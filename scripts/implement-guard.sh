@@ -23,7 +23,7 @@ CAP="${FOUNDRY_GUARD_CAP:-500}"
 open=$(awk '/^## Tasks/{t=1;next} /^## /{t=0} t && /^- \[( |~)\] /{n++} END{print n+0}' "$PROGRESS")
 [ "$open" -gt 0 ] || exit 0
 
-count=$(cat "$LOCK" 2>/dev/null | tr -dc '0-9')
+count=$(tr -dc '0-9' < "$LOCK" 2>/dev/null)
 count=$(( ${count:-0} + 1 ))
 printf '%s\n' "$count" > "$LOCK"
 

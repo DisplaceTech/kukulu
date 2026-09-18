@@ -1,187 +1,173 @@
-// Drives foundry MCP server over stdio through a full plan→implement→review→fix→approve→summary cycle.
-import { spawn, execSync } from "node:child_process";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
+// End-to-end: one flight, start to finish, driven over the real stdio
+// transport. spec → plan → build (with a blocked task and a skipped dependent)
+// → handoff → CHANGES REQUESTED → fix round → APPROVED → summary → done.
+//
+// The focused suites prove each tool in isolation; this one proves they still
+// compose, and that the state on disk after every stage is the state the next
+// stage expects to find.
 
-// Usage: node test/drive.mjs            (fresh temp repo, plugin's own server)
-//        node test/drive.mjs <repo> <server.mjs>
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const SERVER = process.argv[3] ? path.resolve(process.argv[3]) : path.join(HERE, "..", "mcp", "server.mjs");
-let REPO = process.argv[2] ? path.resolve(process.argv[2]) : null;
-if (!REPO) {
-  REPO = fs.mkdtempSync(path.join(os.tmpdir(), "foundry-test-"));
-  execSync("git init -q -b main && git config user.email t@t && git config user.name t && git commit -q --allow-empty -m init", { cwd: REPO });
-  process.on("exit", () => { if (!process.env.KEEP_REPO) fs.rmSync(REPO, { recursive: true, force: true }); });
-}
-const sh = (c) => execSync(c, { cwd: REPO, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+import {
+  finish, ok, eq, like, isError,
+  specRepo, withServer, writeFile, readFile, hasFile, subject,
+  planDoc, progressDoc, commitTask, runGuard, git, sh, mkFailingGhBin,
+} from "./harness.mjs";
 
-const srv = spawn("node", [SERVER], { env: { ...process.env, FOUNDRY_PROJECT_DIR: REPO }, stdio: ["pipe", "pipe", "inherit"] });
-let nextId = 1; const pending = new Map(); let buf = "";
-srv.stdout.on("data", (d) => { buf += d; let i; while ((i = buf.indexOf("\n")) >= 0) { const l = buf.slice(0, i); buf = buf.slice(i + 1); if (!l.trim()) continue; const m = JSON.parse(l); if (pending.has(m.id)) { pending.get(m.id)(m); pending.delete(m.id); } } });
-const rpc = (method, params) => new Promise((res) => { const id = nextId++; pending.set(id, res); srv.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n"); });
-const call = async (name, args = {}) => { const r = await rpc("tools/call", { name, arguments: args }); const t = r.result.content[0].text; if (r.result.isError) return { error: t }; return JSON.parse(t); };
-const assert = (c, m) => { if (!c) { console.error("ASSERT FAILED:", m); process.exit(1); } console.log("ok  ", m); };
+const TASKS = [
+  { id: "P0-01", title: "Create hello", goal: "write hello.txt", files: "hello.txt", tests: "test.sh", verification: "./test.sh" },
+  { id: "P0-02", title: "Impossible task", goal: "fail", files: "nope.txt", depends: ["P0-01"] },
+  { id: "P0-03", title: "Depends on the impossible one", goal: "skip me", files: "x", depends: ["P0-02"] },
+];
 
-const init = await rpc("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "drive", version: "0" } });
-assert(init.result.serverInfo.name === "foundry", "initialize");
-const tl = await rpc("tools/list", {});
-assert(tl.result.tools.length === 10, "tools/list has 10 tools");
+const repo = specRepo("# Spec\nBuild something small.\n");
+const noGh = { env: { PATH: `${mkFailingGhBin()}:${process.env.PATH}` } };
 
-// 0. empty repo, no spec
-let n = await call("foundry_next");
-assert(n.stage === "halt" && /SPEC/.test(n.reason), "no SPEC → halt");
+await withServer(repo, async ({ call }) => {
+  // ---------------------------------------------------------------- plan
 
-// 1. spec present → plan
-fs.mkdirSync(path.join(REPO, "docs"), { recursive: true });
-fs.writeFileSync(path.join(REPO, "docs/SPEC.md"), "# Spec\n");
-sh("git add -A && git commit -qm 'spec'");
-n = await call("foundry_next");
-assert(n.stage === "plan" && n.agent === "foundry:planner", "spec only → plan");
+  let n = await call("foundry_next");
+  eq(n.stage, "plan", "a repo with only a spec needs a plan");
 
-// 2. "planner" writes plan/progress/config/CLAUDE.md
-fs.writeFileSync(path.join(REPO, "docs/PLAN.md"), `# Test build plan
-## Decisions
-- none
-## Phase 0 — Scaffold
-### P0-01: Create hello
-**Goal:** write hello.txt
-**Files touched:** hello.txt
-**Design constraints:** none
-**Acceptance tests:** test.sh
-**Out of scope:** everything else
-**Verification:** ./test.sh
-**Depends on:** none
+  writeFile(repo, "docs/PLAN.md", planDoc(TASKS));
+  writeFile(repo, "docs/PROGRESS.md", progressDoc(TASKS));
+  writeFile(repo, "docs/foundry.json", JSON.stringify({ verify: ["test -f hello.txt"], extraVerify: { "src/": ["echo extra"] }, maxRounds: 2 }, null, 2) + "\n");
+  writeFile(repo, "CLAUDE.md", "# rules\n## Constraints\n- greet in lowercase\n");
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-qm", "plan: derive build plan from SPEC"]);
 
-### P0-02: Impossible task
-**Goal:** fail
-**Files touched:** nope.txt
-**Design constraints:** none
-**Acceptance tests:** none
-**Out of scope:** none
-**Verification:** none
-**Depends on:** P0-01
+  n = await call("foundry_next");
+  eq(n.stage, "implement", "a plan on disk means it is time to build");
+  eq(n.round, 0, "the first build is round 0");
 
-### P0-03: Depends on the impossible one
-**Goal:** skip me
-**Files touched:** x
-**Design constraints:** none
-**Acceptance tests:** none
-**Out of scope:** none
-**Verification:** none
-**Depends on:** P0-02
-`);
-fs.writeFileSync(path.join(REPO, "docs/PROGRESS.md"), `# Test build progress
-Branch: (set by implement)
-Started: (set by implement)
+  // ---------------------------------------------------------------- build
 
-## Tasks
-- [ ] P0-01 Create hello
-- [ ] P0-02 Impossible task
-- [ ] P0-03 Depends on the impossible one
+  let r = await call("foundry_run_start");
+  like(r.branch, /^build\/\d{4}-\d\d-\d\d/, `the run gets its own branch (${r.branch})`);
+  ok(hasFile(repo, ".foundry/implement.lock"), "the Stop-hook lock is armed for the whole run");
 
-## Log
-(one entry per task, appended by implement)
-`);
-fs.writeFileSync(path.join(REPO, "docs/foundry.json"), JSON.stringify({ verify: ["test -f hello.txt"], extraVerify: { "src/": ["echo extra"] }, maxRounds: 2 }, null, 2));
-fs.writeFileSync(path.join(REPO, "CLAUDE.md"), "# rules\n");
-sh("git add -A && git commit -qm 'plan: derive build plan from SPEC'");
-n = await call("foundry_next");
-assert(n.stage === "implement" && n.round === 0, "plan on disk → implement round 0");
+  let t = await call("foundry_task_next");
+  eq(t.id, "P0-01", "the first task comes off the top of the plan");
 
-// 3. run start
-let r = await call("foundry_run_start");
-assert(!r.error && r.branch.startsWith("build/"), "run_start creates build branch: " + r.branch);
-assert(fs.existsSync(path.join(REPO, ".foundry/implement.lock")), "lock armed");
-assert(sh("git log -1 --format=%s") === "chore: start implementation run", "start committed");
-r = await call("foundry_run_start");
-assert(r.alreadyStarted === true, "run_start idempotent");
+  let v = await call("foundry_verify", { files: ["hello.txt"] });
+  eq(v.ok, false, "verification fails before the work is done");
 
-// 4. task loop
-let t = await call("foundry_task_next");
-assert(t.id === "P0-01" && /write hello/.test(t.text), "task_next → P0-01 with plan text");
-// verify before implementing should fail
-let v = await call("foundry_verify", { files: ["hello.txt"] });
-assert(v.ok === false, "verify fails before implementation");
-// try to mark done without commit → refused
-let bad = await call("foundry_task_done", { id: "P0-01", log: "x" });
-assert(bad.error && /HEAD commit/.test(bad.error), "task_done refuses without task commit");
-fs.writeFileSync(path.join(REPO, "hello.txt"), "hi\n");
-sh("git add hello.txt && git commit -qm 'P0-01: Create hello'");
-v = await call("foundry_verify", { files: ["hello.txt", "src/a.js"] });
-assert(v.ok === true && v.results.length === 2 && v.results[1].command === "echo extra", "verify passes; extraVerify matched by prefix");
-r = await call("foundry_task_done", { id: "P0-01", log: "Added hello.txt.\nInterpretation: none." });
-assert(!r.error && r.counts.done === 1, "task_done marks [x] and logs");
-assert(/^### P0-01 — [0-9a-f]{7,}\nAdded hello/m.test(fs.readFileSync(path.join(REPO, "docs/PROGRESS.md"), "utf8")), "log entry stamped with sha");
+  isError(await call("foundry_task_done", { id: "P0-01", log: "x" }), /HEAD commit/, "a task cannot be marked done without its commit");
 
-t = await call("foundry_task_next");
-assert(t.id === "P0-02" && t.dependencyLogs["P0-01"] && /Added hello/.test(t.dependencyLogs["P0-01"]), "P0-02 receives P0-01's log");
-fs.writeFileSync(path.join(REPO, "junk.txt"), "half-done\n");
-r = await call("foundry_task_block", { id: "P0-02", reason: "tried A / fails B / fix C" });
-assert(!r.error && !fs.existsSync(path.join(REPO, "junk.txt")) && fs.existsSync(path.join(REPO, ".foundry/implement.lock")), "task_block resets tree, keeps lock");
+  commitTask(repo, "P0-01", "Create hello", { "hello.txt": "hi\n" });
+  v = await call("foundry_verify", { files: ["hello.txt", "src/a.js"] });
+  eq(v.ok, true, "verification passes once the work is committed");
+  eq(v.results[1].command, "echo extra", "a touched path prefix pulls in its extra verification");
 
-t = await call("foundry_task_next");
-assert(t.done === true && t.skipped.length === 1 && t.skipped[0].id === "P0-03", "P0-03 auto-skipped (dep blocked) → done");
-assert(t.counts.open === 0 && t.counts.blocked === 1 && t.counts.skipped === 1, "counts after loop");
+  r = await call("foundry_task_done", { id: "P0-01", log: "Added hello.txt.\nInterpretation: greeting is lowercase." });
+  eq(r.counts.done, 1, "the first task is recorded as done");
 
-// 5. guard hook behaviour
-const guard = path.join(HERE, "..", "scripts", "implement-guard.sh");
-const runGuard = () => execSync(`bash ${guard}`, { cwd: REPO, encoding: "utf8", env: { ...process.env, CLAUDE_PROJECT_DIR: REPO } }).trim();
-assert(runGuard() === "", "guard allows stop when no open tasks");
-fs.writeFileSync(path.join(REPO, "docs/PROGRESS.md"), fs.readFileSync(path.join(REPO, "docs/PROGRESS.md"), "utf8").replace("- [-] P0-03", "- [ ] P0-03"));
-const g = JSON.parse(runGuard());
-assert(g.decision === "block" && /P0-03/.test(g.reason), "guard blocks stop with open task, names it");
-fs.writeFileSync(path.join(REPO, "docs/PROGRESS.md"), fs.readFileSync(path.join(REPO, "docs/PROGRESS.md"), "utf8").replace("- [ ] P0-03", "- [-] P0-03"));
-sh("git checkout -q -- docs/PROGRESS.md");
+  t = await call("foundry_task_next");
+  eq(t.id, "P0-02", "the loop moves on");
+  like(t.dependencyLogs["P0-01"], /greeting is lowercase/, "the next task inherits what the last one learned");
 
-// 6. finish
-bad = await call("foundry_run_finish");
-assert(bad.error && /HANDOFF/.test(bad.error), "run_finish requires HANDOFF.md");
-fs.writeFileSync(path.join(REPO, "docs/HANDOFF.md"), "# handoff\n");
-r = await call("foundry_run_finish");
-assert(!r.error && /^READY FOR REVIEW/.test(r.readyLine) && !fs.existsSync(path.join(REPO, ".foundry/implement.lock")), "run_finish: " + r.readyLine);
-n = await call("foundry_next");
-assert(n.stage === "review" && n.agent === "foundry:reviewer", "→ review");
+  writeFile(repo, "junk.txt", "half-finished\n");
+  r = await call("foundry_task_block", { id: "P0-02", reason: "tried A / fails B / fix C" });
+  ok(!hasFile(repo, "junk.txt"), "blocking a task throws away its debris");
+  ok(hasFile(repo, ".foundry/implement.lock"), "blocking a task does not end the run");
 
-// 7. review: changes requested
-fs.writeFileSync(path.join(REPO, "docs/REVIEW.md"), "# Review\nRound: 0\n**Verdict**: CHANGES REQUESTED\n");
-r = await call("foundry_review_submit", {
-  verdict: "CHANGES REQUESTED",
-  tasks: [{ title: "Fix hello", goal: "hello must say hello", files: ["hello.txt"], constraints: "none", tests: "test.sh", outOfScope: "none", verification: "cat hello.txt", dependsOn: [] }],
-  unblock: [{ id: "P0-02", reason: "reviewer clarified" }],
-});
-assert(!r.error && r.fixTasks[0] === "R1-01" && r.unblocked[0] === "P0-02" && r.round === 1, "review_submit CR → R1-01 queued, P0-02 unblocked");
-const plan = fs.readFileSync(path.join(REPO, "docs/PLAN.md"), "utf8");
-assert(/## Review fixes \(round 1\)\n\n### R1-01: Fix hello/.test(plan), "PLAN.md has review section in task format");
-const prog = fs.readFileSync(path.join(REPO, "docs/PROGRESS.md"), "utf8");
-assert(/- \[ \] P0-02 Impossible task\n- \[-\] P0-03[^\n]*\n- \[ \] R1-01 Fix hello\n\n## Log/.test(prog), "PROGRESS.md: R1-01 appended to Tasks before Log, P0-02 reset");
-assert(sh("git log -1 --format=%s") === "review: round 1", "review committed");
-n = await call("foundry_next");
-assert(n.stage === "implement" && n.round === 1 && /round 1/.test(n.prompt), "→ implement round 1");
+  t = await call("foundry_task_next");
+  eq(t.done, true, "no work is left");
+  eq(t.skipped[0].id, "P0-03", "the dependent of a blocked task is skipped, not attempted");
+  eq(t.counts.open, 0, "nothing is open");
 
-// 8. fix round
-r = await call("foundry_run_start");
-assert(!r.error && r.alreadyStarted === false && sh("git log -1 --format=%s") === "chore: start review-fix round 1", "fix round start");
-t = await call("foundry_task_next"); assert(t.id === "P0-02", "unblocked P0-02 comes first");
-fs.writeFileSync(path.join(REPO, "nope.txt"), "ok\n"); sh("git add -A && git commit -qm 'P0-02: Impossible task'");
-await call("foundry_task_done", { id: "P0-02", log: "done after all" });
-t = await call("foundry_task_next"); assert(t.id === "R1-01" && /hello must say hello/.test(t.text), "R1-01 text extracted from review section");
-fs.writeFileSync(path.join(REPO, "hello.txt"), "hello\n"); sh("git add -A && git commit -qm 'R1-01: Fix hello'");
-await call("foundry_task_done", { id: "R1-01", log: "fixed" });
-t = await call("foundry_task_next"); assert(t.done === true, "fix round complete");
-fs.writeFileSync(path.join(REPO, "docs/HANDOFF.md"), "# handoff\n## Round 1\n");
-r = await call("foundry_run_finish"); assert(!r.error, "fix round finish");
-n = await call("foundry_next"); assert(n.stage === "review" && n.round === 1, "→ review round 1");
+  // ---------------------------------------------------------------- the guard
 
-// 9. approve → summarize → done
-fs.writeFileSync(path.join(REPO, "docs/REVIEW.md"), "# Review\nRound: 1\n**Verdict**: APPROVED\n");
-bad = await call("foundry_summary_commit"); assert(bad.error, "summary refused before approval");
-r = await call("foundry_review_submit", { verdict: "APPROVED" }); assert(!r.error && sh("git log -1 --format=%s") === "review: approved", "approved");
-n = await call("foundry_next"); assert(n.stage === "summarize", "→ summarize");
-fs.writeFileSync(path.join(REPO, "docs/SUMMARY.md"), "# summary\n");
-r = await call("foundry_summary_commit"); assert(!r.error, "summary committed");
-n = await call("foundry_next"); assert(n.stage === "done", "→ done: " + n.reason);
-assert(sh("git status --porcelain") === "", "tree clean at end");
-console.log("\nALL PASSED\n" + sh("git log --oneline"));
-srv.stdin.end();
+  eq(runGuard(repo), "", "with nothing open, the guard lets the implementer stop");
+  writeFile(repo, "docs/PROGRESS.md", readFile(repo, "docs/PROGRESS.md").replace("- [-] P0-03", "- [ ] P0-03"));
+  like(JSON.parse(runGuard(repo)).reason, /P0-03/, "with a task reopened, the guard pushes it back into the loop");
+  git(repo, ["checkout", "-q", "--", "docs/PROGRESS.md"]);
+
+  // ---------------------------------------------------------------- handoff
+
+  isError(await call("foundry_run_finish"), /HANDOFF/, "the run cannot end without a handoff");
+  writeFile(repo, "docs/HANDOFF.md", "# handoff\n## Round 0\nP0-02 blocked, P0-03 skipped.\n");
+  r = await call("foundry_run_finish");
+  like(r.readyLine, /^READY FOR REVIEW/, r.readyLine);
+  ok(!hasFile(repo, ".foundry/implement.lock"), "the lock is disarmed at the handoff");
+  eq(runGuard(repo), "", "and the guard stands down");
+
+  n = await call("foundry_next");
+  eq(n.stage, "review", "a handoff means it is the reviewer's turn");
+
+  // ---------------------------------------------------------------- review
+
+  writeFile(repo, "docs/REVIEW.md", "# Review\nRound: 0\n**Verdict**: CHANGES REQUESTED\n");
+  r = await call("foundry_review_submit", {
+    verdict: "CHANGES REQUESTED",
+    tasks: [{
+      title: "Fix hello", goal: "hello must actually greet", files: ["hello.txt"],
+      constraints: "lowercase only", tests: "test.sh", outOfScope: "none", verification: "cat hello.txt", dependsOn: [],
+    }],
+    unblock: [{ id: "P0-02", reason: "reviewer clarified the interface" }],
+  });
+  eq(r.fixTasks.join(","), "R1-01", "the finding becomes a task with an id");
+  eq(r.unblocked.join(","), "P0-02", "the reviewer reopens the blocked task");
+  eq(subject(repo), "review: round 1", "the round is one commit");
+  like(readFile(repo, "docs/PLAN.md"), /## Review fixes \(round 1\)\n\n### R1-01: Fix hello/, "the fix task is written into the plan");
+  like(readFile(repo, "docs/PROGRESS.md"), /- \[ \] R1-01 Fix hello\n\n## Log/, "and onto the end of the task list");
+
+  n = await call("foundry_next");
+  eq(n.stage, "implement", "changes requested sends the flight back to the implementer");
+  eq(n.round, 1, "on round 1");
+
+  // ---------------------------------------------------------------- fix round
+
+  r = await call("foundry_run_start");
+  eq(subject(repo), "chore: start review-fix round 1", "the fix round announces itself");
+
+  t = await call("foundry_task_next");
+  eq(t.id, "P0-02", "the unblocked task is first in line");
+  commitTask(repo, "P0-02", "Impossible task", { "nope.txt": "possible after all\n" });
+  await call("foundry_task_done", { id: "P0-02", log: "Turned out to be possible." });
+
+  t = await call("foundry_task_next");
+  eq(t.id, "R1-01", "then the reviewer's fix task");
+  like(t.text, /hello must actually greet/, "which reads back exactly as the reviewer wrote it");
+  commitTask(repo, "R1-01", "Fix hello", { "hello.txt": "hello\n" });
+  await call("foundry_task_done", { id: "R1-01", log: "hello.txt now greets." });
+
+  eq((await call("foundry_task_next")).done, true, "the fix round is complete");
+  writeFile(repo, "docs/HANDOFF.md", "# handoff\n## Round 1\nBoth tasks landed.\n");
+  r = await call("foundry_run_finish");
+  eq(r.round, 1, "the handoff belongs to round 1");
+
+  // ---------------------------------------------------------------- approval
+
+  n = await call("foundry_next");
+  eq(n.stage, "review", "round 1 goes back for review");
+
+  writeFile(repo, "docs/REVIEW.md", "# Review\nRound: 1\n**Verdict**: APPROVED\n");
+  isError(await call("foundry_summary_commit"), /docs\/SUMMARY\.md does not exist/, "there is no summary to commit yet");
+  await call("foundry_review_submit", { verdict: "APPROVED" });
+  eq(subject(repo), "review: approved", "the approval is committed");
+
+  n = await call("foundry_next");
+  eq(n.stage, "summarize", "an approved branch needs its summary");
+
+  writeFile(repo, "docs/SUMMARY.md", "# summary\nMerge build/... into main.\n");
+  r = await call("foundry_summary_commit");
+  eq(r.rounds, 1, "the flight took one review round");
+
+  n = await call("foundry_next");
+  eq(n.stage, "done", "and the flight is done");
+  like(n.reason, /ready for a human to merge/, n.reason);
+
+  // ---------------------------------------------------------------- the record
+
+  eq(git(repo, ["status", "--porcelain"]), "", "the branch is clean");
+  const log = sh(repo, "git log --oneline --format=%s");
+  for (const expected of [
+    "chore: build summary", "review: approved", "chore: round 1 implemented",
+    "chore: handoff for review", "R1-01: Fix hello", "P0-02: Impossible task",
+    "review: round 1", "P0-01: Create hello", "plan: derive build plan from SPEC",
+  ]) {
+    ok(log.includes(expected), `the history records "${expected}"`);
+  }
+  eq(readFile(repo, "hello.txt"), "hello\n", "and the working tree holds the reviewed result");
+}, noGh);
+
+finish();

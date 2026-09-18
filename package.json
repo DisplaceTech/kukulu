@@ -5,9 +5,12 @@
   "description": "Claude Code plugin: spec-driven plan → implement → review → summarize pipeline with per-stage model switching",
   "type": "module",
   "scripts": {
-    "test": "node test/drive.mjs",
-    "lint": "node --check mcp/server.mjs && node --check test/drive.mjs && bash -n scripts/implement-guard.sh"
+    "test": "node test/run.mjs",
+    "lint": "./scripts/lint.sh",
+    "check": "npm run lint && npm test"
   },
-  "engines": { "node": ">=18" },
+  "engines": {
+    "node": ">=22"
+  },
   "license": "MIT"
 }

@@ -1,0 +1,5 @@
+# shellcheck configuration.
+# SC2155: declare and assign separately — noisy in scripts where the assignment
+# is the point and the command cannot fail in a way we would act on.
+disable=SC2155
+external-sources=true

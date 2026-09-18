@@ -29,6 +29,9 @@ const P = {
   gitignore: path.join(ROOT, ".gitignore"),
 };
 
+// Keep in sync with .claude-plugin/plugin.json and package.json; test/plugin.mjs checks it.
+const VERSION = "0.1.0";
+
 const TASK_ID = /\b[PR]\d+-\d+\b/g;
 const TASK_LINE = /^- \[( |~|x|!|-)\] ([PR]\d+-\d+)(?: (.*))?$/;
 const STATE_NAMES = { " ": "todo", "~": "inProgress", x: "done", "!": "blocked", "-": "skipped" };
@@ -357,6 +360,7 @@ function taskNext() {
       skipped.push({ id: pick.id, dependsOn: bad });
       continue;
     }
+    const resumed = pick.state === "~";
     setTaskState(pr, pick.id, "~");
     writeProgress(pr);
     const dependencyLogs = {};
@@ -371,7 +375,7 @@ function taskNext() {
       dependencyLogs,
       skipped,
       counts: counts(pr.tasks),
-      resumed: pick.state === "~",
+      resumed,
     };
   }
 }
@@ -416,7 +420,7 @@ function taskBlock({ id, reason }) {
 
 function runShell(cmd, timeoutMs) {
   const r = spawnSync(cmd, { cwd: ROOT, shell: true, encoding: "utf8", timeout: timeoutMs, maxBuffer: 64 * 1024 * 1024 });
-  const tail = (s, n = 60) => (s || "").split("\n").slice(-n).join("\n").trim();
+  const tail = (s, n = 60) => (s || "").replace(/\s+$/, "").split("\n").slice(-n).join("\n");
   return {
     command: cmd,
     ok: r.status === 0 && !r.error,
@@ -453,6 +457,10 @@ function runFinish() {
   const dirty = git(["status", "--porcelain"]).out;
   if (dirty) throw new ToolError(`working tree is not clean:\n${dirty}\nCommit or discard before finishing`);
 
+  st.implemented = true; st.reviewed = false; st.verdict = null;
+  saveState(st);
+  const stateCommit = gitCommitIfChanged([P.state], `chore: round ${st.round} implemented`);
+
   let push = "skipped: no origin remote";
   let pr_url = null;
   if (g.hasOrigin) {
@@ -469,9 +477,6 @@ function runFinish() {
     }
   }
   if (exists(P.lock)) fs.unlinkSync(P.lock);
-  st.implemented = true; st.reviewed = false; st.verdict = null;
-  saveState(st);
-  const stateCommit = gitCommitIfChanged([P.state], `chore: round ${st.round} implemented`);
   const head = git(["rev-parse", "--short", "HEAD"]).out;
   return {
     branch: g.branch, base: g.base, head, handoffCommit, stateCommit, push, pr: pr_url, counts: cnt, round: st.round,
@@ -553,7 +558,13 @@ function summaryCommit() {
 
 // ---------------------------------------------------------------- MCP plumbing
 
-const S = (props, required = []) => ({ type: "object", properties: props, required, additionalProperties: false });
+// `required: []` is legal but trips stricter schema validators; omit it instead.
+const S = (props, required = []) => ({
+  type: "object",
+  properties: props,
+  ...(required.length ? { required } : {}),
+  additionalProperties: false,
+});
 const TOOLS = [
   { name: "foundry_status", description: "Everything the pipeline knows from disk: which docs exist, task counts by state, branch/base/head, lock, round, review verdict. Read-only.", inputSchema: S({}), fn: status },
   { name: "foundry_next", description: "Deterministic stage selection: returns { stage, agent, round, reason, prompt }. stage is plan | implement | review | summarize | done | halt. Read-only.", inputSchema: S({}), fn: next },
@@ -596,7 +607,7 @@ function handle(req) {
       return reply({
         protocolVersion: params?.protocolVersion || "2025-06-18",
         capabilities: { tools: {} },
-        serverInfo: { name: "foundry", version: "0.1.0" },
+        serverInfo: { name: "foundry", version: VERSION },
       });
     case "notifications/initialized":
     case "notifications/cancelled":

@@ -1,0 +1,69 @@
+# lint.yml — the same checks pre-commit runs locally, plus actionlint over the
+# workflows themselves. If `pre-commit run --all-files` is clean, this is green.
+name: lint
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lint-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pre-commit:
+    name: pre-commit (yamllint / shellcheck / markdownlint / gitleaks)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - uses: pre-commit/action@v3.0.1
+
+  actionlint:
+    name: actionlint (workflow syntax)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      checks: write   # reviewdog's github-check reporter annotates the commit
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: reviewdog/action-actionlint@v1
+        with:
+          reporter: github-check
+          fail_level: error
+          level: error
+
+  diagrams:
+    name: mermaid (diagrams parse)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      # The plugin itself has no dependencies; mermaid and jsdom exist only for
+      # the length of this job, which is why they are installed --no-save.
+      - name: Install the Mermaid parser
+        run: npm install --no-save mermaid@12 jsdom@29
+
+      - name: Parse every diagram in the docs
+        run: node scripts/check-diagrams.mjs

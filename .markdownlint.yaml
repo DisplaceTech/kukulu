@@ -1,0 +1,34 @@
+# markdownlint config — strict on what breaks rendering, lenient on style.
+# Prose is written unwrapped on purpose; the renderer wraps it, and hard wraps
+# only make diffs noisier.
+default: true
+
+# Long lines are fine.
+MD013: false
+
+# Blank lines around fences — stylistic, and verbose in tight lists.
+MD031: false
+
+# Fence language tags are required for diagrams (```mermaid) but several fences
+# are illustrative shell transcripts where a tag adds nothing.
+MD040: false
+
+# Ordered-list prefix counting fights lists interrupted by code blocks.
+MD029: false
+
+# Inline HTML is allowed (badges).
+MD033: false
+
+# Skill and agent files lead with YAML frontmatter, not an h1.
+MD041: false
+
+# Repeated headings across sibling documents are normal.
+MD024:
+  siblings_only: true
+
+# Emphasis used as a label inside tables is fine.
+MD036: false
+
+# Table delimiter padding (`|---|` vs `| --- |`) — purely cosmetic, and the
+# compact form keeps wide tables readable in the source.
+MD060: false
