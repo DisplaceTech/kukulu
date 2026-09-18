@@ -240,15 +240,14 @@ driven over real stdio against a real git repo. CI runs all of it on every
 supported Node line — 22, 24 and 26 — again on macOS, and again on a machine
 with no GitHub CLI installed.
 
-## Note on the name
+## No daemon, no memory
 
-I have used this name before. The last Foundry was an orchestrator built on
-long-running agents, and it broke the way every one of those attempts broke:
-the daemon drifted, forgot what it was doing, and accumulated state nobody
-could audit. This one has no daemon and no memory. Each stage is a fresh
-subagent that reads the repo, does one job, writes what it did to disk, and
-exits. If that sounds like a constraint, it is — it is the only reason the
-pipeline can be trusted to run with nobody watching.
+Nothing in this pipeline runs continuously. Each stage is a fresh subagent that
+reads the repo, does one job, writes down what it did, and exits; the next
+stage starts with no context beyond what is committed. That is a real
+constraint — it rules out a lot of clever things — and it is the whole reason
+the pipeline can be left unattended. There is no accumulated state to drift,
+and no claim about the build that cannot be checked against the git history.
 
 ## Contributing
 
