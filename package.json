@@ -1,0 +1,13 @@
+{
+  "name": "foundry-claude-plugin",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Claude Code plugin: spec-driven plan → implement → review → summarize pipeline with per-stage model switching",
+  "type": "module",
+  "scripts": {
+    "test": "node test/drive.mjs",
+    "lint": "node --check mcp/server.mjs && node --check test/drive.mjs && bash -n scripts/implement-guard.sh"
+  },
+  "engines": { "node": ">=18" },
+  "license": "MIT"
+}

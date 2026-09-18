@@ -1,0 +1,11 @@
+{
+  "name": "ericmann",
+  "owner": { "name": "Eric Mann" },
+  "plugins": [
+    {
+      "name": "foundry",
+      "source": "./",
+      "description": "Spec-driven plan → implement → review → fix → summarize pipeline with per-stage model/effort switching."
+    }
+  ]
+}
