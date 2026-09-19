@@ -239,8 +239,17 @@ export function commitTask(repo, id, title, files = {}) {
  * notifications produce no reply.
  */
 export function startServer(repo, { env = {}, server = SERVER } = {}) {
+  // Isolate every suite from the developer's own machine: point FOUNDRY_CONFIG
+  // at a path that does not exist and force FOUNDRY_PROFILE unset, so a real
+  // ~/.config/foundry/config.json (or an inherited FOUNDRY_PROFILE) can never
+  // leak into a test. A suite that wants to test the global file passes its
+  // own FOUNDRY_CONFIG/FOUNDRY_PROFILE via `env` to override these.
+  const isolation = {
+    FOUNDRY_CONFIG: path.join(repo, ".foundry-test-no-global.json"),
+    FOUNDRY_PROFILE: "",
+  };
   const proc = spawn(process.execPath, [server], {
-    env: { ...process.env, FOUNDRY_PROJECT_DIR: repo, ...env },
+    env: { ...process.env, FOUNDRY_PROJECT_DIR: repo, ...isolation, ...env },
     stdio: ["pipe", "pipe", "inherit"],
   });
   const pending = new Map();
@@ -331,6 +340,41 @@ export async function withServer(repo, fn, opts) {
   } finally {
     await s.stop();
   }
+}
+
+// ---------------------------------------------------------------- frontmatter
+
+/** Minimal YAML frontmatter reader: scalars and `- ` lists, which is all we use. */
+export function frontmatter(body) {
+  const m = body.match(/^---\n([\s\S]*?)\n---\n/);
+  if (!m) return null;
+  const out = {};
+  let key = null;
+  for (const line of m[1].split("\n")) {
+    const item = line.match(/^\s+-\s+(.*)$/);
+    if (item && key) {
+      (out[key] = Array.isArray(out[key]) ? out[key] : []).push(item[1].trim());
+      continue;
+    }
+    const kv = line.match(/^([A-Za-z0-9_-]+):\s*(.*)$/);
+    if (!kv) continue;
+    key = kv[1];
+    const value = kv[2].trim().replace(/^["'](.*)["']$/, "$1");
+    out[key] = value === "" ? [] : value === "true" ? true : value === "false" ? false : value;
+  }
+  return out;
+}
+
+/** Split a file's text into its parsed frontmatter and the body that follows. */
+export function splitFrontmatter(text) {
+  const m = text.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
+  if (!m) return { frontmatter: null, body: text };
+  return { frontmatter: frontmatter(text), body: m[2] };
+}
+
+/** Write a Foundry global routing-config fixture; returns its path. */
+export function writeGlobalConfig(dir, obj) {
+  return writeFile(dir, "foundry-global.json", JSON.stringify(obj, null, 2) + "\n");
 }
 
 // ---------------------------------------------------------------- guard hook

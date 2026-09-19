@@ -6,33 +6,12 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { finish, ok, eq, like, ROOT } from "./harness.mjs";
+import { finish, ok, eq, like, ROOT, frontmatter } from "./harness.mjs";
 
 const read = (rel) => fs.readFileSync(path.join(ROOT, rel), "utf8");
 const json = (rel) => JSON.parse(read(rel));
 const exists = (rel) => fs.existsSync(path.join(ROOT, rel));
 const listDir = (rel) => fs.readdirSync(path.join(ROOT, rel));
-
-/** Minimal YAML frontmatter reader: scalars and `- ` lists, which is all we use. */
-function frontmatter(body) {
-  const m = body.match(/^---\n([\s\S]*?)\n---\n/);
-  if (!m) return null;
-  const out = {};
-  let key = null;
-  for (const line of m[1].split("\n")) {
-    const item = line.match(/^\s+-\s+(.*)$/);
-    if (item && key) {
-      (out[key] = Array.isArray(out[key]) ? out[key] : []).push(item[1].trim());
-      continue;
-    }
-    const kv = line.match(/^([A-Za-z0-9_-]+):\s*(.*)$/);
-    if (!kv) continue;
-    key = kv[1];
-    const value = kv[2].trim().replace(/^["'](.*)["']$/, "$1");
-    out[key] = value === "" ? [] : value === "true" ? true : value === "false" ? false : value;
-  }
-  return out;
-}
 
 const MODELS = ["fable", "opus", "sonnet", "haiku", "inherit"];
 const EFFORTS = ["low", "medium", "high"];
