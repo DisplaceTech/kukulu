@@ -50,6 +50,8 @@ eq(server.command, "node", "the server runs under node, with no install step");
 like(server.args[0], /^\$\{CLAUDE_PLUGIN_ROOT\}/, "the server path is resolved from CLAUDE_PLUGIN_ROOT");
 ok(exists(server.args[0].replace("${CLAUDE_PLUGIN_ROOT}/", "")), "the server file the config names exists");
 eq(server.env.FOUNDRY_PROJECT_DIR, "${CLAUDE_PROJECT_DIR}", "the server is told which project it is operating on");
+eq(server.env.FOUNDRY_CONFIG, "${FOUNDRY_CONFIG:-}", "the global routing config path passes through, empty by default");
+eq(server.env.FOUNDRY_PROFILE, "${FOUNDRY_PROFILE:-}", "the routing profile passes through, empty by default");
 
 // ---------------------------------------------------------------- hooks
 
@@ -128,16 +130,17 @@ const allowed = String(fmGo["allowed-tools"]).split(",").map((s) => s.trim());
 const toolNames = Array.from(serverSrc.matchAll(/name: "(foundry_[a-z_]+)"/g), (m) => m[1]);
 eq(toolNames.length, 12, "the server defines twelve tools");
 ok(allowed.includes("Agent"), "the flight controller may spawn agents");
+ok(allowed.includes("mcp__foundry__foundry_agents_sync"), "the flight controller may sync routing agents");
 for (const t of allowed.filter((a) => a.startsWith("mcp__"))) {
   ok(toolNames.includes(t.replace("mcp__foundry__", "")), `the flight controller's allowed tool ${t} exists`);
 }
 ok(
   allowed.every((a) => a === "Agent" || a.startsWith("mcp__foundry__foundry_")),
-  "the flight controller is allowed nothing beyond Agent and the read-only foundry tools",
+  "the flight controller is allowed nothing beyond Agent, the read-only foundry tools, and agents_sync",
 );
 ok(
   !allowed.some((a) => /run_start|task_|run_finish|review_submit|summary_commit/.test(a)),
-  "the flight controller cannot touch the tools that change state",
+  "the flight controller cannot touch the tools that change project state",
 );
 for (const name of agentNames) like(goFlight, new RegExp(`foundry:${name}`), `go-flight names foundry:${name}`);
 
