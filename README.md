@@ -9,10 +9,15 @@ branch. Foundry does the part in between.
 
 ## What's in the box
 
-- **Four stage agents**, each pinned to its own model and effort level:
-  `planner` (fable, high), `implementer` (sonnet, medium), `reviewer` (fable,
-  high), `summarizer` (fable, medium). Switching happens per stage, not per
-  session, so the expensive model is only spent on the parts that need it.
+- **Four stage agents**, each pinned to its own model and effort level by
+  default: `planner` (fable, high), `implementer` (sonnet, medium), `reviewer`
+  (fable, high), `summarizer` (fable, medium). Switching happens per stage,
+  not per session, so the expensive model is only spent on the parts that
+  need it.
+- **Per-role model routing** — a global config file, optional profiles, and
+  a project override — lets you point any role at a cheaper model, local or
+  hosted through a router, without changing how the pipeline runs. See
+  [docs/routing.md](./docs/routing.md).
 - **A flight controller** — `/foundry:go-flight` — that makes no engineering
   decisions. It asks the MCP what runs next, spawns that agent, and repeats
   until the pipeline reports `done` or `halt`.
@@ -54,6 +59,9 @@ flowchart TD
 Nothing in that loop is decided by a model reading its own past output. Every
 arrow is `foundry_next` re-reading what is actually on disk, which is why a
 flight survives compaction, a crashed subagent, or being resumed a day later.
+The models shown above are the plugin's own defaults; per-machine and
+per-project routing can point any stage somewhere else — see
+[docs/routing.md](./docs/routing.md).
 
 ## The task loop
 
@@ -111,11 +119,17 @@ claude --permission-mode acceptEdits
 > /foundry:go-flight
 ```
 
-`acceptEdits` (or `bypassPermissions` on a throwaway box) matters: plugin
-subagents cannot set their own permission mode, and an unattended implementer
-that hits a permission prompt will sit there until the guard's cap trips. The
-`verify` commands in `docs/foundry.json` run through the MCP rather than the
-model's Bash tool, so those never prompt.
+`acceptEdits` (or `bypassPermissions` on a throwaway box) matters the first
+time: plugin subagents cannot set their own permission mode, and an
+unattended implementer that hits a permission prompt will sit there until
+the guard's cap trips. The `verify` commands in `docs/foundry.json` run
+through the MCP rather than the model's Bash tool, so those never prompt.
+`/foundry:go-flight` generates project-level agents on its first run, and
+those *can* carry `permissionMode` — so once they exist, `--permission-mode`
+on launch is no longer required. The first run in a project (and the first
+run after any routing config change) prints `FOUNDRY: RESTART REQUIRED` and
+stops instead of proceeding; run the command again and it continues. See
+[docs/routing.md](./docs/routing.md).
 
 Each stage also runs by hand by delegating to its agent — `foundry-planner`,
 `foundry-implementer`, `foundry-reviewer`, `foundry-summarizer` once
@@ -127,6 +141,17 @@ directly runs the stage on your session's current model instead.
 Writing the spec is the part that decides whether any of this works —
 [docs/writing-specs.md](./docs/writing-specs.md) covers what the planner needs
 from it and what it does with each section.
+
+## Model routing
+
+Each of the four roles can be pointed at a different model — an Anthropic
+alias or id, or a model reached through a local router such as
+claude-code-router — from a global config file, an optional profile inside
+it, and an optional per-project override. `/foundry:go-flight` calls
+`foundry_agents_sync` before its loop and prints the resolved table;
+`foundry_config_show` shows the same table, with the source of every value,
+at any time. Full precedence, the config file shape, and a
+claude-code-router walkthrough: [docs/routing.md](./docs/routing.md).
 
 ## Files the pipeline owns
 
@@ -142,6 +167,8 @@ from it and what it does with each section.
 | `docs/SUMMARY.md` | summarizer | you |
 | `.foundry/state.json` | MCP (committed) | `foundry_next` |
 | `.foundry/implement.lock` | MCP (gitignored) | guard hook |
+| `.claude/agents/foundry-*.md` | MCP (`foundry_agents_sync`, git-excluded) | Claude Code |
+| `~/.config/foundry/config.json` | you | MCP (`foundry_agents_sync`, `foundry_config_show`) |
 
 Checkbox states in `PROGRESS.md`: `[ ]` todo · `[~]` in progress · `[x]` done ·
 `[!]` blocked · `[-]` skipped because a dependency is blocked.
@@ -150,8 +177,8 @@ Checkbox states in `PROGRESS.md`: `[ ]` todo · `[~]` in progress · `[x]` done 
 
 | Tool | Does |
 |---|---|
-| `foundry_status` | Everything on disk: docs present, counts, branch/base/head, lock, round, verdict |
-| `foundry_next` | The state machine. Returns `{stage, agent, round, reason, prompt}` |
+| `foundry_status` | Everything on disk: docs present, counts, branch/base/head, lock, round, verdict, generated agents |
+| `foundry_next` | The state machine. Returns `{stage, agent, model, round, reason, prompt}` |
 | `foundry_run_start` | Create or reuse `build/<date>`, arm the lock, stamp PROGRESS, commit. Idempotent |
 | `foundry_task_next` | Pick first `[~]` else first `[ ]`, auto-skip dependency-blocked tasks, mark `[~]`, return PLAN text and dependency logs |
 | `foundry_task_done` | Requires `<ID>:` at HEAD and a clean tree; mark `[x]`, log with the sha, commit |
@@ -160,6 +187,8 @@ Checkbox states in `PROGRESS.md`: `[ ]` todo · `[~]` in progress · `[x]` done 
 | `foundry_run_finish` | Requires zero open tasks and `HANDOFF.md`; commit, push, draft a PR, disarm the lock |
 | `foundry_review_submit` | `APPROVED` → commit. `CHANGES REQUESTED` → assign `R<N>-<nn>`, append to PLAN and PROGRESS, unblock, commit `review: round N` |
 | `foundry_summary_commit` | Commit `SUMMARY.md`, mark the flight complete |
+| `foundry_agents_sync` | Write `.claude/agents/foundry-<role>.md` from the merged routing config; only changed files are written |
+| `foundry_config_show` | The merged routing config with the source of every value. Read-only |
 
 Full arguments, return shapes and failure modes:
 [docs/mcp-tools.md](./docs/mcp-tools.md).
@@ -197,8 +226,11 @@ including what each failure looks like and how to unstick it.
 │   └── check-diagrams.mjs       parses every Mermaid block (CI only)
 ├── agents/                      planner · implementer · reviewer · summarizer
 ├── skills/                      go-flight · plan-build · implement · review-build · summarize
-├── templates/SPEC.md            the spec skeleton the planner reads
-├── docs/                        architecture · MCP reference · spec guide · runbook
+├── templates/
+│   ├── SPEC.md                  the spec skeleton the planner reads
+│   ├── foundry.config.example.json   the global routing config, explained in docs/routing.md
+│   └── ccr/                     claude-code-router provider manifests
+├── docs/                        architecture · MCP reference · routing · spec guide · runbook
 └── test/                        harness + eight suites, run by test/run.mjs
 ```
 
@@ -221,9 +253,10 @@ including what each failure looks like and how to unstick it.
 
 ## Adapting it
 
-- Models and effort live in `agents/*.md`, with matching frontmatter in
-  `skills/*/SKILL.md` for manual invocation. Change them there and nowhere
-  else.
+- The plugin's own model and effort defaults live in `agents/*.md`. Per-machine
+  and per-project overrides live in the routing config instead — see
+  [docs/routing.md](./docs/routing.md) — so you rarely need to edit the
+  plugin itself to change what runs where.
 - Project-specific constraints belong in `SPEC.md` §3. The planner turns them
   into `## Constraints` in `CLAUDE.md`, which is the first thing the reviewer
   checks. Nothing project-specific lives in the plugin.
@@ -238,12 +271,13 @@ npm test -- guard protocol     # one or more suites by name
 KEEP_REPO=1 npm test -- drive  # keep the temp repos to poke at afterwards
 ```
 
-Seven suites, about 480 assertions: the plugin manifests and documentation links,
-the JSON-RPC transport, the `foundry_next` decision table, the implement-stage
-tools, the review and summary tools, the guard hook, and one end-to-end flight
-driven over real stdio against a real git repo. CI runs all of it on every
-supported Node line — 22, 24 and 26 — again on macOS, and again on a machine
-with no GitHub CLI installed.
+Eight suites, about 705 assertions: the plugin manifests and documentation
+links, the JSON-RPC transport, the `foundry_next` decision table, the
+implement-stage tools, the review and summary tools, per-role routing
+(config merge, `foundry_agents_sync`, `foundry_config_show`), the guard
+hook, and one end-to-end flight driven over real stdio against a real git
+repo. CI runs all of it on every supported Node line — 22, 24 and 26 —
+again on macOS, and again on a machine with no GitHub CLI installed.
 
 ## No daemon, no memory
 

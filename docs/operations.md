@@ -90,6 +90,9 @@ one; see [writing-specs.md](./writing-specs.md).
 | Run finishes but nothing was pushed | No `origin`, or the push failed | `push` in the handoff output says which; the branch is local and reviewable either way |
 | No draft PR | `gh` is not installed or not authenticated | Optional by design; open one yourself |
 | Reviewer approves work that is wrong | `CLAUDE.md` `## Constraints` are unverifiable | Tighten `SPEC.md` §3 so each rule is a grep, then re-plan |
+| Controller prints `FOUNDRY: RESTART REQUIRED` and stops | Agent files were generated or changed and this session never loaded them (first run in the project, or after any routing config edit) | Expected. Run `/foundry:go-flight` again in a new session |
+| `Agent` call fails with `Agent type 'foundry-<role>' not found` | Same cause as above, hit mid-flight instead of at the start | Same fix: relaunch and re-run |
+| Flight stops immediately with a routing config error | The global file, a profile, or `docs/foundry.json`'s `roles`/`permissionMode` is malformed | Run `foundry_config_show` to see exactly what and where; fix it and re-run |
 
 ## Clearing a wedged run by hand
 
@@ -143,6 +146,31 @@ Environment variables:
 |---|---|---|
 | `FOUNDRY_PROJECT_DIR` | `cwd` | Project root the server operates on; set by `.mcp.json` |
 | `FOUNDRY_GUARD_CAP` | `500` | Re-blocks before the guard gives up and lets the run end |
+| `FOUNDRY_CONFIG` | `~/.config/foundry/config.json` (or `$XDG_CONFIG_HOME/foundry/config.json`) | Path to the global routing config |
+| `FOUNDRY_PROFILE` | the global file's own `"profile"` key, if any | Which profile in the global file to apply; wins over the file's own choice |
+
+## Routing
+
+Which model runs each role, and where that comes from, is
+[docs/routing.md](./routing.md)'s subject in full. The short version for
+unattended use: `/foundry:go-flight` calls `foundry_agents_sync` before its
+loop, and if anything changed — the first run in a project, or after any
+edit to the routing config — it prints `FOUNDRY: RESTART REQUIRED` and
+stops rather than risk spawning a stage against a model the session cannot
+actually reach. A plain re-run picks up where it left off. To make a
+headless launcher handle that restart itself:
+
+```bash
+out=$(claude -p "/foundry:go-flight")
+printf '%s\n' "$out"
+case "$out" in
+  *"FOUNDRY: RESTART REQUIRED"*) claude -p "/foundry:go-flight" ;;
+esac
+```
+
+`foundry_config_show` prints the merged config and the source of every
+value; run it whenever the resolved model for a role is not what you
+expected.
 
 ## What the flight leaves behind
 

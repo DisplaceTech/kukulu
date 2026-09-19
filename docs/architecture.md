@@ -41,9 +41,12 @@ flowchart LR
 ```
 
 The flight controller is deliberately the weakest model in the system. It has
-access to exactly three tools — `Agent`, `foundry_status` and `foundry_next` —
-and none of them change anything. It cannot start a run, mark a task, or
-record a verdict even if it decides it should.
+access to four tools — `Agent`, `foundry_status`, `foundry_next` and
+`foundry_agents_sync` — and none of the MCP ones change project state.
+`foundry_agents_sync` writes only the generated agent files under
+`.claude/agents/` and a `.git/info/exclude` line (see
+[routing.md](./routing.md)); it cannot start a run, mark a task, or record a
+verdict even if it decides it should.
 
 ## The stage machine
 
@@ -121,9 +124,10 @@ the thing it is guarding.
 | summarizer | fable | medium | Synthesis across plan, handoff and every review round, for a human who was not there. |
 
 These are the plugin defaults, in `agents/*.md`; per-machine and per-project
-routing overrides them. The stage skills themselves carry no model of their
-own (`model: inherit`), so invoking one directly instead of through its agent
-runs it on your session's current model.
+routing overrides them — see [routing.md](./routing.md). The stage skills
+themselves carry no model of their own (`model: inherit`), so invoking one
+directly instead of through its agent runs it on your session's current
+model.
 
 ## The unattended contract
 
@@ -203,7 +207,9 @@ fix task is a task, and it goes through the same test-first loop as any other.
 | `.foundry/state.json` | yes | `round`, `implemented`, `reviewed`, `verdict`, `summarized`, `halted` |
 | `.foundry/implement.lock` | no (gitignored) | the guard's re-block counter |
 | `docs/PROGRESS.md` | yes | task checkboxes and the per-task log |
-| `docs/foundry.json` | yes | `verify`, `extraVerify`, `build`, `baseBranch`, `branchPrefix`, `maxRounds`, `commandTimeoutMs` |
+| `docs/foundry.json` | yes | `verify`, `extraVerify`, `build`, `baseBranch`, `branchPrefix`, `maxRounds`, `commandTimeoutMs`, `roles`, `permissionMode` |
+| `.claude/agents/foundry-*.md` | no (`.git/info/exclude`) | the generated per-role agents; see [routing.md](./routing.md) |
+| `~/.config/foundry/config.json` | n/a (outside the project) | the global routing config, its profiles |
 
 A corrupt `state.json` degrades to defaults rather than failing — the tasks on
 disk are the real record. A corrupt `foundry.json` is a hard error, because

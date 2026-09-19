@@ -1,13 +1,21 @@
 # MCP tool reference
 
-Ten tools, served over stdio by `mcp/server.mjs` with no dependencies. The
+Twelve tools, served over stdio by `mcp/server.mjs` with no dependencies. The
 server is launched by Claude Code from [`.mcp.json`](../.mcp.json) with
 `FOUNDRY_PROJECT_DIR` set to the project root; every path below is relative to
 that root.
 
-Two of them — `foundry_status` and `foundry_next` — are read-only, and they are
-the only two the flight controller is allowed to call. Everything else changes
-state and belongs to a stage agent.
+Three of them — `foundry_status`, `foundry_next` and `foundry_config_show` —
+are read-only. The flight controller is allowed those plus
+`foundry_agents_sync`, which writes only the generated agent files and a
+`.git/info/exclude` line, never project state. Everything else changes
+project state and belongs to a stage agent.
+
+`foundry_next`, `foundry_status`, `foundry_config_show` and
+`foundry_agents_sync` all resolve the merged routing config (see
+[routing.md](./routing.md)) as part of answering, so a malformed global
+config, profile or project override is a refusal from any of the four —
+deliberately: a flight must not run with a half-understood routing config.
 
 A tool that refuses returns a normal MCP result with `isError: true` and a
 plain-English message. It is not a transport error: the model is expected to
@@ -38,9 +46,11 @@ context.
 | `counts` | `{ todo, inProgress, done, blocked, skipped, total, open }`; `open = todo + inProgress` |
 | `blocked`, `skipped` | Task ids in those states |
 | `reviewVerdictInFile` | The verdict parsed out of `REVIEW.md`, if one exists |
+| `agentsGenerated` | Role names whose `.claude/agents/foundry-<role>.md` currently exists |
 
-**Refuses when:** `PROGRESS.md` exists but has no `## Tasks` section, or
-`foundry.json` is not valid JSON. Both are corruption, not absence, and
+**Refuses when:** `PROGRESS.md` exists but has no `## Tasks` section,
+`foundry.json` is not valid JSON, or the merged routing config is malformed
+(see [routing.md](./routing.md)). All three are corruption, not absence, and
 guessing past them would produce confident nonsense.
 
 ---
@@ -52,11 +62,15 @@ report.
 
 **Arguments:** none.
 
-**Returns:** `{ stage, agent, round, reason, prompt }`.
+**Returns:** `{ stage, agent, model, round, reason, prompt }`.
 
 - `stage` — `plan` · `implement` · `review` · `summarize` · `done` · `halt`
-- `agent` — the subagent to spawn (`foundry:planner`, `foundry:implementer`,
-  `foundry:reviewer`, `foundry:summarizer`), or `null` for `done` and `halt`
+- `agent` — the subagent to spawn: the generated `foundry-<role>` name when
+  `.claude/agents/foundry-<role>.md` exists, else the plugin's own
+  `foundry:planner` / `foundry:implementer` / `foundry:reviewer` /
+  `foundry:summarizer`; `null` for `done` and `halt`
+- `model` — the resolved model string for that role from the routing config
+  (see [routing.md](./routing.md)); `null` for `done` and `halt`
 - `reason` — one sentence, written for a human reading the transcript
 - `prompt` — the text to hand the subagent **verbatim**
 
@@ -269,6 +283,78 @@ does not exist or is not blocked or skipped.
 
 **Refuses when:** `SUMMARY.md` does not exist, or the recorded verdict is not
 `APPROVED`.
+
+---
+
+## `foundry_agents_sync`
+
+Generate `.claude/agents/foundry-<role>.md` for each of the four roles from
+the merged routing config. This is what `/foundry:go-flight` calls, once,
+before its loop; see [routing.md](./routing.md) for the full precedence.
+
+**Arguments:** none.
+
+**Does:**
+
+1. Resolves the routing config (plugin defaults < global file < profile <
+   `docs/foundry.json` `roles`), per role, per key.
+2. Renders each role's agent file — frontmatter copied from the plugin's own
+   `agents/<role>.md` (`description`, `skills`, `color`), plus the resolved
+   `model`, `effort` (only when the model is a known Anthropic alias or a
+   `claude-*` id) and `permissionMode` — and writes it only when the
+   rendered text differs from what is already on disk.
+3. In a git repository, ensures the pattern `.claude/agents/foundry-*.md` is
+   present in `.git/info/exclude` (not `.gitignore` — these files encode a
+   person's own routing, not the project's, and this way needs no commit).
+   Outside a git repository, this step is skipped, not an error.
+
+**Returns:** `{ dir, globalConfig, globalConfigPath, profile, profileSource,
+projectOverride, permissionMode, roles, effortDropped, changed, unchanged,
+exclude, table }`.
+
+- `roles` — `{ <role>: { agent, model, effort, source: { model, effort } } }`
+  for all four roles; `source` is `default` | `global` | `profile:<name>` |
+  `project`
+- `effortDropped` — `{ <role>: <effort> }` for any role whose configured
+  effort was dropped because its model is not an Anthropic one
+- `changed` / `unchanged` — role names written this call / left alone
+  because their rendered content was already correct
+- `exclude` — `"added"` | `"present"` | `"skipped: not a git repository"`
+- `table` — the same information as a ready-to-print Markdown table
+
+A non-empty `changed` means Claude Code has not loaded those agent
+definitions in the current session — confirmed directly: a freshly written
+or edited `.claude/agents/*.md` file is not callable by name until the
+session restarts, regardless of whether the directory already existed.
+`/foundry:go-flight` checks for this and stops with a fixed message rather
+than spawning a stage against the wrong model; see
+[operations.md](./operations.md#routing).
+
+**Refuses when:** the merged routing config is malformed — an unknown role
+or role key, an invalid `effort` or `permissionMode` value, an unknown
+top-level key in the global file, or a `FOUNDRY_PROFILE` (or the global
+file's own `"profile"` key) naming a profile that does not exist. Nothing is
+written on a refusal.
+
+---
+
+## `foundry_config_show`
+
+The merged routing config, read-only, with the source of every value.
+
+**Arguments:** none.
+
+**Returns:** `{ globalConfig, globalConfigPath, profile, profileSource,
+projectOverride, permissionMode, permissionModeSource, roles, effortDropped,
+agentsGenerated, agentsStale, table }`.
+
+`agentsGenerated` is the same field `foundry_status` returns.
+`agentsStale` lists roles whose generated file exists but no longer matches
+what `foundry_agents_sync` would write for the current config — this tool
+never writes anything itself, so staleness is reported, not fixed.
+
+**Refuses when:** the same conditions as `foundry_agents_sync`, with the
+same messages.
 
 ---
 
