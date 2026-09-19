@@ -7,6 +7,59 @@ mechanical work, and a zero-dependency MCP server does everything that should
 never be left to a language model at all. You write the spec and you merge the
 branch. Foundry does the part in between.
 
+## Quickstart
+
+You need Node ≥ 22, git, and Claude Code. Nothing to `npm install`.
+
+1. **Install the plugin.** The repo is its own marketplace.
+
+   ```bash
+   claude plugin marketplace add ericmann/foundry
+   claude plugin install foundry@ericmann
+   ```
+
+2. **Allow the plugin's MCP server, once.** An unattended run cannot answer
+   a permission prompt. Put this in `~/.claude/settings.json` (or the
+   project's `.claude/settings.json`); or, the first time a prompt appears,
+   pick "always allow", which writes the same rule.
+
+   ```json
+   { "permissions": { "allow": ["mcp__plugin_foundry_foundry"] } }
+   ```
+
+3. **Write a spec** in the project you want built, and commit it.
+
+   ```bash
+   cd myproject                      # a git repo on its base branch
+   mkdir -p docs
+   curl -fsSL https://raw.githubusercontent.com/ericmann/foundry/main/templates/SPEC.md -o docs/SPEC.md
+   $EDITOR docs/SPEC.md              # docs/writing-specs.md says what the planner needs
+   git add -A && git commit -m "spec"
+   ```
+
+4. **Fly.** The first run in a project sets up the stage agents and stops
+   with `FOUNDRY: RESTART REQUIRED`; run it again in a new session and it
+   goes all the way to a reviewed `build/<date>` branch.
+
+   ```bash
+   claude
+   > /foundry:go-flight
+   ```
+
+5. **Read `docs/SUMMARY.md`, then merge the branch yourself.** Foundry never
+   merges.
+
+> **Optional — run a stage on a different model or backend.** By default the
+> planner and reviewer use `fable` and the implementer uses `sonnet`, all on
+> your Anthropic account. To point any role somewhere else — `haiku`, a full
+> model id, or a local or hosted model through
+> [claude-code-router](https://github.com/musistudio/claude-code-router) —
+> copy [`templates/foundry.config.example.json`](./templates/foundry.config.example.json)
+> to `~/.config/foundry/config.json`, edit the roles or pick a profile with
+> `"profile": "local"`, and run `/foundry:go-flight` again (it will ask for
+> one more restart). [docs/routing.md](./docs/routing.md) has the whole
+> story, including the router setup.
+
 ## What's in the box
 
 - **Four stage agents**, each pinned to its own model and effort level by
@@ -92,15 +145,11 @@ task, and cannot mark work done that it did not commit.
 
 ## Install
 
-The MCP server has no dependencies. Node ≥ 22 and git are all it needs.
+The [Quickstart](#quickstart) installs from the marketplace. To try a
+checkout for one session instead:
 
 ```bash
-# try it for one session
 claude --plugin-dir /path/to/foundry
-
-# or install from the repo, which is its own marketplace
-claude plugin marketplace add ericmann/foundry
-claude plugin install foundry@ericmann
 ```
 
 Plugin skills are namespaced, so the entry point is `/foundry:go-flight`; the
@@ -293,15 +342,6 @@ implement-stage tools, the review and summary tools, per-role routing
 hook, and one end-to-end flight driven over real stdio against a real git
 repo. CI runs all of it on every supported Node line — 22, 24 and 26 —
 again on macOS, and again on a machine with no GitHub CLI installed.
-
-## No daemon, no memory
-
-Nothing in this pipeline runs continuously. Each stage is a fresh subagent that
-reads the repo, does one job, writes down what it did, and exits; the next
-stage starts with no context beyond what is committed. That is a real
-constraint — it rules out a lot of clever things — and it is the whole reason
-the pipeline can be left unattended. There is no accumulated state to drift,
-and no claim about the build that cannot be checked against the git history.
 
 ## Contributing
 
