@@ -22,10 +22,18 @@ const repo = specRepo("# Spec\nBuild something small.\n");
 const noGh = { env: { PATH: `${mkFailingGhBin()}:${process.env.PATH}` } };
 
 await withServer(repo, async ({ call }) => {
+  // ---------------------------------------------------------------- routing
+
+  const sync = await call("foundry_agents_sync");
+  eq(sync.changed.length, 4, "the flight starts by generating all four role agents");
+  eq(sync.exclude, "added", "the exclude pattern is added before any run starts");
+
   // ---------------------------------------------------------------- plan
 
   let n = await call("foundry_next");
   eq(n.stage, "plan", "a repo with only a spec needs a plan");
+  eq(n.agent, "foundry-planner", "the generated planner agent is named");
+  ok(n.model, "a resolved model is reported for the plan stage");
 
   writeFile(repo, "docs/PLAN.md", planDoc(TASKS));
   writeFile(repo, "docs/PROGRESS.md", progressDoc(TASKS));
@@ -37,6 +45,8 @@ await withServer(repo, async ({ call }) => {
   n = await call("foundry_next");
   eq(n.stage, "implement", "a plan on disk means it is time to build");
   eq(n.round, 0, "the first build is round 0");
+  eq(n.agent, "foundry-implementer", "the generated implementer agent is named");
+  ok(n.model, "a resolved model is reported for the implement stage");
 
   // ---------------------------------------------------------------- build
 
@@ -92,6 +102,8 @@ await withServer(repo, async ({ call }) => {
 
   n = await call("foundry_next");
   eq(n.stage, "review", "a handoff means it is the reviewer's turn");
+  eq(n.agent, "foundry-reviewer", "the generated reviewer agent is named");
+  ok(n.model, "a resolved model is reported for the review stage");
 
   // ---------------------------------------------------------------- review
 
@@ -113,6 +125,7 @@ await withServer(repo, async ({ call }) => {
   n = await call("foundry_next");
   eq(n.stage, "implement", "changes requested sends the flight back to the implementer");
   eq(n.round, 1, "on round 1");
+  eq(n.agent, "foundry-implementer", "still the generated implementer agent, on the fix round");
 
   // ---------------------------------------------------------------- fix round
 
@@ -139,6 +152,7 @@ await withServer(repo, async ({ call }) => {
 
   n = await call("foundry_next");
   eq(n.stage, "review", "round 1 goes back for review");
+  eq(n.agent, "foundry-reviewer", "still the generated reviewer agent, on round 1");
 
   writeFile(repo, "docs/REVIEW.md", "# Review\nRound: 1\n**Verdict**: APPROVED\n");
   isError(await call("foundry_summary_commit"), /docs\/SUMMARY\.md does not exist/, "there is no summary to commit yet");
@@ -147,6 +161,8 @@ await withServer(repo, async ({ call }) => {
 
   n = await call("foundry_next");
   eq(n.stage, "summarize", "an approved branch needs its summary");
+  eq(n.agent, "foundry-summarizer", "the generated summarizer agent is named");
+  ok(n.model, "a resolved model is reported for the summarize stage");
 
   writeFile(repo, "docs/SUMMARY.md", "# summary\nMerge build/... into main.\n");
   r = await call("foundry_summary_commit");
@@ -154,10 +170,14 @@ await withServer(repo, async ({ call }) => {
 
   n = await call("foundry_next");
   eq(n.stage, "done", "and the flight is done");
+  eq(n.agent, null, "done still has no agent to delegate to");
   like(n.reason, /ready for a human to merge/, n.reason);
 
   // ---------------------------------------------------------------- the record
 
+  // foundry_agents_sync never commits anything (the generated files are
+  // excluded via .git/info/exclude, not tracked), so the branch's commit
+  // history is exactly what it would have been without routing at all.
   eq(git(repo, ["status", "--porcelain"]), "", "the branch is clean");
   const log = sh(repo, "git log --oneline --format=%s");
   for (const expected of [
