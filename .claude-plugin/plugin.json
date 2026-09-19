@@ -1,13 +1,13 @@
 {
   "name": "foundry",
   "displayName": "Foundry",
-  "version": "0.1.0",
-  "description": "Spec-driven plan → implement → review → fix → summarize pipeline with per-stage model/effort switching. Drop docs/SPEC.md in a repo and run /foundry:go-flight.",
+  "version": "0.2.0",
+  "description": "Spec-driven plan → implement → review → fix → summarize pipeline with per-role, per-machine model routing. Drop docs/SPEC.md in a repo and run /foundry:go-flight.",
   "author": {
     "name": "Eric Mann",
     "email": "eric.allen.mann@gmail.com"
   },
-  "keywords": ["workflow", "planning", "review", "unattended", "multi-model"],
+  "keywords": ["workflow", "planning", "review", "unattended", "multi-model", "routing"],
   "mcpServers": "./.mcp.json",
   "hooks": "./hooks/hooks.json"
 }

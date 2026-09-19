@@ -4,6 +4,56 @@ All notable changes to this plugin. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] — 2026-09-19
+
+### Added
+
+- **Per-role model routing.** Each of the four stage roles can be pointed at
+  a different model — an Anthropic alias or id, or a model reached through
+  a local router such as claude-code-router — from a global config file
+  (`$FOUNDRY_CONFIG`, else `$XDG_CONFIG_HOME/foundry/config.json`, else
+  `~/.config/foundry/config.json`), an optional named profile inside it
+  (`FOUNDRY_PROFILE`, or the file's own `"profile"` key), and an optional
+  per-project override in `docs/foundry.json`'s new `roles` and
+  `permissionMode` keys. See `docs/routing.md`.
+- **`foundry_agents_sync`** generates `.claude/agents/foundry-<role>.md`
+  from the merged config, writing only files whose content changed, and
+  excludes them from git via `.git/info/exclude`. `/foundry:go-flight` calls
+  it once before its loop and prints the resolved table.
+- **`foundry_config_show`** shows the merged routing config, read-only,
+  with the source of every value (`default` | `global` | `profile:<name>` |
+  `project`) and which generated agents are stale.
+- **`foundry_next`** gains a `model` field and now names the generated
+  `foundry-<role>` agent once one exists, instead of the plugin's own
+  `foundry:<role>`. **`foundry_status`** gains `agentsGenerated`.
+- **Templates**: `templates/foundry.config.example.json` and two
+  claude-code-router provider manifests under `templates/ccr/`.
+- **Test suite**: an eighth suite, `routing` (194 assertions), covering the
+  config merge, both new tools and every refusal.
+
+### Changed
+
+- Project-level agents accept `permissionMode`, which every generated agent
+  now carries (default `acceptEdits`) — once `/foundry:go-flight` has run
+  once in a project, launching with `--permission-mode acceptEdits` is no
+  longer required.
+- Claude Code does not load an agent file written or edited after a session
+  starts, so a routing config change (including the very first sync in a
+  project) makes `/foundry:go-flight` print `FOUNDRY: RESTART REQUIRED` and
+  stop, rather than risk spawning a stage against a model the session
+  cannot actually reach.
+- The server now defines twelve tools.
+
+### Fixed
+
+- The four stage skills (`implement`, `plan-build`, `review-build`,
+  `summarize`) set `disable-model-invocation: true`, which — per Claude
+  Code's own docs — also blocks a skill from being preloaded into a
+  subagent. Every stage agent's `skills:` preload had therefore never
+  actually taken effect. The four skills now set neither that flag nor
+  their own `model`/`effort` (`model: inherit`), so the agent — plugin
+  default or generated — is the sole owner of both, and preloading works.
+
 ## [0.1.0] — 2026-09-18
 
 First release.
