@@ -1,0 +1,9 @@
+{
+  "provider": {
+    "name": "OpenRouter",
+    "base_url": "https://openrouter.ai/api",
+    "protocol": "anthropic_messages",
+    "models": ["deepseek/deepseek-v4-pro", "z-ai/glm-5.2"],
+    "source": "https://openrouter.ai"
+  }
+}

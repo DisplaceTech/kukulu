@@ -23,7 +23,7 @@ for f in scripts/*.sh; do
   check bash -n "$f"
 done
 
-for f in package.json .mcp.json .claude-plugin/*.json hooks/*.json; do
+for f in package.json .mcp.json .claude-plugin/*.json hooks/*.json templates/*.json templates/ccr/*.json; do
   check node -e 'JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"))' "$f"
 done
 

@@ -214,6 +214,23 @@ for (const heading of [
 like(read("skills/plan-build/SKILL.md"), /⚠️ ASSUMPTION/, "the planner knows the template's assumption marker");
 like(template, /⚠️ ASSUMPTION/, "the template explains the assumption marker");
 
+// ---------------------------------------------------------------- routing config templates
+
+const foundryConfigTemplate = json("templates/foundry.config.example.json");
+eq(
+  Object.keys(foundryConfigTemplate.roles).sort().join(","),
+  ["implementer", "planner", "reviewer", "summarizer"].join(","),
+  "the global config template covers exactly the four roles",
+);
+ok(Object.keys(foundryConfigTemplate.profiles).length >= 2, "the template shows more than one profile");
+for (const file of listDir("templates/ccr").filter((f) => f.endsWith(".json"))) {
+  const provider = json(`templates/ccr/${file}`).provider;
+  ok(provider?.name, `templates/ccr/${file} names a provider`);
+  ok(provider?.base_url, `templates/ccr/${file} gives a base_url`);
+  ok(provider?.protocol, `templates/ccr/${file} names a protocol`);
+  ok(Array.isArray(provider?.models) && provider.models.length > 0, `templates/ccr/${file} lists at least one model`);
+}
+
 // ---------------------------------------------------------------- CI wiring
 
 const workflows = listDir(".github/workflows");

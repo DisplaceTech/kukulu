@@ -1,0 +1,19 @@
+{
+  "roles": {
+    "planner": { "model": "fable", "effort": "high" },
+    "implementer": { "model": "sonnet", "effort": "medium" },
+    "reviewer": { "model": "fable", "effort": "high" },
+    "summarizer": { "model": "fable", "effort": "medium" }
+  },
+  "profiles": {
+    "local": {
+      "implementer": { "model": "Ollama/qwen3.6:35b-a3b" },
+      "reviewer": { "model": "OpenRouter/deepseek/deepseek-v4-pro" }
+    },
+    "cheap": {
+      "implementer": { "model": "haiku", "effort": "medium" },
+      "summarizer": { "model": "haiku", "effort": "low" }
+    }
+  },
+  "permissionMode": "acceptEdits"
+}

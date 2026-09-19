@@ -365,6 +365,39 @@ const cfgDir = () => mkDir("foundry-cfg-");
   });
 }
 
+// ---------------------------------------------------------------- the shipped templates validate
+
+{
+  const repo = plannedRepo();
+  const templatePath = `${ROOT}/templates/foundry.config.example.json`;
+
+  await withServer(repo, async ({ call }) => {
+    const cfg = await call("foundry_config_show");
+    eq(cfg.globalConfig, templatePath, "the template file is read as the global config");
+    eq(cfg.roles.implementer.model, "sonnet", "the template's un-profiled defaults resolve");
+  }, { env: { FOUNDRY_CONFIG: templatePath } });
+
+  await withServer(repo, async ({ call }) => {
+    const cfg = await call("foundry_config_show");
+    eq(cfg.profile, "local", "the template's local profile is selected");
+    eq(cfg.roles.implementer.model, "Ollama/qwen3.6:35b-a3b", "the template's local profile resolves");
+  }, { env: { FOUNDRY_CONFIG: templatePath, FOUNDRY_PROFILE: "local" } });
+
+  await withServer(repo, async ({ call }) => {
+    const cfg = await call("foundry_config_show");
+    eq(cfg.profile, "cheap", "the template's cheap profile is selected");
+    eq(cfg.roles.implementer.model, "haiku", "the template's cheap profile resolves");
+  }, { env: { FOUNDRY_CONFIG: templatePath, FOUNDRY_PROFILE: "cheap" } });
+
+  for (const file of ["ollama.provider.json", "openrouter.provider.json"]) {
+    const provider = JSON.parse(readFile(ROOT, `templates/ccr/${file}`)).provider;
+    ok(provider.name, `${file} names a provider`);
+    ok(provider.base_url, `${file} gives a base_url`);
+    ok(provider.protocol, `${file} names a protocol`);
+    ok(Array.isArray(provider.models) && provider.models.length > 0, `${file} lists at least one model`);
+  }
+}
+
 // ---------------------------------------------------------------- description round-trips
 
 {
