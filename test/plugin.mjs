@@ -126,7 +126,7 @@ const goFlight = read("skills/go-flight/SKILL.md");
 const fmGo = frontmatter(goFlight);
 const allowed = String(fmGo["allowed-tools"]).split(",").map((s) => s.trim());
 const toolNames = Array.from(serverSrc.matchAll(/name: "(foundry_[a-z_]+)"/g), (m) => m[1]);
-eq(toolNames.length, 11, "the server defines eleven tools");
+eq(toolNames.length, 12, "the server defines twelve tools");
 ok(allowed.includes("Agent"), "the flight controller may spawn agents");
 for (const t of allowed.filter((a) => a.startsWith("mcp__"))) {
   ok(toolNames.includes(t.replace("mcp__foundry__", "")), `the flight controller's allowed tool ${t} exists`);

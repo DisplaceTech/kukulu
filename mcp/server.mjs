@@ -58,6 +58,14 @@ const write = (p, s) => {
 const rel = (p) => path.relative(ROOT, p);
 const today = () => new Date().toISOString().slice(0, 10);
 
+/** Ensure `line` is present in the file at `file`, appending it once if not. Returns whether it added the line. */
+function ensureLineInFile(file, line) {
+  const cur = exists(file) ? read(file) : "";
+  if (cur.split("\n").includes(line)) return false;
+  write(file, cur.replace(/\s*$/, "") + (cur ? "\n" : "") + line + "\n");
+  return true;
+}
+
 function git(args, { allowFail = false } = {}) {
   const r = spawnSync("git", args, { cwd: ROOT, encoding: "utf8" });
   if (r.status !== 0 && !allowFail) {
@@ -337,6 +345,64 @@ function configShow() {
   };
 }
 
+/** Resolve a `git rev-parse --git-path <name>` result to an absolute path. */
+function gitPath(name) {
+  const out = git(["rev-parse", "--git-path", name]).out;
+  return path.isAbsolute(out) ? out : path.join(ROOT, out);
+}
+
+/**
+ * Write .claude/agents/foundry-<role>.md for every role from the resolved
+ * routing config, writing only files whose rendered content actually
+ * changed, and exclude the pattern from git per clone (via
+ * .git/info/exclude, not .gitignore: these files encode a person's own
+ * routing, not the project's, and excluding them this way needs no commit
+ * on the base branch before a run can start).
+ */
+function agentsSync() {
+  const r = resolveRouting();
+  fs.mkdirSync(P.agentsDir, { recursive: true });
+
+  const changed = [];
+  const unchanged = [];
+  for (const role of ROLES) {
+    const file = path.join(P.agentsDir, `foundry-${role}.md`);
+    const text = renderAgentFile(role, r.roles[role], r.permissionMode);
+    if (exists(file) && read(file) === text) {
+      unchanged.push(role);
+    } else {
+      write(file, text);
+      changed.push(role);
+    }
+  }
+
+  let excludeResult;
+  if (gitFacts().inRepo) {
+    const added = ensureLineInFile(gitPath("info/exclude"), ".claude/agents/foundry-*.md");
+    excludeResult = added ? "added" : "present";
+  } else {
+    excludeResult = "skipped: not a git repository";
+  }
+
+  return {
+    dir: rel(P.agentsDir),
+    globalConfig: r.globalPresent ? r.globalPath : "none",
+    globalConfigPath: r.globalPath,
+    profile: r.profile,
+    profileSource: r.profileSource,
+    projectOverride: r.projectOverride,
+    permissionMode: r.permissionMode,
+    roles: Object.fromEntries(
+      ROLES.map((role) => [role, { agent: `foundry-${role}`, model: r.roles[role].model, effort: r.roles[role].effort, source: r.roles[role].source }]),
+    ),
+    effortDropped: r.effortDropped,
+    changed,
+    unchanged,
+    exclude: excludeResult,
+    table: routingTable(r),
+  };
+}
+
 const DEFAULT_STATE = { round: 0, implemented: false, reviewed: false, verdict: null, summarized: false, halted: null };
 
 function loadState() {
@@ -574,9 +640,7 @@ function runStart() {
   }
 
   // .gitignore the lock, arm it, stamp PROGRESS, commit.
-  const ignoreLine = ".foundry/implement.lock";
-  const gi = exists(P.gitignore) ? read(P.gitignore) : "";
-  if (!gi.split("\n").includes(ignoreLine)) write(P.gitignore, gi.replace(/\s*$/, "") + (gi ? "\n" : "") + ignoreLine + "\n");
+  ensureLineInFile(P.gitignore, ".foundry/implement.lock");
   fs.mkdirSync(P.stateDir, { recursive: true });
   write(P.lock, "0\n");
   if (!pr.branch || pr.branch.startsWith("(")) setHeader(pr, "Branch", branch);
@@ -841,6 +905,12 @@ const TOOLS = [
     fn: reviewSubmit,
   },
   { name: "foundry_summary_commit", description: "Commit docs/SUMMARY.md and mark the flight complete. Only valid after an APPROVED review.", inputSchema: S({}), fn: summaryCommit },
+  {
+    name: "foundry_agents_sync",
+    description: "Generate .claude/agents/foundry-<role>.md from the merged routing config (plugin defaults < global file < profile < docs/foundry.json roles). Writes only files whose content changed, excludes them from git, and returns the resolved per-role table. A non-empty `changed` means the session must be relaunched before those agents can be spawned.",
+    inputSchema: S({}),
+    fn: agentsSync,
+  },
   { name: "foundry_config_show", description: "The merged routing config with the source of every role/key (default | global | profile:<name> | project) and the global file path. Read-only.", inputSchema: S({}), fn: configShow },
 ];
 
