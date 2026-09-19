@@ -28,7 +28,7 @@ it.
 | `agents/*.md` | Stage agents: model, effort, and the skill each preloads |
 | `skills/*/SKILL.md` | The prose each stage follows |
 | `templates/SPEC.md` | The spec skeleton users copy |
-| `test/` | Harness plus seven suites |
+| `test/` | Harness plus eight suites |
 | `docs/` | Architecture, tool reference, spec guide, runbook |
 
 ## Setup
@@ -48,7 +48,7 @@ plugin that fails on someone else's machine.
 
 ```bash
 npm run lint                    # node --check, bash -n, JSON parse, exec bits
-npm test                        # all seven suites
+npm test                        # all eight suites
 npm test -- guard protocol      # named suites only
 node test/state.mjs             # one suite, directly
 KEEP_REPO=1 npm test -- drive   # keep the temp repos for inspection

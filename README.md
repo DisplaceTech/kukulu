@@ -199,7 +199,7 @@ including what each failure looks like and how to unstick it.
 ├── skills/                      go-flight · plan-build · implement · review-build · summarize
 ├── templates/SPEC.md            the spec skeleton the planner reads
 ├── docs/                        architecture · MCP reference · spec guide · runbook
-└── test/                        harness + seven suites, run by test/run.mjs
+└── test/                        harness + eight suites, run by test/run.mjs
 ```
 
 ## Documentation map

@@ -14,6 +14,7 @@ const SUITES = [
   ["state", "foundry_status and the foundry_next decision table"],
   ["implement", "run_start, task_next/done/block, verify, run_finish"],
   ["review", "review_submit and summary_commit"],
+  ["routing", "config merge, foundry_agents_sync, foundry_config_show"],
   ["guard", "the Stop / SubagentStop guard hook"],
   ["drive", "one whole flight, end to end"],
 ];
