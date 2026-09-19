@@ -530,6 +530,7 @@ function gitFacts() {
 // ---------------------------------------------------------------- tools
 
 function status() {
+  resolveRouting(); // validate the merged routing config; a bad one refuses here too
   const st = loadState();
   const g = gitFacts();
   const out = {
@@ -564,18 +565,31 @@ function status() {
     const v = read(P.review).match(/\*\*Verdict\*\*:?\s*`?(APPROVED|CHANGES REQUESTED)`?/i) || read(P.review).match(/Verdict:?\s*`?(APPROVED|CHANGES REQUESTED)`?/i);
     out.reviewVerdictInFile = v ? v[1].toUpperCase() : null;
   }
+  out.agentsGenerated = agentsOnDisk();
   return out;
 }
 
 const AGENT = { plan: "foundry:planner", implement: "foundry:implementer", review: "foundry:reviewer", summarize: "foundry:summarizer" };
+const ROLE_OF_STAGE = { plan: "planner", implement: "implementer", review: "reviewer", summarize: "summarizer" };
 
 function next() {
+  const routing = resolveRouting();
   const s = status();
   const c = cfg();
   const st = s.state;
+  const agentFor = (name) => {
+    const role = ROLE_OF_STAGE[name];
+    if (!role) return null;
+    return exists(path.join(P.agentsDir, `foundry-${role}.md`)) ? `foundry-${role}` : AGENT[name];
+  };
+  const modelFor = (name) => {
+    const role = ROLE_OF_STAGE[name];
+    return role ? routing.roles[role].model : null;
+  };
   const stage = (name, reason, extra = {}) => ({
     stage: name,
-    agent: AGENT[name] || null,
+    agent: agentFor(name),
+    model: modelFor(name),
     round: st.round,
     reason,
     prompt: PROMPTS[name] ? PROMPTS[name](st.round, s) : null,
