@@ -15,6 +15,7 @@ const EXPECTED_TOOLS = [
   "foundry_run_finish",
   "foundry_review_submit",
   "foundry_summary_commit",
+  "foundry_config_show",
 ];
 
 const repo = mkRepo();

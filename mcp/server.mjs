@@ -11,8 +11,10 @@
 // the tools decide *what happens*.
 
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(process.env.FOUNDRY_PROJECT_DIR || process.cwd());
 const P = {
@@ -27,7 +29,14 @@ const P = {
   state: path.join(ROOT, ".foundry", "state.json"),
   lock: path.join(ROOT, ".foundry", "implement.lock"),
   gitignore: path.join(ROOT, ".gitignore"),
+  agentsDir: path.join(ROOT, ".claude", "agents"),
 };
+
+// The plugin's own root — where agents/*.md ships — derived from this file's
+// own location rather than ROOT, because ROOT is the *project* Foundry is
+// operating on and is almost never the same directory as the installed
+// plugin.
+const PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 // Keep in sync with .claude-plugin/plugin.json and package.json; test/plugin.mjs checks it.
 const VERSION = "0.1.0";
@@ -85,6 +94,246 @@ function cfg() {
     branchPrefix: c.branchPrefix || "build/",
     maxRounds: Number.isInteger(c.maxRounds) ? c.maxRounds : 3,
     commandTimeoutMs: c.commandTimeoutMs || 10 * 60 * 1000,
+  };
+}
+
+// ---------------------------------------------------------------- routing config
+//
+// Per-role model routing (v0.2.0): which model and effort each of the four
+// stage roles runs with, merged from the plugin's own defaults (agents/*.md),
+// an optional global file, an optional named profile inside it, and an
+// optional project override in docs/foundry.json. foundry_agents_sync turns
+// the merged result into .claude/agents/foundry-<role>.md files that Claude
+// Code will actually spawn; foundry_next and foundry_status read the merge
+// without writing anything.
+
+const ROLES = ["planner", "implementer", "reviewer", "summarizer"];
+const ROLE_KEYS = ["model", "effort"];
+const EFFORTS = ["low", "medium", "high", "xhigh", "max"];
+const ANTHROPIC_ALIASES = ["fable", "opus", "sonnet", "haiku", "inherit"];
+const PERMISSION_MODES = ["default", "acceptEdits", "auto", "dontAsk", "bypassPermissions", "plan", "manual"];
+const GLOBAL_KEYS = ["roles", "profiles", "profile", "permissionMode"];
+
+const isAnthropicModel = (m) => ANTHROPIC_ALIASES.includes(m) || m.startsWith("claude-");
+
+/** Minimal YAML frontmatter reader: scalars and `- ` lists, which is all an agent file uses. */
+function parseFrontmatter(text) {
+  const m = text.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
+  if (!m) throw new ToolError("agent file has no frontmatter");
+  const fm = {};
+  let key = null;
+  for (const line of m[1].split("\n")) {
+    const item = line.match(/^\s+-\s+(.*)$/);
+    if (item && key) {
+      (fm[key] = Array.isArray(fm[key]) ? fm[key] : []).push(item[1].trim());
+      continue;
+    }
+    const kv = line.match(/^([A-Za-z0-9_-]+):\s*(.*)$/);
+    if (!kv) continue;
+    key = kv[1];
+    const value = kv[2].trim().replace(/^["'](.*)["']$/, "$1");
+    fm[key] = value === "" ? [] : value === "true" ? true : value === "false" ? false : value;
+  }
+  return { frontmatter: fm, body: m[2] };
+}
+
+/** The plugin's own default agent file for a role: frontmatter plus body, verbatim. */
+function pluginAgent(role) {
+  const file = path.join(PLUGIN_ROOT, "agents", `${role}.md`);
+  return { file, ...parseFrontmatter(read(file)) };
+}
+
+function globalConfigPath() {
+  if (process.env.FOUNDRY_CONFIG) return path.resolve(process.env.FOUNDRY_CONFIG);
+  if (process.env.XDG_CONFIG_HOME) return path.join(process.env.XDG_CONFIG_HOME, "foundry", "config.json");
+  return path.join(os.homedir(), ".config", "foundry", "config.json");
+}
+
+function loadGlobalConfig() {
+  const p = globalConfigPath();
+  if (!exists(p)) return { path: p, present: false, data: {} };
+  let data;
+  try {
+    data = JSON.parse(read(p));
+  } catch (e) {
+    throw new ToolError(`global config ${p} is not valid JSON: ${e.message}`);
+  }
+  for (const k of Object.keys(data)) {
+    if (!GLOBAL_KEYS.includes(k)) throw new ToolError(`global config ${p} has an unknown key '${k}'`);
+  }
+  return { path: p, present: true, data };
+}
+
+/** `where` names the block itself, e.g. "global config <path> roles" or "docs/foundry.json roles". */
+function validateRolesBlock(roles, where) {
+  if (roles === undefined) return;
+  if (typeof roles !== "object" || roles === null || Array.isArray(roles)) {
+    throw new ToolError(`${where} must be an object`);
+  }
+  for (const [role, block] of Object.entries(roles)) {
+    if (!ROLES.includes(role)) throw new ToolError(`${where} names an unknown role '${role}'`);
+    if (typeof block !== "object" || block === null || Array.isArray(block)) {
+      throw new ToolError(`${where}.${role} must be an object`);
+    }
+    for (const [key, value] of Object.entries(block)) {
+      if (!ROLE_KEYS.includes(key)) throw new ToolError(`${where}.${role} has an unknown key '${key}'`);
+      if (key === "model" && (typeof value !== "string" || !value)) {
+        throw new ToolError(`${where}.${role}.model must be a non-empty string`);
+      }
+      if (key === "effort" && !EFFORTS.includes(value)) {
+        throw new ToolError(`${where}.${role}.effort must be one of ${EFFORTS.join(", ")}`);
+      }
+    }
+  }
+}
+
+/** `where` names the key itself, e.g. "global config <path> permissionMode". */
+function validatePermissionMode(mode, where) {
+  if (mode === undefined) return;
+  if (!PERMISSION_MODES.includes(mode)) {
+    throw new ToolError(`${where} must be one of ${PERMISSION_MODES.join(", ")}`);
+  }
+}
+
+/**
+ * Merge the plugin defaults, the global file, the selected profile and the
+ * project override, per role, per key, tracking where each surviving value
+ * came from. Never writes anything; throws on any malformed input.
+ */
+function resolveRouting() {
+  const global = loadGlobalConfig();
+  validateRolesBlock(global.data.roles, `global config ${global.path} roles`);
+  validatePermissionMode(global.data.permissionMode, `global config ${global.path} permissionMode`);
+  if (global.data.profiles !== undefined) {
+    if (typeof global.data.profiles !== "object" || global.data.profiles === null || Array.isArray(global.data.profiles)) {
+      throw new ToolError(`global config ${global.path} 'profiles' must be an object`);
+    }
+    for (const [name, block] of Object.entries(global.data.profiles)) {
+      validateRolesBlock(block, `global config ${global.path} profiles.${name}`);
+    }
+  }
+  if (global.data.profile !== undefined && (typeof global.data.profile !== "string" || !global.data.profile)) {
+    throw new ToolError(`global config ${global.path} 'profile' must be a non-empty string`);
+  }
+
+  let profile = null;
+  let profileSource = null;
+  if (process.env.FOUNDRY_PROFILE) {
+    profile = process.env.FOUNDRY_PROFILE;
+    profileSource = "env";
+  } else if (global.data.profile) {
+    profile = global.data.profile;
+    profileSource = "global";
+  }
+  if (profile !== null && !(profile in (global.data.profiles || {}))) {
+    const src = profileSource === "env" ? `FOUNDRY_PROFILE=${profile}` : `"profile": "${profile}" in ${global.path}`;
+    const globalDesc = global.present ? global.path : `${global.path} (does not exist)`;
+    throw new ToolError(`${src} selects a profile, but ${globalDesc} has no profiles.${profile} entry`);
+  }
+
+  const project = loadConfig() || {};
+  validateRolesBlock(project.roles, "docs/foundry.json roles");
+  validatePermissionMode(project.permissionMode, "docs/foundry.json permissionMode");
+
+  const roles = {};
+  const effortDropped = {};
+  for (const role of ROLES) {
+    const agent = pluginAgent(role);
+    const layers = [{ model: agent.frontmatter.model, effort: agent.frontmatter.effort, source: "default" }];
+    if (global.data.roles?.[role]) layers.push({ ...global.data.roles[role], source: "global" });
+    if (profile !== null && global.data.profiles?.[profile]?.[role]) {
+      layers.push({ ...global.data.profiles[profile][role], source: `profile:${profile}` });
+    }
+    if (project.roles?.[role]) layers.push({ ...project.roles[role], source: "project" });
+
+    let model, effort;
+    let modelSource = "default", effortSource = "default";
+    for (const layer of layers) {
+      if (layer.model !== undefined) { model = layer.model; modelSource = layer.source; }
+      if (layer.effort !== undefined) { effort = layer.effort; effortSource = layer.source; }
+    }
+    if (effort !== undefined && !isAnthropicModel(model)) {
+      effortDropped[role] = effort;
+      effort = undefined;
+    }
+    roles[role] = { model, effort, source: { model: modelSource, effort: effortSource } };
+  }
+
+  let permissionMode = "acceptEdits";
+  let permissionModeSource = "default";
+  if (global.data.permissionMode !== undefined) { permissionMode = global.data.permissionMode; permissionModeSource = "global"; }
+  if (project.permissionMode !== undefined) { permissionMode = project.permissionMode; permissionModeSource = "project"; }
+
+  return {
+    globalPath: global.path,
+    globalPresent: global.present,
+    profile,
+    profileSource,
+    roles,
+    permissionMode,
+    permissionModeSource,
+    effortDropped,
+    projectOverride: project.roles !== undefined || project.permissionMode !== undefined,
+  };
+}
+
+/** Quote a YAML scalar only when a plain scalar would parse differently. */
+function yamlScalar(s) {
+  if (/: | #/.test(s) || /^["'#[{*&!|>%@`]/.test(s)) return JSON.stringify(s);
+  return s;
+}
+
+/** The exact text foundry_agents_sync would write for one role's generated agent. */
+function renderAgentFile(role, resolved, permissionMode) {
+  const agent = pluginAgent(role);
+  const fm = agent.frontmatter;
+  const lines = ["---", `name: foundry-${role}`, `description: ${yamlScalar(fm.description)}`, `model: ${resolved.model}`];
+  if (resolved.effort !== undefined) lines.push(`effort: ${resolved.effort}`);
+  lines.push(`permissionMode: ${permissionMode}`, "skills:");
+  for (const s of fm.skills || []) lines.push(`  - ${s}`);
+  lines.push(`color: ${fm.color}`, "---");
+  const body = agent.body.replace(/^\n+/, "").replace(/\s+$/, "") + "\n";
+  return `${lines.join("\n")}\n<!-- generated by foundry_agents_sync; edit config, not this file -->\n\n${body}`;
+}
+
+/** A ready-to-print Markdown table of the resolved per-role routing. */
+function routingTable(r) {
+  const rows = ROLES.map((role) => {
+    const e = r.roles[role];
+    const effort = e.effort !== undefined ? e.effort : "–";
+    const source = e.source.model === e.source.effort ? e.source.model : `model:${e.source.model} effort:${e.source.effort}`;
+    return `| ${role} | foundry-${role} | ${e.model} | ${effort} | ${source} |`;
+  });
+  return ["| role | agent | model | effort | source |", "|---|---|---|---|---|", ...rows].join("\n");
+}
+
+/** Roles whose generated agent file currently exists on disk. */
+function agentsOnDisk() {
+  return ROLES.filter((role) => exists(path.join(P.agentsDir, `foundry-${role}.md`)));
+}
+
+function configShow() {
+  const r = resolveRouting();
+  const generated = agentsOnDisk();
+  const stale = generated.filter((role) => {
+    const file = path.join(P.agentsDir, `foundry-${role}.md`);
+    return read(file) !== renderAgentFile(role, r.roles[role], r.permissionMode);
+  });
+  return {
+    globalConfig: r.globalPresent ? r.globalPath : "none",
+    globalConfigPath: r.globalPath,
+    profile: r.profile,
+    profileSource: r.profileSource,
+    projectOverride: r.projectOverride,
+    permissionMode: r.permissionMode,
+    permissionModeSource: r.permissionModeSource,
+    roles: Object.fromEntries(
+      ROLES.map((role) => [role, { agent: `foundry-${role}`, model: r.roles[role].model, effort: r.roles[role].effort, source: r.roles[role].source }]),
+    ),
+    effortDropped: r.effortDropped,
+    agentsGenerated: generated,
+    agentsStale: stale,
+    table: routingTable(r),
   };
 }
 
@@ -592,6 +841,7 @@ const TOOLS = [
     fn: reviewSubmit,
   },
   { name: "foundry_summary_commit", description: "Commit docs/SUMMARY.md and mark the flight complete. Only valid after an APPROVED review.", inputSchema: S({}), fn: summaryCommit },
+  { name: "foundry_config_show", description: "The merged routing config with the source of every role/key (default | global | profile:<name> | project) and the global file path. Read-only.", inputSchema: S({}), fn: configShow },
 ];
 
 function send(msg) {
