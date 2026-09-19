@@ -140,10 +140,11 @@ that can grep for violations rather than form an impression.
 Then:
 
 ```bash
-claude --permission-mode acceptEdits
+claude
 > /foundry:go-flight
 ```
 
-The planner will report the decisions it made and the spec issues it found
+(The README's per-project section covers the one-time permission rule an
+unattended flight needs.) The planner will report the decisions it made and the spec issues it found
 before any code is written. Read that report. It is the cheapest moment to
 discover the spec meant something you did not intend.

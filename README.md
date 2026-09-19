@@ -115,20 +115,35 @@ cp /path/to/foundry/templates/SPEC.md docs/SPEC.md   # then write the spec
 # drop mockups, fixtures and diagrams next to it in docs/
 git add -A && git commit -m "spec"
 
-claude --permission-mode acceptEdits
+claude
 > /foundry:go-flight
 ```
 
-`acceptEdits` (or `bypassPermissions` on a throwaway box) matters the first
-time: plugin subagents cannot set their own permission mode, and an
-unattended implementer that hits a permission prompt will sit there until
-the guard's cap trips. The `verify` commands in `docs/foundry.json` run
-through the MCP rather than the model's Bash tool, so those never prompt.
-`/foundry:go-flight` generates project-level agents on its first run, and
-those *can* carry `permissionMode` — so once they exist, `--permission-mode`
-on launch is no longer required. The first run in a project (and the first
-run after any routing config change) prints `FOUNDRY: RESTART REQUIRED` and
-stops instead of proceeding; run the command again and it continues. See
+An unattended implementer that hits a permission prompt sits there until the
+guard's cap trips, so two kinds of prompt have to be dealt with up front, and
+they are handled differently:
+
+- **File edits.** The generated `foundry-<role>` agents carry
+  `permissionMode: acceptEdits`, which plugin-shipped agents cannot. Once
+  they exist, the implementer's edits never prompt and `--permission-mode
+  acceptEdits` on launch is no longer needed.
+- **MCP tool calls.** A subagent's permission mode does not cover these: a
+  generated agent's `foundry_status` call is denied under both `acceptEdits`
+  and `bypassPermissions` unless the session carries an allow rule. Allow
+  the plugin's server once, in `~/.claude/settings.json` (every project) or
+  the project's `.claude/settings.json`:
+
+  ```json
+  { "permissions": { "allow": ["mcp__plugin_foundry_foundry"] } }
+  ```
+
+  Interactively, choosing "always allow" at the first prompt writes the
+  same rule. The `verify` commands in `docs/foundry.json` run through the
+  MCP rather than the model's Bash tool, so those never prompt at all.
+
+The first run in a project (and the first run after any routing config
+change) generates the agents, prints `FOUNDRY: RESTART REQUIRED` and stops;
+run the command again in a new session and it continues. See
 [docs/routing.md](./docs/routing.md).
 
 Each stage also runs by hand by delegating to its agent — `foundry-planner`,
@@ -271,7 +286,7 @@ npm test -- guard protocol     # one or more suites by name
 KEEP_REPO=1 npm test -- drive  # keep the temp repos to poke at afterwards
 ```
 
-Eight suites, about 705 assertions: the plugin manifests and documentation
+Eight suites, about 720 assertions: the plugin manifests and documentation
 links, the JSON-RPC transport, the `foundry_next` decision table, the
 implement-stage tools, the review and summary tools, per-role routing
 (config merge, `foundry_agents_sync`, `foundry_config_show`), the guard

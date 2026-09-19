@@ -129,13 +129,23 @@ const fmGo = frontmatter(goFlight);
 const allowed = String(fmGo["allowed-tools"]).split(",").map((s) => s.trim());
 const toolNames = Array.from(serverSrc.matchAll(/name: "(foundry_[a-z_]+)"/g), (m) => m[1]);
 eq(toolNames.length, 12, "the server defines twelve tools");
+// A plugin-shipped MCP server's tools are exposed as
+// mcp__plugin_<plugin>_<server>__<tool> (verified with --plugin-dir), not as
+// the bare mcp__<server>__<tool> a project .mcp.json would give. The
+// controller lists both, so it is allowed its tools whichever way the server
+// was loaded.
+const MCP_PREFIXES = ["mcp__plugin_foundry_foundry__", "mcp__foundry__"];
+const bareTool = (t) => MCP_PREFIXES.reduce((s, p) => s.replace(p, ""), t);
 ok(allowed.includes("Agent"), "the flight controller may spawn agents");
-ok(allowed.includes("mcp__foundry__foundry_agents_sync"), "the flight controller may sync routing agents");
+for (const t of ["foundry_status", "foundry_next", "foundry_agents_sync"]) {
+  for (const p of MCP_PREFIXES) ok(allowed.includes(p + t), `the flight controller may call ${p}${t}`);
+}
 for (const t of allowed.filter((a) => a.startsWith("mcp__"))) {
-  ok(toolNames.includes(t.replace("mcp__foundry__", "")), `the flight controller's allowed tool ${t} exists`);
+  ok(MCP_PREFIXES.some((p) => t.startsWith(p)), `the flight controller's allowed tool ${t} names the foundry server`);
+  ok(toolNames.includes(bareTool(t)), `the flight controller's allowed tool ${t} exists`);
 }
 ok(
-  allowed.every((a) => a === "Agent" || a.startsWith("mcp__foundry__foundry_")),
+  allowed.every((a) => a === "Agent" || MCP_PREFIXES.some((p) => a.startsWith(p))),
   "the flight controller is allowed nothing beyond Agent, the read-only foundry tools, and agents_sync",
 );
 ok(

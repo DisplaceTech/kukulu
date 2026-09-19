@@ -34,7 +34,13 @@ agents accept any `model:` string, including a router-specific
 `provider,model` or `provider/model` form, and they accept `permissionMode`,
 which every generated file sets (default `acceptEdits`) — this is what
 removes the need to launch a session with `--permission-mode acceptEdits`
-once agents have been generated at least once. Plugin-shipped agents cannot
+for the implementer's file edits once agents have been generated at least
+once. It does not cover MCP tool calls: verified directly, a generated
+agent's `foundry_status` call is denied under both `acceptEdits` and
+`bypassPermissions` unless the session carries an allow rule, and the rule
+that works (and reaches subagents) is the scoped server name
+`mcp__plugin_foundry_foundry` in `permissions.allow` — the README's
+per-project section shows it. Plugin-shipped agents cannot
 do either of these things: [Claude Code's plugin
 reference](https://code.claude.com/docs/en/plugins-reference) states that
 "plugin subagents don't support the `hooks`, `mcpServers`, or

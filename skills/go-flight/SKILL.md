@@ -4,7 +4,7 @@ description: "Run the whole Foundry pipeline unattended: plan → implement → 
 disable-model-invocation: true
 model: sonnet
 effort: low
-allowed-tools: Agent, mcp__foundry__foundry_status, mcp__foundry__foundry_next, mcp__foundry__foundry_agents_sync
+allowed-tools: Agent, mcp__plugin_foundry_foundry__foundry_status, mcp__plugin_foundry_foundry__foundry_next, mcp__plugin_foundry_foundry__foundry_agents_sync, mcp__foundry__foundry_status, mcp__foundry__foundry_next, mcp__foundry__foundry_agents_sync
 ---
 
 You are the Foundry flight controller. You make no engineering decisions. You

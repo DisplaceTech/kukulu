@@ -8,7 +8,7 @@ something looks wrong, `foundry_status` is the whole truth.
 
 ```bash
 cd myproject
-claude --permission-mode acceptEdits
+claude
 > /foundry:go-flight
 ```
 
@@ -16,9 +16,13 @@ The controller prints the stage it is entering, delegates, and repeats. When it
 stops it prints the final stage, the round count, the branch, and the path to
 `docs/SUMMARY.md` if one exists.
 
-`acceptEdits` is not optional in practice. Plugin subagents cannot set their
-own permission mode; an implementer that hits a prompt sits there until the
-guard's cap trips, hours later, having done nothing.
+An implementer that hits a permission prompt sits there until the guard's cap
+trips, hours later, having done nothing. The generated `foundry-<role>`
+agents carry `permissionMode: acceptEdits`, which covers file edits; MCP
+tool calls need one allow rule in `~/.claude/settings.json` or the project's
+`.claude/settings.json` — `"permissions": { "allow": ["mcp__plugin_foundry_foundry"] }`
+— which the README's per-project section explains. Without it, the first
+stage's first `foundry_status` call is denied and the flight stops.
 
 ## Checking on a run
 

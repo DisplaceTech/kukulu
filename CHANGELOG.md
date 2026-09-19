@@ -36,7 +36,14 @@ All notable changes to this plugin. Format follows
 - Project-level agents accept `permissionMode`, which every generated agent
   now carries (default `acceptEdits`) — once `/foundry:go-flight` has run
   once in a project, launching with `--permission-mode acceptEdits` is no
-  longer required.
+  longer required for the implementer's file edits. MCP tool calls inside a
+  subagent still need a `permissions.allow` rule for
+  `mcp__plugin_foundry_foundry`; the README shows it.
+- `go-flight`'s `allowed-tools` now names the MCP tools the way a
+  plugin-shipped server actually exposes them
+  (`mcp__plugin_foundry_foundry__<tool>`), alongside the bare
+  `mcp__foundry__<tool>` form a project `.mcp.json` gives. The bare form
+  alone never matched a plugin install.
 - Claude Code does not load an agent file written or edited after a session
   starts, so a routing config change (including the very first sync in a
   project) makes `/foundry:go-flight` print `FOUNDRY: RESTART REQUIRED` and
