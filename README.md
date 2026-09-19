@@ -208,6 +208,9 @@ including what each failure looks like and how to unstick it.
   split this way, what each stage may and may not do, and where state lives
 - [**docs/mcp-tools.md**](./docs/mcp-tools.md) — every tool, argument, return
   field and refusal
+- [**docs/routing.md**](./docs/routing.md) — per-role model routing: the
+  global config file, profiles, and running stages through a router like
+  claude-code-router
 - [**docs/writing-specs.md**](./docs/writing-specs.md) — how to write a
   `SPEC.md` the planner can turn into a plan worth executing
 - [**docs/operations.md**](./docs/operations.md) — running, resuming,
