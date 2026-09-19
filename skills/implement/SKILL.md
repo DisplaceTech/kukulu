@@ -1,9 +1,7 @@
 ---
 name: implement
-description: "Sonnet: work through every open task in docs/PROGRESS.md unattended, then hand off for review-build"
-disable-model-invocation: true
-model: sonnet
-effort: medium
+description: "Foundry pipeline stage — work through every open task in docs/PROGRESS.md unattended, then hand off for review-build. Invoked by go-flight through the foundry-implementer agent; not for ordinary work."
+model: inherit
 ---
 
 You are implementing the build plan in `docs/PLAN.md`. You run **unattended**:

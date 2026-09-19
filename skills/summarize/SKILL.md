@@ -1,9 +1,7 @@
 ---
 name: summarize
-description: "Write docs/SUMMARY.md after an APPROVED review: what was built, what was decided, what a human still owes"
-disable-model-invocation: true
-model: fable
-effort: medium
+description: "Foundry pipeline stage — write docs/SUMMARY.md after an APPROVED review: what was built, what was decided, what a human still owes. Invoked by go-flight through the foundry-summarizer agent; not for ordinary work."
+model: inherit
 ---
 
 The build branch has been approved. Write the one document a human reads

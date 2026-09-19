@@ -78,9 +78,22 @@ for (const name of skillNames) {
   ok(fm, `skills/${name} has frontmatter`);
   eq(fm.name, name, `skills/${name}'s name matches its directory`);
   ok(fm.description && fm.description.length > 30, `skills/${name} has a usable description`);
-  eq(fm["disable-model-invocation"], true, `skills/${name} is invoked deliberately, never guessed into`);
-  ok(MODELS.includes(fm.model), `skills/${name} pins a known model (${fm.model})`);
-  ok(EFFORTS.includes(fm.effort), `skills/${name} pins an effort level (${fm.effort})`);
+  if (name === "go-flight") {
+    // The controller is invoked deliberately and pins its own model/effort;
+    // it is a skill in its own right, not a stage preloaded into an agent.
+    eq(fm["disable-model-invocation"], true, `skills/${name} is invoked deliberately, never guessed into`);
+    ok(MODELS.includes(fm.model), `skills/${name} pins a known model (${fm.model})`);
+    ok(EFFORTS.includes(fm.effort), `skills/${name} pins an effort level (${fm.effort})`);
+  } else {
+    // The four stage skills are preloaded into their foundry-<role> agent, and
+    // disable-model-invocation also blocks preloading — so a stage skill must
+    // never set it. Model and effort belong solely to the agent that routing
+    // generates; the skill inherits whatever the agent is running as.
+    eq(fm["disable-model-invocation"], undefined, `skills/${name} stays preloadable: disable-model-invocation also blocks preloading`);
+    eq(fm.model, "inherit", `skills/${name} lets its agent's routed model own the turn`);
+    eq(fm.effort, undefined, `skills/${name} carries no effort of its own; the agent's does`);
+    like(fm.description, /^Foundry pipeline stage/, `skills/${name}'s description marks it as a pipeline stage`);
+  }
 }
 
 for (const name of agentNames) {

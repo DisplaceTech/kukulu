@@ -1,9 +1,7 @@
 ---
 name: review-build
-description: "Fable: review the completed build branch against SPEC and PLAN, then approve or queue fix tasks for implement"
-disable-model-invocation: true
-model: fable
-effort: high
+description: "Foundry pipeline stage — review the completed build branch against SPEC and PLAN, then approve or queue fix tasks for implement. Invoked by go-flight through the foundry-reviewer agent; not for ordinary work."
+model: inherit
 ---
 
 You are reviewing an implementation run that a smaller model completed

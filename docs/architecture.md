@@ -120,8 +120,10 @@ the thing it is guarding.
 | reviewer | fable | high | Reviews work it did not do, against a spec it must read in full, with the authority to reject. Weak review is worse than none. |
 | summarizer | fable | medium | Synthesis across plan, handoff and every review round, for a human who was not there. |
 
-Change these in `agents/*.md`. The matching frontmatter in `skills/*/SKILL.md`
-covers the case where a stage is invoked by hand instead of by the controller.
+These are the plugin defaults, in `agents/*.md`; per-machine and per-project
+routing overrides them. The stage skills themselves carry no model of their
+own (`model: inherit`), so invoking one directly instead of through its agent
+runs it on your session's current model.
 
 ## The unattended contract
 

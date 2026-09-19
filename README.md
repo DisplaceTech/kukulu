@@ -117,10 +117,12 @@ that hits a permission prompt will sit there until the guard's cap trips. The
 `verify` commands in `docs/foundry.json` run through the MCP rather than the
 model's Bash tool, so those never prompt.
 
-Stages also run by hand, with the same model switching:
-`/foundry:plan-build`, `/foundry:implement`, `/foundry:review-build`,
-`/foundry:summarize`. Each skill's frontmatter carries its model and effort, so
-invoking it switches for that turn and switches back after.
+Each stage also runs by hand by delegating to its agent — `foundry-planner`,
+`foundry-implementer`, `foundry-reviewer`, `foundry-summarizer` once
+generated, else `foundry:planner` and so on — which keeps the same model and
+effort the flight controller would have used. Invoking `/foundry:plan-build`,
+`/foundry:implement`, `/foundry:review-build` or `/foundry:summarize`
+directly runs the stage on your session's current model instead.
 
 Writing the spec is the part that decides whether any of this works —
 [docs/writing-specs.md](./docs/writing-specs.md) covers what the planner needs

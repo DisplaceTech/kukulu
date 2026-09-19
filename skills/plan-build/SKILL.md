@@ -1,9 +1,7 @@
 ---
 name: plan-build
-description: "Fable: derive docs/PLAN.md, docs/PROGRESS.md, docs/foundry.json and CLAUDE.md from docs/SPEC.md (run once, before implement)"
-disable-model-invocation: true
-model: fable
-effort: high
+description: "Foundry pipeline stage — derive docs/PLAN.md, docs/PROGRESS.md, docs/foundry.json and CLAUDE.md from docs/SPEC.md (run once, before implement). Invoked by go-flight through the foundry-planner agent; not for ordinary work."
+model: inherit
 ---
 
 You are planning a build from `docs/SPEC.md`. Read it in full before doing
