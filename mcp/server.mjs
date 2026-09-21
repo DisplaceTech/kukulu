@@ -320,6 +320,16 @@ function agentsOnDisk() {
   return ROLES.filter((role) => exists(path.join(P.agentsDir, `foundry-${role}.md`)));
 }
 
+// Claude Code hot-reloads a project agent file within seconds of a change,
+// with one documented exception: the first agent file created in a new
+// .claude/agents directory is not picked up until the session restarts. So a
+// session can trust a *change* to an already-populated agents directory to
+// take effect live, but not the directory's first population. Both flags are
+// process-lifetime state: they answer "since this session's MCP server
+// started", which is the right proxy for "since this session started".
+let agentsDirCreatedThisProcess = false;
+const generatedThisProcess = new Set();
+
 function configShow() {
   const r = resolveRouting();
   const generated = agentsOnDisk();
@@ -361,7 +371,9 @@ function gitPath(name) {
  */
 function agentsSync() {
   const r = resolveRouting();
+  const dirExistedBefore = exists(P.agentsDir);
   fs.mkdirSync(P.agentsDir, { recursive: true });
+  if (!dirExistedBefore) agentsDirCreatedThisProcess = true;
 
   const changed = [];
   const unchanged = [];
@@ -373,8 +385,15 @@ function agentsSync() {
     } else {
       write(file, text);
       changed.push(role);
+      generatedThisProcess.add(role);
     }
   }
+
+  // The one case a headless launcher still needs to detect and relaunch for:
+  // this process just created the agents directory itself (so Claude Code
+  // cannot have hot-loaded it), and one of the roles that changed resolves to
+  // a model the Agent tool cannot name directly, so there is no fallback.
+  const restartRequired = agentsDirCreatedThisProcess && changed.some((role) => !isAnthropicModel(r.roles[role].model));
 
   let excludeResult;
   if (gitFacts().inRepo) {
@@ -398,6 +417,7 @@ function agentsSync() {
     effortDropped: r.effortDropped,
     changed,
     unchanged,
+    restartRequired,
     exclude: excludeResult,
     table: routingTable(r),
   };
@@ -566,6 +586,7 @@ function status() {
     out.reviewVerdictInFile = v ? v[1].toUpperCase() : null;
   }
   out.agentsGenerated = agentsOnDisk();
+  out.agentsGeneratedThisSession = Array.from(generatedThisProcess);
   return out;
 }
 
@@ -577,24 +598,47 @@ function next() {
   const s = status();
   const c = cfg();
   const st = s.state;
-  const agentFor = (name) => {
+  /**
+   * Whether the generated agent for `role` can be trusted to spawn in this
+   * session: the file exists on disk (Claude Code hot-reloads a *change* to
+   * an already-populated agents directory within seconds) and this process
+   * did not just create the agents directory itself (the one case Claude
+   * Code does not hot-load — the directory's first population needs a
+   * restart). When it cannot be trusted and the routed model is not one the
+   * Agent tool can name directly (an Anthropic alias or a claude-* id), there
+   * is no safe fallback and a restart is required.
+   */
+  const agentInfo = (name) => {
     const role = ROLE_OF_STAGE[name];
-    if (!role) return null;
-    return exists(path.join(P.agentsDir, `foundry-${role}.md`)) ? `foundry-${role}` : AGENT[name];
+    const fallbackAgent = role ? AGENT[name] : null;
+    if (!role) return { agent: null, agentFallback: false, fallbackAgent: null, restartRequired: false };
+    const onDisk = exists(path.join(P.agentsDir, `foundry-${role}.md`));
+    const agentFallback = !onDisk || agentsDirCreatedThisProcess;
+    const model = routing.roles[role].model;
+    if (agentFallback && !isAnthropicModel(model)) {
+      return { agent: null, agentFallback: true, fallbackAgent, restartRequired: true };
+    }
+    return { agent: onDisk ? `foundry-${role}` : fallbackAgent, agentFallback, fallbackAgent, restartRequired: false };
   };
   const modelFor = (name) => {
     const role = ROLE_OF_STAGE[name];
     return role ? routing.roles[role].model : null;
   };
-  const stage = (name, reason, extra = {}) => ({
-    stage: name,
-    agent: agentFor(name),
-    model: modelFor(name),
-    round: st.round,
-    reason,
-    prompt: PROMPTS[name] ? PROMPTS[name](st.round, s) : null,
-    ...extra,
-  });
+  const stage = (name, reason, extra = {}) => {
+    const info = agentInfo(name);
+    return {
+      stage: name,
+      agent: info.agent,
+      agentFallback: info.agentFallback,
+      fallbackAgent: info.fallbackAgent,
+      restartRequired: info.restartRequired,
+      model: modelFor(name),
+      round: st.round,
+      reason,
+      prompt: PROMPTS[name] ? PROMPTS[name](st.round, s) : null,
+      ...extra,
+    };
+  };
 
   if (!s.specPresent) return stage("halt", "docs/SPEC.md is missing; nothing to build from");
   if (st.halted) return stage("halt", st.halted);
@@ -894,7 +938,7 @@ const S = (props, required = []) => ({
 });
 const TOOLS = [
   { name: "foundry_status", description: "Everything the pipeline knows from disk: which docs exist, task counts by state, branch/base/head, lock, round, review verdict. Read-only.", inputSchema: S({}), fn: status },
-  { name: "foundry_next", description: "Deterministic stage selection: returns { stage, agent, round, reason, prompt }. stage is plan | implement | review | summarize | done | halt. Read-only.", inputSchema: S({}), fn: next },
+  { name: "foundry_next", description: "Deterministic stage selection: returns { stage, agent, agentFallback, fallbackAgent, restartRequired, model, round, reason, prompt }. stage is plan | implement | review | summarize | done | halt. restartRequired is true only when the routed model cannot be reached without relaunching the session. Read-only.", inputSchema: S({}), fn: next },
   { name: "foundry_run_start", description: "Begin (or resume) an implementation run: create/reuse the build branch, arm the implement guard lock, stamp Branch/Started in PROGRESS.md, commit. Idempotent.", inputSchema: S({}), fn: runStart },
   { name: "foundry_task_next", description: "Select the next task (first [~], else first [ ]), auto-skip tasks whose dependencies are blocked, mark it [~], and return its PLAN.md text plus dependency log entries. Returns { done: true } when none remain.", inputSchema: S({}), fn: taskNext },
   { name: "foundry_task_done", description: "Mark a task [x] and append its log entry stamped with HEAD's sha. Requires HEAD's commit subject to start with '<id>:' and a clean tree. Commits PROGRESS.md.", inputSchema: S({ id: { type: "string" }, log: { type: "string", description: "Log entry body, under 15 lines" } }, ["id", "log"]), fn: taskDone },
@@ -921,7 +965,7 @@ const TOOLS = [
   { name: "foundry_summary_commit", description: "Commit docs/SUMMARY.md and mark the flight complete. Only valid after an APPROVED review.", inputSchema: S({}), fn: summaryCommit },
   {
     name: "foundry_agents_sync",
-    description: "Generate .claude/agents/foundry-<role>.md from the merged routing config (plugin defaults < global file < profile < docs/foundry.json roles). Writes only files whose content changed, excludes them from git, and returns the resolved per-role table. A non-empty `changed` means the session must be relaunched before those agents can be spawned.",
+    description: "Generate .claude/agents/foundry-<role>.md from the merged routing config (plugin defaults < global file < profile < docs/foundry.json roles). Writes only files whose content changed, excludes them from git, and returns the resolved per-role table. `restartRequired` is true only when this is the directory's first population and a changed role's model cannot be named directly by the Agent tool.",
     inputSchema: S({}),
     fn: agentsSync,
   },

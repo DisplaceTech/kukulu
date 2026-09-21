@@ -62,13 +62,26 @@ report.
 
 **Arguments:** none.
 
-**Returns:** `{ stage, agent, model, round, reason, prompt }`.
+**Returns:** `{ stage, agent, agentFallback, fallbackAgent, restartRequired,
+model, round, reason, prompt }`.
 
 - `stage` — `plan` · `implement` · `review` · `summarize` · `done` · `halt`
 - `agent` — the subagent to spawn: the generated `foundry-<role>` name when
-  `.claude/agents/foundry-<role>.md` exists, else the plugin's own
+  `.claude/agents/foundry-<role>.md` exists on disk, else the plugin's own
   `foundry:planner` / `foundry:implementer` / `foundry:reviewer` /
-  `foundry:summarizer`; `null` for `done` and `halt`
+  `foundry:summarizer`; `null` for `done`, `halt`, and whenever
+  `restartRequired` is true
+- `agentFallback` — true when the generated agent file cannot yet be trusted
+  to spawn in this session: it is absent, or this server process created the
+  `.claude/agents` directory itself (see [routing.md](./routing.md) for why
+  that one case needs a restart and a routing *change* to an existing
+  directory does not)
+- `fallbackAgent` — the plugin's own `foundry:<role>` name, always present
+  for a stage that has a role, so a controller can retry with it if spawning
+  `agent` fails with "not found"
+- `restartRequired` — true only when `agentFallback` is true **and** the
+  resolved model is not one the `Agent` tool can name directly (an
+  Anthropic alias or a `claude-*` id); `false` for `done` and `halt`
 - `model` — the resolved model string for that role from the routing config
   (see [routing.md](./routing.md)); `null` for `done` and `halt`
 - `reason` — one sentence, written for a human reading the transcript
@@ -310,7 +323,7 @@ before its loop; see [routing.md](./routing.md) for the full precedence.
 
 **Returns:** `{ dir, globalConfig, globalConfigPath, profile, profileSource,
 projectOverride, permissionMode, roles, effortDropped, changed, unchanged,
-exclude, table }`.
+restartRequired, exclude, table }`.
 
 - `roles` — `{ <role>: { agent, model, effort, source: { model, effort } } }`
   for all four roles; `source` is `default` | `global` | `profile:<name>` |
@@ -319,15 +332,19 @@ exclude, table }`.
   effort was dropped because its model is not an Anthropic one
 - `changed` / `unchanged` — role names written this call / left alone
   because their rendered content was already correct
+- `restartRequired` — true only when this call populated the
+  `.claude/agents` directory for the *first* time in this project and at
+  least one changed role's model is not one the `Agent` tool can name
+  directly. Claude Code hot-reloads a change to an already-populated agents
+  directory within seconds, so every other case — including every later
+  routing edit — needs no restart; `foundry_next` falls back to the
+  plugin's own agent with the resolved model in the meantime. See
+  [routing.md](./routing.md).
 - `exclude` — `"added"` | `"present"` | `"skipped: not a git repository"`
 - `table` — the same information as a ready-to-print Markdown table
 
-A non-empty `changed` means Claude Code has not loaded those agent
-definitions in the current session — confirmed directly: a freshly written
-or edited `.claude/agents/*.md` file is not callable by name until the
-session restarts, regardless of whether the directory already existed.
-`/foundry:go-flight` checks for this and stops with a fixed message rather
-than spawning a stage against the wrong model; see
+`/foundry:go-flight` checks `restartRequired` and stops with a fixed message
+rather than spawning a stage against a model it cannot reach; see
 [operations.md](./operations.md#routing).
 
 **Refuses when:** the merged routing config is malformed — an unknown role

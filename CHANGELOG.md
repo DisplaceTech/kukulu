@@ -6,6 +6,17 @@ All notable changes to this plugin. Format follows
 
 ## [Unreleased]
 
+### Added
+
+- `foundry_next` and `foundry_agents_sync` report `agentFallback`,
+  `fallbackAgent` and `restartRequired`. Claude Code hot-reloads a routing
+  change to an already-populated `.claude/agents/` directory within
+  seconds; only a project's very first sync, and only for a role routed to
+  a model the `Agent` tool cannot name directly, still needs
+  `FOUNDRY: RESTART REQUIRED` (F-02, F-04, F-06). Every other case falls
+  back to the plugin's own agent with the resolved `model` and proceeds
+  without stopping.
+
 ### Changed
 
 - `go-flight` is model-invocable (F-01): `disable-model-invocation` is gone,

@@ -37,9 +37,11 @@ You need Node ≥ 22, git, and Claude Code. Nothing to `npm install`.
    git add -A && git commit -m "spec"
    ```
 
-4. **Fly.** The first run in a project sets up the stage agents and stops
-   with `FOUNDRY: RESTART REQUIRED`; run it again in a new session and it
-   goes all the way to a reviewed `build/<date>` branch.
+4. **Fly.** The first run in a project sets up the stage agents. On the
+   default, Anthropic-only routing this goes straight through to a reviewed
+   `build/<date>` branch; only a role routed off-platform before that first
+   sync stops with `FOUNDRY: RESTART REQUIRED` — run it again in a new
+   session and it continues.
 
    ```bash
    claude
@@ -60,9 +62,10 @@ You need Node ≥ 22, git, and Claude Code. Nothing to `npm install`.
 > [claude-code-router](https://github.com/musistudio/claude-code-router) —
 > copy [`templates/foundry.config.example.json`](./templates/foundry.config.example.json)
 > to `~/.config/foundry/config.json`, edit the roles or pick a profile with
-> `"profile": "local"`, and run `/foundry:go-flight` again (it will ask for
-> one more restart). [docs/routing.md](./docs/routing.md) has the whole
-> story, including the router setup.
+> `"profile": "local"`, and run `/foundry:go-flight` again — it will ask for
+> one more restart only the first time a role not reachable by name (a
+> router or local model) is generated. [docs/routing.md](./docs/routing.md)
+> has the whole story, including the router setup.
 
 ## What's in the box
 
@@ -194,10 +197,12 @@ they are handled differently:
   same rule. The `verify` commands in `docs/foundry.json` run through the
   MCP rather than the model's Bash tool, so those never prompt at all.
 
-The first run in a project (and the first run after any routing config
-change) generates the agents, prints `FOUNDRY: RESTART REQUIRED` and stops;
-run the command again in a new session and it continues. See
-[docs/routing.md](./docs/routing.md).
+The first run in a project generates the agents. Claude Code hot-reloads a
+later routing edit to that directory within seconds, so only that first
+sync — and only when a role is routed to a model the `Agent` tool cannot
+name directly — prints `FOUNDRY: RESTART REQUIRED` and stops; run the
+command again in a new session and it continues. Every Anthropic-routed
+role needs no restart at all, ever. See [docs/routing.md](./docs/routing.md).
 
 Each stage also runs by hand by delegating to its agent — `foundry-planner`,
 `foundry-implementer`, `foundry-reviewer`, `foundry-summarizer` once

@@ -98,7 +98,7 @@ one; see [writing-specs.md](./writing-specs.md).
 | Run finishes but nothing was pushed | No `origin`, or the push failed | `push` in the handoff output says which; the branch is local and reviewable either way |
 | No draft PR | `gh` is not installed or not authenticated | Optional by design; open one yourself |
 | Reviewer approves work that is wrong | `CLAUDE.md` `## Constraints` are unverifiable | Tighten `SPEC.md` §3 so each rule is a grep, then re-plan |
-| Controller prints `FOUNDRY: RESTART REQUIRED` and stops | Agent files were generated or changed and this session never loaded them (first run in the project, or after any routing config edit) | Expected. Run `/foundry:go-flight` again in a new session |
+| Controller prints `FOUNDRY: RESTART REQUIRED` and stops | The agents directory was populated for the first time in this project, and a changed role routes to a model the `Agent` tool cannot name directly | Expected, and rare after 0.3.0 — only the first sync of a router-routed role hits this. Run `/foundry:go-flight` again in a new session |
 | `Agent` call fails with `Agent type 'foundry-<role>' not found` | Same cause as above, hit mid-flight instead of at the start | Same fix: relaunch and re-run |
 | Flight stops immediately with a routing config error | The global file, a profile, or `docs/foundry.json`'s `roles`/`permissionMode` is malformed | Run `foundry_config_show` to see exactly what and where; fix it and re-run |
 
@@ -162,11 +162,13 @@ Environment variables:
 Which model runs each role, and where that comes from, is
 [docs/routing.md](./routing.md)'s subject in full. The short version for
 unattended use: `/foundry:go-flight` calls `foundry_agents_sync` before its
-loop, and if anything changed — the first run in a project, or after any
-edit to the routing config — it prints `FOUNDRY: RESTART REQUIRED` and
-stops rather than risk spawning a stage against a model the session cannot
-actually reach. A plain re-run picks up where it left off. To make a
-headless launcher handle that restart itself:
+loop. Claude Code hot-reloads a routing change to an already-populated
+`.claude/agents/` directory within seconds, so most edits need no restart at
+all — `foundry_next` falls back to the plugin's own agent with the resolved
+model until the change is picked up. Only a project's very first sync, and
+only for a role routed to a model the `Agent` tool cannot name directly,
+prints `FOUNDRY: RESTART REQUIRED` and stops. A plain re-run picks up where
+it left off. To make a headless launcher handle that restart itself:
 
 ```bash
 out=$(claude -p "/foundry:go-flight")

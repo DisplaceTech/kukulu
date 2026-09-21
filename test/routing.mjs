@@ -104,6 +104,40 @@ const cfgDir = () => mkDir("foundry-cfg-");
   });
 }
 
+// ---------------------------------------------------------------- restartRequired
+
+{
+  const repo = plannedRepo();
+  await withServer(repo, async ({ call }) => {
+    const r = await call("foundry_agents_sync");
+    eq(r.restartRequired, false, "syncing four Anthropic-routed roles for the first time needs no restart");
+  });
+}
+
+{
+  const repo = plannedRepo();
+  const globalPath = writeGlobalConfig(cfgDir(), { roles: { implementer: { model: "Ollama/qwen3.6:35b-a3b" } } });
+  await withServer(repo, async ({ call }) => {
+    const r = await call("foundry_agents_sync");
+    eq(r.restartRequired, true, "a first-time sync with a router-routed role among the changed ones needs a restart");
+  }, { env: { FOUNDRY_CONFIG: globalPath } });
+}
+
+{
+  // A routing change to an *existing* directory is not a first population,
+  // so even a router-routed role needs no restart the second time around.
+  const repo = plannedRepo();
+  await withServer(repo, async ({ call }) => {
+    await call("foundry_agents_sync");
+  });
+  const globalPath = writeGlobalConfig(cfgDir(), { roles: { implementer: { model: "Ollama/qwen3.6:35b-a3b" } } });
+  await withServer(repo, async ({ call }) => {
+    const r = await call("foundry_agents_sync");
+    eq(r.changed.join(","), "implementer", "the routing change is picked up");
+    eq(r.restartRequired, false, "but this process did not create the directory, so no restart is required");
+  }, { env: { FOUNDRY_CONFIG: globalPath } });
+}
+
 // ---------------------------------------------------------------- foundry_next before/after sync
 
 {

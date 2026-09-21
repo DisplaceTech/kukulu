@@ -28,13 +28,34 @@ await withServer(mkDir(), async ({ call }) => {
 // -------------------------------------------------------------- plan stage
 
 await withServer(specRepo(), async ({ call }) => {
-  const n = await call("foundry_next");
+  let n = await call("foundry_next");
   eq(n.stage, "plan", "SPEC alone → plan");
   eq(n.agent, "foundry:planner", "the plan stage delegates to the planner");
+  eq(n.agentFallback, true, "with nothing generated yet, the stage falls back to the plugin agent");
+  eq(n.fallbackAgent, "foundry:planner", "the fallback agent is always named");
+  eq(n.restartRequired, false, "an Anthropic-routed role never needs a restart");
   eq(n.round, 0, "a fresh flight is round 0");
   like(n.prompt, /docs\/SPEC\.md/, "the planner prompt points at the spec");
   like(n.prompt, /Do not write implementation code/, "the planner prompt forbids coding");
+
+  await call("foundry_agents_sync");
+  n = await call("foundry_next");
+  eq(n.agent, "foundry-planner", "once the file is on disk, next names the generated agent");
+  eq(n.agentFallback, true, "but this process created the agents directory itself, so fallback stays in effect");
+  eq(n.restartRequired, false, "still no restart needed for an Anthropic-routed role");
 });
+
+// A role routed to a model the Agent tool cannot name, with nothing generated yet.
+{
+  const repo = specRepo();
+  writeFile(repo, "docs/foundry.json", JSON.stringify({ verify: ["true"], roles: { planner: { model: "Ollama/x" } } }, null, 2) + "\n");
+  await withServer(repo, async ({ call }) => {
+    const n = await call("foundry_next");
+    eq(n.agent, null, "a router-routed role with nothing generated has no agent to spawn");
+    eq(n.agentFallback, true, "the file is absent, so fallback would apply if it could");
+    eq(n.restartRequired, true, "but the Agent tool cannot name the model directly, so a restart is required");
+  });
+}
 
 // A half-written plan is not a plan.
 for (const missing of ["docs/PLAN.md", "docs/PROGRESS.md", "docs/foundry.json"]) {

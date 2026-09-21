@@ -8,7 +8,7 @@
 
 import {
   finish, ok, eq, like, isError,
-  specRepo, withServer, writeFile, readFile, hasFile, subject,
+  specRepo, plannedRepo, withServer, writeFile, readFile, hasFile, subject,
   planDoc, progressDoc, commitTask, runGuard, git, sh, mkFailingGhBin,
 } from "./harness.mjs";
 
@@ -189,5 +189,20 @@ await withServer(repo, async ({ call }) => {
   }
   eq(readFile(repo, "hello.txt"), "hello\n", "and the working tree holds the reviewed result");
 }, noGh);
+
+// A fresh server process trusts an agents directory that already existed
+// before it started, even though this process never called agents_sync
+// itself: only the directory's *first* population needs a session restart.
+{
+  const fresh = plannedRepo();
+  await withServer(fresh, async ({ call }) => {
+    await call("foundry_agents_sync");
+  });
+  await withServer(fresh, async ({ call }) => {
+    const n = await call("foundry_next");
+    eq(n.agentFallback, false, "a fresh process against an already-synced repo trusts the generated agent immediately");
+    eq(n.agent, "foundry-implementer", "...and names it directly");
+  });
+}
 
 finish();
