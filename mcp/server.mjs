@@ -30,7 +30,15 @@ const P = {
   lock: path.join(ROOT, ".foundry", "implement.lock"),
   gitignore: path.join(ROOT, ".gitignore"),
   agentsDir: path.join(ROOT, ".claude", "agents"),
+  settings: path.join(ROOT, ".claude", "settings.json"),
+  settingsLocal: path.join(ROOT, ".claude", "settings.local.json"),
 };
+
+// The one rule an unattended flight needs before its first foundry_status
+// call: without it, a subagent's MCP tool call is denied under every
+// permission mode, and the flight stalls silently (F-03). Named once here so
+// every place that writes or documents it says the same thing.
+const MCP_ALLOW_RULE = "mcp__plugin_foundry_foundry";
 
 // The plugin's own root — where agents/*.md ships — derived from this file's
 // own location rather than ROOT, because ROOT is the *project* Foundry is
@@ -364,6 +372,48 @@ function agentsOnDisk() {
 let agentsDirCreatedThisProcess = false;
 const generatedThisProcess = new Set();
 
+/** Parse a settings file leniently: `{ ok: true, data }`, or `{ ok: false, error }` for invalid JSON. Absence is `{ ok: true, data: {} }`. */
+function readJsonLenient(p) {
+  if (!exists(p)) return { ok: true, data: {} };
+  try {
+    return { ok: true, data: JSON.parse(read(p)) };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
+const allowListHasRule = (data) => Array.isArray(data?.permissions?.allow) && data.permissions.allow.includes(MCP_ALLOW_RULE);
+
+/** Whether the MCP allow rule already appears in either settings file. Never throws, never writes. */
+function mcpAllowRulePresent() {
+  const committed = readJsonLenient(P.settings);
+  if (committed.ok && allowListHasRule(committed.data)) return true;
+  const local = readJsonLenient(P.settingsLocal);
+  return local.ok && allowListHasRule(local.data);
+}
+
+/**
+ * Add the MCP allow rule to `.claude/settings.local.json` if it is not
+ * already covered by that file or the committed `.claude/settings.json`
+ * (F-03). Read-merge-write: every other key and allow entry survives.
+ * Returns `"added"`, `"present"`, or `"failed: <why>"` — a `settings.local.json`
+ * that fails to parse is never overwritten.
+ */
+function ensureMcpAllowRule() {
+  const committed = readJsonLenient(P.settings);
+  if (committed.ok && allowListHasRule(committed.data)) return "present";
+
+  const local = readJsonLenient(P.settingsLocal);
+  if (!local.ok) return `failed: ${rel(P.settingsLocal)} is not valid JSON: ${local.error}`;
+  if (allowListHasRule(local.data)) return "present";
+
+  const data = { ...local.data };
+  const existingAllow = Array.isArray(data.permissions?.allow) ? data.permissions.allow : [];
+  data.permissions = { ...(data.permissions || {}), allow: [...existingAllow, MCP_ALLOW_RULE] };
+  write(P.settingsLocal, `${JSON.stringify(data, null, 2)}\n`);
+  return "added";
+}
+
 function configShow() {
   const r = resolveRouting();
   const generated = agentsOnDisk();
@@ -385,6 +435,7 @@ function configShow() {
     effortDropped: r.effortDropped,
     agentsGenerated: generated,
     agentsStale: stale,
+    permissionRule: mcpAllowRulePresent() ? "present" : "missing",
     table: routingTable(r),
   };
 }
@@ -429,16 +480,24 @@ function agentsSync() {
   // a model the Agent tool cannot name directly, so there is no fallback.
   const restartRequired = agentsDirCreatedThisProcess && changed.some((role) => !isAnthropicModel(r.roles[role].model));
 
+  const permissions = ensureMcpAllowRule();
+
   let excludeResult;
   if (gitFacts().inRepo) {
-    const added = ensureLineInFile(gitPath("info/exclude"), ".claude/agents/foundry-*.md");
-    excludeResult = added ? "added" : "present";
+    // Claude Code gitignores .claude/settings.local.json only when it
+    // creates the file itself; a copy this sync creates (or already found)
+    // needs the same per-clone exclusion the agent files get, since it
+    // encodes a person's own permission grant, not the project's.
+    const addedAgents = ensureLineInFile(gitPath("info/exclude"), ".claude/agents/foundry-*.md");
+    const addedSettings = ensureLineInFile(gitPath("info/exclude"), ".claude/settings.local.json");
+    excludeResult = addedAgents || addedSettings ? "added" : "present";
   } else {
     excludeResult = "skipped: not a git repository";
   }
 
   return {
     dir: rel(P.agentsDir),
+    permissions,
     globalConfig: r.globalPresent ? r.globalPath : "none",
     globalConfigPath: r.globalPath,
     profile: r.profile,
@@ -1065,7 +1124,7 @@ const TOOLS = [
   { name: "foundry_summary_commit", description: "Commit docs/SUMMARY.md and mark the flight complete. Only valid after an APPROVED review.", inputSchema: S({}), fn: summaryCommit },
   {
     name: "foundry_agents_sync",
-    description: "Generate .claude/agents/foundry-<role>.md from the merged routing config (plugin defaults < global file < profile < docs/foundry.json roles). Writes only files whose content changed, excludes them from git, and returns the resolved per-role table. `restartRequired` is true only when this is the directory's first population and a changed role's model cannot be named directly by the Agent tool.",
+    description: "Generate .claude/agents/foundry-<role>.md from the merged routing config (plugin defaults < global file < profile < docs/foundry.json roles). Writes only files whose content changed, excludes them from git, and returns the resolved per-role table. `restartRequired` is true only when this is the directory's first population and a changed role's model cannot be named directly by the Agent tool. Also ensures the MCP allow rule in .claude/settings.local.json (`permissions` in the result), without which a subagent's first foundry_status call is denied under any permission mode.",
     inputSchema: S({}),
     fn: agentsSync,
   },

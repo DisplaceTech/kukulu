@@ -16,6 +16,17 @@ All notable changes to this plugin. Format follows
   `FOUNDRY: RESTART REQUIRED` (F-02, F-04, F-06). Every other case falls
   back to the plugin's own agent with the resolved `model` and proceeds
   without stopping.
+- **`foundry_agents_sync` sets up the MCP allow rule** (F-03): without
+  `{ "permissions": { "allow": ["mcp__plugin_foundry_foundry"] } }`, the
+  first `foundry_status` call in a subagent is denied under every
+  permission mode and the flight stalls silently. The sync now read-merges
+  this rule into `.claude/settings.local.json`, unless it is already
+  covered there or in the committed `.claude/settings.json`, preserving
+  every other key and allow entry; a `settings.local.json` that fails to
+  parse is reported (`permissions: "failed: ..."`) rather than overwritten.
+  `foundry_config_show` reports `permissionRule: "present" | "missing"`.
+  Both `settings.local.json` and the generated agent files are excluded
+  from git per clone via `.git/info/exclude`.
 
 ### Changed
 

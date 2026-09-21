@@ -22,11 +22,24 @@ round count, the branch, and the path to `docs/SUMMARY.md` if one exists.
 
 An implementer that hits a permission prompt sits there until the guard's cap
 trips, hours later, having done nothing. The generated `foundry-<role>`
-agents carry `permissionMode: acceptEdits`, which covers file edits; MCP
-tool calls need one allow rule in `~/.claude/settings.json` or the project's
-`.claude/settings.json` — `"permissions": { "allow": ["mcp__plugin_foundry_foundry"] }`
-— which the README's per-project section explains. Without it, the first
-stage's first `foundry_status` call is denied and the flight stops.
+agents carry `permissionMode: acceptEdits`, which covers file edits.
+
+MCP tool calls need one allow rule, since a subagent's permission mode does
+not cover them:
+
+```json
+{ "permissions": { "allow": ["mcp__plugin_foundry_foundry"] } }
+```
+
+`foundry_agents_sync` — which `/foundry:go-flight` calls before its loop —
+writes this itself into the project's `.claude/settings.local.json` (F-03),
+read-merge-write, unless it is already covered there or in the committed
+`.claude/settings.json`. It never touches `~/.claude/settings.json`; put the
+rule there yourself if you want it to apply to every project instead of one.
+Its result's `permissions` field is `"added"`, `"present"`, or
+`"failed: <why>"` — a `settings.local.json` that fails to parse is reported,
+never overwritten. Without the rule, the first stage's first
+`foundry_status` call is denied and the flight stalls silently.
 
 ## Checking on a run
 
@@ -101,6 +114,7 @@ one; see [writing-specs.md](./writing-specs.md).
 | Controller prints `FOUNDRY: RESTART REQUIRED` and stops | The agents directory was populated for the first time in this project, and a changed role routes to a model the `Agent` tool cannot name directly | Expected, and rare after 0.3.0 — only the first sync of a router-routed role hits this. Run `/foundry:go-flight` again in a new session |
 | `Agent` call fails with `Agent type 'foundry-<role>' not found` | Same cause as above, hit mid-flight instead of at the start | Same fix: relaunch and re-run |
 | Flight stops immediately with a routing config error | The global file, a profile, or `docs/foundry.json`'s `roles`/`permissionMode` is malformed | Run `foundry_config_show` to see exactly what and where; fix it and re-run |
+| A subagent's first `foundry_status` call is denied | The MCP allow rule is missing, or `foundry_agents_sync` reported `permissions: "failed: ..."` | Run `foundry_config_show` and check `permissionRule`; if a sync failed, the message names the broken `settings.local.json` — fix its JSON and re-run |
 
 ## Clearing a wedged run by hand
 

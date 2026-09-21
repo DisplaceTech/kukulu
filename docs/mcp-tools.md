@@ -331,14 +331,23 @@ before its loop; see [routing.md](./routing.md) for the full precedence.
    `model`, `effort` (only when the model is a known Anthropic alias or a
    `claude-*` id) and `permissionMode` — and writes it only when the
    rendered text differs from what is already on disk.
-3. In a git repository, ensures the pattern `.claude/agents/foundry-*.md` is
-   present in `.git/info/exclude` (not `.gitignore` — these files encode a
-   person's own routing, not the project's, and this way needs no commit).
-   Outside a git repository, this step is skipped, not an error.
+3. Ensures the MCP allow rule (`{ "permissions": { "allow":
+   ["mcp__plugin_foundry_foundry"] } }`) is covered by either
+   `.claude/settings.json` or `.claude/settings.local.json` (F-03):
+   read-merge-write on the local file, preserving every other key and allow
+   entry, creating the file only if neither already covers it. A
+   `settings.local.json` that exists but fails to parse is never
+   overwritten. See [operations.md](./operations.md#running-a-flight) for
+   why this rule matters.
+4. In a git repository, ensures both `.claude/agents/foundry-*.md` and
+   `.claude/settings.local.json` are present in `.git/info/exclude` (not
+   `.gitignore` — both encode a person's own machine, not the project, and
+   this way needs no commit). Outside a git repository, this step is
+   skipped, not an error.
 
 **Returns:** `{ dir, globalConfig, globalConfigPath, profile, profileSource,
 projectOverride, permissionMode, roles, effortDropped, changed, unchanged,
-restartRequired, exclude, table }`.
+permissions, restartRequired, exclude, table }`.
 
 - `roles` — `{ <role>: { agent, model, effort, source: { model, effort } } }`
   for all four roles; `source` is `default` | `global` | `profile:<name>` |
@@ -347,6 +356,8 @@ restartRequired, exclude, table }`.
   effort was dropped because its model is not an Anthropic one
 - `changed` / `unchanged` — role names written this call / left alone
   because their rendered content was already correct
+- `permissions` — `"added"` | `"present"` | `"failed: <why>"`, from the MCP
+  allow rule step above
 - `restartRequired` — true only when this call populated the
   `.claude/agents` directory for the *first* time in this project and at
   least one changed role's model is not one the `Agent` tool can name
@@ -378,12 +389,15 @@ The merged routing config, read-only, with the source of every value.
 
 **Returns:** `{ globalConfig, globalConfigPath, profile, profileSource,
 projectOverride, permissionMode, permissionModeSource, roles, effortDropped,
-agentsGenerated, agentsStale, table }`.
+agentsGenerated, agentsStale, permissionRule, table }`.
 
 `agentsGenerated` is the same field `foundry_status` returns.
 `agentsStale` lists roles whose generated file exists but no longer matches
 what `foundry_agents_sync` would write for the current config — this tool
 never writes anything itself, so staleness is reported, not fixed.
+`permissionRule` is `"present"` when either settings file already covers
+the MCP allow rule, else `"missing"` — again reported, not fixed; only
+`foundry_agents_sync` writes.
 
 **Refuses when:** the same conditions as `foundry_agents_sync`, with the
 same messages.

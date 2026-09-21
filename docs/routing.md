@@ -39,8 +39,9 @@ once. It does not cover MCP tool calls: verified directly, a generated
 agent's `foundry_status` call is denied under both `acceptEdits` and
 `bypassPermissions` unless the session carries an allow rule, and the rule
 that works (and reaches subagents) is the scoped server name
-`mcp__plugin_foundry_foundry` in `permissions.allow` — the README's
-per-project section shows it. Plugin-shipped agents cannot
+`mcp__plugin_foundry_foundry` in `permissions.allow` —
+`foundry_agents_sync` writes it for you; see
+[operations.md](./operations.md#running-a-flight). Plugin-shipped agents cannot
 do either of these things: [Claude Code's plugin
 reference](https://code.claude.com/docs/en/plugins-reference) states that
 "plugin subagents don't support the `hooks`, `mcpServers`, or

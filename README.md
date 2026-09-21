@@ -18,16 +18,7 @@ You need Node ≥ 22, git, and Claude Code. Nothing to `npm install`.
    claude plugin install foundry@ericmann
    ```
 
-2. **Allow the plugin's MCP server, once.** An unattended run cannot answer
-   a permission prompt. Put this in `~/.claude/settings.json` (or the
-   project's `.claude/settings.json`); or, the first time a prompt appears,
-   pick "always allow", which writes the same rule.
-
-   ```json
-   { "permissions": { "allow": ["mcp__plugin_foundry_foundry"] } }
-   ```
-
-3. **Write a spec** in the project you want built, and commit it.
+2. **Write a spec** in the project you want built, and commit it.
 
    ```bash
    cd myproject                      # a git repo on its base branch
@@ -37,8 +28,10 @@ You need Node ≥ 22, git, and Claude Code. Nothing to `npm install`.
    git add -A && git commit -m "spec"
    ```
 
-4. **Fly.** The first run in a project sets up the stage agents. On the
-   default, Anthropic-only routing this goes straight through to a reviewed
+3. **Fly.** The first run in a project sets up the stage agents and, if
+   needed, the MCP allow rule an unattended run cannot answer a permission
+   prompt for (see [Per-project use](#per-project-use)). On the default,
+   Anthropic-only routing this goes straight through to a reviewed
    `build/<date>` branch; only a role routed off-platform before that first
    sync stops with `FOUNDRY: RESTART REQUIRED` — run it again in a new
    session and it continues.
@@ -52,7 +45,7 @@ You need Node ≥ 22, git, and Claude Code. Nothing to `npm install`.
    model-invocable too — asking Claude to "run the foundry flight" reaches
    the same instructions.
 
-5. **Read `docs/SUMMARY.md`, then merge the branch yourself.** Foundry never
+4. **Read `docs/SUMMARY.md`, then merge the branch yourself.** Foundry never
    merges.
 
 > **Optional — run a stage on a different model or backend.** By default the
@@ -185,17 +178,15 @@ they are handled differently:
   acceptEdits` on launch is no longer needed.
 - **MCP tool calls.** A subagent's permission mode does not cover these: a
   generated agent's `foundry_status` call is denied under both `acceptEdits`
-  and `bypassPermissions` unless the session carries an allow rule. Allow
-  the plugin's server once, in `~/.claude/settings.json` (every project) or
-  the project's `.claude/settings.json`:
-
-  ```json
-  { "permissions": { "allow": ["mcp__plugin_foundry_foundry"] } }
-  ```
-
-  Interactively, choosing "always allow" at the first prompt writes the
-  same rule. The `verify` commands in `docs/foundry.json` run through the
-  MCP rather than the model's Bash tool, so those never prompt at all.
+  and `bypassPermissions` unless the session carries an allow rule.
+  `foundry_agents_sync` writes this rule for you (F-03), into the project's
+  `.claude/settings.local.json`, unless it is already covered there or in
+  the committed `.claude/settings.json` — see
+  [docs/operations.md](./docs/operations.md#running-a-flight) for the exact
+  rule and what its result field means. Put it in `~/.claude/settings.json`
+  yourself instead if you want it to apply to every project rather than
+  one. The `verify` commands in `docs/foundry.json` run through the MCP
+  rather than the model's Bash tool, so those never prompt at all.
 
 The first run in a project generates the agents. Claude Code hot-reloads a
 later routing edit to that directory within seconds, so only that first
