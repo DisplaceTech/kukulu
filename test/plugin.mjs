@@ -350,4 +350,16 @@ for (const f of listDir("docs").filter((f) => f.endsWith(".md"))) {
 }
 eq(orphan, null, "every document in docs/ is linked from the README");
 
+// The compound-engineering loop (V3-15): a flight's SUMMARY.md friction
+// feeds docs/feedback/, and a release plan under docs/plans/ works through
+// it. Both directories are real (not just directory entries a moment
+// after `mkdir`) and linked from the README.
+ok(exists("docs/feedback/README.md"), "docs/feedback/ exists and explains its own convention");
+ok(exists("docs/plans"), "docs/plans/ exists");
+ok(readme.includes("docs/feedback/"), "docs/feedback/ is linked from the README");
+ok(readme.includes("docs/plans/"), "docs/plans/ is linked from the README");
+like(read("skills/summarize/SKILL.md"), /Pipeline friction/, "the summarize skill collects pipeline friction into SUMMARY.md");
+like(read("skills/implement/SKILL.md"), /Pipeline friction/, "the implement skill records pipeline friction in HANDOFF.md");
+like(read("skills/review-build/SKILL.md"), /Pipeline friction/, "the review-build skill records pipeline friction in REVIEW.md");
+
 finish();

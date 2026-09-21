@@ -136,6 +136,10 @@ When `foundry_task_next` returns `{ done: true }`:
      was tuned.
    - What a human must check by hand, per phase.
    - Anything you would tell a reviewer who has not seen this code.
+   - A `## Pipeline friction` section: anything the Foundry pipeline itself
+     cost you time on — a refused tool, an ambiguous prompt, a stall you
+     had to work around — one line each, or "None". This is not about the
+     project; it is what the summarizer collects to feed the next release.
    If this is a review-fix round, rewrite only the `## Round N` section of
    HANDOFF.md rather than the whole file. Write it with the `Write` tool; if
    the harness refuses (some builds tell subagents to return findings as

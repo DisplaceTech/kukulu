@@ -43,6 +43,16 @@ All notable changes to this plugin. Format follows
   `foundry_next` report the halt like any other. The implement skill
   documents when to disable signing mid-run versus when to halt. The server
   now defines thirteen tools.
+- **The compound step: feedback in, friction out.** `FEEDBACK.md` — the
+  untracked notes from the flight this release was built to fix — moves to
+  `docs/feedback/2026-09-21-project-a.md`, the first entry in a tracked
+  convention (`docs/feedback/README.md`) for collecting what a real flight
+  hits. `docs/SUMMARY.md` gains a "Pipeline friction" section: anything the
+  pipeline itself cost time on, not the project it built, collected from a
+  new `## Pipeline friction` heading the implement and review-build skills
+  now record in `HANDOFF.md` and each round's `REVIEW.md`. "None" is a
+  valid entry. README's Contributing section explains the loop: a flight's
+  friction feeds a feedback file, and a release plan works through it.
 - **Documentation pass for 0.3.** `docs/operations.md` gains a
   "Calibrating" section with the real per-stage timings and token counts a
   76-task flight produced, and what each tuned default (`guardCap: 60`,

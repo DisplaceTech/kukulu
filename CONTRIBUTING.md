@@ -29,8 +29,11 @@ it.
 | `skills/*/SKILL.md` | The prose each stage follows |
 | `templates/SPEC.md` | The spec skeleton users copy |
 | `templates/foundry.config.example.json`, `templates/ccr/` | The global routing config and claude-code-router provider manifests |
+| `templates/constraints.example.json` | Three worked `docs/foundry.json` `constraints` rules, with fixtures |
 | `test/` | Harness plus nine suites |
 | `docs/` | Architecture, tool reference, routing guide, spec guide, runbook |
+| `docs/plans/` | The task-by-task plan behind each release |
+| `docs/feedback/` | Stumbling blocks a real flight hit, feeding the next release plan |
 
 ## Setup
 

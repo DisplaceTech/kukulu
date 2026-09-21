@@ -328,6 +328,8 @@ to unstick it.
   halting, and what to do when a stage misbehaves
 - [**docs/plans/**](./docs/plans/) — the task-by-task plan behind each
   release, kept for whoever plans the next one
+- [**docs/feedback/**](./docs/feedback/) — stumbling blocks a real flight
+  hit, feeding the next release plan
 - [**CONTRIBUTING.md**](./CONTRIBUTING.md) — layout, tests, and the rules
   about where behaviour is allowed to live
 - [**CHANGELOG.md**](./CHANGELOG.md) — what shipped, when
@@ -366,6 +368,15 @@ again on macOS, and again on a machine with no GitHub CLI installed.
 Single-author project, but the rules are written down: CI must pass on every
 PR, and `pre-commit install` runs the same checks locally that CI runs
 remotely. See [CONTRIBUTING.md](./CONTRIBUTING.md).
+
+**Feeding back.** A flight's `docs/SUMMARY.md` ends with a "Pipeline
+friction" section — anything the pipeline itself did that cost time, not
+the project it built. That section is the raw material for the next
+release: drop it (or a fuller writeup of what actually happened) into
+[docs/feedback/](./docs/feedback/) as a new dated file, and a future
+release plan works through it item by item. `docs/feedback/2026-09-21-project-a.md`
+is the first one, and every item in it maps to a task in
+[`docs/plans/v0.3.md`](./docs/plans/v0.3.md).
 
 ## License
 
