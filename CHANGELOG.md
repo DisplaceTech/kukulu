@@ -43,6 +43,16 @@ All notable changes to this plugin. Format follows
   `foundry_next` report the halt like any other. The implement skill
   documents when to disable signing mid-run versus when to halt. The server
   now defines thirteen tools.
+- **Per-command verify timeouts.** A `verify`, `extraVerify` or `build`
+  entry in `docs/foundry.json` may now be `{ "cmd": "...", "timeoutMs": N }`
+  instead of a bare string, so one slow end-to-end command can get a longer
+  timeout without raising `commandTimeoutMs` for every other command. A
+  malformed entry (missing `cmd`, a non-positive or non-integer
+  `timeoutMs`) refuses with the offending entry named. `foundry_verify`'s
+  per-result `timeoutMs` reports which timeout each command actually ran
+  with. The plan-build skill's `docs/foundry.json` template documents the
+  form and every key introduced since 0.2.0 (`guardCap`, `policies`,
+  `maxRoundsHard`), which had gone undocumented there.
 
 ### Changed
 

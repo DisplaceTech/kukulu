@@ -175,8 +175,8 @@ parse. Edit it between stages, not during one.
 
 | Key | Default | Effect |
 |---|---|---|
-| `verify` | `[]` | Commands run after every task. At least one is required. |
-| `extraVerify` | `{}` | Path prefix → extra commands, run when a task touches that prefix |
+| `verify` | `[]` | Commands run after every task. At least one is required. Each entry is a string, or `{ cmd, timeoutMs }` to override `commandTimeoutMs` for that one command. |
+| `extraVerify` | `{}` | Path prefix → extra commands (same string-or-`{ cmd, timeoutMs }` entries), run when a task touches that prefix |
 | `build` | `[]` | Recorded for the plan's use; the MCP does not run it |
 | `baseBranch` | `main` | Branch runs start from, and the merge-base reported as `base` |
 | `branchPrefix` | `build/` | Prefix for run branches (`build/2026-09-18`, `-2`, …) |

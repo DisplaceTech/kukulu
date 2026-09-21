@@ -157,18 +157,40 @@ function validatePolicies(policies) {
   }
 }
 
+/**
+ * Normalise a verify/extraVerify/build entry to `{ cmd, timeoutMs }`. A bare
+ * string takes `defaultTimeoutMs`; `{ cmd, timeoutMs }` may override it.
+ * Throws on anything else, a missing `cmd`, or a non-positive integer
+ * `timeoutMs` — a plan can give one slow end-to-end command a longer
+ * timeout without lifting the timeout for everything else.
+ */
+function normalizeCommand(entry, defaultTimeoutMs, where) {
+  if (typeof entry === "string") return { cmd: entry, timeoutMs: defaultTimeoutMs };
+  if (entry && typeof entry === "object" && !Array.isArray(entry)) {
+    if (typeof entry.cmd !== "string" || !entry.cmd) throw new ToolError(`${where} is missing 'cmd'`);
+    const timeoutMs = entry.timeoutMs === undefined ? defaultTimeoutMs : entry.timeoutMs;
+    if (!Number.isInteger(timeoutMs) || timeoutMs <= 0) throw new ToolError(`${where}.timeoutMs must be a positive integer`);
+    return { cmd: entry.cmd, timeoutMs };
+  }
+  throw new ToolError(`${where} must be a command string or { cmd, timeoutMs }`);
+}
+
 function cfg() {
   const c = loadConfig() || {};
   validatePolicies(c.policies);
+  const commandTimeoutMs = c.commandTimeoutMs || 10 * 60 * 1000;
+  const norm = (entry, i, where) => normalizeCommand(entry, commandTimeoutMs, `docs/foundry.json ${where}[${i}]`);
   return {
-    verify: c.verify || [],
-    extraVerify: c.extraVerify || {},
-    build: c.build || [],
+    verify: (c.verify || []).map((e, i) => norm(e, i, "verify")),
+    extraVerify: Object.fromEntries(
+      Object.entries(c.extraVerify || {}).map(([prefix, arr]) => [prefix, (arr || []).map((e, i) => norm(e, i, `extraVerify['${prefix}']`))]),
+    ),
+    build: (c.build || []).map((e, i) => norm(e, i, "build")),
     baseBranch: c.baseBranch || "main",
     branchPrefix: c.branchPrefix || "build/",
     maxRounds: Number.isInteger(c.maxRounds) ? c.maxRounds : 3,
     maxRoundsHard: Number.isInteger(c.maxRoundsHard) ? c.maxRoundsHard : 6,
-    commandTimeoutMs: c.commandTimeoutMs || 10 * 60 * 1000,
+    commandTimeoutMs,
     guardCap: Number.isInteger(c.guardCap) ? c.guardCap : 60,
     policies: {
       signing: c.policies?.signing ?? "auto",
@@ -1046,6 +1068,7 @@ function runShell(cmd, timeoutMs) {
     ok: r.status === 0 && !r.error,
     exitCode: r.status,
     timedOut: r.error?.code === "ETIMEDOUT",
+    timeoutMs,
     stdoutTail: tail(r.stdout),
     stderrTail: tail(r.stderr),
   };
@@ -1059,9 +1082,9 @@ function verify({ files = [] } = {}) {
   const cmds = [...cc.verify];
   const touched = Array.isArray(files) ? files : String(files).split(/[\s,]+/).filter(Boolean);
   for (const [prefix, extra] of Object.entries(cc.extraVerify)) {
-    if (touched.some((f) => f.startsWith(prefix))) for (const x of extra) if (!cmds.includes(x)) cmds.push(x);
+    if (touched.some((f) => f.startsWith(prefix))) for (const x of extra) if (!cmds.some((c2) => c2.cmd === x.cmd)) cmds.push(x);
   }
-  const results = cmds.map((cmd) => runShell(cmd, cc.commandTimeoutMs));
+  const results = cmds.map((c2) => runShell(c2.cmd, c2.timeoutMs));
   return { ok: results.every((r) => r.ok), results };
 }
 

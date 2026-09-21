@@ -373,6 +373,34 @@ for (const missing of ["docs/SPEC.md", "docs/PLAN.md", "docs/PROGRESS.md", "docs
 }
 
 {
+  const repo = plannedRepo({
+    config: { verify: [{ cmd: "sleep 2", timeoutMs: 200 }, "echo fast"], commandTimeoutMs: 60_000 },
+  });
+  await withServer(repo, async ({ call }) => {
+    const v = await call("foundry_verify");
+    eq(v.ok, false, "the slow command's own short timeout still fails the whole verify");
+    eq(v.results[0].timedOut, true, "the object-form command times out on its own timeoutMs");
+    eq(v.results[0].timeoutMs, 200, "...and reports which timeout it was given");
+    eq(v.results[1].command, "echo fast", "a plain string entry in the same run is unaffected");
+    eq(v.results[1].timeoutMs, 60_000, "...and uses the run's default commandTimeoutMs");
+    eq(v.results[1].ok, true, "...and still passes");
+  });
+}
+
+for (const [config, re] of [
+  [{ verify: [{ timeoutMs: 1000 }] }, /verify\[0\] is missing 'cmd'/],
+  [{ verify: [{ cmd: "x", timeoutMs: 0 }] }, /verify\[0\]\.timeoutMs must be a positive integer/],
+  [{ verify: [{ cmd: "x", timeoutMs: 1.5 }] }, /verify\[0\]\.timeoutMs must be a positive integer/],
+  [{ verify: [42] }, /verify\[0\] must be a command string or \{ cmd, timeoutMs \}/],
+  [{ extraVerify: { "src/": [{ timeoutMs: 1000 }] } }, /extraVerify\['src\/'\]\[0\] is missing 'cmd'/],
+]) {
+  const repo = plannedRepo({ config });
+  await withServer(repo, async ({ call }) => {
+    isError(await call("foundry_verify"), re, `a malformed command entry refuses: ${JSON.stringify(config)}`);
+  });
+}
+
+{
   const repo = plannedRepo({ config: { verify: ["echo out; echo boom >&2; exit 3"] } });
   await withServer(repo, async ({ call }) => {
     const v = await call("foundry_verify");

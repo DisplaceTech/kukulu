@@ -239,14 +239,19 @@ a permission prompt.
 whitespace- or comma-delimited string is accepted too.
 
 **Does:** runs every command in `verify`, then, for each `extraVerify` prefix
-that any touched file starts with, appends its commands (skipping duplicates).
-Each command runs in a shell from the project root with a timeout of
-`commandTimeoutMs` (default 10 minutes).
+that any touched file starts with, appends its commands (skipping
+duplicates by command text). Each command runs in a shell from the project
+root with its own timeout: `commandTimeoutMs` (default 10 minutes) unless
+the command was given as `{ cmd, timeoutMs }` in `docs/foundry.json`, which
+overrides it for that command alone.
 
-**Returns:** `{ ok, results: [{ command, ok, exitCode, timedOut, stdoutTail, stderrTail }] }`,
-where the tails are the last 60 lines of each stream.
+**Returns:** `{ ok, results: [{ command, ok, exitCode, timedOut, timeoutMs, stdoutTail, stderrTail }] }`,
+where the tails are the last 60 lines of each stream and `timeoutMs` is
+whichever timeout that command actually ran with.
 
-**Refuses when:** `foundry.json` is missing or has no `verify` commands.
+**Refuses when:** `foundry.json` is missing or has no `verify` commands; or
+any `verify`/`extraVerify`/`build` entry is malformed — neither a string nor
+`{ cmd, timeoutMs }`, missing `cmd`, or `timeoutMs` not a positive integer.
 
 ---
 

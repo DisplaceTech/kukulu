@@ -133,7 +133,8 @@ add other checkbox lines to this file.
   "build": ["<build command, if any>"],
   "baseBranch": "main",
   "branchPrefix": "build/",
-  "maxRounds": 3
+  "maxRounds": 3,
+  "maxRoundsHard": 6
 }
 ```
 
@@ -141,6 +142,23 @@ Take the commands from SPEC's commands/tooling section. `verify` runs after
 every task; `extraVerify` maps a path prefix to commands that run in addition
 when a task's Files touched fall under it. Leave `build` empty if there is no
 build step. Every command must exit non-zero on failure.
+
+Any command — in `verify`, `extraVerify`, or `build` — may instead be
+`{ "cmd": "<command>", "timeoutMs": <ms> }` when it needs a timeout other
+than the default (`commandTimeoutMs`, 10 minutes): a slow end-to-end suite
+should get its own longer timeout rather than raising the default for
+every other command. Leave `maxRounds` and `maxRoundsHard` at their
+defaults unless SPEC says the review loop needs a different tolerance;
+`maxRounds` bounds review rounds that fail to converge, `maxRoundsHard` is
+an absolute ceiling regardless.
+
+Leave `policies` and `guardCap` out entirely unless SPEC's commands section
+says otherwise — every key defaults sensibly for an ordinary flight, and
+naming a key here only to repeat its default adds nothing. `policies`
+covers commit signing, pushing and PR creation; `guardCap` raises the
+implement guard's stall tolerance for a plan with unusually many
+per-task blocked stops. See [docs/operations.md](../../docs/operations.md#configuration)
+for every key and its default.
 
 ## `CLAUDE.md` contents
 
