@@ -209,6 +209,51 @@ eq(
   ok(readFile(repo, ".foundry/implement.lock").includes("3"), "the lock keeps counting past the cap");
 }
 
+{
+  // Nothing in progress yet, only todo tasks: the trip message says so rather
+  // than naming a task that is not actually stalled.
+  const repo = armed([{ id: "P0-01", title: "a", state: " " }, { id: "P0-02", title: "b", state: " " }]);
+  const over = JSON.parse(guard(repo, { input: implementerStop(repo), cap: 0 }));
+  ok(!/stuck on/.test(over.systemMessage), "with nothing in progress, the trip message names no stalled task");
+}
+
+{
+  const repo = armed([{ id: "P0-01", title: "a", state: "~" }, { id: "P0-02", title: "b", state: " " }]);
+  const over = JSON.parse(guard(repo, { input: implementerStop(repo), cap: 0 }));
+  like(over.systemMessage, /stuck on P0-01/, "the trip message names the in-progress task, not the next todo one");
+  like(over.systemMessage, /foundry_task_block/, "the trip message says how to recover");
+}
+
+// ---------------------------------------------------------------- the effective cap
+
+{
+  const repo = armed();
+  writeFile(repo, ".foundry/implement.lock", '{"count":59}\n');
+  const j = JSON.parse(guard(repo, { input: implementerStop(repo) }));
+  eq(j.decision, "block", "the default cap of 60 is still in effect at count 59→60");
+}
+
+{
+  const repo = armed();
+  writeFile(repo, ".foundry/implement.lock", '{"count":60}\n');
+  const j = JSON.parse(guard(repo, { input: implementerStop(repo) }));
+  eq(j.decision, undefined, "the default cap of 60 trips with no lock.cap and no env override");
+}
+
+{
+  const repo = armed();
+  writeFile(repo, ".foundry/implement.lock", '{"count":59,"cap":100}\n');
+  const j = JSON.parse(guard(repo, { input: implementerStop(repo), cap: 10 }));
+  eq(j.decision, "block", "the lock's own cap wins over the FOUNDRY_GUARD_CAP env var");
+}
+
+{
+  const repo = armed();
+  writeFile(repo, ".foundry/implement.lock", '{"count":9}\n');
+  const j = JSON.parse(guard(repo, { input: implementerStop(repo), cap: 5 }));
+  eq(j.decision, undefined, "with no lock.cap, the env var is used instead of the default");
+}
+
 // ---------------------------------------------------------------- environment
 
 {

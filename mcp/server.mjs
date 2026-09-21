@@ -102,6 +102,7 @@ function cfg() {
     branchPrefix: c.branchPrefix || "build/",
     maxRounds: Number.isInteger(c.maxRounds) ? c.maxRounds : 3,
     commandTimeoutMs: c.commandTimeoutMs || 10 * 60 * 1000,
+    guardCap: Number.isInteger(c.guardCap) ? c.guardCap : 60,
   };
 }
 
@@ -533,24 +534,41 @@ function reviewRoundCount() {
   return (read(P.plan).match(/^## Review fixes \(round \d+\)/gm) || []).length;
 }
 
+/** Parse the lock file, tolerating both the JSON form and a legacy bare
+ * number. Returns `{ json, count }`; `json` is null for the legacy form. */
+function parseLock() {
+  const raw = read(P.lock);
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return { json: parsed, count: Number.isInteger(parsed.count) ? parsed.count : 0 };
+    }
+  } catch {
+    // fall through to the legacy form below
+  }
+  const digits = raw.replace(/[^0-9]/g, "");
+  return { json: null, count: digits ? Number(digits) : 0 };
+}
+
 /**
  * The implement guard's re-block counter, tolerating both the JSON lock
  * foundry_run_start writes from 0.3.0 and the legacy bare-number form a
  * 0.2.x run may have left armed. `null` when there is no lock to read.
  */
 function lockCounter() {
-  if (!exists(P.lock)) return null;
-  const raw = read(P.lock);
-  try {
-    const parsed = JSON.parse(raw);
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      return Number.isInteger(parsed.count) ? parsed.count : 0;
-    }
-  } catch {
-    // fall through to the legacy form below
-  }
-  const digits = raw.replace(/[^0-9]/g, "");
-  return digits ? Number(digits) : 0;
+  return exists(P.lock) ? parseLock().count : null;
+}
+
+/**
+ * Reset the guard's re-block counter to zero on every task state change
+ * (foundry_task_done, foundry_task_block, foundry_run_start on resume), so
+ * the cap bounds re-blocks *since the last time work actually moved*
+ * rather than accumulating over the whole run.
+ */
+function resetLockCounter() {
+  if (!exists(P.lock)) return;
+  const lock = parseLock();
+  write(P.lock, `${lock.json ? JSON.stringify({ ...lock.json, count: 0 }) : "0"}\n`);
 }
 
 // ---------------------------------------------------------------- git facts
@@ -705,6 +723,7 @@ function runStart() {
 
   let branch = g.branch;
   if (exists(P.lock) && pr.branch && !pr.branch.startsWith("(")) {
+    resetLockCounter();
     return { alreadyStarted: true, branch, counts: counts(pr.tasks), round: st.round };
   }
   if (branch === c.baseBranch) {
@@ -721,7 +740,7 @@ function runStart() {
   // .gitignore the lock, arm it, stamp PROGRESS, commit.
   ensureLineInFile(P.gitignore, ".foundry/implement.lock");
   fs.mkdirSync(P.stateDir, { recursive: true });
-  write(P.lock, `${JSON.stringify({ count: 0, armedAt: new Date().toISOString(), round: st.round })}\n`);
+  write(P.lock, `${JSON.stringify({ count: 0, armedAt: new Date().toISOString(), round: st.round, cap: c.guardCap })}\n`);
   if (!pr.branch || pr.branch.startsWith("(")) setHeader(pr, "Branch", branch);
   if (!pr.started || pr.started.startsWith("(")) setHeader(pr, "Started", new Date().toISOString());
   writeProgress(pr);
@@ -791,7 +810,8 @@ function taskDone({ id, log }) {
   appendLog(pr, id, sha, log);
   writeProgress(pr);
   const psha = gitCommitIfChanged([P.progress], `progress: ${id} done`);
-  return { id, taskCommit: sha, progressCommit: psha, counts: counts(pr.tasks) };
+  resetLockCounter();
+  return { id, taskCommit: sha, progressCommit: psha, counts: counts(pr.tasks), guardReset: true };
 }
 
 function taskBlock({ id, reason }) {
@@ -807,6 +827,7 @@ function taskBlock({ id, reason }) {
   appendLog(pr, id, "blocked", `BLOCKED: ${reason}`);
   writeProgress(pr);
   const psha = gitCommitIfChanged([P.progress], `progress: ${id} blocked`);
+  resetLockCounter();
   return { id, progressCommit: psha, counts: counts(pr.tasks) };
 }
 

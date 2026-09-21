@@ -79,6 +79,7 @@ for (const missing of ["docs/SPEC.md", "docs/PLAN.md", "docs/PROGRESS.md", "docs
     const lock = JSON.parse(readFile(repo, ".foundry/implement.lock"));
     eq(lock.count, 0, "the lock starts its re-block counter at zero");
     eq(lock.round, 0, "the lock records the round it was armed for");
+    eq(lock.cap, 60, "the lock carries the default guard cap");
     ok(lock.armedAt, "the lock records when it was armed");
     eq((await call("foundry_status")).lockCounter, 0, "status reads the lock's counter");
     like(readFile(repo, ".gitignore"), /^\.foundry\/implement\.lock$/m, "run_start gitignores the lock");
@@ -87,9 +88,11 @@ for (const missing of ["docs/SPEC.md", "docs/PLAN.md", "docs/PROGRESS.md", "docs
     eq(subject(repo), "chore: start implementation run", "run_start commits the stamp");
     eq(git(repo, ["status", "--porcelain"]), "", "run_start leaves a clean tree");
 
+    writeFile(repo, ".foundry/implement.lock", JSON.stringify({ ...JSON.parse(readFile(repo, ".foundry/implement.lock")), count: 40 }));
     const again = await call("foundry_run_start");
     eq(again.alreadyStarted, true, "run_start is idempotent while the lock is held");
     eq(subject(repo), "chore: start implementation run", "the idempotent call commits nothing new");
+    eq(JSON.parse(readFile(repo, ".foundry/implement.lock")).count, 0, "resuming an already-started run resets the guard's counter");
   });
 }
 
@@ -121,6 +124,14 @@ for (const missing of ["docs/SPEC.md", "docs/PLAN.md", "docs/PROGRESS.md", "docs
   const repo = plannedRepo({ config: { branchPrefix: "wip/", baseBranch: "main" } });
   await withServer(repo, async ({ call }) => {
     eq((await call("foundry_run_start")).branch, `wip/${TODAY}`, "branchPrefix from foundry.json is honoured");
+  });
+}
+
+{
+  const repo = plannedRepo({ config: { guardCap: 200 } });
+  await withServer(repo, async ({ call }) => {
+    await call("foundry_run_start");
+    eq(JSON.parse(readFile(repo, ".foundry/implement.lock")).cap, 200, "a configured guardCap is carried into the lock");
   });
 }
 
@@ -222,13 +233,19 @@ for (const missing of ["docs/SPEC.md", "docs/PLAN.md", "docs/PROGRESS.md", "docs
     await call("foundry_task_next");
     isError(await call("foundry_task_done", { id: "P0-01", log: "x" }), /HEAD commit .* is not this task's commit/, "task_done refuses without the task's own commit");
 
+    // Simulate blocked stops piling up the guard's counter before the task lands.
+    writeFile(repo, ".foundry/implement.lock", JSON.stringify({ ...JSON.parse(readFile(repo, ".foundry/implement.lock")), count: 12 }));
+
     commitTask(repo, "P0-01", "Create hello", { "hello.txt": "hi\n" });
     writeFile(repo, "leftover.txt", "forgotten\n");
     isError(await call("foundry_task_done", { id: "P0-01", log: "x" }), /uncommitted changes remain[\s\S]*leftover\.txt/, "task_done refuses to leave work uncommitted");
+    eq(JSON.parse(readFile(repo, ".foundry/implement.lock")).count, 12, "a refused task_done does not touch the guard's counter");
 
     fs.rmSync(path.join(repo, "leftover.txt"));
     const r = await call("foundry_task_done", { id: "P0-01", log: "Added hello.txt." });
     eq(r.counts.done, 1, "task_done marks the task done");
+    eq(r.guardReset, true, "task_done reports that it reset the guard's counter");
+    eq(JSON.parse(readFile(repo, ".foundry/implement.lock")).count, 0, "...and the lock's counter is actually back to zero");
     eq(r.taskCommit, git(repo, ["rev-parse", "--short", "HEAD~1"]), "task_done records the task's commit sha");
     like(readFile(repo, "docs/PROGRESS.md"), /^### P0-01 — [0-9a-f]{7,}\nAdded hello\.txt\.$/m, "the log entry is stamped with that sha");
     eq(subject(repo), "progress: P0-01 done", "the bookkeeping commit is separate from the task commit");
@@ -248,8 +265,10 @@ for (const missing of ["docs/SPEC.md", "docs/PLAN.md", "docs/PROGRESS.md", "docs
     await call("foundry_task_next");
     writeFile(repo, "half-done.txt", "debris\n");
     writeFile(repo, "docs/SPEC.md", "# Spec\nedited by mistake\n");
+    writeFile(repo, ".foundry/implement.lock", JSON.stringify({ ...JSON.parse(readFile(repo, ".foundry/implement.lock")), count: 9 }));
     const r = await call("foundry_task_block", { id: "P0-01", reason: "tried A / fails B / fix C" });
     eq(r.counts.blocked, 1, "task_block marks the task blocked");
+    eq(JSON.parse(readFile(repo, ".foundry/implement.lock")).count, 0, "task_block resets the guard's counter too");
     ok(!hasFile(repo, "half-done.txt"), "task_block deletes untracked debris");
     eq(readFile(repo, "docs/SPEC.md"), "# Spec\n", "task_block reverts tracked edits");
     ok(hasFile(repo, ".foundry/implement.lock"), "task_block keeps the run's lock armed");

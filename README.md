@@ -275,8 +275,12 @@ naming it (`hooks/hooks.json`'s matcher already scopes the hook to it) or a
 merely waiting on a background implementer is never blocked. For a stop it
 does consider: while `.foundry/implement.lock` exists and `## Tasks` still
 has `[ ]` or `[~]` lines, it returns `{"decision":"block"}` naming the next
-task. It counts re-blocks in the lock and gives up at `FOUNDRY_GUARD_CAP`
-(default 500), so a wedged run ends rather than spinning.
+task. `foundry_task_done`, `foundry_task_block` and `foundry_run_start` all
+reset the lock's counter to zero, so the cap bounds re-blocks since the
+last time work actually moved, not the whole run. It gives up at the
+effective cap — `docs/foundry.json`'s `guardCap`, else `FOUNDRY_GUARD_CAP`,
+else 60 — naming the stalled task, so a wedged run ends rather than
+spinning.
 
 ## Resuming and halting
 

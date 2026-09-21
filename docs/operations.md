@@ -134,7 +134,8 @@ parse. Edit it between stages, not during one.
   "baseBranch": "main",
   "branchPrefix": "build/",
   "maxRounds": 3,
-  "commandTimeoutMs": 600000
+  "commandTimeoutMs": 600000,
+  "guardCap": 60
 }
 ```
 
@@ -147,13 +148,14 @@ parse. Edit it between stages, not during one.
 | `branchPrefix` | `build/` | Prefix for run branches (`build/2026-09-18`, `-2`, …) |
 | `maxRounds` | `3` | Review rounds allowed before the flight halts |
 | `commandTimeoutMs` | `600000` | Per-command timeout for `foundry_verify` |
+| `guardCap` | `60` | Re-blocks since the last task state change before the implement guard gives up; carried into `.foundry/implement.lock` at `foundry_run_start` and wins over `FOUNDRY_GUARD_CAP` |
 
 Environment variables:
 
 | Variable | Default | Effect |
 |---|---|---|
 | `FOUNDRY_PROJECT_DIR` | `cwd` | Project root the server operates on; set by `.mcp.json` |
-| `FOUNDRY_GUARD_CAP` | `500` | Re-blocks before the guard gives up and lets the run end |
+| `FOUNDRY_GUARD_CAP` | `60` | Re-blocks since the last task state change before the guard gives up; `docs/foundry.json`'s `guardCap` wins over this when set |
 | `FOUNDRY_CONFIG` | `~/.config/foundry/config.json` (or `$XDG_CONFIG_HOME/foundry/config.json`) | Path to the global routing config |
 | `FOUNDRY_PROFILE` | the global file's own `"profile"` key, if any | Which profile in the global file to apply; wins over the file's own choice |
 

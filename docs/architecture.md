@@ -149,8 +149,13 @@ mechanisms keep it honest:
   history). For a stop it does consider, it counts `[ ]` and `[~]` lines
   under `## Tasks`; if the lock exists and the count is non-zero it returns
   `{"decision":"block"}` with the next task's id and instructions to call
-  `foundry_task_next`. At `FOUNDRY_GUARD_CAP` re-blocks (default 500) it
-  stops blocking and emits a `systemMessage` instead, leaving the lock in
+  `foundry_task_next`. `foundry_task_done`, `foundry_task_block` and
+  `foundry_run_start` all reset the counter to zero, so the cap bounds
+  re-blocks since the last time work actually moved, not over the whole
+  run — a large plan making normal progress cannot exhaust it. At the
+  effective cap (`docs/foundry.json`'s `guardCap`, carried in the lock;
+  else `FOUNDRY_GUARD_CAP`; else 60) it stops blocking and emits a
+  `systemMessage` naming the stalled task instead, leaving the lock in
   place so the next `foundry_next` sees the unfinished run.
 - **The refusals.** `foundry_task_done` requires HEAD's subject to start with
   the task id and the tree to be clean apart from `PROGRESS.md`.

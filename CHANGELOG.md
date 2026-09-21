@@ -19,6 +19,16 @@ All notable changes to this plugin. Format follows
 
 ### Changed
 
+- The implement guard's cap counts stalls, not stops (F-08): `foundry_task_done`,
+  `foundry_task_block` and `foundry_run_start` all reset the re-block counter
+  to zero, so the cap bounds re-blocks since the last time work actually
+  moved, not the whole run. The default drops from 500 to 60 — at the
+  ~6 blocked stops per healthy task observed in practice, 60 is ten tasks'
+  worth of blocking with no progress. A new `guardCap` key in
+  `docs/foundry.json` overrides the default per project, carried into
+  `.foundry/implement.lock` at `foundry_run_start` and taking precedence
+  over the `FOUNDRY_GUARD_CAP` environment variable. The trip message now
+  names the stalled task. `foundry_task_done`'s return gains `guardReset`.
 - The implement guard is a Node script (`scripts/implement-guard.mjs`,
   replacing `implement-guard.sh`) scoped to the implementer, not to every
   `Stop`/`SubagentStop` in the project (F-07). `hooks/hooks.json` matches

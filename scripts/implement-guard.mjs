@@ -29,8 +29,12 @@
 //      transcript: allow. A guard that cannot identify the stopping party
 //      must never guess block.
 //
-// A hard cap on re-blocks (default 500, see FOUNDRY_GUARD_CAP) still
-// prevents a runaway. Exit 0 with no output = allow the stop.
+// A hard cap on re-blocks (default 60, see FOUNDRY_GUARD_CAP or
+// docs/foundry.json's guardCap) still prevents a runaway. The counter
+// resets to zero on every task state change, so the cap bounds re-blocks
+// since the last time work actually moved, not over the whole run — a
+// 76-task plan making normal progress cannot exhaust it. Exit 0 with no
+// output = allow the stop.
 
 import fs from "node:fs";
 import path from "node:path";
@@ -126,7 +130,7 @@ function openTasks(progressPath) {
     if (m[1] === "~" && inProgress === null) inProgress = m[2];
     if (m[1] === " " && todo === null) todo = m[2];
   }
-  return { open, next: inProgress || todo };
+  return { open, next: inProgress || todo, stalled: inProgress };
 }
 
 function main() {
@@ -137,19 +141,30 @@ function main() {
 
   if (!fs.existsSync(lockPath) || !fs.existsSync(progressPath)) return;
 
-  const { open, next } = openTasks(progressPath);
+  const { open, next, stalled } = openTasks(progressPath);
   if (open === 0) return;
 
   if (!isImplementerStop(input)) return;
 
   const lock = readLock(lockPath);
-  const cap = Number(process.env.FOUNDRY_GUARD_CAP || 500);
+  // The effective cap bounds re-blocks *since the last task state change*
+  // (foundry_task_done / foundry_task_block / foundry_run_start all reset
+  // the counter to zero), not the whole run — so a per-run cap set in
+  // docs/foundry.json's guardCap, carried in the lock, wins over the
+  // process-wide FOUNDRY_GUARD_CAP env var, which wins over the default.
+  const cap = Number.isInteger(lock.json?.cap) ? lock.json.cap : Number(process.env.FOUNDRY_GUARD_CAP || 60);
   const count = lock.count + 1;
   writeLock(lockPath, lock, count);
 
   if (count > cap) {
-    // Give up rather than loop forever; leave the lock so the orchestrator sees it.
-    process.stdout.write(`${JSON.stringify({ systemMessage: `foundry: implement guard cap (${cap}) reached with ${open} open tasks; run halted` })}\n`);
+    // Give up rather than loop forever; leave the lock so the orchestrator
+    // sees it. Name the stalled task, if there is one in progress, so a
+    // human knows exactly where to look.
+    const stuckOn = stalled ? ` stuck on ${stalled}` : "";
+    const recover = "block it by hand with foundry_task_block, or resume the flight and it will pick up where it stalled";
+    process.stdout.write(
+      `${JSON.stringify({ systemMessage: `foundry: implement guard cap (${cap}) reached with ${open} open tasks${stuckOn}; run halted — ${recover}` })}\n`,
+    );
     return;
   }
 
