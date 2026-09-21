@@ -66,6 +66,15 @@ check by hand. If the repo has no `origin` remote, skip the push and put
 `Push: no remote configured` in the log. Put `Manual check: NOT VERIFIED
 (human)` in the log. Do not wait for anyone to look at it.
 
+## Files you did not create
+
+`foundry_run_start` records everything already untracked before this run
+began. Never move, delete, rename, or add to `.gitignore` a file that
+existed before you started — not to "tidy up", not because it looks like
+debris, not for any reason. `foundry_task_done` and `foundry_run_finish`
+already ignore it; it is invisible to your dirty-tree checks on purpose. If
+one is in your way, it is not — leave it exactly where it is.
+
 ## Constraints you may not relax
 
 Everything under `## Constraints` in `CLAUDE.md`, on every task. SPEC.md wins

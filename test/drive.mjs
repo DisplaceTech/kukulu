@@ -21,6 +21,10 @@ const TASKS = [
 const repo = specRepo("# Spec\nBuild something small.\n");
 const noGh = { env: { PATH: `${mkFailingGhBin()}:${process.env.PATH}` } };
 
+// An untracked operator file, predating the whole flight, must survive it
+// unchanged: not committed, not moved, not deleted (F-09, F-17).
+writeFile(repo, "FOUNDRY_FEEDBACK.md", "pipeline feedback notes, unrelated to this build\n");
+
 await withServer(repo, async ({ call }) => {
   // ---------------------------------------------------------------- routing
 
@@ -39,7 +43,10 @@ await withServer(repo, async ({ call }) => {
   writeFile(repo, "docs/PROGRESS.md", progressDoc(TASKS));
   writeFile(repo, "docs/foundry.json", JSON.stringify({ verify: ["test -f hello.txt"], extraVerify: { "src/": ["echo extra"] }, maxRounds: 2 }, null, 2) + "\n");
   writeFile(repo, "CLAUDE.md", "# rules\n## Constraints\n- greet in lowercase\n");
-  git(repo, ["add", "-A"]);
+  // The plan-build skill commits exactly its four deliverables, never a
+  // blanket `-A` — which would otherwise sweep up the untracked operator
+  // file seeded above.
+  git(repo, ["add", "--", "docs/PLAN.md", "docs/PROGRESS.md", "docs/foundry.json", "CLAUDE.md"]);
   git(repo, ["commit", "-qm", "plan: derive build plan from SPEC"]);
 
   n = await call("foundry_next");
@@ -178,7 +185,10 @@ await withServer(repo, async ({ call }) => {
   // foundry_agents_sync never commits anything (the generated files are
   // excluded via .git/info/exclude, not tracked), so the branch's commit
   // history is exactly what it would have been without routing at all.
-  eq(git(repo, ["status", "--porcelain"]), "", "the branch is clean");
+  // The only untracked thing left standing is the operator file the flight
+  // found sitting there before it started (F-09, F-17).
+  eq(git(repo, ["status", "--porcelain"]), "?? FOUNDRY_FEEDBACK.md", "the branch is clean apart from the pre-existing operator file");
+  eq(readFile(repo, "FOUNDRY_FEEDBACK.md"), "pipeline feedback notes, unrelated to this build\n", "...which the whole flight left byte-for-byte untouched");
   const log = sh(repo, "git log --oneline --format=%s");
   for (const expected of [
     "chore: build summary", "review: approved", "chore: round 1 implemented",
@@ -187,6 +197,7 @@ await withServer(repo, async ({ call }) => {
   ]) {
     ok(log.includes(expected), `the history records "${expected}"`);
   }
+  ok(!log.includes("FOUNDRY_FEEDBACK"), "the operator file is never mentioned in a commit");
   eq(readFile(repo, "hello.txt"), "hello\n", "and the working tree holds the reviewed result");
 }, noGh);
 

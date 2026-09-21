@@ -52,10 +52,23 @@ for (const missing of ["docs/SPEC.md", "docs/PLAN.md", "docs/PROGRESS.md", "docs
 }
 
 {
+  // A *tracked* uncommitted change still refuses: it would otherwise ride
+  // along into a task's first commit or be stranded switching branches.
   const repo = plannedRepo();
-  writeFile(repo, "stray.txt", "uncommitted\n");
+  writeFile(repo, "CLAUDE.md", "# rules\nedited, not committed\n");
   await withServer(repo, async ({ call }) => {
     isError(await call("foundry_run_start"), /working tree is dirty on main/, "run_start refuses to branch from a dirty main");
+  });
+}
+
+{
+  // An *untracked* file never blocks a run from starting (F-09): branching
+  // off HEAD does not touch it, and it is recorded as pre-existing.
+  const repo = plannedRepo();
+  writeFile(repo, "stray.txt", "sitting here untracked\n");
+  await withServer(repo, async ({ call }) => {
+    const r = await call("foundry_run_start");
+    eq(r.alreadyStarted, false, "an untracked file alone does not stop the run from starting");
   });
 }
 
@@ -345,6 +358,55 @@ for (const missing of ["docs/SPEC.md", "docs/PLAN.md", "docs/PROGRESS.md", "docs
     const v = await call("foundry_verify");
     eq(v.ok, false, "a hung command fails rather than hanging the flight");
     eq(v.results[0].timedOut, true, "the timeout is reported as such");
+  });
+}
+
+// ---------------------------------------------------------------- pre-existing untracked files
+
+{
+  const repo = plannedRepo();
+  writeFile(repo, "FOUNDRY_FEEDBACK.md", "notes predating this run\n");
+  await withServer(repo, async ({ call }) => {
+    await call("foundry_run_start");
+    const s = await call("foundry_status");
+    eq(s.preexistingUntracked.join(","), "FOUNDRY_FEEDBACK.md", "run_start records what was already untracked");
+
+    await call("foundry_task_next");
+    commitTask(repo, "P0-01", "Create hello", { "hello.txt": "hi\n" });
+    const r = await call("foundry_task_done", { id: "P0-01", log: "Added hello.txt." });
+    eq(r.counts.done, 1, "task_done succeeds with the pre-existing file still untracked");
+    ok(hasFile(repo, "FOUNDRY_FEEDBACK.md"), "the file is untouched");
+
+    await call("foundry_task_next");
+    const blocked = await call("foundry_task_block", { id: "P0-02", reason: "tried A / fails B / fix C" });
+    eq(blocked.counts.blocked, 1, "task_block succeeds with the pre-existing file present");
+    ok(hasFile(repo, "FOUNDRY_FEEDBACK.md"), "task_block's git clean spares it, rather than deleting it");
+
+    await call("foundry_task_next"); // P0-03, skipped as a dependent of the blocked P0-02
+    writeFile(repo, "docs/HANDOFF.md", "# handoff\n");
+    const f = await call("foundry_run_finish");
+    ok(f.readyLine, "run_finish succeeds with the pre-existing file still present");
+    ok(hasFile(repo, "FOUNDRY_FEEDBACK.md"), "...and it is still there afterwards");
+  });
+}
+
+{
+  const repo = plannedRepo();
+  await withServer(repo, async ({ call }) => {
+    await call("foundry_run_start");
+    await call("foundry_task_next");
+    commitTask(repo, "P0-01", "Create hello", { "hello.txt": "hi\n" });
+    writeFile(repo, "surprise.txt", "created mid-task, not before the run\n");
+    isError(
+      await call("foundry_task_done", { id: "P0-01", log: "x" }),
+      /uncommitted changes remain[\s\S]*surprise\.txt/,
+      "a file created *after* run_start still fails task_done, listing it by name",
+    );
+    isError(
+      await call("foundry_task_done", { id: "P0-01", log: "x" }),
+      /git checkout --.*git clean/,
+      "the refusal says to commit, checkout or clean it - never to move or tidy it away",
+    );
   });
 }
 

@@ -23,7 +23,10 @@ severe first:
    mechanically against the diff (grep for the forbidden calls, imports,
    patterns). A constraint violation is always the most severe category.
 2. **Boundaries**: anything crossing a module boundary SPEC's architecture
-   forbids; config values hard-coded outside the config module.
+   forbids; config values hard-coded outside the config module; an edit to
+   `.gitignore`, `.gitattributes`, an editor config, or CI config that no
+   task called for — a sign the implementer tidied away something it should
+   have left alone.
 3. **Tests**: do the acceptance tests named in the task exist, do they test
    the mechanic in isolation rather than re-deriving the formula, and would
    they fail if the mechanic were removed? Run `foundry_verify` yourself. Do

@@ -83,6 +83,39 @@ function gitCommitIfChanged(paths, message) {
   return git(["rev-parse", "--short", "HEAD"]).out;
 }
 
+/**
+ * Every currently untracked path, one per file (never a rolled-up
+ * directory), exactly as `git status --porcelain` prints it — the same
+ * shape `porcelainExcluding` matches against.
+ */
+function untrackedPaths() {
+  return git(["status", "--porcelain", "--untracked-files=all"])
+    .out.split("\n")
+    .filter((l) => l.startsWith("?? "))
+    .map((l) => l.slice(3))
+    .sort();
+}
+
+/** Escape a literal path for use as a `git clean -e` exclude pattern, which
+ * is matched like a .gitignore line (fnmatch-style), not a plain string. */
+function gitCleanExcludePattern(literalPath) {
+  return literalPath.replace(/[*?[\]!\\]/g, "\\$&");
+}
+
+/**
+ * `git status --porcelain --untracked-files=all` lines, with any untracked
+ * path in `ignore` removed. A file the run found already sitting untracked
+ * before it started is invisible to every check that follows: the run had
+ * no hand in it and no reason to touch it (F-09).
+ */
+function porcelainExcludingPreexisting(ignore) {
+  const set = new Set(ignore || []);
+  return git(["status", "--porcelain", "--untracked-files=all"])
+    .out.split("\n")
+    .filter(Boolean)
+    .filter((l) => !(l.startsWith("?? ") && set.has(l.slice(3))));
+}
+
 function loadConfig() {
   if (!exists(P.config)) return null;
   try {
@@ -424,7 +457,7 @@ function agentsSync() {
   };
 }
 
-const DEFAULT_STATE = { round: 0, implemented: false, reviewed: false, verdict: null, summarized: false, halted: null };
+const DEFAULT_STATE = { round: 0, implemented: false, reviewed: false, verdict: null, summarized: false, halted: null, preexistingUntracked: [] };
 
 function loadState() {
   if (!exists(P.state)) return { ...DEFAULT_STATE };
@@ -605,6 +638,7 @@ function status() {
     git: g,
     state: st,
     round: st.round,
+    preexistingUntracked: st.preexistingUntracked,
     reviewRoundsInPlan: reviewRoundCount(),
     branch: null,
     started: null,
@@ -727,7 +761,13 @@ function runStart() {
     return { alreadyStarted: true, branch, counts: counts(pr.tasks), round: st.round };
   }
   if (branch === c.baseBranch) {
-    if (g.dirty) throw new ToolError(`working tree is dirty on ${c.baseBranch}; commit or stash before starting a run`);
+    // Untracked files never block a run from starting: branching off HEAD
+    // does not touch them, and they are recorded as pre-existing below
+    // regardless (F-09). Only uncommitted changes to *tracked* files are
+    // grounds to refuse — those would otherwise ride along into a task's
+    // first commit or be stranded on a branch nobody asked to switch to.
+    const trackedDirty = git(["status", "--porcelain", "--untracked-files=no"]).out !== "";
+    if (trackedDirty) throw new ToolError(`working tree is dirty on ${c.baseBranch}; commit or stash before starting a run`);
     let name = `${c.branchPrefix}${today()}`;
     let n = 2;
     while (git(["rev-parse", "--verify", "--quiet", name], { allowFail: true }).ok) name = `${c.branchPrefix}${today()}-${n++}`;
@@ -737,6 +777,11 @@ function runStart() {
     throw new ToolError(`on branch '${branch}'; runs start from '${c.baseBranch}' or an existing '${c.branchPrefix}*' branch`);
   }
 
+  // Snapshot what is untracked *before* this call's own writes (starting
+  // with .gitignore below) can create anything new — otherwise a freshly
+  // created .gitignore would be misfiled as if it predated the run.
+  const preexistingUntracked = untrackedPaths();
+
   // .gitignore the lock, arm it, stamp PROGRESS, commit.
   ensureLineInFile(P.gitignore, ".foundry/implement.lock");
   fs.mkdirSync(P.stateDir, { recursive: true });
@@ -744,6 +789,10 @@ function runStart() {
   if (!pr.branch || pr.branch.startsWith("(")) setHeader(pr, "Branch", branch);
   if (!pr.started || pr.started.startsWith("(")) setHeader(pr, "Started", new Date().toISOString());
   writeProgress(pr);
+  // Whatever was untracked before this call is not this run's business: not
+  // a deliverable to commit, not debris to clean up, not a signal to act on
+  // (F-09, F-17).
+  st.preexistingUntracked = preexistingUntracked;
   st.implemented = false; st.reviewed = false; st.verdict = null;
   saveState(st);
   const sha = gitCommitIfChanged([P.gitignore, P.progress, P.state], st.round === 0 ? "chore: start implementation run" : `chore: start review-fix round ${st.round}`);
@@ -801,9 +850,12 @@ function taskDone({ id, log }) {
   if (!subject.startsWith(`${id}:`)) {
     throw new ToolError(`HEAD commit '${subject}' is not this task's commit; commit the task as '${id}: <title>' before calling foundry_task_done`);
   }
-  const dirtyOutsideProgress = git(["status", "--porcelain"]).out.split("\n").filter((l) => l && !l.endsWith("docs/PROGRESS.md"));
+  const st = loadState();
+  const dirtyOutsideProgress = porcelainExcludingPreexisting(st.preexistingUntracked).filter((l) => !l.endsWith("docs/PROGRESS.md"));
   if (dirtyOutsideProgress.length) {
-    throw new ToolError(`uncommitted changes remain after the task commit:\n${dirtyOutsideProgress.join("\n")}\nCommit them as part of ${id} or discard them.`);
+    throw new ToolError(
+      `uncommitted changes remain after the task commit:\n${dirtyOutsideProgress.join("\n")}\nCommit them as part of ${id} or \`git checkout --\`/\`git clean\` them.`,
+    );
   }
   const sha = git(["rev-parse", "--short", "HEAD"]).out;
   setTaskState(pr, id, "x");
@@ -819,9 +871,13 @@ function taskBlock({ id, reason }) {
   let pr = parseProgress();
   const t = pr.tasks.find((x) => x.id === id);
   if (!t) throw new ToolError(`task ${id} not in docs/PROGRESS.md`);
-  // Discard whatever the attempt left behind; the lock is gitignored so clean leaves it alone.
+  const st = loadState();
+  // Discard whatever the attempt left behind; the lock is gitignored so
+  // clean leaves it alone, and -e spares every path that was already
+  // untracked before this run started (F-09) — `git clean` would otherwise
+  // delete it outright, which is worse than merely being tempted to move it.
   git(["reset", "-q", "--hard", "HEAD"]);
-  git(["clean", "-qfd"]);
+  git(["clean", "-qfd", ...(st.preexistingUntracked || []).flatMap((p) => ["-e", gitCleanExcludePattern(p)])]);
   pr = parseProgress();
   setTaskState(pr, id, "!");
   appendLog(pr, id, "blocked", `BLOCKED: ${reason}`);
@@ -867,8 +923,10 @@ function runFinish() {
   const c = cfg();
   const g = gitFacts();
   const handoffCommit = gitCommitIfChanged([P.handoff], "chore: handoff for review");
-  const dirty = git(["status", "--porcelain"]).out;
-  if (dirty) throw new ToolError(`working tree is not clean:\n${dirty}\nCommit or discard before finishing`);
+  const dirtyLines = porcelainExcludingPreexisting(st.preexistingUntracked);
+  if (dirtyLines.length) {
+    throw new ToolError(`working tree is not clean:\n${dirtyLines.join("\n")}\nCommit them as part of the handoff or \`git checkout --\`/\`git clean\` them.`);
+  }
 
   st.implemented = true; st.reviewed = false; st.verdict = null;
   saveState(st);

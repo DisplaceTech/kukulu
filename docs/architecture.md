@@ -222,7 +222,7 @@ fix task is a task, and it goes through the same test-first loop as any other.
 
 | Path | Committed | Contents |
 |---|---|---|
-| `.foundry/state.json` | yes | `round`, `implemented`, `reviewed`, `verdict`, `summarized`, `halted` |
+| `.foundry/state.json` | yes | `round`, `implemented`, `reviewed`, `verdict`, `summarized`, `halted`, `preexistingUntracked` |
 | `.foundry/implement.lock` | no (gitignored) | JSON `{ count, armedAt, round }` — the guard's re-block counter (a legacy bare number still reads back correctly) |
 | `docs/PROGRESS.md` | yes | task checkboxes and the per-task log |
 | `docs/foundry.json` | yes | `verify`, `extraVerify`, `build`, `baseBranch`, `branchPrefix`, `maxRounds`, `commandTimeoutMs`, `roles`, `permissionMode` |

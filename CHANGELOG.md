@@ -19,6 +19,17 @@ All notable changes to this plugin. Format follows
 
 ### Changed
 
+- Pre-existing untracked files are invisible to a run (F-09, F-17):
+  `foundry_run_start` records every path already untracked before it arms
+  the lock. `foundry_task_done` and `foundry_run_finish` ignore those paths
+  in their dirty-tree checks, and `foundry_task_block`'s `git clean` now
+  excludes them instead of deleting them outright. `foundry_run_start`'s own
+  "working tree is dirty" gate on the base branch also now considers only
+  *tracked* changes, since an untracked file blocking a run from starting at
+  all defeated the purpose. `foundry_status` exposes the recorded list as
+  `preexistingUntracked`. The implement and review-build skills say so:
+  never move, delete, rename, or gitignore a file you did not create, and an
+  unexplained edit to `.gitignore` or similar is a review finding.
 - The implement guard's cap counts stalls, not stops (F-08): `foundry_task_done`,
   `foundry_task_block` and `foundry_run_start` all reset the re-block counter
   to zero, so the cap bounds re-blocks since the last time work actually

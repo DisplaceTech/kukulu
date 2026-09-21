@@ -38,9 +38,11 @@ context.
 | `root` | Absolute project root the server is operating on |
 | `specPresent` … `configPresent` | Which pipeline documents exist |
 | `lockPresent` | Whether an implementation run is armed |
+| `lockCounter` | The implement guard's re-block counter, read from the lock (either format); `null` when there is no lock |
 | `git` | `{ inRepo, branch, head, base, dirty, hasOrigin }` — `base` is the merge-base with `baseBranch` |
-| `state` | `{ round, implemented, reviewed, verdict, summarized, halted }` from `.foundry/state.json` |
+| `state` | `{ round, implemented, reviewed, verdict, summarized, halted, preexistingUntracked }` from `.foundry/state.json` |
 | `round` | Current review round (0 = initial build) |
+| `preexistingUntracked` | Paths that were already untracked before the current run started — invisible to every dirty-tree check (F-09) |
 | `reviewRoundsInPlan` | How many `## Review fixes (round N)` sections `PLAN.md` carries |
 | `branch`, `started` | The `Branch:` and `Started:` headers in `PROGRESS.md` |
 | `counts` | `{ todo, inProgress, done, blocked, skipped, total, open }`; `open = todo + inProgress` |
@@ -100,19 +102,25 @@ in progress returns `{ alreadyStarted: true }` and changes nothing.
 
 **Does:**
 
-1. Creates `build/<date>` from `baseBranch` (or `build/<date>-2`, `-3`, … if
+1. Records every currently untracked path as `preexistingUntracked` in
+   `.foundry/state.json` — nothing this run finds already lying around is
+   ever this run's business (F-09). Skipped on an idempotent resume, so the
+   list is fixed at the start of each round, not re-scanned mid-run.
+2. Creates `build/<date>` from `baseBranch` (or `build/<date>-2`, `-3`, … if
    that name is taken), or reuses the current `branchPrefix*` branch.
-2. Adds `.foundry/implement.lock` to `.gitignore` if it is not already there.
-3. Writes the lock with its counter at `0`, arming the guard hook.
-4. Fills in `Branch:` and `Started:` in `PROGRESS.md` if they are placeholders.
-5. Commits as `chore: start implementation run`, or
+3. Adds `.foundry/implement.lock` to `.gitignore` if it is not already there.
+4. Writes the lock as JSON — `{ count: 0, armedAt, round, cap }`, `cap` from
+   `foundry.json`'s `guardCap` — arming the guard hook.
+5. Fills in `Branch:` and `Started:` in `PROGRESS.md` if they are placeholders.
+6. Commits as `chore: start implementation run`, or
    `chore: start review-fix round N`.
 
 **Returns:** `{ alreadyStarted, branch, commit, counts, round }`.
 
 **Refuses when:** any of `SPEC.md`, `PLAN.md`, `PROGRESS.md` or `foundry.json`
-is missing; the directory is not a git repository; the working tree is dirty on
-the base branch; or the current branch is neither the base branch nor a
+is missing; the directory is not a git repository; a *tracked* file has
+uncommitted changes on the base branch (an untracked one never blocks a
+start — see above); or the current branch is neither the base branch nor a
 `branchPrefix*` branch.
 
 ---
@@ -161,14 +169,17 @@ tests added, interpretation choices, config keys introduced, anything the
 reviewer or a later task must know.
 
 **Does:** marks the task `[x]`, appends `### <ID> — <sha>` plus the log body
-under `## Log`, and commits `PROGRESS.md` as `progress: <ID> done`.
+under `## Log`, commits `PROGRESS.md` as `progress: <ID> done`, and resets
+the implement guard's re-block counter to zero (F-08).
 
-**Returns:** `{ id, taskCommit, progressCommit, counts }`.
+**Returns:** `{ id, taskCommit, progressCommit, counts, guardReset: true }`.
 
 **Refuses when:** the id is unknown; the task is not `[~]` (nobody selected
 it); HEAD's commit subject does not start with `<ID>:`; or anything other than
-`docs/PROGRESS.md` is uncommitted. The last two are the load-bearing ones — a
-task is done when there is a commit, not when a model says so.
+`docs/PROGRESS.md` is uncommitted — a path already recorded as
+`preexistingUntracked` at `foundry_run_start` never counts (F-09). The last
+two are the load-bearing ones — a task is done when there is a commit, not
+when a model says so.
 
 ---
 
@@ -179,9 +190,12 @@ Give up on a task without ending the run.
 **Arguments:** `{ id, reason }` — the reason should read
 `what you tried / what fails / what you think the fix is`.
 
-**Does:** `git reset --hard HEAD` and `git clean -fd` (the lock survives, being
-gitignored), marks the task `[!]`, logs `BLOCKED: <reason>`, and commits as
-`progress: <ID> blocked`.
+**Does:** `git reset --hard HEAD` and `git clean -fd`, excluding every path
+recorded as `preexistingUntracked` (the lock survives too, being
+gitignored) — a file that predates the run is never deleted by it, only
+whatever the attempt itself left behind (F-09). Marks the task `[!]`, logs
+`BLOCKED: <reason>`, commits as `progress: <ID> blocked`, and resets the
+implement guard's re-block counter to zero (F-08).
 
 **Returns:** `{ id, progressCommit, counts }`.
 
@@ -231,7 +245,8 @@ message>"` — a failed push does not fail the handoff, because the branch is
 still perfectly reviewable locally.
 
 **Refuses when:** any task is still open; `HANDOFF.md` does not exist; or the
-tree is not clean after the handoff commit.
+tree is not clean after the handoff commit — again, ignoring anything
+recorded as `preexistingUntracked` (F-09).
 
 ---
 
