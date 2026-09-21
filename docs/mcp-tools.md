@@ -106,25 +106,32 @@ in progress returns `{ alreadyStarted: true }` and changes nothing.
    `.foundry/state.json` — nothing this run finds already lying around is
    ever this run's business (F-09). Skipped on an idempotent resume, so the
    list is fixed at the start of each round, not re-scanned mid-run.
-2. Creates `build/<date>` from `baseBranch` (or `build/<date>-2`, `-3`, … if
-   that name is taken), or reuses the current `branchPrefix*` branch.
-3. Adds `.foundry/implement.lock` to `.gitignore` if it is not already there.
-4. Writes the lock as JSON — `{ count: 0, armedAt, round, cap }`, `cap` from
-   `foundry.json`'s `guardCap` — arming the guard hook.
-5. Fills in `Branch:` and `Started:` in `PROGRESS.md` if they are placeholders.
-6. Resolves `foundry.json`'s `policies` (`signing`, `push`, `pr`) and records
+2. Resolves `foundry.json`'s `policies` (`signing`, `push`, `pr`) and records
    them in state, and — skipped on an idempotent resume — probes signing:
    `off` disables `commit.gpgsign` locally; `auto`/`required` with signing
    configured actually attempt a signed object (`git commit-tree -S`, not a
    dry run) and record `"on"` on success; `auto` falls back to disabling
    signing locally on failure, recording why; `required` refuses instead of
    falling back. See [operations.md](./operations.md#configuration).
-7. Commits as `chore: start implementation run`, or
+3. When creating a new build branch (not resuming one), pushes `baseBranch`
+   to `origin` first — via the shared push helper, so it honours
+   `policies.push` — so the planner's commits reach the remote before the
+   build branch diverges and a later PR's diff is the build, not the plan
+   (F-18). A failed or skipped base push is reported, never fatal.
+4. Creates `build/<date>` from `baseBranch` (or `build/<date>-2`, `-3`, … if
+   that name is taken), or reuses the current `branchPrefix*` branch.
+5. Adds `.foundry/implement.lock` to `.gitignore` if it is not already there.
+6. Writes the lock as JSON — `{ count: 0, armedAt, round, cap }`, `cap` from
+   `foundry.json`'s `guardCap` — arming the guard hook.
+7. Fills in `Branch:` and `Started:` in `PROGRESS.md` if they are placeholders.
+8. Commits as `chore: start implementation run`, or
    `chore: start review-fix round N`.
 
 **Returns:** `{ alreadyStarted, branch, commit, counts, round, policies,
-signing }`. `signing` is `"on"`, `"off"`, `"none"` (not configured), or
-`"off (probe failed: <reason>)"`.
+signing, basePush }`. `signing` is `"on"`, `"off"`, `"none"` (not
+configured), or `"off (probe failed: <reason>)"`. `basePush` is present only
+when a new build branch was created — `"pushed"`, `"skipped: policy"`,
+`"skipped: no origin remote"`, or `"failed: <git's first line>"`.
 
 **Refuses when:** any of `SPEC.md`, `PLAN.md`, `PROGRESS.md` or `foundry.json`
 is missing; the directory is not a git repository; `policies` is malformed;
@@ -319,18 +326,20 @@ Record a verdict. Call it exactly once per review.
 
 `unblock` also accepts bare id strings, which get a default reason.
 
-**Does, for `APPROVED`:** records the verdict and commits `REVIEW.md` as
-`review: approved`.
+**Does, for `APPROVED`:** records the verdict, commits `REVIEW.md` as
+`review: approved`, and pushes the branch per `policies.push` (F-18).
 
 **Does, for `CHANGES REQUESTED`:** assigns `R<N>-<nn>` ids, appends
 `## Review fixes (round N)` to `PLAN.md` in task format, appends the checkbox
 lines to `PROGRESS.md` above `## Log`, resets unblocked tasks to `[ ]` with
-their reasons logged, bumps the round, and commits everything as
-`review: round N`. If the new round exceeds `maxRounds` it also writes a
-`halted` reason into `.foundry/state.json`, which stops the next flight.
+their reasons logged, bumps the round, commits everything as
+`review: round N`, and pushes the branch per `policies.push`. If the new
+round exceeds `maxRounds` it also writes a `halted` reason into
+`.foundry/state.json`, which stops the next flight.
 
-**Returns:** `{ verdict, round, commit }` for an approval;
-`{ verdict, round, fixTasks, unblocked, commit, halted, counts }` for changes.
+**Returns:** `{ verdict, round, commit, push }` for an approval;
+`{ verdict, round, fixTasks, unblocked, commit, halted, counts, push }` for
+changes. `push` is the same shape `foundry_run_finish` returns.
 
 **Refuses when:** the verdict is neither legal value; `REVIEW.md` does not
 exist; no implementation handoff has been recorded for this round; an approval
@@ -344,10 +353,10 @@ does not exist or is not blocked or skipped.
 
 **Arguments:** none.
 
-**Does:** marks the flight complete and commits `docs/SUMMARY.md` as
-`chore: build summary`.
+**Does:** marks the flight complete, commits `docs/SUMMARY.md` as
+`chore: build summary`, and pushes the branch per `policies.push` (F-18).
 
-**Returns:** `{ commit, branch, base, head, rounds }`.
+**Returns:** `{ commit, branch, base, head, rounds, push }`.
 
 **Refuses when:** `SUMMARY.md` does not exist, or the recorded verdict is not
 `APPROVED`.

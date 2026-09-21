@@ -895,6 +895,7 @@ function runStart() {
   const st = loadState();
 
   let branch = g.branch;
+  let basePush;
   if (exists(P.lock) && pr.branch && !pr.branch.startsWith("(")) {
     resetLockCounter();
     return { alreadyStarted: true, branch, counts: counts(pr.tasks), round: st.round, policies: st.policies, signing: st.signing };
@@ -910,6 +911,11 @@ function runStart() {
     let name = `${c.branchPrefix}${today()}`;
     let n = 2;
     while (git(["rev-parse", "--verify", "--quiet", name], { allowFail: true }).ok) name = `${c.branchPrefix}${today()}-${n++}`;
+    // Push the base branch itself before branching off it, so the planner's
+    // commits reach the remote and a later PR's diff is the build, not the
+    // plan (F-18). A failed base push is reported, not fatal: the build
+    // branch push in run_finish still carries the plan commits either way.
+    basePush = pushBranch(c.baseBranch, c.policies.push);
     git(["checkout", "-q", "-b", name]);
     branch = name;
   } else if (!branch || !branch.startsWith(c.branchPrefix)) {
@@ -937,7 +943,7 @@ function runStart() {
   st.implemented = false; st.reviewed = false; st.verdict = null;
   saveState(st);
   const sha = gitCommitIfChanged([P.gitignore, P.progress, P.state], st.round === 0 ? "chore: start implementation run" : `chore: start review-fix round ${st.round}`);
-  return { alreadyStarted: false, branch, commit: sha, counts: counts(pr.tasks), round: st.round, policies: st.policies, signing: st.signing };
+  return { alreadyStarted: false, branch, commit: sha, counts: counts(pr.tasks), round: st.round, policies: st.policies, signing: st.signing, basePush };
 }
 
 function taskNext() {
@@ -1055,6 +1061,21 @@ function verify({ files = [] } = {}) {
   return { ok: results.every((r) => r.ok), results };
 }
 
+/**
+ * Push `branch` to `origin`, honouring the run's push policy. Never throws:
+ * `"pushed"`, `"skipped: policy"`, `"skipped: no origin remote"`, or
+ * `"failed: <git's first line>"` — every caller (F-18) treats a push the
+ * same way a `foundry_run_finish` failure always has, as informational,
+ * never fatal to the bookkeeping commit it followed.
+ */
+function pushBranch(branch, pushAllowed) {
+  if (!pushAllowed) return "skipped: policy";
+  if (!gitFacts().hasOrigin) return "skipped: no origin remote";
+  const p = git(["push", "-u", "origin", branch], { allowFail: true });
+  if (p.ok) return "pushed";
+  return `failed: ${(p.err || p.out || "unknown error").split("\n")[0]}`;
+}
+
 function runFinish() {
   const pr = parseProgress();
   const cnt = counts(pr.tasks);
@@ -1073,16 +1094,12 @@ function runFinish() {
   saveState(st);
   const stateCommit = gitCommitIfChanged([P.state], `chore: round ${st.round} implemented`);
 
-  let push = "skipped: no origin remote";
+  const push = pushBranch(g.branch, st.policies.push);
   let pr_url = null;
-  if (!st.policies.push) {
-    push = "skipped: policy";
-  } else if (g.hasOrigin) {
-    const p = git(["push", "-u", "origin", g.branch], { allowFail: true });
-    push = p.ok ? "pushed" : `failed: ${p.err}`;
-    if (p.ok && st.policies.pr === "none") {
+  if (push === "pushed") {
+    if (st.policies.pr === "none") {
       pr_url = "skipped: policy";
-    } else if (p.ok && spawnSync("gh", ["--version"], { encoding: "utf8" }).status === 0) {
+    } else if (spawnSync("gh", ["--version"], { encoding: "utf8" }).status === 0) {
       const existing = spawnSync("gh", ["pr", "view", "--json", "url", "-q", ".url"], { cwd: ROOT, encoding: "utf8" });
       if (existing.status === 0 && existing.stdout.trim()) pr_url = existing.stdout.trim();
       else {
@@ -1146,7 +1163,8 @@ function reviewSubmit({ verdict, tasks = [], unblock = [] }) {
     st.reviewed = true; st.verdict = "APPROVED";
     saveState(st);
     const sha = gitCommitIfChanged([P.review, P.state], "review: approved");
-    return { verdict, round: st.round, commit: sha };
+    const push = pushBranch(gitFacts().branch, st.policies.push);
+    return { verdict, round: st.round, commit: sha, push };
   }
 
   if (!tasks.length && !unblock.length) throw new ToolError("CHANGES REQUESTED requires at least one fix task or unblock");
@@ -1177,7 +1195,8 @@ function reviewSubmit({ verdict, tasks = [], unblock = [] }) {
   if (N > c.maxRounds) st.halted = `review round ${N} exceeds maxRounds=${c.maxRounds}; a human must decide whether to continue (edit .foundry/state.json to clear 'halted' and raise maxRounds in docs/foundry.json)`;
   saveState(st);
   const sha = gitCommitIfChanged([P.review, P.plan, P.progress, P.state], `review: round ${N}`);
-  return { verdict, round: N, fixTasks: ids, unblocked, commit: sha, halted: st.halted, counts: counts(pr.tasks) };
+  const push = pushBranch(gitFacts().branch, st.policies.push);
+  return { verdict, round: N, fixTasks: ids, unblocked, commit: sha, halted: st.halted, counts: counts(pr.tasks), push };
 }
 
 function summaryCommit() {
@@ -1188,7 +1207,8 @@ function summaryCommit() {
   saveState(st);
   const sha = gitCommitIfChanged([P.summary, P.state], "chore: build summary");
   const g = gitFacts();
-  return { commit: sha, branch: g.branch, base: g.base, head: g.head, rounds: st.round };
+  const push = pushBranch(g.branch, st.policies.push);
+  return { commit: sha, branch: g.branch, base: g.base, head: g.head, rounds: st.round, push };
 }
 
 // ---------------------------------------------------------------- MCP plumbing

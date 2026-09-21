@@ -9,7 +9,7 @@
 import {
   finish, ok, eq, like, isError,
   specRepo, plannedRepo, withServer, writeFile, readFile, hasFile, subject,
-  planDoc, progressDoc, commitTask, runGuard, git, sh, mkFailingGhBin,
+  planDoc, progressDoc, commitTask, runGuard, git, sh, mkFailingGhBin, mkBareRemote,
 } from "./harness.mjs";
 
 const TASKS = [
@@ -20,6 +20,7 @@ const TASKS = [
 
 const repo = specRepo("# Spec\nBuild something small.\n");
 const noGh = { env: { PATH: `${mkFailingGhBin()}:${process.env.PATH}` } };
+git(repo, ["remote", "add", "origin", mkBareRemote()]);
 
 // An untracked operator file, predating the whole flight, must survive it
 // unchanged: not committed, not moved, not deleted (F-09, F-17).
@@ -199,6 +200,12 @@ await withServer(repo, async ({ call }) => {
   }
   ok(!log.includes("FOUNDRY_FEEDBACK"), "the operator file is never mentioned in a commit");
   eq(readFile(repo, "hello.txt"), "hello\n", "and the working tree holds the reviewed result");
+
+  // Every push-worthy commit actually reached the remote (F-18): the base
+  // branch (pushed by run_start before the build branch was cut) and the
+  // build branch (pushed after every review_submit and summary_commit).
+  eq(git(repo, ["rev-parse", "origin/main"]), git(repo, ["rev-parse", "main"]), "the remote's base branch carries the plan commits");
+  eq(git(repo, ["rev-parse", `origin/${r.branch}`]), git(repo, ["rev-parse", "HEAD"]), "the remote build branch head matches the local head");
 }, noGh);
 
 // A fresh server process trusts an agents directory that already existed

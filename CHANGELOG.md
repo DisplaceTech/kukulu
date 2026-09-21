@@ -46,6 +46,16 @@ All notable changes to this plugin. Format follows
 
 ### Changed
 
+- **Every push-worthy commit is actually pushed** (F-18): after a flight,
+  the `review:` commit from `foundry_review_submit` and the `chore: build
+  summary` commit from `foundry_summary_commit` used to stay local, and the
+  base branch never received the planner's commits at all, so a PR
+  silently included `PLAN.md`/`PROGRESS.md`/`foundry.json` as if they were
+  build work. Both tools now push after their commit, `foundry_run_start`
+  pushes the base branch before cutting the first build branch, and all
+  three honour `policies.push`. A shared helper makes every push report the
+  same shape: `"pushed"`, `"skipped: policy"`, `"skipped: no origin
+  remote"`, or `"failed: <git's first line>"`.
 - Pre-existing untracked files are invisible to a run (F-09, F-17):
   `foundry_run_start` records every path already untracked before it arms
   the lock. `foundry_task_done` and `foundry_run_finish` ignore those paths

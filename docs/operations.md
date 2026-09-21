@@ -176,7 +176,7 @@ parse. Edit it between stages, not during one.
 | `commandTimeoutMs` | `600000` | Per-command timeout for `foundry_verify` |
 | `guardCap` | `60` | Re-blocks since the last task state change before the implement guard gives up; carried into `.foundry/implement.lock` at `foundry_run_start` and wins over `FOUNDRY_GUARD_CAP` |
 | `policies.signing` | `"auto"` | `"off"` disables commit signing for the run; `"required"` refuses to start unless a real signed commit succeeds; `"auto"` uses signing when it works and falls back to off, recording why, when it does not |
-| `policies.push` | `true` | `false` skips the push `foundry_run_finish` would otherwise make |
+| `policies.push` | `true` | `false` skips every push `foundry_run_start`, `foundry_run_finish`, `foundry_review_submit` and `foundry_summary_commit` would otherwise make |
 | `policies.pr` | `"draft"` | `"none"` skips draft-PR creation in `foundry_run_finish` even when `gh` is available |
 
 Environment variables:
@@ -222,7 +222,14 @@ A `build/<date>` branch containing:
 - `review: round N` commits, one per round, each carrying that round's
   `REVIEW.md` and the fix tasks it queued
 - `docs/HANDOFF.md`, `docs/REVIEW.md` and `docs/SUMMARY.md` at the tip
-- a draft PR, if `gh` was available
+- a draft PR, if `gh` was available and `policies.pr` is not `"none"`
+
+When there is an `origin`, every one of those commits is pushed as it lands —
+`foundry_run_finish`, `foundry_review_submit` and `foundry_summary_commit`
+all push (unless `policies.push` is `false`) — and `foundry_run_start`
+pushes the base branch itself before the first build branch is cut, so the
+base branch on the remote carries the planner's commits too and a PR's diff
+is the build, not the plan (F-18).
 
 Read `SUMMARY.md` first. It is written for someone who was not there: what was
 built, what was decided and by whom, which assumptions are still guesses, which

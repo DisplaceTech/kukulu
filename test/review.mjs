@@ -5,7 +5,7 @@
 import {
   finish, ok, eq, like, isError,
   plannedRepo, withServer, readFile, writeFile, subject,
-  markTasks, setState, git,
+  markTasks, setState, git, mkBareRemote,
 } from "./harness.mjs";
 
 const TODAY = new Date().toISOString().slice(0, 10);
@@ -202,6 +202,58 @@ const FIX = {
   const repo = reviewableRepo({ verdict: "APPROVED" });
   await withServer(repo, async ({ call }) => {
     eq((await call("foundry_review_submit", { verdict: " approved " })).verdict, "APPROVED", "the verdict is normalised before it is trusted");
+  });
+}
+
+// ---------------------------------------------------------------- pushing (F-18)
+
+{
+  const repo = reviewableRepo({ verdict: "APPROVED" });
+  git(repo, ["remote", "add", "origin", mkBareRemote()]);
+  await withServer(repo, async ({ call }) => {
+    const r = await call("foundry_review_submit", { verdict: "APPROVED" });
+    eq(r.push, "pushed", "an APPROVED review pushes the branch");
+    eq(git(repo, ["rev-parse", `origin/build/${TODAY}`]), git(repo, ["rev-parse", "HEAD"]), "the remote branch head matches the local head");
+
+    writeFile(repo, "docs/SUMMARY.md", "# summary\n");
+    const sum = await call("foundry_summary_commit");
+    eq(sum.push, "pushed", "the summary commit pushes too");
+    eq(git(repo, ["rev-parse", `origin/build/${TODAY}`]), git(repo, ["rev-parse", "HEAD"]), "...and the remote catches up again");
+  });
+}
+
+{
+  const repo = reviewableRepo();
+  git(repo, ["remote", "add", "origin", mkBareRemote()]);
+  await withServer(repo, async ({ call }) => {
+    const r = await call("foundry_review_submit", { verdict: "CHANGES REQUESTED", tasks: [FIX] });
+    eq(r.push, "pushed", "a CHANGES REQUESTED review pushes the branch too");
+    eq(git(repo, ["rev-parse", `origin/build/${TODAY}`]), git(repo, ["rev-parse", "HEAD"]), "the remote branch head matches the local head");
+  });
+}
+
+{
+  const repo = reviewableRepo({ verdict: "APPROVED" });
+  await withServer(repo, async ({ call }) => {
+    eq((await call("foundry_review_submit", { verdict: "APPROVED" })).push, "skipped: no origin remote", "without a remote, review_submit says so");
+  });
+}
+
+{
+  // reviewableRepo bypasses foundry_run_start, which is what would normally
+  // copy docs/foundry.json's policies into state; set state directly to
+  // simulate what a real run_start earlier in the round would have recorded.
+  const repo = reviewableRepo({ config: { policies: { push: false } } });
+  setState(repo, { policies: { signing: "auto", push: false, pr: "draft" } });
+  git(repo, ["remote", "add", "origin", mkBareRemote()]);
+  await withServer(repo, async ({ call }) => {
+    const r = await call("foundry_review_submit", { verdict: "CHANGES REQUESTED", tasks: [FIX] });
+    eq(r.push, "skipped: policy", "push: false skips review_submit's push even with a remote present");
+
+    writeFile(repo, "docs/SUMMARY.md", "# summary\n");
+    setState(repo, { verdict: "APPROVED" }); // shortcut past the fix round, for summary_commit's own push check
+    const sum = await call("foundry_summary_commit");
+    eq(sum.push, "skipped: policy", "and summary_commit's push, too");
   });
 }
 

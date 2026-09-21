@@ -160,6 +160,46 @@ for (const missing of ["docs/SPEC.md", "docs/PLAN.md", "docs/PROGRESS.md", "docs
   });
 }
 
+// ---------------------------------------------------------------- basePush
+
+{
+  const repo = plannedRepo();
+  git(repo, ["remote", "add", "origin", mkBareRemote()]);
+  await withServer(repo, async ({ call }) => {
+    const r = await call("foundry_run_start");
+    eq(r.basePush, "pushed", "run_start pushes the base branch before branching off it (F-18)");
+    eq(git(repo, ["rev-parse", "origin/main"]), git(repo, ["rev-parse", "main"]), "the remote's main matches local main, including the plan commits");
+  });
+}
+
+{
+  const repo = plannedRepo();
+  await withServer(repo, async ({ call }) => {
+    eq((await call("foundry_run_start")).basePush, "skipped: no origin remote", "without a remote, basePush says so");
+  });
+}
+
+{
+  const repo = plannedRepo({ config: { policies: { push: false } } });
+  git(repo, ["remote", "add", "origin", mkBareRemote()]);
+  await withServer(repo, async ({ call }) => {
+    eq((await call("foundry_run_start")).basePush, "skipped: policy", "push: false skips the base branch push too");
+  });
+}
+
+{
+  // Resuming an existing build branch never pushes the base branch again —
+  // basePush belongs only to the creation path.
+  const repo = plannedRepo();
+  git(repo, ["checkout", "-q", "-b", `build/${TODAY}`]);
+  writeFile(repo, ".gitignore", ".foundry/implement.lock\n");
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-qm", "chore: pre-existing"]);
+  await withServer(repo, async ({ call }) => {
+    ok(!("basePush" in await call("foundry_run_start")), "resuming an existing build branch reports no basePush at all");
+  });
+}
+
 // ---------------------------------------------------------------- task_next
 
 {
