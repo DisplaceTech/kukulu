@@ -310,7 +310,7 @@ to unstick it.
 │   ├── foundry.config.example.json   the global routing config, explained in docs/routing.md
 │   └── ccr/                     claude-code-router provider manifests
 ├── docs/                        architecture · MCP reference · routing · spec guide · runbook
-└── test/                        harness + eight suites, run by test/run.mjs
+└── test/                        harness + nine suites, run by test/run.mjs
 ```
 
 ## Documentation map
@@ -350,10 +350,11 @@ npm test -- guard protocol     # one or more suites by name
 KEEP_REPO=1 npm test -- drive  # keep the temp repos to poke at afterwards
 ```
 
-Eight suites, about 720 assertions: the plugin manifests and documentation
+Nine suites, about 930 assertions: the plugin manifests and documentation
 links, the JSON-RPC transport, the `foundry_next` decision table, the
 implement-stage tools, the review and summary tools, per-role routing
-(config merge, `foundry_agents_sync`, `foundry_config_show`), the guard
+(config merge, `foundry_agents_sync`, `foundry_config_show`),
+`docs/foundry.json` constraints and their fixture self-tests, the guard
 hook, and one end-to-end flight driven over real stdio against a real git
 repo. CI runs all of it on every supported Node line — 22, 24 and 26 —
 again on macOS, and again on a machine with no GitHub CLI installed.

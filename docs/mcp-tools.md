@@ -238,20 +238,35 @@ a permission prompt.
 **Arguments:** `{ files?: string[] }` — the task's touched files. A
 whitespace- or comma-delimited string is accepted too.
 
-**Does:** runs every command in `verify`, then, for each `extraVerify` prefix
-that any touched file starts with, appends its commands (skipping
-duplicates by command text). Each command runs in a shell from the project
-root with its own timeout: `commandTimeoutMs` (default 10 minutes) unless
-the command was given as `{ cmd, timeoutMs }` in `docs/foundry.json`, which
-overrides it for that command alone.
+**Does:** first, for every rule in `docs/foundry.json`'s `constraints`,
+self-tests it against its own `shouldMatch`/`shouldNotMatch` fixtures and —
+only if that passes — scans every tracked file under its `paths` minus
+`exclude` for real hits (F-14; see
+[operations.md](./operations.md#constraints)); this ignores `files`
+entirely and always covers the whole repo. Then runs every command in
+`verify`, and for each `extraVerify` prefix that any touched file starts
+with, appends its commands (skipping duplicates by command text). Each
+command runs in a shell from the project root with its own timeout:
+`commandTimeoutMs` (default 10 minutes) unless the command was given as
+`{ cmd, timeoutMs }` in `docs/foundry.json`, which overrides it for that
+command alone.
 
-**Returns:** `{ ok, results: [{ command, ok, exitCode, timedOut, timeoutMs, stdoutTail, stderrTail }] }`,
-where the tails are the last 60 lines of each stream and `timeoutMs` is
-whichever timeout that command actually ran with.
+**Returns:** `{ ok, constraints: { ok, results: [{ id, ok, fixture, hits }] },
+results: [{ command, ok, exitCode, timedOut, timeoutMs, stdoutTail, stderrTail }] }`.
+The tails are the last 60 lines of each stream; `timeoutMs` is whichever
+timeout that command actually ran with. For a constraint result: `fixture`
+is `null` when the rule's own self-test passed, else a message naming the
+disagreeing fixture line (and `hits` is then always empty, since a rule
+that fails its own test is never trusted to scan); `hits` is
+`{ file, line, text }` for each real match. Top-level `ok` is true only when
+every constraint and every command passed.
 
-**Refuses when:** `foundry.json` is missing or has no `verify` commands; or
-any `verify`/`extraVerify`/`build` entry is malformed — neither a string nor
-`{ cmd, timeoutMs }`, missing `cmd`, or `timeoutMs` not a positive integer.
+**Refuses when:** `foundry.json` is missing or has no `verify` commands; any
+`verify`/`extraVerify`/`build` entry is malformed — neither a string nor
+`{ cmd, timeoutMs }`, missing `cmd`, or `timeoutMs` not a positive integer;
+or any `constraints` entry is malformed — missing `id`, `paths`, `pattern`,
+`shouldMatch` or `shouldNotMatch`, an unparseable `pattern`, or a duplicate
+`id`.
 
 ---
 

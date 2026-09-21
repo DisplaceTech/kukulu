@@ -29,7 +29,7 @@ it.
 | `skills/*/SKILL.md` | The prose each stage follows |
 | `templates/SPEC.md` | The spec skeleton users copy |
 | `templates/foundry.config.example.json`, `templates/ccr/` | The global routing config and claude-code-router provider manifests |
-| `test/` | Harness plus eight suites |
+| `test/` | Harness plus nine suites |
 | `docs/` | Architecture, tool reference, routing guide, spec guide, runbook |
 
 ## Setup
@@ -49,7 +49,7 @@ plugin that fails on someone else's machine.
 
 ```bash
 npm run lint                    # node --check, bash -n, JSON parse, exec bits
-npm test                        # all eight suites
+npm test                        # all nine suites
 npm test -- guard protocol      # named suites only
 node test/state.mjs             # one suite, directly
 KEEP_REPO=1 npm test -- drive   # keep the temp repos for inspection
@@ -66,6 +66,7 @@ npm install --no-save mermaid jsdom && node scripts/check-diagrams.mjs
 | `implement` | `run_start`, `task_next`, `task_done`, `task_block`, `verify`, `run_finish` |
 | `review` | `review_submit` and `summary_commit`, including every refusal |
 | `routing` | Config merge and precedence, `foundry_agents_sync`, `foundry_config_show`, every refusal |
+| `constraints` | `docs/foundry.json` constraints, fixture self-tests, the scan, every refusal |
 | `guard` | The Stop / SubagentStop hook: scoping, blocking, counting, giving up, environment handling |
 | `drive` | One complete flight end to end over real stdio |
 

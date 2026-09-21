@@ -252,6 +252,20 @@ for (const file of listDir("templates/ccr").filter((f) => f.endsWith(".json"))) 
   ok(Array.isArray(provider?.models) && provider.models.length > 0, `templates/ccr/${file} lists at least one model`);
 }
 
+// ---------------------------------------------------------------- constraints template
+
+const constraintsTemplate = json("templates/constraints.example.json");
+ok(Array.isArray(constraintsTemplate) && constraintsTemplate.length >= 3, "the constraints template ships at least three worked rules");
+for (const rule of constraintsTemplate) {
+  ok(rule.id, `constraint template rule '${rule.id}' has an id`);
+  ok(Array.isArray(rule.paths) && rule.paths.length, `${rule.id} names at least one path`);
+  ok(rule.pattern, `${rule.id} has a pattern`);
+  ok(Array.isArray(rule.shouldMatch) && rule.shouldMatch.length, `${rule.id} has at least one shouldMatch fixture`);
+  ok(Array.isArray(rule.shouldNotMatch) && rule.shouldNotMatch.length, `${rule.id} has at least one shouldNotMatch fixture`);
+}
+ok(read("docs/operations.md").includes("templates/constraints.example.json"), "the constraints template is referenced from docs/operations.md");
+ok(read("skills/plan-build/SKILL.md").includes("templates/constraints.example.json"), "...and from the plan-build skill that would actually use it");
+
 // ---------------------------------------------------------------- CI wiring
 
 const workflows = listDir(".github/workflows");

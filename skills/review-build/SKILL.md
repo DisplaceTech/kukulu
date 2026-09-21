@@ -22,9 +22,19 @@ task commit. For every task, read the diff, then the task in `docs/PLAN.md`,
 then the SPEC sections it cites. Check, in order, and report findings most
 severe first:
 
-1. **Constraints**: every rule under `## Constraints` in CLAUDE.md, checked
-   mechanically against the diff (grep for the forbidden calls, imports,
-   patterns). A constraint violation is always the most severe category.
+1. **Constraints**: every rule under `## Constraints` in CLAUDE.md. Call
+   `foundry_verify` yourself and read its `constraints` result — the tool
+   self-tests each rule against its own fixtures before scanning, so a
+   `fixture` failure there means the rule itself is broken, not the code.
+   For any rule expressed in `docs/foundry.json`'s `constraints`, trust the
+   tool's `hits`, not your own re-derivation of the grep. Then read the
+   diff yourself for anything the mechanical rules cannot express, and for
+   any constraint you find violated that the tool's rule *missed* — if it
+   missed a real violation, the rule has a blind spot, and the fix task
+   must add the missed shape to that rule's `shouldMatch` (with the diff's
+   own line as the new fixture) as well as fixing the code, so the same
+   blind spot cannot pass a future round silently (F-14). A constraint
+   violation is always the most severe category.
 2. **Boundaries**: anything crossing a module boundary SPEC's architecture
    forbids; config values hard-coded outside the config module; an edit to
    `.gitignore`, `.gitattributes`, an editor config, or CI config that no

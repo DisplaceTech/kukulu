@@ -157,7 +157,10 @@ says otherwise — every key defaults sensibly for an ordinary flight, and
 naming a key here only to repeat its default adds nothing. `policies`
 covers commit signing, pushing and PR creation; `guardCap` raises the
 implement guard's stall tolerance for a plan with unusually many
-per-task blocked stops. See [docs/operations.md](../../docs/operations.md#configuration)
+per-task blocked stops. `constraints` turns `CLAUDE.md`'s mechanically
+checkable rules into data the reviewer's `foundry_verify` call actually
+runs — see the dedicated section below. See
+[docs/operations.md](../../docs/operations.md#configuration)
 for every key and its default.
 
 ## `CLAUDE.md` contents
@@ -169,11 +172,33 @@ Under fixed headings so the implementer and reviewer can find them:
 - `## Module map` — from SPEC's architecture section.
 - `## Constraints` — every global invariant, one line each, phrased as a rule
   the reviewer can check mechanically ("no `Date.now` under `src/core/`").
+  Every constraint here that can be expressed as a single-line pattern must
+  also appear in `docs/foundry.json`'s `constraints` array (below) — a rule
+  stated only in prose is a rule the reviewer has to remember to grep for by
+  hand, three rounds running, and still might miss a shape (F-14). A
+  constraint that genuinely cannot be a line pattern (a structural rule, a
+  cross-file invariant) says so here explicitly: "reviewer checks by
+  reading" — never silently omit it from `constraints` without saying why.
 - `## Commit template` — title `<ID>: <title>`; body with Goal / Tests /
   Interpretation / Measurement (if tuning) / Manual check.
 - A closing note that SPEC.md wins over PLAN.md wins over code comments.
 
 Keep it under 150 lines. Do not describe the Foundry workflow in CLAUDE.md.
+
+### `constraints` in `docs/foundry.json`
+
+For each mechanically-checkable `## Constraints` line, add an entry:
+`{ "id", "description", "paths", "exclude"?, "pattern" (a JS regex source,
+line-based only — no multi-line patterns), "flags"?, "shouldMatch": [one or
+more lines the pattern must catch], "shouldNotMatch": [one or more lines it
+must not] }`. `foundry_verify` self-tests every rule against its own
+fixtures before scanning a single file, so a pattern with a blind spot
+fails immediately instead of passing for three review rounds — write a
+fixture for every syntactic shape an implementer might plausibly reach for,
+not just the one you thought of first (a hard-coded tunable, for instance,
+can show up as `const x = 5;`, `'x' => 5,`, or `x: 5,` — cover all of
+them). See `templates/constraints.example.json` for three fully worked
+examples and [docs/operations.md](../../docs/operations.md#constraints).
 
 ## When you finish
 

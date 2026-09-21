@@ -45,11 +45,15 @@ Repeat until `foundry_task_next` returns `{ done: true }`:
    Confirm they fail for the right reason.
 4. **Implement** the smallest change that makes them pass, within Files
    touched.
-5. **Verify.** Call `foundry_verify` with the task's Files touched. It runs the
-   project's verify commands plus any path-specific extras and returns each
-   command's exit status and tail. All must pass: no skipped tests, no lint
-   suppressions added. Then do whatever the task's own Verification section
-   asks that a command cannot cover, and describe what you verified.
+5. **Verify.** Call `foundry_verify` with the task's Files touched. It
+   self-tests and runs every `docs/foundry.json` constraint against the
+   whole repo, then runs the project's verify commands plus any
+   path-specific extras, returning each command's exit status and tail. All
+   must pass: no skipped tests, no lint suppressions added. A constraint hit
+   is a failing test — fix the code it flagged, not the rule, unless the
+   task you are on explicitly changes the rule itself. Then do whatever the
+   task's own Verification section asks that a command cannot cover, and
+   describe what you verified.
 6. **Commit** with the template in CLAUDE.md: title `<ID>: <title>`, body with
    Goal / Tests / Interpretation / Measurement (if tuning) / Manual check.
    Stage only the files the task touched. Do not stage `docs/PROGRESS.md`.

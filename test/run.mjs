@@ -15,6 +15,7 @@ const SUITES = [
   ["implement", "run_start, task_next/done/block, verify, run_finish"],
   ["review", "review_submit and summary_commit"],
   ["routing", "config merge, foundry_agents_sync, foundry_config_show"],
+  ["constraints", "docs/foundry.json constraints, their fixtures, and foundry_verify's scan"],
   ["guard", "the Stop / SubagentStop guard hook"],
   ["drive", "one whole flight, end to end"],
 ];

@@ -187,6 +187,7 @@ parse. Edit it between stages, not during one.
 | `policies.signing` | `"auto"` | `"off"` disables commit signing for the run; `"required"` refuses to start unless a real signed commit succeeds; `"auto"` uses signing when it works and falls back to off, recording why, when it does not |
 | `policies.push` | `true` | `false` skips every push `foundry_run_start`, `foundry_run_finish`, `foundry_review_submit` and `foundry_summary_commit` would otherwise make |
 | `policies.pr` | `"draft"` | `"none"` skips draft-PR creation in `foundry_run_finish` even when `gh` is available |
+| `constraints` | `[]` | `CLAUDE.md` rules expressed as data and checked by `foundry_verify` — see [Constraints](#constraints) below |
 
 Environment variables:
 
@@ -196,6 +197,61 @@ Environment variables:
 | `FOUNDRY_GUARD_CAP` | `60` | Re-blocks since the last task state change before the guard gives up; `docs/foundry.json`'s `guardCap` wins over this when set |
 | `FOUNDRY_CONFIG` | `~/.config/foundry/config.json` (or `$XDG_CONFIG_HOME/foundry/config.json`) | Path to the global routing config |
 | `FOUNDRY_PROFILE` | the global file's own `"profile"` key, if any | Which profile in the global file to apply; wins over the file's own choice |
+
+## Constraints
+
+A `## Constraints` line in `CLAUDE.md` is prose a reviewer has to remember
+to check by hand, three review rounds running, and can still miss a shape a
+hand-written grep never covered (F-14). `docs/foundry.json`'s `constraints`
+array turns a mechanically-checkable one into data with proof that its own
+check works:
+
+```json
+{
+  "constraints": [
+    {
+      "id": "no-hardcoded-tick-rate",
+      "description": "The tick rate is config.TICK_RATE, never a literal.",
+      "paths": ["src/"],
+      "exclude": ["src/config/"],
+      "pattern": "(tickRate|TICK_RATE)['\"]?\\s*(=|:|=>)\\s*[0-9]",
+      "shouldMatch": ["const tickRate = 60;", "TICK_RATE: 60,", "'tickRate' => 60,"],
+      "shouldNotMatch": ["const tickRate = config.TICK_RATE;"]
+    }
+  ]
+}
+```
+
+| Field | Required | Meaning |
+|---|---|---|
+| `id` | yes | Unique name; the fix task for a violation names it |
+| `description` | no | For a human reading `docs/foundry.json` |
+| `paths` | yes | Path prefixes to scan (matches `git ls-files`'s pathspec) |
+| `exclude` | no | Path prefixes to skip within `paths` |
+| `pattern` | yes | A JS `RegExp` source, checked line by line — no multi-line patterns |
+| `flags` | no | `RegExp` flags, e.g. `"i"` |
+| `shouldMatch` | yes, ≥ 1 | Lines the pattern must catch |
+| `shouldNotMatch` | yes, ≥ 1 | Lines it must not |
+
+`foundry_verify` runs constraints before any shell command, always against
+the whole repo regardless of the `files` argument: first it self-tests every
+rule against its own `shouldMatch`/`shouldNotMatch` fixtures — a fixture
+that disagrees fails the rule outright, with `fixture` in the result naming
+which line, and no file is scanned for that rule — then it scans every
+*tracked* file under `paths` minus `exclude` (`git ls-files`, so an
+untracked or gitignored file is never scanned) and reports each hit as
+`{ file, line, text }`. A malformed rule (missing `id`/`paths`/`pattern`,
+no fixtures, an unparseable `pattern`, a duplicate `id`) refuses the whole
+call, naming the offending rule.
+
+`templates/constraints.example.json` has three fully worked rules — a
+forbidden import, a hard-coded tunable in three different syntactic shapes,
+and a call forbidden outside the module that owns it — each with fixtures
+covering the shapes an implementer might reach for. The plan-build skill
+requires every mechanically-checkable `CLAUDE.md` constraint to have a
+matching entry here; the review-build skill treats a rule that missed a
+real violation as a defect in the rule, not just the code, and the fix
+task closes the blind spot by adding the missed shape to `shouldMatch`.
 
 ## Routing
 

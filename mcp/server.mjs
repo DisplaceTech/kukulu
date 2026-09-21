@@ -175,9 +175,53 @@ function normalizeCommand(entry, defaultTimeoutMs, where) {
   throw new ToolError(`${where} must be a command string or { cmd, timeoutMs }`);
 }
 
+const CONSTRAINT_KEYS = ["id", "description", "paths", "exclude", "pattern", "flags", "shouldMatch", "shouldNotMatch"];
+
+/**
+ * Validate `docs/foundry.json`'s `constraints` array: every rule must carry
+ * proof that its own check works, so a grep with a blind spot fails its own
+ * fixture instead of passing silently (F-14). Never checks the pattern
+ * against real files — that is `checkConstraints`'s job at `foundry_verify`
+ * time — only that the rule is well-formed.
+ */
+function validateConstraints(constraints) {
+  if (constraints === undefined) return;
+  if (!Array.isArray(constraints)) throw new ToolError("docs/foundry.json 'constraints' must be an array");
+  const seen = new Set();
+  for (const c of constraints) {
+    const label = c && typeof c === "object" && typeof c.id === "string" ? c.id : "?";
+    if (!c || typeof c !== "object" || Array.isArray(c)) throw new ToolError(`constraint '${label}' must be an object`);
+    for (const k of Object.keys(c)) if (!CONSTRAINT_KEYS.includes(k)) throw new ToolError(`constraint '${label}' has an unknown key '${k}'`);
+    if (typeof c.id !== "string" || !c.id) throw new ToolError("a constraint is missing 'id'");
+    if (seen.has(c.id)) throw new ToolError(`constraint '${c.id}' is defined more than once`);
+    seen.add(c.id);
+    if (!Array.isArray(c.paths) || !c.paths.length || !c.paths.every((p) => typeof p === "string" && p)) {
+      throw new ToolError(`constraint '${c.id}' must have a non-empty 'paths' array of strings`);
+    }
+    if (c.exclude !== undefined && (!Array.isArray(c.exclude) || !c.exclude.every((p) => typeof p === "string" && p))) {
+      throw new ToolError(`constraint '${c.id}'.exclude must be an array of strings`);
+    }
+    if (typeof c.pattern !== "string" || !c.pattern) throw new ToolError(`constraint '${c.id}' must have a non-empty 'pattern'`);
+    if (c.flags !== undefined && typeof c.flags !== "string") throw new ToolError(`constraint '${c.id}'.flags must be a string`);
+    try {
+      // eslint-disable-next-line no-new -- validity check only, the instance is discarded
+      new RegExp(c.pattern, c.flags || "");
+    } catch (e) {
+      throw new ToolError(`constraint '${c.id}' has an invalid pattern: ${e.message}`);
+    }
+    if (!Array.isArray(c.shouldMatch) || !c.shouldMatch.length || !c.shouldMatch.every((l) => typeof l === "string")) {
+      throw new ToolError(`constraint '${c.id}' must have at least one 'shouldMatch' fixture line`);
+    }
+    if (!Array.isArray(c.shouldNotMatch) || !c.shouldNotMatch.length || !c.shouldNotMatch.every((l) => typeof l === "string")) {
+      throw new ToolError(`constraint '${c.id}' must have at least one 'shouldNotMatch' fixture line`);
+    }
+  }
+}
+
 function cfg() {
   const c = loadConfig() || {};
   validatePolicies(c.policies);
+  validateConstraints(c.constraints);
   const commandTimeoutMs = c.commandTimeoutMs || 10 * 60 * 1000;
   const norm = (entry, i, where) => normalizeCommand(entry, commandTimeoutMs, `docs/foundry.json ${where}[${i}]`);
   return {
@@ -192,6 +236,7 @@ function cfg() {
     maxRoundsHard: Number.isInteger(c.maxRoundsHard) ? c.maxRoundsHard : 6,
     commandTimeoutMs,
     guardCap: Number.isInteger(c.guardCap) ? c.guardCap : 60,
+    constraints: c.constraints || [],
     policies: {
       signing: c.policies?.signing ?? "auto",
       push: c.policies?.push ?? true,
@@ -1074,18 +1119,60 @@ function runShell(cmd, timeoutMs) {
   };
 }
 
+/** Does `file` (a repo-relative path) fall under path or exclude prefix `p`? */
+const pathUnder = (file, p) => file === p || file.startsWith(p.endsWith("/") ? p : `${p}/`);
+
+/**
+ * Run every constraint rule: first self-test it against its own fixtures —
+ * a `shouldMatch` line that fails to match, or a `shouldNotMatch` line that
+ * matches, fails the rule outright and is never trusted to scan anything
+ * (F-14) — then scan every *tracked* file under its `paths` minus
+ * `exclude` (`git ls-files`, so untracked and ignored files are never
+ * scanned), line by line. Line-based only; no multi-line patterns.
+ */
+function checkConstraints(constraints) {
+  const testLine = (c, line) => new RegExp(c.pattern, c.flags || "").test(line);
+  const results = constraints.map((c) => {
+    for (const line of c.shouldMatch) {
+      if (!testLine(c, line)) return { id: c.id, ok: false, fixture: `shouldMatch ${JSON.stringify(line)} did not match`, hits: [] };
+    }
+    for (const line of c.shouldNotMatch) {
+      if (testLine(c, line)) return { id: c.id, ok: false, fixture: `shouldNotMatch ${JSON.stringify(line)} matched`, hits: [] };
+    }
+    const listed = git(["ls-files", "--", ...c.paths], { allowFail: true });
+    const files = listed.ok ? listed.out.split("\n").filter(Boolean) : [];
+    const excluded = c.exclude || [];
+    const hits = [];
+    for (const file of files) {
+      if (excluded.some((ex) => pathUnder(file, ex))) continue;
+      const full = path.join(ROOT, file);
+      if (!exists(full)) continue; // e.g. a submodule gitlink git ls-files can list but fs cannot read
+      read(full)
+        .split("\n")
+        .forEach((text, i) => {
+          if (testLine(c, text)) hits.push({ file, line: i + 1, text });
+        });
+    }
+    return { id: c.id, ok: hits.length === 0, fixture: null, hits };
+  });
+  return { ok: results.every((r) => r.ok), results };
+}
+
 function verify({ files = [] } = {}) {
   const c = loadConfig();
   if (!c) throw new ToolError("docs/foundry.json is missing; the plan stage must write it");
   const cc = cfg();
   if (!cc.verify.length) throw new ToolError("docs/foundry.json has no 'verify' commands");
+  // Constraints are whole-repo, always — `files` narrows which shell
+  // commands' extras run, never what a constraint scans.
+  const constraints = checkConstraints(cc.constraints);
   const cmds = [...cc.verify];
   const touched = Array.isArray(files) ? files : String(files).split(/[\s,]+/).filter(Boolean);
   for (const [prefix, extra] of Object.entries(cc.extraVerify)) {
     if (touched.some((f) => f.startsWith(prefix))) for (const x of extra) if (!cmds.some((c2) => c2.cmd === x.cmd)) cmds.push(x);
   }
   const results = cmds.map((c2) => runShell(c2.cmd, c2.timeoutMs));
-  return { ok: results.every((r) => r.ok), results };
+  return { ok: constraints.ok && results.every((r) => r.ok), constraints, results };
 }
 
 /**
@@ -1296,7 +1383,7 @@ const TOOLS = [
   { name: "foundry_task_next", description: "Select the next task (first [~], else first [ ]), auto-skip tasks whose dependencies are blocked, mark it [~], and return its PLAN.md text plus dependency log entries. Returns { done: true } when none remain.", inputSchema: S({}), fn: taskNext },
   { name: "foundry_task_done", description: "Mark a task [x] and append its log entry stamped with HEAD's sha. Requires HEAD's commit subject to start with '<id>:' and a clean tree. Commits PROGRESS.md.", inputSchema: S({ id: { type: "string" }, log: { type: "string", description: "Log entry body, under 15 lines" } }, ["id", "log"]), fn: taskDone },
   { name: "foundry_task_block", description: "Give up on a task: hard-reset uncommitted changes, mark it [!], log BLOCKED: <reason>, commit PROGRESS.md.", inputSchema: S({ id: { type: "string" }, reason: { type: "string", description: "what you tried / what fails / what you think the fix is" } }, ["id", "reason"]), fn: taskBlock },
-  { name: "foundry_verify", description: "Run the verify commands from docs/foundry.json, plus extraVerify commands for any path prefix the given files fall under. Returns per-command exit status and output tails.", inputSchema: S({ files: { type: "array", items: { type: "string" }, description: "Files touched by the task (optional)" } }), fn: verify },
+  { name: "foundry_verify", description: "Self-tests and runs every docs/foundry.json constraint against the whole tracked repo, then runs the verify commands plus extraVerify commands for any path prefix the given files fall under. Returns constraint results and per-command exit status and output tails.", inputSchema: S({ files: { type: "array", items: { type: "string" }, description: "Files touched by the task (optional); narrows extraVerify only, never the constraint scan" } }), fn: verify },
   { name: "foundry_run_finish", description: "End an implementation run: requires zero open tasks and docs/HANDOFF.md; commits it, pushes and opens a draft PR unless policies say otherwise, disarms the lock, records the round as implemented.", inputSchema: S({}), fn: runFinish },
   {
     name: "foundry_run_halt",

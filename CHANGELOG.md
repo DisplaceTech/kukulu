@@ -43,6 +43,25 @@ All notable changes to this plugin. Format follows
   `foundry_next` report the halt like any other. The implement skill
   documents when to disable signing mid-run versus when to halt. The server
   now defines thirteen tools.
+- **Constraints as data, checked mechanically** (F-14): three consecutive
+  review rounds found a hard-coded tunable that `CLAUDE.md`'s own grep
+  missed — array `=>` syntax only, then an allow-list left in place, then
+  plain `= N;` — because the rule lived only in prose and had to be
+  re-checked by hand each round. `docs/foundry.json` gains a `constraints`
+  array: `{ id, description, paths, exclude?, pattern, flags?, shouldMatch,
+  shouldNotMatch }`. `foundry_verify` self-tests every rule against its own
+  fixtures before scanning a single file — a fixture that disagrees fails
+  the rule outright, reported as `fixture` in the result — then scans every
+  *tracked* file (untracked and gitignored files are never touched) under
+  `paths` minus `exclude`, reporting each hit as `{ file, line, text }`.
+  Line-based only. This runs whole-repo on every `foundry_verify` call,
+  regardless of `files`. `templates/constraints.example.json` ships three
+  fully worked rules with fixtures covering multiple syntactic shapes. The
+  plan-build skill requires a `constraints` entry for every mechanically
+  checkable `CLAUDE.md` rule; the review-build skill treats a rule that
+  missed a real violation as a defect in the rule, closed by adding the
+  missed shape to `shouldMatch`; the implement skill treats a constraint
+  hit as a failing test. New `constraints` test suite.
 - **Per-command verify timeouts.** A `verify`, `extraVerify` or `build`
   entry in `docs/foundry.json` may now be `{ "cmd": "...", "timeoutMs": N }`
   instead of a bare string, so one slow end-to-end command can get a longer
