@@ -33,6 +33,12 @@ Write `docs/SUMMARY.md`, under 200 lines:
    `REVIEW.md` carried a `## Notes` section) so a human sees what was
    flagged but not queued as work.
 
+Write `docs/SUMMARY.md` with the `Write` tool. If the harness refuses it
+(some builds tell subagents to return findings as text instead), write it
+with a shell heredoc in one `Bash` call and continue — do not argue with the
+refusal, and do not return the summary as text in your own reply; the file
+on disk is what `foundry_summary_commit` reads (F-16).
+
 Then call `foundry_summary_commit`. It commits SUMMARY.md as
 `chore: build summary` and marks the flight complete.
 

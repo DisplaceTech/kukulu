@@ -43,6 +43,19 @@ All notable changes to this plugin. Format follows
   `foundry_next` report the halt like any other. The implement skill
   documents when to disable signing mid-run versus when to halt. The server
   now defines thirteen tools.
+- **Stage agents declare their tools explicitly** (F-16): all four
+  plugin agents (and the generated `foundry-<role>` files, which copy it
+  verbatim) now carry a `tools:` frontmatter list — the six general tools
+  plus exactly the `foundry` MCP tools that role actually calls, in the
+  plugin-prefixed form, never `Agent` (a stage never spawns). The
+  summarize, plan-build and implement skills also state a shell-heredoc
+  fallback for writing their deliverable file if the harness refuses the
+  `Write` tool, so a refusal costs no turn and the file is never returned
+  as text instead of being written. The plan-build skill's report must now
+  quote `docs/foundry.json` from disk (`cat docs/foundry.json`), not from
+  memory, and the planner sets `baseBranch` to the branch it is actually on
+  when it commits — closing the gap where a planner's report and the file
+  it wrote once disagreed (F-06).
 - **Constraints as data, checked mechanically** (F-14): three consecutive
   review rounds found a hard-coded tunable that `CLAUDE.md`'s own grep
   missed — array `=>` syntax only, then an allow-list left in place, then

@@ -104,6 +104,13 @@ for (const name of skillNames) {
   }
 }
 
+// A Write refusal should never cost a turn or a returned-as-text file
+// (F-16): every skill that writes a deliverable file states the heredoc
+// fallback.
+for (const name of ["summarize", "plan-build", "implement"]) {
+  like(read(`skills/${name}/SKILL.md`), /heredoc/, `skills/${name} states the shell-heredoc fallback for a refused Write`);
+}
+
 for (const name of agentNames) {
   const body = read(`agents/${name}.md`);
   const fm = frontmatter(body);
@@ -135,6 +142,25 @@ const fmGo = frontmatter(goFlight);
 const allowed = String(fmGo["allowed-tools"]).split(",").map((s) => s.trim());
 const toolNames = Array.from(serverSrc.matchAll(/name: "(foundry_[a-z_]+)"/g), (m) => m[1]);
 eq(toolNames.length, 13, "the server defines thirteen tools");
+
+// Every stage agent's own tool set is explicit (F-16): no agent is left to
+// discover by trial and error what it is allowed to call.
+for (const name of agentNames) {
+  const fm = frontmatter(read(`agents/${name}.md`));
+  ok(typeof fm.tools === "string" && fm.tools.length > 0, `agents/${name} declares a tools: list`);
+  const tools = fm.tools.split(",").map((s) => s.trim());
+  for (const general of ["Read", "Write", "Edit", "Bash", "Grep", "Glob"]) {
+    ok(tools.includes(general), `agents/${name}'s tools include ${general}`);
+  }
+  ok(!tools.includes("Agent"), `agents/${name} cannot spawn further agents`);
+  const mcpTools = tools.filter((t) => t.startsWith("mcp__"));
+  ok(mcpTools.length > 0, `agents/${name} names at least one foundry MCP tool`);
+  for (const t of mcpTools) {
+    ok(t.startsWith("mcp__plugin_foundry_foundry__"), `agents/${name}'s MCP tool ${t} uses the plugin-prefixed form`);
+    ok(toolNames.includes(t.replace("mcp__plugin_foundry_foundry__", "")), `agents/${name}'s MCP tool ${t} actually exists`);
+  }
+  ok(mcpTools.some((t) => t.endsWith("foundry_status")), `agents/${name} can call foundry_status to re-orient itself`);
+}
 // A plugin-shipped MCP server's tools are exposed as
 // mcp__plugin_<plugin>_<server>__<tool> (verified with --plugin-dir), not as
 // the bare mcp__<server>__<tool> a project .mcp.json would give. The
@@ -233,6 +259,7 @@ for (const heading of [
   ok(template.includes(heading), `the SPEC template keeps "${heading}"`);
 }
 like(read("skills/plan-build/SKILL.md"), /⚠️ ASSUMPTION/, "the planner knows the template's assumption marker");
+like(read("skills/plan-build/SKILL.md"), /cat\s+docs\/foundry\.json/, "the planner is told to quote foundry.json from disk, not from memory, in its report (F-06)");
 like(template, /⚠️ ASSUMPTION/, "the template explains the assumption marker");
 
 // ---------------------------------------------------------------- routing config templates

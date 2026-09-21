@@ -65,10 +65,14 @@ Repeat until `foundry_task_next` returns `{ done: true }`:
 
 ## Phase-end tasks
 
-The last task of each phase pushes the branch and records what a human must
-check by hand. If the repo has no `origin` remote, skip the push and put
-`Push: no remote configured` in the log. Put `Manual check: NOT VERIFIED
-(human)` in the log. Do not wait for anyone to look at it.
+The last task of each phase pushes the branch, if this run's policies say
+`push=on` (stated in your prompt) and a remote exists, and records what a
+human must check by hand. `foundry_run_finish` will push again at the very
+end regardless, so a phase-end push is only there to let a human watch a
+long multi-phase run land as it goes. If policies say `push=off`, put
+`Push: skipped (policy)` in the log instead; if there is no `origin`
+remote, put `Push: no remote configured`. Put `Manual check: NOT VERIFIED
+(human)` in the log either way. Do not wait for anyone to look at it.
 
 ## Files you did not create
 
@@ -133,7 +137,11 @@ When `foundry_task_next` returns `{ done: true }`:
    - What a human must check by hand, per phase.
    - Anything you would tell a reviewer who has not seen this code.
    If this is a review-fix round, rewrite only the `## Round N` section of
-   HANDOFF.md rather than the whole file.
+   HANDOFF.md rather than the whole file. Write it with the `Write` tool; if
+   the harness refuses (some builds tell subagents to return findings as
+   text instead), write it with a shell heredoc in one `Bash` call and
+   continue — do not argue with the refusal, and do not return it as text
+   in your own reply (F-16).
 3. Call `foundry_run_finish`. It commits HANDOFF.md, pushes and opens a draft
    PR if it can, disarms the Stop hook, and returns the handoff summary.
 4. Print one final message that starts with `READY FOR REVIEW` and contains

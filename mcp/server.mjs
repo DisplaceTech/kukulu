@@ -437,7 +437,9 @@ function renderAgentFile(role, resolved, permissionMode) {
   const fm = agent.frontmatter;
   const lines = ["---", `name: foundry-${role}`, `description: ${yamlScalar(fm.description)}`, `model: ${resolved.model}`];
   if (resolved.effort !== undefined) lines.push(`effort: ${resolved.effort}`);
-  lines.push(`permissionMode: ${permissionMode}`, "skills:");
+  lines.push(`permissionMode: ${permissionMode}`);
+  if (fm.tools) lines.push(`tools: ${fm.tools}`);
+  lines.push("skills:");
   for (const s of fm.skills || []) lines.push(`  - ${s}`);
   lines.push(`color: ${fm.color}`, "---");
   const body = agent.body.replace(/^\n+/, "").replace(/\s+$/, "") + "\n";

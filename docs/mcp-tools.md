@@ -411,10 +411,10 @@ before its loop; see [routing.md](./routing.md) for the full precedence.
 1. Resolves the routing config (plugin defaults < global file < profile <
    `docs/foundry.json` `roles`), per role, per key.
 2. Renders each role's agent file — frontmatter copied from the plugin's own
-   `agents/<role>.md` (`description`, `skills`, `color`), plus the resolved
-   `model`, `effort` (only when the model is a known Anthropic alias or a
-   `claude-*` id) and `permissionMode` — and writes it only when the
-   rendered text differs from what is already on disk.
+   `agents/<role>.md` (`description`, `tools`, `skills`, `color`), plus the
+   resolved `model`, `effort` (only when the model is a known Anthropic
+   alias or a `claude-*` id) and `permissionMode` — and writes it only when
+   the rendered text differs from what is already on disk.
 3. Ensures the MCP allow rule (`{ "permissions": { "allow":
    ["mcp__plugin_foundry_foundry"] } }`) is covered by either
    `.claude/settings.json` or `.claude/settings.local.json` (F-03):

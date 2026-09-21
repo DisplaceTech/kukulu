@@ -202,7 +202,20 @@ examples and [docs/operations.md](../../docs/operations.md#constraints).
 
 ## When you finish
 
+Write `docs/PLAN.md`, `docs/PROGRESS.md`, `docs/foundry.json` and
+`CLAUDE.md` with the `Write` tool. If the harness refuses one (some builds
+tell subagents to return findings as text instead), write it with a shell
+heredoc in one `Bash` call and continue — do not argue with the refusal,
+and do not return the file's content as text in your own reply (F-16).
+
+Set `docs/foundry.json`'s `baseBranch` to the branch you are actually on
+when you commit, and say so in your report — do not assume it is `main`.
 Commit PLAN.md, PROGRESS.md, foundry.json and CLAUDE.md as
-`plan: derive build plan from SPEC`. Report: number of tasks per phase, the
-decisions you made, and the spec issues you found. Do not start
-implementation.
+`plan: derive build plan from SPEC`.
+
+Report: number of tasks per phase, the decisions you made, and the spec
+issues you found. Quote `docs/foundry.json` verbatim from disk (`cat
+docs/foundry.json`, not from memory) in your report, and state the
+`baseBranch` and `branchPrefix` it actually contains — a report that
+disagrees with the file it just wrote is worse than no report (F-06). Do
+not start implementation.

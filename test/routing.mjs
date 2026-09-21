@@ -75,6 +75,7 @@ const cfgDir = () => mkDir("foundry-cfg-");
       eq(fm.effort, plugin.frontmatter.effort, `${role}'s effort matches the plugin default`);
       eq(fm.permissionMode, "acceptEdits", `${role}'s permissionMode defaults to acceptEdits`);
       eq((fm.skills || []).join(","), (plugin.frontmatter.skills || []).join(","), `${role}'s skills match the plugin default`);
+      eq(fm.tools, plugin.frontmatter.tools, `${role}'s tools: list matches the plugin default exactly`);
       eq(fm.color, plugin.frontmatter.color, `${role}'s color matches the plugin default`);
       ok(body.startsWith(comment), `${role}'s body starts with the generated-by comment`);
       const expectedRest = plugin.body.replace(/^\n+/, "").replace(/\s+$/, "") + "\n";
