@@ -200,18 +200,77 @@ const FIX = {
   });
 }
 
-// ---------------------------------------------------------------- round cap
+// ---------------------------------------------------------------- convergence (F-13, F-15)
+
+/** `n` fix tasks, distinct titles, otherwise shaped like FIX. */
+const manyTasks = (n) => Array.from({ length: n }, (_, i) => ({ ...FIX, title: `Fix ${i + 1}` }));
+
+/**
+ * Drive a sequence of CHANGES REQUESTED rounds on `repo`, one call per entry
+ * in `counts` (the number of fix tasks that round). Stands in for a whole
+ * implement/review cycle between rounds: review_submit itself only requires
+ * `implemented: true` and a matching `Round:` line, not real task work.
+ */
+async function driveRounds(call, repo, counts) {
+  let last;
+  for (const [i, n] of counts.entries()) {
+    const round = i + 1;
+    writeFile(repo, "docs/REVIEW.md", `# Review\nRound: ${round}\n**Verdict**: CHANGES REQUESTED\n`);
+    setState(repo, { implemented: true });
+    last = await call("foundry_review_submit", { verdict: "CHANGES REQUESTED", tasks: manyTasks(n) });
+  }
+  return last;
+}
 
 {
-  const repo = reviewableRepo({ config: { maxRounds: 1 }, round: 1 });
+  const repo = reviewableRepo({ config: { maxRounds: 3 } });
   await withServer(repo, async ({ call }) => {
-    const r = await call("foundry_review_submit", { verdict: "CHANGES REQUESTED", tasks: [FIX] });
-    eq(r.round, 2, "the round still increments past the cap");
-    like(r.halted, /exceeds maxRounds=1/, "the flight records why it halted");
-    like(r.halted, /edit \.foundry\/state\.json/, "the halt message says how to resume");
+    const r = await driveRounds(call, repo, [15, 3, 2, 1]);
+    eq(r.halted, null, "findings shrinking every round never halts, even across four rounds with a maxRounds of 3");
+    eq(r.round, 4, "the round still counts up normally");
+  });
+}
+
+{
+  const repo = reviewableRepo({ config: { maxRounds: 2 } });
+  await withServer(repo, async ({ call }) => {
+    const r = await driveRounds(call, repo, [4, 4, 4]);
+    like(r.halted, /non-converging/, "three rounds that never shrink halt on the third");
+    like(r.halted, /reaching maxRounds=2/, "the message names the exceeded cap");
+    like(r.halted, /findings per round: 4 → 4 → 4/, "the message shows the trail of counts");
     const n = await call("foundry_next");
-    eq(n.stage, "halt", "the next stage is a halt, not another implement");
+    eq(n.stage, "halt", "the flight now halts");
     eq(n.reason, r.halted, "the halt reason is the one review_submit recorded");
+  });
+}
+
+{
+  const repo = reviewableRepo({ config: { maxRounds: 100, maxRoundsHard: 2 } });
+  await withServer(repo, async ({ call }) => {
+    const r = await driveRounds(call, repo, [10, 5, 2]);
+    like(r.halted, /hard cap maxRoundsHard=2/, "the hard cap fires on round 3 even while every round is converging, since maxRounds=100 would never trip");
+  });
+}
+
+{
+  const repo = reviewableRepo();
+  await withServer(repo, async ({ call }) => {
+    const r1 = await call("foundry_review_submit", { verdict: "CHANGES REQUESTED", tasks: manyTasks(2) });
+    eq(r1.halted, null, "round 1 is always allowed; there is nothing to compare it against yet");
+    let s = await call("foundry_status");
+    eq(s.state.rounds.length, 1, "state.rounds records the submission");
+    eq(s.state.rounds[0].fixTasks, 2, "...with its fix-task count");
+    eq(s.state.rounds[0].verdict, "CHANGES REQUESTED", "...and its verdict");
+    eq(s.state.rounds[0].nonConverging, false, "round 1 is never marked non-converging");
+    ok(s.state.rounds[0].at, "...and a timestamp");
+
+    writeFile(repo, "docs/REVIEW.md", "# Review\nRound: 2\n**Verdict**: APPROVED\n");
+    setState(repo, { implemented: true });
+    await call("foundry_review_submit", { verdict: "APPROVED" });
+    s = await call("foundry_status");
+    eq(s.state.rounds.length, 2, "an approval is recorded in the history too");
+    eq(s.state.rounds[1].verdict, "APPROVED", "...with its own verdict");
+    eq(s.state.rounds[1].fixTasks, 0, "...and no fix tasks, since an approval can carry none");
   });
 }
 

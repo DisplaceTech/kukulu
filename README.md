@@ -277,12 +277,18 @@ spinning.
 ## Resuming and halting
 
 Everything is on disk and committed, so `/foundry:go-flight` can be re-run from
-any point: `foundry_next` reads the state and continues. Two things stop a
-flight on purpose — a review round past `maxRounds`, and an explicit `halted`
-value in `.foundry/state.json`. Both want a human. Raise `maxRounds` in
-`docs/foundry.json`, clear `halted`, and run `/foundry:go-flight` again.
-[docs/operations.md](./docs/operations.md) has the rest of the runbook,
-including what each failure looks like and how to unstick it.
+any point: `foundry_next` reads the state and continues. Three things stop a
+flight on purpose, and all of them write an explicit `halted` value in
+`.foundry/state.json`: a review round reaching `maxRoundsHard` regardless of
+how well it's going, review findings that stop shrinking for `maxRounds`
+rounds running (F-13, F-15 — a flight whose findings go 15 → 3 → 2 → 1 is
+never penalised for taking rounds, only one that stops improving is), and
+`foundry_run_halt`, which an implementer calls for an operator-level problem
+it cannot resolve itself (F-05). All three want a human. Raise `maxRounds` or
+`maxRoundsHard` in `docs/foundry.json` as appropriate, clear `halted`, and
+run `/foundry:go-flight` again. [docs/operations.md](./docs/operations.md)
+has the rest of the runbook, including what each failure looks like and how
+to unstick it.
 
 ## Repo layout
 

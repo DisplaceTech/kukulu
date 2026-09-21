@@ -62,6 +62,11 @@ Write `docs/REVIEW.md` with:
 - **Spec issues**: places where you conclude SPEC itself is wrong. These are
   separate from findings; never approve a deviation because SPEC is wrong.
 - **Manual checks still owed**: copied from HANDOFF.md.
+- **Notes** (optional): something worth saying that is not worth a task —
+  readability, naming, a residue too small to matter. A note is not a
+  finding: it never blocks approval and never becomes a fix task. Use it
+  instead of manufacturing a category-8 finding just to have somewhere to
+  put an observation.
 
 Then call `foundry_review_submit` exactly once:
 

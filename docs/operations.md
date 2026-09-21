@@ -82,9 +82,15 @@ session, and a subagent that errored out. It is not the answer to a halt.
 
 Three things halt a flight on purpose.
 
-**Round cap.** `foundry_review_submit` writes a `halted` reason when the new
-round exceeds `maxRounds` (default 3). The reviewer has now asked for changes
-three times; the pipeline's opinion is that a human should look at why.
+**Round cap.** `foundry_review_submit` writes a `halted` reason under either
+of two conditions (F-13, F-15): the round count reaches `maxRoundsHard`
+(default 6) regardless of how well the rounds are going, or the number of
+*non-converging* rounds — a round whose fix-task count did not shrink from
+the one before it — reaches `maxRounds` (default 3). A flight whose findings
+go 15 → 3 → 2 → 1 never trips the soft cap, however many rounds that takes;
+one that goes 4 → 4 → 4 does, on the third round, because none of them
+improved on the last. `foundry_status`'s `state.rounds` has the count for
+every round so far, and the halt message includes the trail.
 
 ```bash
 # read the reviews first — docs/REVIEW.md is overwritten each round,
@@ -93,8 +99,9 @@ git log --oneline --grep '^review:'
 git show <sha>:docs/REVIEW.md
 ```
 
-To continue anyway: raise `maxRounds` in `docs/foundry.json`, set `"halted":
-null` in `.foundry/state.json`, commit both, and re-run the flight.
+To continue anyway: raise `maxRounds` (or `maxRoundsHard`, whichever
+tripped) in `docs/foundry.json`, set `"halted": null` in
+`.foundry/state.json`, commit both, and re-run the flight.
 
 **Missing spec.** No `docs/SPEC.md` means there is nothing to build from. Write
 one; see [writing-specs.md](./writing-specs.md).
@@ -159,6 +166,7 @@ parse. Edit it between stages, not during one.
   "baseBranch": "main",
   "branchPrefix": "build/",
   "maxRounds": 3,
+  "maxRoundsHard": 6,
   "commandTimeoutMs": 600000,
   "guardCap": 60,
   "policies": { "signing": "auto", "push": true, "pr": "draft" }
@@ -172,7 +180,8 @@ parse. Edit it between stages, not during one.
 | `build` | `[]` | Recorded for the plan's use; the MCP does not run it |
 | `baseBranch` | `main` | Branch runs start from, and the merge-base reported as `base` |
 | `branchPrefix` | `build/` | Prefix for run branches (`build/2026-09-18`, `-2`, …) |
-| `maxRounds` | `3` | Review rounds allowed before the flight halts |
+| `maxRounds` | `3` | Non-converging review rounds allowed before the flight halts; a round whose fix-task count did not shrink from the last one counts against this |
+| `maxRoundsHard` | `6` | Absolute review-round ceiling, regardless of convergence |
 | `commandTimeoutMs` | `600000` | Per-command timeout for `foundry_verify` |
 | `guardCap` | `60` | Re-blocks since the last task state change before the implement guard gives up; carried into `.foundry/implement.lock` at `foundry_run_start` and wins over `FOUNDRY_GUARD_CAP` |
 | `policies.signing` | `"auto"` | `"off"` disables commit signing for the run; `"required"` refuses to start unless a real signed commit succeeds; `"auto"` uses signing when it works and falls back to off, recording why, when it does not |

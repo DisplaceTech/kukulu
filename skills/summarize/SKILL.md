@@ -24,8 +24,14 @@ Write `docs/SUMMARY.md`, under 200 lines:
    are edits the human should make to SPEC.md.
 6. **Manual checks owed**: the consolidated list, per phase, with what to
    look for.
-7. **Review history**: one line per round — findings count, fix tasks, and
-   whether any finding recurred.
+7. **Review history**: read `foundry_status`'s `state.rounds` — one recorded
+   entry per submission, in order, each with `round`, `fixTasks`,
+   `unblocked`, `verdict` and whether it was `nonConverging`. Render it as
+   one line per round: findings count, fix tasks, and whether any finding
+   recurred (a task id reappearing in consecutive rounds' `REVIEW.md`
+   files). Note any notes-only approval (an `APPROVED` round whose
+   `REVIEW.md` carried a `## Notes` section) so a human sees what was
+   flagged but not queued as work.
 
 Then call `foundry_summary_commit`. It commits SUMMARY.md as
 `chore: build summary` and marks the flight complete.

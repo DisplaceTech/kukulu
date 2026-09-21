@@ -334,16 +334,20 @@ Record a verdict. Call it exactly once per review.
 
 `unblock` also accepts bare id strings, which get a default reason.
 
-**Does, for `APPROVED`:** records the verdict, commits `REVIEW.md` as
-`review: approved`, and pushes the branch per `policies.push` (F-18).
+**Does, for `APPROVED`:** records the verdict, appends an entry to
+`state.rounds`, commits `REVIEW.md` as `review: round N approved`, and
+pushes the branch per `policies.push` (F-18).
 
 **Does, for `CHANGES REQUESTED`:** assigns `R<N>-<nn>` ids, appends
 `## Review fixes (round N)` to `PLAN.md` in task format, appends the checkbox
 lines to `PROGRESS.md` above `## Log`, resets unblocked tasks to `[ ]` with
-their reasons logged, bumps the round, commits everything as
-`review: round N`, and pushes the branch per `policies.push`. If the new
-round exceeds `maxRounds` it also writes a `halted` reason into
-`.foundry/state.json`, which stops the next flight.
+their reasons logged, bumps the round, appends an entry to `state.rounds`,
+commits everything as `review: round N`, and pushes the branch per
+`policies.push`. Halts (writes a `halted` reason into `.foundry/state.json`,
+which stops the next flight) when the new round reaches `maxRoundsHard`, or
+when the count of non-converging rounds so far reaches `maxRounds` — see
+[architecture.md](./architecture.md#review-rounds) for exactly what
+"non-converging" means (F-13, F-15).
 
 **Returns:** `{ verdict, round, commit, push }` for an approval;
 `{ verdict, round, fixTasks, unblocked, commit, halted, counts, push }` for

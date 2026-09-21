@@ -206,14 +206,17 @@ for (const round of [0, 1, 5]) {
 
 // -------------------------------------------------------------- round caps
 
+// The round-cap decision belongs solely to foundry_review_submit (V3-10);
+// next() never re-derives it from round/maxRounds — open tasks past a round
+// review_submit did *not* itself halt are still just the next implement
+// stage, exactly like any other round. See test/review.mjs for the actual
+// convergence and hard-cap halting behaviour.
 {
   const repo = plannedRepo({ config: { maxRounds: 2 } });
   setState(repo, { round: 3 });
   await withServer(repo, async ({ call }) => {
     const n = await call("foundry_next");
-    eq(n.stage, "halt", "a round past maxRounds with open tasks → halt");
-    like(n.reason, /maxRounds=2/, "the halt reason quotes the configured cap");
-    like(n.reason, /human intervention required/, "the halt reason says a human is needed");
+    eq(n.stage, "implement", "open tasks send the flight to implement regardless of round or maxRounds; only state.halted can stop it");
   });
 }
 

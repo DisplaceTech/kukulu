@@ -46,6 +46,17 @@ All notable changes to this plugin. Format follows
 
 ### Changed
 
+- **Converging review rounds no longer halt the flight** (F-13, F-15): every
+  round used to count against `maxRounds` regardless of whether findings
+  were shrinking, so a flight whose findings went 15 → 3 → 2 could halt on
+  a round that was, by every measure, converging. `maxRounds` (default 3)
+  now bounds *non-converging* rounds only — a round whose fix-task count
+  did not shrink from the round before it; round 1 is always allowed. A
+  new `maxRoundsHard` (default 6) is the absolute ceiling regardless of
+  convergence. `state.rounds` records every submission
+  (`{ round, fixTasks, unblocked, verdict, nonConverging, at }`), and the
+  halt message shows the trail of counts. The summarize skill's review
+  history now reads it directly instead of reconstructing it from git.
 - **The MCP owns the review round number** (F-10, F-11): `foundry_status`
   and `foundry_next` expose `reviewRound` (always `round + 1`), and the
   review prompt states it explicitly ("This review is round N") instead of

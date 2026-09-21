@@ -235,14 +235,29 @@ For `CHANGES REQUESTED`, this is the only way findings become work:
    `## Log`.
 5. Tasks named in `unblock` are reset to `[ ]` with the reviewer's reason in
    the log.
-6. Round, verdict and — if the cap is exceeded — the halt reason are written to
-   `.foundry/state.json`.
+6. Round, verdict, a new entry in `state.rounds` and — if a cap is reached —
+   the halt reason are written to `.foundry/state.json`.
 7. All of it lands in one commit, `review: round N`, then pushed per
    `policies.push` (F-18).
 
 An `APPROVED` verdict commits `REVIEW.md` as `review: round N approved` and
 pushes the same way; `round` itself does not change, since nothing new was
-queued.
+queued. It still appends to `state.rounds`, with zero fix tasks, so the
+history is complete.
+
+**Convergence, not just a count (F-13, F-15).** `state.rounds` is
+`[{ round, fixTasks, unblocked, verdict, nonConverging, at }, …]`, one entry
+per submission. A `CHANGES REQUESTED` round is `nonConverging` when its
+`fixTasks + unblocked` is at least the previous `CHANGES REQUESTED` round's —
+round 1 has nothing to compare against, so it is never non-converging.
+`foundry_review_submit` halts when the round number reaches
+`maxRoundsHard` (default 6, an absolute ceiling), or when the count of
+non-converging rounds so far reaches `maxRounds` (default 3) — whichever
+fires first. A flight whose findings shrink every round, 15 → 3 → 2 → 1,
+never trips the soft cap no matter how many rounds that takes; one that
+goes 4 → 4 → 4 does, on the third round, because none of those rounds
+improved on the one before it. The halt message includes the trail of
+counts so a human can see the shape of the problem immediately.
 
 The round-trip matters: what the reviewer submits as structured JSON is
 rendered into PLAN.md and parsed straight back out by `foundry_task_next`. A
@@ -252,7 +267,7 @@ fix task is a task, and it goes through the same test-first loop as any other.
 
 | Path | Committed | Contents |
 |---|---|---|
-| `.foundry/state.json` | yes | `round`, `implemented`, `reviewed`, `verdict`, `summarized`, `halted`, `preexistingUntracked`, `policies`, `signing` |
+| `.foundry/state.json` | yes | `round`, `implemented`, `reviewed`, `verdict`, `summarized`, `halted`, `preexistingUntracked`, `policies`, `signing`, `rounds` |
 | `.foundry/implement.lock` | no (gitignored) | JSON `{ count, armedAt, round }` — the guard's re-block counter (a legacy bare number still reads back correctly) |
 | `docs/PROGRESS.md` | yes | task checkboxes and the per-task log |
 | `docs/foundry.json` | yes | `verify`, `extraVerify`, `build`, `baseBranch`, `branchPrefix`, `maxRounds`, `commandTimeoutMs`, `roles`, `permissionMode` |

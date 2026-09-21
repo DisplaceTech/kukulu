@@ -167,6 +167,7 @@ function cfg() {
     baseBranch: c.baseBranch || "main",
     branchPrefix: c.branchPrefix || "build/",
     maxRounds: Number.isInteger(c.maxRounds) ? c.maxRounds : 3,
+    maxRoundsHard: Number.isInteger(c.maxRoundsHard) ? c.maxRoundsHard : 6,
     commandTimeoutMs: c.commandTimeoutMs || 10 * 60 * 1000,
     guardCap: Number.isInteger(c.guardCap) ? c.guardCap : 60,
     policies: {
@@ -556,6 +557,7 @@ const DEFAULT_STATE = {
   preexistingUntracked: [],
   policies: { signing: "auto", push: true, pr: "draft" },
   signing: null,
+  rounds: [],
 };
 
 function loadState() {
@@ -826,9 +828,9 @@ function next() {
     return stage("plan", "no plan on disk (docs/PLAN.md, docs/PROGRESS.md and docs/foundry.json are all required)");
   }
   const open = s.counts.open;
-  if (open > 0 && st.round > c.maxRounds) {
-    return stage("halt", `review round ${st.round} exceeds maxRounds=${c.maxRounds} with ${open} fix task(s) still open; human intervention required`);
-  }
+  // The round cap decision is made once, by foundry_review_submit, and
+  // recorded as state.halted (checked above) — next() never re-derives it,
+  // so a converging flight is never second-guessed here.
   if (open > 0) return stage("implement", `${open} open task(s) in docs/PROGRESS.md`);
   if (s.lockPresent) return stage("implement", "implementation lock present but no open tasks: the run stopped before foundry_run_finish; finish the handoff");
   if (!st.implemented) return stage("implement", "no handoff recorded for this round");
@@ -1179,6 +1181,7 @@ function reviewSubmit({ verdict, tasks = [], unblock = [] }) {
   if (verdict === "APPROVED") {
     if (tasks.length || unblock.length) throw new ToolError("an APPROVED verdict cannot carry fix tasks or unblocks");
     st.reviewed = true; st.verdict = "APPROVED";
+    st.rounds = [...st.rounds, { round: N, fixTasks: 0, unblocked: 0, verdict: "APPROVED", at: new Date().toISOString() }];
     saveState(st);
     const sha = gitCommitIfChanged([P.review, P.state], `review: round ${N} approved`);
     const push = pushBranch(gitFacts().branch, st.policies.push);
@@ -1216,8 +1219,26 @@ function reviewSubmit({ verdict, tasks = [], unblock = [] }) {
     unblocked.push(id);
   }
   writeProgress(pr);
+
+  // Convergence: a round is non-converging when it queues at least as much
+  // work as the round before it. Round 1 has nothing to compare against, so
+  // it is always allowed. maxRounds bounds how many non-converging rounds a
+  // flight tolerates; maxRoundsHard is the absolute ceiling regardless
+  // (F-13, F-15) — three rounds that shrink 15 → 3 → 2 never hit either.
+  const thisCount = ids.length + unblocked.length;
+  const priorFixRounds = st.rounds.filter((r) => r.verdict === "CHANGES REQUESTED");
+  const prevRound = priorFixRounds[priorFixRounds.length - 1];
+  const nonConverging = Boolean(prevRound) && thisCount >= prevRound.fixTasks + prevRound.unblocked;
+  st.rounds = [...st.rounds, { round: N, fixTasks: ids.length, unblocked: unblocked.length, verdict: "CHANGES REQUESTED", nonConverging, at: new Date().toISOString() }];
+  const nonConvergingSoFar = st.rounds.filter((r) => r.nonConverging).length;
+  const trail = st.rounds.filter((r) => r.verdict === "CHANGES REQUESTED").map((r) => r.fixTasks + r.unblocked).join(" → ");
+
   st.round = N; st.implemented = false; st.reviewed = true; st.verdict = "CHANGES REQUESTED";
-  if (N > c.maxRounds) st.halted = `review round ${N} exceeds maxRounds=${c.maxRounds}; a human must decide whether to continue (edit .foundry/state.json to clear 'halted' and raise maxRounds in docs/foundry.json)`;
+  if (N > c.maxRoundsHard) {
+    st.halted = `review round ${N} exceeds the hard cap maxRoundsHard=${c.maxRoundsHard} (findings per round: ${trail}); a human must decide whether to continue (edit .foundry/state.json to clear 'halted' and raise maxRoundsHard in docs/foundry.json)`;
+  } else if (nonConvergingSoFar >= c.maxRounds) {
+    st.halted = `round ${N} is non-converging (findings per round: ${trail}), the ${nonConvergingSoFar}th non-converging round, reaching maxRounds=${c.maxRounds}; a human must decide whether to continue (edit .foundry/state.json to clear 'halted' and raise maxRounds in docs/foundry.json)`;
+  }
   saveState(st);
   const sha = gitCommitIfChanged([P.review, P.plan, P.progress, P.state], `review: round ${N}`);
   const push = pushBranch(gitFacts().branch, st.policies.push);
