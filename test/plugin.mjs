@@ -81,9 +81,10 @@ for (const name of skillNames) {
   eq(fm.name, name, `skills/${name}'s name matches its directory`);
   ok(fm.description && fm.description.length > 30, `skills/${name} has a usable description`);
   if (name === "go-flight") {
-    // The controller is invoked deliberately and pins its own model/effort;
-    // it is a skill in its own right, not a stage preloaded into an agent.
-    eq(fm["disable-model-invocation"], true, `skills/${name} is invoked deliberately, never guessed into`);
+    // The controller makes no engineering decisions itself, so it carries no
+    // invocation restriction: a person or another agent can ask for it by
+    // name, and the literal slash command still works too.
+    eq(fm["disable-model-invocation"], undefined, `skills/${name} is model-invocable, not restricted to the literal command`);
     ok(MODELS.includes(fm.model), `skills/${name} pins a known model (${fm.model})`);
     ok(EFFORTS.includes(fm.effort), `skills/${name} pins an effort level (${fm.effort})`);
   } else {
@@ -153,6 +154,8 @@ ok(
   "the flight controller cannot touch the tools that change project state",
 );
 for (const name of agentNames) like(goFlight, new RegExp(`foundry:${name}`), `go-flight names foundry:${name}`);
+like(goFlight, /notification/, "go-flight describes the loop as event-driven, not a blocking wait");
+like(goFlight, /do not poll/, "go-flight says not to poll while a stage is running");
 
 // ---------------------------------------------------------------- cross-references
 

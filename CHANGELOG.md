@@ -4,6 +4,16 @@ All notable changes to this plugin. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- `go-flight` is model-invocable (F-01): `disable-model-invocation` is gone,
+  so asking Claude to run the flight works alongside the literal
+  `/foundry:go-flight` command. The loop section now describes an `Agent`
+  call as event-driven rather than a blocking wait, since some harnesses
+  return immediately and deliver the result as a later notification (F-04).
+
 ## [0.2.0] — 2026-09-19
 
 ### Added

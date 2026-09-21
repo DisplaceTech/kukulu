@@ -12,9 +12,13 @@ claude
 > /foundry:go-flight
 ```
 
-The controller prints the stage it is entering, delegates, and repeats. When it
-stops it prints the final stage, the round count, the branch, and the path to
-`docs/SUMMARY.md` if one exists.
+The controller is model-invocable, so asking for it by name works too; the
+slash command is just the documented shortcut. It prints the stage it is
+entering, delegates, and repeats. Each stage is one `Agent` call that either
+blocks until the stage finishes or returns at once with the result delivered
+later as a completion notification — the controller treats both the same
+way and never polls in between. When it stops it prints the final stage, the
+round count, the branch, and the path to `docs/SUMMARY.md` if one exists.
 
 An implementer that hits a permission prompt sits there until the guard's cap
 trips, hours later, having done nothing. The generated `foundry-<role>`

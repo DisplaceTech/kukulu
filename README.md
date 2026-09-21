@@ -46,6 +46,10 @@ You need Node ≥ 22, git, and Claude Code. Nothing to `npm install`.
    > /foundry:go-flight
    ```
 
+   `/foundry:go-flight` is the documented entry point, but the controller is
+   model-invocable too — asking Claude to "run the foundry flight" reaches
+   the same instructions.
+
 5. **Read `docs/SUMMARY.md`, then merge the branch yourself.** Foundry never
    merges.
 

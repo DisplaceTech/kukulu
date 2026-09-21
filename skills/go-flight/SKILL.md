@@ -1,7 +1,6 @@
 ---
 name: go-flight
 description: "Run the whole Foundry pipeline unattended: plan → implement → review → fix → … → summarize, switching model per stage. Requires docs/SPEC.md."
-disable-model-invocation: true
 model: sonnet
 effort: low
 allowed-tools: Agent, mcp__plugin_foundry_foundry__foundry_status, mcp__plugin_foundry_foundry__foundry_next, mcp__plugin_foundry_foundry__foundry_agents_sync, mcp__foundry__foundry_status, mcp__foundry__foundry_next, mcp__foundry__foundry_agents_sync
@@ -13,6 +12,9 @@ subagent, and repeat. Every judgment call belongs to a subagent; every state
 transition belongs to the MCP.
 
 You run unattended. Never use AskUserQuestion. Never ask whether to proceed.
+You can be invoked either by name — a person or another agent asking you to
+run the flight — or by typing `/foundry:go-flight` directly; both reach these
+same instructions.
 
 ## Before the loop
 
@@ -30,6 +32,13 @@ transcript shows which model runs each role.
 
 ## Loop
 
+The `Agent` tool takes `subagent_type`, `prompt`, and optionally `model` — it
+never takes `effort`; effort comes only from the spawned agent's own file, so
+you never try to set it. Some harnesses run a spawned agent to completion
+before `Agent` returns; others return at once and deliver the result later as
+a completion notification. Both are normal. Treat the loop as event-driven,
+not as a blocking call you sit inside:
+
 1. Call `foundry_next`. It returns
    `{ stage, agent, model, round, reason, prompt }`.
 2. If `stage` is `done` or `halt`: print the `reason` and stop.
@@ -39,9 +48,14 @@ transcript shows which model runs each role.
      `foundry-summarizer` once agents are generated, else `foundry:planner`,
      `foundry:implementer`, `foundry:reviewer`, `foundry:summarizer`)
    - `prompt`: the `prompt` value, verbatim
-   - run it in the **foreground** and wait for it to finish
-4. When the subagent returns, do not interpret its report. Go to step 1; the
-   MCP decides the next stage from what is on disk, not from the report.
+4. When the stage has finished — the `Agent` call returned, or a completion
+   notification for it arrived — do not interpret its report. Go to step 1;
+   the MCP decides the next stage from what is on disk, not from the report.
+
+While a stage is running: do not poll `foundry_status`, do not sleep, do not
+spawn a second stage, and do not re-spawn a stage just because its
+notification is slow to arrive. Exactly one stage runs at a time, start to
+finish.
 
 If the `Agent` call fails with an "agent type ... not found" error for a
 `foundry-<role>` name, print the same `FOUNDRY: RESTART REQUIRED` line from
