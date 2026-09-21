@@ -3,7 +3,7 @@ name: go-flight
 description: "Run the whole Foundry pipeline unattended: plan → implement → review → fix → … → summarize, switching model per stage. Requires docs/SPEC.md."
 model: sonnet
 effort: low
-allowed-tools: Agent, mcp__plugin_foundry_foundry__foundry_status, mcp__plugin_foundry_foundry__foundry_next, mcp__plugin_foundry_foundry__foundry_agents_sync, mcp__foundry__foundry_status, mcp__foundry__foundry_next, mcp__foundry__foundry_agents_sync
+allowed-tools: Agent, mcp__plugin_foundry_foundry__foundry_status, mcp__plugin_foundry_foundry__foundry_next, mcp__plugin_foundry_foundry__foundry_agents_sync, mcp__plugin_foundry_foundry__foundry_run_halt, mcp__foundry__foundry_status, mcp__foundry__foundry_next, mcp__foundry__foundry_agents_sync, mcp__foundry__foundry_run_halt
 ---
 
 You are the Foundry flight controller. You make no engineering decisions. You
@@ -71,9 +71,14 @@ finish.
 If the `Agent` call in step 4 fails with an "agent type ... not found" error
 for a `foundry-<role>` name, retry once with `subagent_type: fallbackAgent`
 and `model: model`. If that also fails, print the `FOUNDRY: RESTART
-REQUIRED` line above and stop. For any other failure, or if the subagent
-returns an error, call `foundry_status`, print it, and stop. Do not retry a
-stage yourself and do not attempt any part of a stage in your own context.
+REQUIRED` line above and stop. For any other failure spawning a stage, call
+`foundry_run_halt` with a one-sentence reason (e.g. "Agent spawn failed:
+<error>"), so the next `/foundry:go-flight` sees a clean `halt` instead of
+silently retrying against whatever broke; then print its result and stop.
+If the subagent itself returns an error, call `foundry_status`, print it,
+and stop — the stage's own tools already recorded what happened. Do not
+retry a stage yourself and do not attempt any part of a stage in your own
+context.
 
 ## When you stop
 

@@ -133,8 +133,33 @@ function loadConfig() {
   }
 }
 
+const SIGNING_POLICIES = ["auto", "off", "required"];
+const PR_POLICIES = ["draft", "none"];
+const POLICY_KEYS = ["signing", "push", "pr"];
+
+/** Validate `docs/foundry.json`'s `policies` block; throws, never defaults a bad value away. */
+function validatePolicies(policies) {
+  if (policies === undefined) return;
+  if (typeof policies !== "object" || policies === null || Array.isArray(policies)) {
+    throw new ToolError("docs/foundry.json 'policies' must be an object");
+  }
+  for (const key of Object.keys(policies)) {
+    if (!POLICY_KEYS.includes(key)) throw new ToolError(`docs/foundry.json policies has an unknown key '${key}'`);
+  }
+  if (policies.signing !== undefined && !SIGNING_POLICIES.includes(policies.signing)) {
+    throw new ToolError(`docs/foundry.json policies.signing must be one of ${SIGNING_POLICIES.join(", ")}`);
+  }
+  if (policies.push !== undefined && typeof policies.push !== "boolean") {
+    throw new ToolError("docs/foundry.json policies.push must be a boolean");
+  }
+  if (policies.pr !== undefined && !PR_POLICIES.includes(policies.pr)) {
+    throw new ToolError(`docs/foundry.json policies.pr must be one of ${PR_POLICIES.join(", ")}`);
+  }
+}
+
 function cfg() {
   const c = loadConfig() || {};
+  validatePolicies(c.policies);
   return {
     verify: c.verify || [],
     extraVerify: c.extraVerify || {},
@@ -144,6 +169,11 @@ function cfg() {
     maxRounds: Number.isInteger(c.maxRounds) ? c.maxRounds : 3,
     commandTimeoutMs: c.commandTimeoutMs || 10 * 60 * 1000,
     guardCap: Number.isInteger(c.guardCap) ? c.guardCap : 60,
+    policies: {
+      signing: c.policies?.signing ?? "auto",
+      push: c.policies?.push ?? true,
+      pr: c.policies?.pr ?? "draft",
+    },
   };
 }
 
@@ -516,7 +546,17 @@ function agentsSync() {
   };
 }
 
-const DEFAULT_STATE = { round: 0, implemented: false, reviewed: false, verdict: null, summarized: false, halted: null, preexistingUntracked: [] };
+const DEFAULT_STATE = {
+  round: 0,
+  implemented: false,
+  reviewed: false,
+  verdict: null,
+  summarized: false,
+  halted: null,
+  preexistingUntracked: [],
+  policies: { signing: "auto", push: true, pr: "draft" },
+  signing: null,
+};
 
 function loadState() {
   if (!exists(P.state)) return { ...DEFAULT_STATE };
@@ -698,6 +738,8 @@ function status() {
     state: st,
     round: st.round,
     preexistingUntracked: st.preexistingUntracked,
+    policies: st.policies,
+    signing: st.signing,
     reviewRoundsInPlan: reviewRoundCount(),
     branch: null,
     started: null,
@@ -756,6 +798,10 @@ function next() {
     const role = ROLE_OF_STAGE[name];
     return role ? routing.roles[role].model : null;
   };
+  // Read fresh from foundry.json rather than state, so the sentence is
+  // accurate even before this round's foundry_run_start has recorded
+  // state.policies (round 0, before the implementer's first call).
+  const policySentence = `Run policies: signing=${c.policies.signing}, push=${c.policies.push ? "on" : "off"}, pr=${c.policies.pr}.`;
   const stage = (name, reason, extra = {}) => {
     const info = agentInfo(name);
     return {
@@ -767,7 +813,7 @@ function next() {
       model: modelFor(name),
       round: st.round,
       reason,
-      prompt: PROMPTS[name] ? PROMPTS[name](st.round, s) : null,
+      prompt: PROMPTS[name] ? PROMPTS[name](st.round, s, policySentence) : null,
       ...extra,
     };
   };
@@ -796,13 +842,47 @@ function next() {
 const PROMPTS = {
   plan: () =>
     "Run the Foundry plan stage for this repository. Read docs/SPEC.md and everything else in docs/ in full, then produce docs/PLAN.md, docs/PROGRESS.md, docs/foundry.json and CLAUDE.md exactly as your plan-build instructions specify, commit them, and report. Do not write implementation code.",
-  implement: (round, s) =>
-    `Run the Foundry implement stage. ${round === 0 ? "This is the initial build." : `This is review-fix round ${round}; the open tasks are R${round}-* fix tasks queued by the reviewer.`} Call foundry_run_start, then loop on foundry_task_next until it reports done, then write docs/HANDOFF.md and call foundry_run_finish. You are unattended; never ask a question and never stop with open tasks. ${s.counts ? `${s.counts.open} task(s) are open.` : ""}`,
-  review: (round) =>
-    `Run the Foundry review stage for round ${round}. Review the whole build branch against docs/SPEC.md and docs/PLAN.md as your review-build instructions specify, write docs/REVIEW.md, and call foundry_review_submit exactly once with your verdict. Do not fix code yourself.`,
-  summarize: () =>
-    "Run the Foundry summarize stage. The review is APPROVED. Write docs/SUMMARY.md as your summarize instructions specify and call foundry_summary_commit. Do not merge.",
+  implement: (round, s, policies) =>
+    `Run the Foundry implement stage. ${round === 0 ? "This is the initial build." : `This is review-fix round ${round}; the open tasks are R${round}-* fix tasks queued by the reviewer.`} Call foundry_run_start, then loop on foundry_task_next until it reports done, then write docs/HANDOFF.md and call foundry_run_finish. You are unattended; never ask a question and never stop with open tasks. ${s.counts ? `${s.counts.open} task(s) are open.` : ""} ${policies}`,
+  review: (round, s, policies) =>
+    `Run the Foundry review stage for round ${round}. Review the whole build branch against docs/SPEC.md and docs/PLAN.md as your review-build instructions specify, write docs/REVIEW.md, and call foundry_review_submit exactly once with your verdict. Do not fix code yourself. ${policies}`,
+  summarize: (round, s, policies) =>
+    `Run the Foundry summarize stage. The review is APPROVED. Write docs/SUMMARY.md as your summarize instructions specify and call foundry_summary_commit. Do not merge. ${policies}`,
 };
+
+/**
+ * Prove signing works rather than assume it (F-05: a dry run is not
+ * enough — the actual signing agent has to produce a real signed object).
+ * Returns the outcome to record in state: `"on"`, `"off"`, `"none"` (not
+ * configured), or `"off (probe failed: <reason>)"` for `auto` falling back.
+ * Throws under `required` when signing is not configured or the probe fails.
+ */
+function probeSigning(signingPolicy) {
+  if (signingPolicy === "off") {
+    git(["config", "--local", "commit.gpgsign", "false"]);
+    return "off";
+  }
+  const configured = git(["config", "--get", "commit.gpgsign"], { allowFail: true }).out === "true";
+  if (!configured) {
+    if (signingPolicy === "required") {
+      throw new ToolError("policies.signing is 'required' but commit.gpgsign is not set; fix the signing agent or set policies.signing to 'off'");
+    }
+    return "none";
+  }
+  const probe = spawnSync("git", ["commit-tree", "-S", "HEAD^{tree}", "-m", "foundry signing probe"], {
+    cwd: ROOT,
+    encoding: "utf8",
+    timeout: 30_000,
+    env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+  });
+  if (probe.status === 0 && !probe.error) return "on";
+  const errLine = (probe.stderr || probe.stdout || probe.error?.message || "signing probe failed").trim().split("\n")[0] || "signing probe failed";
+  if (signingPolicy === "required") {
+    throw new ToolError(`policies.signing is 'required' but the signing probe failed: ${errLine}. Fix the signing agent or set policies.signing to 'off'.`);
+  }
+  git(["config", "--local", "commit.gpgsign", "false"]);
+  return `off (probe failed: ${errLine})`;
+}
 
 function runStart() {
   for (const [k, p] of Object.entries({ spec: P.spec, plan: P.plan, progress: P.progress, config: P.config })) {
@@ -817,7 +897,7 @@ function runStart() {
   let branch = g.branch;
   if (exists(P.lock) && pr.branch && !pr.branch.startsWith("(")) {
     resetLockCounter();
-    return { alreadyStarted: true, branch, counts: counts(pr.tasks), round: st.round };
+    return { alreadyStarted: true, branch, counts: counts(pr.tasks), round: st.round, policies: st.policies, signing: st.signing };
   }
   if (branch === c.baseBranch) {
     // Untracked files never block a run from starting: branching off HEAD
@@ -852,10 +932,12 @@ function runStart() {
   // a deliverable to commit, not debris to clean up, not a signal to act on
   // (F-09, F-17).
   st.preexistingUntracked = preexistingUntracked;
+  st.policies = c.policies;
+  st.signing = probeSigning(c.policies.signing);
   st.implemented = false; st.reviewed = false; st.verdict = null;
   saveState(st);
   const sha = gitCommitIfChanged([P.gitignore, P.progress, P.state], st.round === 0 ? "chore: start implementation run" : `chore: start review-fix round ${st.round}`);
-  return { alreadyStarted: false, branch, commit: sha, counts: counts(pr.tasks), round: st.round };
+  return { alreadyStarted: false, branch, commit: sha, counts: counts(pr.tasks), round: st.round, policies: st.policies, signing: st.signing };
 }
 
 function taskNext() {
@@ -993,10 +1075,14 @@ function runFinish() {
 
   let push = "skipped: no origin remote";
   let pr_url = null;
-  if (g.hasOrigin) {
+  if (!st.policies.push) {
+    push = "skipped: policy";
+  } else if (g.hasOrigin) {
     const p = git(["push", "-u", "origin", g.branch], { allowFail: true });
     push = p.ok ? "pushed" : `failed: ${p.err}`;
-    if (p.ok && spawnSync("gh", ["--version"], { encoding: "utf8" }).status === 0) {
+    if (p.ok && st.policies.pr === "none") {
+      pr_url = "skipped: policy";
+    } else if (p.ok && spawnSync("gh", ["--version"], { encoding: "utf8" }).status === 0) {
       const existing = spawnSync("gh", ["pr", "view", "--json", "url", "-q", ".url"], { cwd: ROOT, encoding: "utf8" });
       if (existing.status === 0 && existing.stdout.trim()) pr_url = existing.stdout.trim();
       else {
@@ -1012,6 +1098,25 @@ function runFinish() {
     branch: g.branch, base: g.base, head, handoffCommit, stateCommit, push, pr: pr_url, counts: cnt, round: st.round,
     readyLine: `READY FOR REVIEW — branch ${g.branch}, head ${head}, ${cnt.done} done / ${cnt.blocked} blocked / ${cnt.skipped} skipped of ${cnt.total}`,
   };
+}
+
+/**
+ * Stop a flight cleanly for an operator-level reason the implementer
+ * cannot resolve itself (F-05): a signing agent that died mid-run, a disk
+ * full, a verify command that cannot run at all, a base branch that
+ * vanished. Never resets or cleans the tree — whatever state the run is in
+ * stays exactly as it is for a human to look at.
+ */
+function runHalt({ reason }) {
+  if (!reason) throw new ToolError("reason is required");
+  const st = loadState();
+  st.halted = reason;
+  saveState(st);
+  if (exists(P.lock)) fs.unlinkSync(P.lock);
+  const commit = gitCommitIfChanged([P.state, P.progress], "chore: run halted");
+  const g = gitFacts();
+  const dirty = git(["status", "--porcelain"], { allowFail: true }).out !== "";
+  return { halted: reason, branch: g.branch, head: g.head, commit, dirty };
 }
 
 function formatTask(id, t) {
@@ -1103,7 +1208,13 @@ const TOOLS = [
   { name: "foundry_task_done", description: "Mark a task [x] and append its log entry stamped with HEAD's sha. Requires HEAD's commit subject to start with '<id>:' and a clean tree. Commits PROGRESS.md.", inputSchema: S({ id: { type: "string" }, log: { type: "string", description: "Log entry body, under 15 lines" } }, ["id", "log"]), fn: taskDone },
   { name: "foundry_task_block", description: "Give up on a task: hard-reset uncommitted changes, mark it [!], log BLOCKED: <reason>, commit PROGRESS.md.", inputSchema: S({ id: { type: "string" }, reason: { type: "string", description: "what you tried / what fails / what you think the fix is" } }, ["id", "reason"]), fn: taskBlock },
   { name: "foundry_verify", description: "Run the verify commands from docs/foundry.json, plus extraVerify commands for any path prefix the given files fall under. Returns per-command exit status and output tails.", inputSchema: S({ files: { type: "array", items: { type: "string" }, description: "Files touched by the task (optional)" } }), fn: verify },
-  { name: "foundry_run_finish", description: "End an implementation run: requires zero open tasks and docs/HANDOFF.md; commits it, pushes and opens a draft PR when possible, disarms the lock, records the round as implemented.", inputSchema: S({}), fn: runFinish },
+  { name: "foundry_run_finish", description: "End an implementation run: requires zero open tasks and docs/HANDOFF.md; commits it, pushes and opens a draft PR unless policies say otherwise, disarms the lock, records the round as implemented.", inputSchema: S({}), fn: runFinish },
+  {
+    name: "foundry_run_halt",
+    description: "Stop the flight for an operator-level reason the implementer cannot resolve (a dead signing agent, a full disk, a vanished base branch): records the reason, disarms the lock, commits state and PROGRESS.md if they changed. Never resets or cleans the tree.",
+    inputSchema: S({ reason: { type: "string", description: "why the flight cannot continue" } }, ["reason"]),
+    fn: runHalt,
+  },
   {
     name: "foundry_review_submit",
     description: "Record a review verdict. APPROVED commits REVIEW.md. CHANGES REQUESTED assigns R<N>-<nn> ids, appends '## Review fixes (round N)' to PLAN.md, appends checkbox lines to PROGRESS.md, resets unblocked tasks, and commits 'review: round N'.",

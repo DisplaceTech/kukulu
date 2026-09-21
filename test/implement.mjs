@@ -464,4 +464,120 @@ for (const missing of ["docs/SPEC.md", "docs/PLAN.md", "docs/PROGRESS.md", "docs
   }, noGh);
 }
 
+// ---------------------------------------------------------------- run policies
+
+{
+  const repo = plannedRepo();
+  await withServer(repo, async ({ call }) => {
+    const r = await call("foundry_run_start");
+    eq(r.policies.signing, "auto", "policies.signing defaults to auto");
+    eq(r.policies.push, true, "policies.push defaults to true");
+    eq(r.policies.pr, "draft", "policies.pr defaults to draft");
+    eq(r.signing, "none", "with commit.gpgsign unset (the test fixture's default), the outcome is none");
+    eq((await call("foundry_status")).policies.signing, "auto", "status reports the recorded policies");
+  });
+}
+
+for (const [bad, re] of [
+  [{ policies: { signing: "sometimes" } }, /policies\.signing must be one of/],
+  [{ policies: { push: "yes" } }, /policies\.push must be a boolean/],
+  [{ policies: { pr: "regular" } }, /policies\.pr must be one of/],
+  [{ policies: { branch: "x" } }, /policies has an unknown key 'branch'/],
+]) {
+  const repo = plannedRepo({ config: bad });
+  await withServer(repo, async ({ call }) => {
+    isError(await call("foundry_run_start"), re, `run_start refuses a malformed policies.${Object.keys(bad.policies)[0]}`);
+    isError(await call("foundry_status"), re, "...and so does status, since cfg() validates on every read");
+  });
+}
+
+{
+  const repo = plannedRepo({ config: { policies: { signing: "off" } } });
+  git(repo, ["config", "commit.gpgsign", "true"]); // as if a global/local signing setup were already active
+  await withServer(repo, async ({ call }) => {
+    const r = await call("foundry_run_start");
+    eq(r.signing, "off", "policies.signing: off records off without even probing");
+    eq(git(repo, ["config", "--local", "commit.gpgsign"]), "false", "...and disables signing locally");
+  });
+}
+
+{
+  // commit.gpgsign true with no working signer: the probe has to actually
+  // attempt a signed commit, not just check whether signing is configured.
+  const repo = plannedRepo({ config: { policies: { signing: "required" } } });
+  git(repo, ["config", "commit.gpgsign", "true"]);
+  git(repo, ["config", "gpg.format", "openpgp"]); // override the host's own signing format so the probe below is deterministic
+  git(repo, ["config", "gpg.program", "/nonexistent-signing-agent"]);
+  await withServer(repo, async ({ call }) => {
+    isError(await call("foundry_run_start"), /policies\.signing is 'required'.*signing probe failed/s, "required signing that cannot actually sign refuses to start");
+  });
+}
+
+{
+  const repo = plannedRepo({ config: { policies: { signing: "auto" } } });
+  git(repo, ["config", "commit.gpgsign", "true"]);
+  git(repo, ["config", "gpg.format", "openpgp"]);
+  git(repo, ["config", "gpg.program", "/nonexistent-signing-agent"]);
+  await withServer(repo, async ({ call }) => {
+    const r = await call("foundry_run_start");
+    like(r.signing, /^off \(probe failed: /, "auto falls back to off and records why, rather than refusing");
+    eq(git(repo, ["config", "--local", "commit.gpgsign"]), "false", "...and disables signing locally so the first task commit does not hang");
+  });
+}
+
+{
+  const repo = plannedRepo({ config: { policies: { push: false } } });
+  git(repo, ["remote", "add", "origin", mkBareRemote()]);
+  await withServer(repo, async ({ call }) => {
+    await call("foundry_run_start");
+    await call("foundry_task_next");
+    commitTask(repo, "P0-01", "Create hello", { "hello.txt": "hi\n" });
+    await call("foundry_task_done", { id: "P0-01", log: "x" });
+    await call("foundry_task_block", { id: "P0-02", reason: "x / y / z" });
+    await call("foundry_task_next"); // skips P0-03, the blocked task's dependent
+    writeFile(repo, "docs/HANDOFF.md", "# handoff\n");
+    const r = await call("foundry_run_finish");
+    eq(r.push, "skipped: policy", "push: false skips the push even though a remote exists");
+    eq(r.pr, null, "no push means no pull request either");
+  }, noGh);
+}
+
+{
+  const repo = plannedRepo({ config: { policies: { pr: "none" } } });
+  git(repo, ["remote", "add", "origin", mkBareRemote()]);
+  await withServer(repo, async ({ call }) => {
+    await call("foundry_run_start");
+    await call("foundry_task_next");
+    commitTask(repo, "P0-01", "Create hello", { "hello.txt": "hi\n" });
+    await call("foundry_task_done", { id: "P0-01", log: "x" });
+    await call("foundry_task_block", { id: "P0-02", reason: "x / y / z" });
+    await call("foundry_task_next"); // skips P0-03, the blocked task's dependent
+    writeFile(repo, "docs/HANDOFF.md", "# handoff\n");
+    const r = await call("foundry_run_finish");
+    eq(r.push, "pushed", "push still happens; only the PR is policy-gated");
+    eq(r.pr, "skipped: policy", "pr: none skips PR creation, reported explicitly");
+  });
+}
+
+// ---------------------------------------------------------------- run_halt
+
+{
+  const repo = startedRepo();
+  writeFile(repo, "half-finished.txt", "in-flight work, not this tool's business to touch\n");
+  await withServer(repo, async ({ call }) => {
+    isError(await call("foundry_run_halt", {}), /reason is required/, "run_halt needs a reason");
+
+    const r = await call("foundry_run_halt", { reason: "signing agent died: connection refused" });
+    eq(r.halted, "signing agent died: connection refused", "run_halt reports the reason it recorded");
+    ok(!hasFile(repo, ".foundry/implement.lock"), "run_halt disarms the lock");
+    eq(JSON.parse(readFile(repo, ".foundry/state.json")).halted, "signing agent died: connection refused", "the reason is persisted in state");
+    ok(hasFile(repo, "half-finished.txt"), "run_halt never resets or cleans the tree");
+    ok(r.dirty, "run_halt reports that the tree is still dirty");
+
+    const n = await call("foundry_next");
+    eq(n.stage, "halt", "the flight now halts");
+    eq(n.reason, "signing agent died: connection refused", "...with the recorded reason");
+  });
+}
+
 finish();

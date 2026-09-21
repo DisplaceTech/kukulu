@@ -27,6 +27,22 @@ All notable changes to this plugin. Format follows
   `foundry_config_show` reports `permissionRule: "present" | "missing"`.
   Both `settings.local.json` and the generated agent files are excluded
   from git per clone via `.git/info/exclude`.
+- **Run policies and `foundry_run_halt`** (F-05): after 14 tasks a signing
+  agent stopped responding mid-flight, and the implementer had no way to
+  learn the operator had already authorized unsigned commits, nor a clean
+  way to stop. `docs/foundry.json` gains a `policies` block —
+  `signing: "auto" | "off" | "required"`, `push: boolean`, `pr: "draft" |
+  "none"` — resolved and recorded by `foundry_run_start`, which also probes
+  signing for real (`git commit-tree -S`, never a dry run): `off` disables
+  it locally; `required` refuses to start unless a genuine signed commit
+  succeeds; `auto` falls back to disabling it and records why. Every stage
+  prompt from `foundry_next` states the run's policies in one sentence. The
+  new `foundry_run_halt` tool lets a run stop cleanly for an operator-level
+  problem — a dead signing agent, a full disk, a vanished base branch —
+  without resetting or cleaning the tree; `foundry_status` and
+  `foundry_next` report the halt like any other. The implement skill
+  documents when to disable signing mid-run versus when to halt. The server
+  now defines thirteen tools.
 
 ### Changed
 

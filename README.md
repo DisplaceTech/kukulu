@@ -242,13 +242,14 @@ Checkbox states in `PROGRESS.md`: `[ ]` todo · `[~]` in progress · `[x]` done 
 | Tool | Does |
 |---|---|
 | `foundry_status` | Everything on disk: docs present, counts, branch/base/head, lock, round, verdict, generated agents |
-| `foundry_next` | The state machine. Returns `{stage, agent, model, round, reason, prompt}` |
-| `foundry_run_start` | Create or reuse `build/<date>`, arm the lock, stamp PROGRESS, commit. Idempotent |
+| `foundry_next` | The state machine. Returns `{stage, agent, agentFallback, fallbackAgent, restartRequired, model, round, reason, prompt}` |
+| `foundry_run_start` | Create or reuse `build/<date>`, record pre-existing untracked files and run policies, probe signing, arm the lock, stamp PROGRESS, commit. Idempotent |
 | `foundry_task_next` | Pick first `[~]` else first `[ ]`, auto-skip dependency-blocked tasks, mark `[~]`, return PLAN text and dependency logs |
 | `foundry_task_done` | Requires `<ID>:` at HEAD and a clean tree; mark `[x]`, log with the sha, commit |
 | `foundry_task_block` | `git reset --hard && git clean -fd`, mark `[!]`, log `BLOCKED:`, commit |
 | `foundry_verify` | Run `verify` plus any `extraVerify` commands matching the touched paths; return exit codes and tails |
-| `foundry_run_finish` | Requires zero open tasks and `HANDOFF.md`; commit, push, draft a PR, disarm the lock |
+| `foundry_run_finish` | Requires zero open tasks and `HANDOFF.md`; commit, push, draft a PR (unless policies say otherwise), disarm the lock |
+| `foundry_run_halt` | Record an operator-level reason the run cannot continue; disarm the lock; commit state; never resets or cleans the tree |
 | `foundry_review_submit` | `APPROVED` → commit. `CHANGES REQUESTED` → assign `R<N>-<nn>`, append to PLAN and PROGRESS, unblock, commit `review: round N` |
 | `foundry_summary_commit` | Commit `SUMMARY.md`, mark the flight complete |
 | `foundry_agents_sync` | Write `.claude/agents/foundry-<role>.md` from the merged routing config; only changed files are written |

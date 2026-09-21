@@ -134,7 +134,7 @@ const goFlight = read("skills/go-flight/SKILL.md");
 const fmGo = frontmatter(goFlight);
 const allowed = String(fmGo["allowed-tools"]).split(",").map((s) => s.trim());
 const toolNames = Array.from(serverSrc.matchAll(/name: "(foundry_[a-z_]+)"/g), (m) => m[1]);
-eq(toolNames.length, 12, "the server defines twelve tools");
+eq(toolNames.length, 13, "the server defines thirteen tools");
 // A plugin-shipped MCP server's tools are exposed as
 // mcp__plugin_<plugin>_<server>__<tool> (verified with --plugin-dir), not as
 // the bare mcp__<server>__<tool> a project .mcp.json would give. The
@@ -143,7 +143,7 @@ eq(toolNames.length, 12, "the server defines twelve tools");
 const MCP_PREFIXES = ["mcp__plugin_foundry_foundry__", "mcp__foundry__"];
 const bareTool = (t) => MCP_PREFIXES.reduce((s, p) => s.replace(p, ""), t);
 ok(allowed.includes("Agent"), "the flight controller may spawn agents");
-for (const t of ["foundry_status", "foundry_next", "foundry_agents_sync"]) {
+for (const t of ["foundry_status", "foundry_next", "foundry_agents_sync", "foundry_run_halt"]) {
   for (const p of MCP_PREFIXES) ok(allowed.includes(p + t), `the flight controller may call ${p}${t}`);
 }
 for (const t of allowed.filter((a) => a.startsWith("mcp__"))) {
@@ -152,9 +152,12 @@ for (const t of allowed.filter((a) => a.startsWith("mcp__"))) {
 }
 ok(
   allowed.every((a) => a === "Agent" || MCP_PREFIXES.some((p) => a.startsWith(p))),
-  "the flight controller is allowed nothing beyond Agent, the read-only foundry tools, and agents_sync",
+  "the flight controller is allowed nothing beyond Agent, the read-only foundry tools, agents_sync, and run_halt",
 );
 ok(
+  // run_halt is the one deliberate exception: it records a clean halt reason
+  // when a stage cannot even be spawned, rather than leaving the flight to
+  // silently retry against whatever broke.
   !allowed.some((a) => /run_start|task_|run_finish|review_submit|summary_commit/.test(a)),
   "the flight controller cannot touch the tools that change project state",
 );

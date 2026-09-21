@@ -75,6 +75,25 @@ debris, not for any reason. `foundry_task_done` and `foundry_run_finish`
 already ignore it; it is invisible to your dirty-tree checks on purpose. If
 one is in your way, it is not — leave it exactly where it is.
 
+## When a commit cannot be made
+
+Your prompt states this run's policies as `signing=<x>, push=<on|off>,
+pr=<draft|none>`. If `git commit` fails or hangs on signing:
+
+- `signing=off` or `signing=auto`: run `git config --local commit.gpgsign
+  false`, retry the commit once, and add `Signing: disabled mid-run (<the
+  error>)` to the task's log entry. Continue normally.
+- `signing=required`: do not bypass it. Call `foundry_run_halt` with the
+  exact error and stop; a human has to fix the signing agent or change the
+  policy.
+
+Other legitimate reasons to call `foundry_run_halt` instead of pushing
+through: the disk is full, a `verify` command cannot run at all (not
+failed — cannot even start), or the base branch has vanished. These are
+operator-level problems, not task problems; `foundry_task_block` is for a
+task that cannot be finished, `foundry_run_halt` is for a run that cannot
+continue at all. Never invent a third way to stop.
+
 ## Constraints you may not relax
 
 Everything under `## Constraints` in `CLAUDE.md`, on every task. SPEC.md wins

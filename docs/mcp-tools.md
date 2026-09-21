@@ -112,15 +112,26 @@ in progress returns `{ alreadyStarted: true }` and changes nothing.
 4. Writes the lock as JSON — `{ count: 0, armedAt, round, cap }`, `cap` from
    `foundry.json`'s `guardCap` — arming the guard hook.
 5. Fills in `Branch:` and `Started:` in `PROGRESS.md` if they are placeholders.
-6. Commits as `chore: start implementation run`, or
+6. Resolves `foundry.json`'s `policies` (`signing`, `push`, `pr`) and records
+   them in state, and — skipped on an idempotent resume — probes signing:
+   `off` disables `commit.gpgsign` locally; `auto`/`required` with signing
+   configured actually attempt a signed object (`git commit-tree -S`, not a
+   dry run) and record `"on"` on success; `auto` falls back to disabling
+   signing locally on failure, recording why; `required` refuses instead of
+   falling back. See [operations.md](./operations.md#configuration).
+7. Commits as `chore: start implementation run`, or
    `chore: start review-fix round N`.
 
-**Returns:** `{ alreadyStarted, branch, commit, counts, round }`.
+**Returns:** `{ alreadyStarted, branch, commit, counts, round, policies,
+signing }`. `signing` is `"on"`, `"off"`, `"none"` (not configured), or
+`"off (probe failed: <reason>)"`.
 
 **Refuses when:** any of `SPEC.md`, `PLAN.md`, `PROGRESS.md` or `foundry.json`
-is missing; the directory is not a git repository; a *tracked* file has
-uncommitted changes on the base branch (an untracked one never blocks a
-start — see above); or the current branch is neither the base branch nor a
+is missing; the directory is not a git repository; `policies` is malformed;
+`policies.signing` is `"required"` and signing is not configured or the
+probe fails; a *tracked* file has uncommitted changes on the base branch (an
+untracked one never blocks a start — see above); or the current branch is
+neither the base branch nor a
 `branchPrefix*` branch.
 
 ---
@@ -235,18 +246,47 @@ End an implementation run and hand off to review.
 1. Commits `docs/HANDOFF.md` as `chore: handoff for review`.
 2. Records the round as implemented in `.foundry/state.json` and commits it as
    `chore: round N implemented`.
-3. Pushes to `origin` if there is one, and — if `gh` is on `PATH` — opens a
-   draft PR with `HANDOFF.md` as the body, or reports the existing one.
+3. Pushes to `origin` if `policies.push` is true and there is one, and — if
+   `policies.pr` is not `"none"` and `gh` is on `PATH` — opens a draft PR
+   with `HANDOFF.md` as the body, or reports the existing one.
 4. Deletes the lock, standing the guard hook down.
 
 **Returns:** `{ branch, base, head, handoffCommit, stateCommit, push, pr, counts, round, readyLine }`.
-`push` is `"pushed"`, `"skipped: no origin remote"`, or `"failed: <git's
-message>"` — a failed push does not fail the handoff, because the branch is
-still perfectly reviewable locally.
+`push` is `"pushed"`, `"skipped: no origin remote"`, `"skipped: policy"`, or
+`"failed: <git's message>"` — a failed push does not fail the handoff,
+because the branch is still perfectly reviewable locally. `pr` is `null`
+when there was nothing to try, `"skipped: policy"` when `policies.pr` is
+`"none"`, a URL, or a `gh` failure message.
 
 **Refuses when:** any task is still open; `HANDOFF.md` does not exist; or the
 tree is not clean after the handoff commit — again, ignoring anything
 recorded as `preexistingUntracked` (F-09).
+
+---
+
+## `foundry_run_halt`
+
+Stop the flight for an operator-level reason the implementer cannot resolve
+itself: a signing agent that died mid-run, a full disk, a `verify` command
+that cannot even run, a base branch that vanished (F-05). Distinct from
+`foundry_task_block`, which is for a single task the implementer cannot
+finish — this is for a run that cannot continue at all.
+
+**Arguments:** `{ reason }` — one sentence a human will read.
+
+**Does:** records `reason` as `state.halted`, deletes the lock, and commits
+`.foundry/state.json` and `docs/PROGRESS.md` together as `chore: run halted`
+if either changed. Never resets or cleans the working tree — whatever state
+the run was in when it could not continue is left exactly as it is.
+
+**Returns:** `{ halted, branch, head, commit, dirty }`. `dirty` is true when
+anything is left uncommitted, which after a halt is expected, not an error.
+
+**Refuses when:** `reason` is missing.
+
+The next `foundry_next` call returns `{ stage: "halt", reason }` with the
+same reason. Clearing it is the same hand edit as any other halt — see
+[operations.md](./operations.md#halts).
 
 ---
 

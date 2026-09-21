@@ -80,7 +80,7 @@ session, and a subagent that errored out. It is not the answer to a halt.
 
 ## Halts
 
-Two things halt a flight on purpose.
+Three things halt a flight on purpose.
 
 **Round cap.** `foundry_review_submit` writes a `halted` reason when the new
 round exceeds `maxRounds` (default 3). The reviewer has now asked for changes
@@ -99,6 +99,15 @@ null` in `.foundry/state.json`, commit both, and re-run the flight.
 **Missing spec.** No `docs/SPEC.md` means there is nothing to build from. Write
 one; see [writing-specs.md](./writing-specs.md).
 
+**An operator-level problem.** `foundry_run_halt` records a reason when the
+implementer hits something no task-level retry fixes: a signing agent that
+died, a full disk, a `verify` command that cannot even run, a vanished base
+branch (F-05). Nothing is reset or cleaned — read the branch exactly as the
+run left it.
+
+To continue anyway, after fixing the actual problem: set `"halted": null` in
+`.foundry/state.json`, commit it, and re-run the flight.
+
 ## When something goes wrong
 
 | Symptom | What it means | What to do |
@@ -114,6 +123,8 @@ one; see [writing-specs.md](./writing-specs.md).
 | Controller prints `FOUNDRY: RESTART REQUIRED` and stops | The agents directory was populated for the first time in this project, and a changed role routes to a model the `Agent` tool cannot name directly | Expected, and rare after 0.3.0 — only the first sync of a router-routed role hits this. Run `/foundry:go-flight` again in a new session |
 | `Agent` call fails with `Agent type 'foundry-<role>' not found` | Same cause as above, hit mid-flight instead of at the start | Same fix: relaunch and re-run |
 | Flight stops immediately with a routing config error | The global file, a profile, or `docs/foundry.json`'s `roles`/`permissionMode` is malformed | Run `foundry_config_show` to see exactly what and where; fix it and re-run |
+| `foundry_run_start` refuses with a signing message | `policies.signing` is `"required"` and either signing is not configured or a real signed commit failed | Fix the signing agent, or set `policies.signing` to `"off"` in `docs/foundry.json` |
+| Flight halts with a reason naming a dead tool or agent | `foundry_run_halt` was called | Read the reason, fix the actual problem, clear `halted` in `.foundry/state.json`, re-run |
 | A subagent's first `foundry_status` call is denied | The MCP allow rule is missing, or `foundry_agents_sync` reported `permissions: "failed: ..."` | Run `foundry_config_show` and check `permissionRule`; if a sync failed, the message names the broken `settings.local.json` — fix its JSON and re-run |
 
 ## Clearing a wedged run by hand
@@ -149,7 +160,8 @@ parse. Edit it between stages, not during one.
   "branchPrefix": "build/",
   "maxRounds": 3,
   "commandTimeoutMs": 600000,
-  "guardCap": 60
+  "guardCap": 60,
+  "policies": { "signing": "auto", "push": true, "pr": "draft" }
 }
 ```
 
@@ -163,6 +175,9 @@ parse. Edit it between stages, not during one.
 | `maxRounds` | `3` | Review rounds allowed before the flight halts |
 | `commandTimeoutMs` | `600000` | Per-command timeout for `foundry_verify` |
 | `guardCap` | `60` | Re-blocks since the last task state change before the implement guard gives up; carried into `.foundry/implement.lock` at `foundry_run_start` and wins over `FOUNDRY_GUARD_CAP` |
+| `policies.signing` | `"auto"` | `"off"` disables commit signing for the run; `"required"` refuses to start unless a real signed commit succeeds; `"auto"` uses signing when it works and falls back to off, recording why, when it does not |
+| `policies.push` | `true` | `false` skips the push `foundry_run_finish` would otherwise make |
+| `policies.pr` | `"draft"` | `"none"` skips draft-PR creation in `foundry_run_finish` even when `gh` is available |
 
 Environment variables:
 
