@@ -96,6 +96,28 @@ await withServer(plannedRepo(), async ({ call }) => {
   });
 }
 
+// status reads the lock's counter, in either format, or reports null.
+{
+  const repo = plannedRepo();
+  await withServer(repo, async ({ call }) => {
+    eq((await call("foundry_status")).lockCounter, null, "no lock means no counter to report");
+  });
+}
+{
+  const repo = plannedRepo();
+  writeFile(repo, ".foundry/implement.lock", "3\n");
+  await withServer(repo, async ({ call }) => {
+    eq((await call("foundry_status")).lockCounter, 3, "a legacy bare-number lock still reads back its count");
+  });
+}
+{
+  const repo = plannedRepo();
+  writeFile(repo, ".foundry/implement.lock", '{"count":7,"round":1}\n');
+  await withServer(repo, async ({ call }) => {
+    eq((await call("foundry_status")).lockCounter, 7, "a JSON lock's count is read directly");
+  });
+}
+
 // A lock with no open tasks means a run died before its handoff.
 {
   const repo = plannedRepo();

@@ -63,10 +63,15 @@ for (const [event, entries] of Object.entries(hooks.hooks)) {
   eq(cmd.type, "command", `${event} runs a command hook`);
   like(cmd.command, /^"\$\{CLAUDE_PLUGIN_ROOT\}"\//, `${event}'s command quotes the plugin root, so a path with spaces still works`);
   const script = cmd.command.replace(/^"\$\{CLAUDE_PLUGIN_ROOT\}"\//, "");
+  eq(script, "scripts/implement-guard.mjs", `${event} points at the guard script`);
   ok(exists(script), `${event}'s script exists`);
   ok(fs.statSync(path.join(ROOT, script)).mode & 0o111, `${event}'s script is executable`);
-  like(read(script), /^#!\/usr\/bin\/env bash\n/, `${event}'s script has a shebang`);
+  like(read(script), /^#!\/usr\/bin\/env node\n/, `${event}'s script has a shebang`);
 }
+// SubagentStop is scoped to the implementer at the hook-registration level
+// (F-07): the harness never even runs the guard for any other subagent.
+like(hooks.hooks.SubagentStop[0].matcher, /foundry.implementer/, "SubagentStop's matcher names the implementer");
+ok(!hooks.hooks.Stop[0].matcher, "Stop carries no matcher — a Stop event has no agent to match against");
 
 // ---------------------------------------------------------------- agents and skills
 

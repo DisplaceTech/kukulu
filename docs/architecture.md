@@ -21,7 +21,7 @@ flowchart LR
 
     subgraph PL["plugin"]
         MCP["foundry MCP server<br/>mcp/server.mjs"]
-        HOOK["implement-guard.sh<br/>Stop · SubagentStop"]
+        HOOK["implement-guard.mjs<br/>Stop · SubagentStop (implementer only)"]
     end
 
     subgraph REPO["your repository"]
@@ -134,16 +134,24 @@ model.
 An implement run can last hours and will be compacted repeatedly. Three
 mechanisms keep it honest:
 
-- **The lock.** `foundry_run_start` writes `.foundry/implement.lock`. It is
-  gitignored, so `git clean -fd` during a blocked task leaves it alone, and its
-  contents are the re-block counter.
-- **The guard.** On every `Stop` and `SubagentStop`, `implement-guard.sh`
-  counts `[ ]` and `[~]` lines under `## Tasks`. If the lock exists and the
-  count is non-zero it returns `{"decision":"block"}` with the next task's id
-  and instructions to call `foundry_task_next`. At `FOUNDRY_GUARD_CAP`
-  re-blocks (default 500) it stops blocking and emits a `systemMessage`
-  instead, leaving the lock in place so the next `foundry_next` sees the
-  unfinished run.
+- **The lock.** `foundry_run_start` writes `.foundry/implement.lock` as JSON
+  (`{ count, armedAt, round }`; a bare-number lock left by a 0.2.x run is
+  still read correctly). It is gitignored, so `git clean -fd` during a
+  blocked task leaves it alone, and `count` is the re-block counter.
+- **The guard.** `implement-guard.mjs` runs on `Stop` and `SubagentStop`,
+  but only *considers* a stop that belongs to the implementer: a
+  `SubagentStop` whose `agent_type` names it (scoped further at the
+  hook-registration level by `hooks/hooks.json`'s matcher, so the harness
+  never even runs the guard for another subagent), or a `Stop` whose own
+  transcript called `foundry_run_start` (the implement stage run directly in
+  a session, not a background flight another session is merely waiting on —
+  see [operations.md](./operations.md) and F-07 in the project's feedback
+  history). For a stop it does consider, it counts `[ ]` and `[~]` lines
+  under `## Tasks`; if the lock exists and the count is non-zero it returns
+  `{"decision":"block"}` with the next task's id and instructions to call
+  `foundry_task_next`. At `FOUNDRY_GUARD_CAP` re-blocks (default 500) it
+  stops blocking and emits a `systemMessage` instead, leaving the lock in
+  place so the next `foundry_next` sees the unfinished run.
 - **The refusals.** `foundry_task_done` requires HEAD's subject to start with
   the task id and the tree to be clean apart from `PROGRESS.md`.
   `foundry_run_finish` requires zero open tasks, a `HANDOFF.md`, and a clean
@@ -152,17 +160,22 @@ mechanisms keep it honest:
 ```mermaid
 sequenceDiagram
     participant IMP as implementer
-    participant HOOK as implement-guard.sh
+    participant HOOK as implement-guard.mjs
     participant DISK as PROGRESS.md + lock
 
     IMP->>IMP: finishes a task, tries to stop and report
-    IMP->>HOOK: Stop
+    IMP->>HOOK: SubagentStop (agent_type: foundry-implementer)
     HOOK->>DISK: lock present? open tasks?
     DISK-->>HOOK: yes, 7 open
     HOOK-->>IMP: block — "next: P2-03, call foundry_task_next"
-    Note over IMP,HOOK: counter++ in the lock file
+    Note over IMP,HOOK: count++ in the lock file
     IMP->>IMP: continues the loop
 ```
+
+A controller session that merely spawned the implementer and is waiting on
+it receives its own, unrelated `Stop` events; since that session's own
+transcript never called `foundry_run_start`, the guard allows those without
+touching the counter (F-07).
 
 ## Blocked tasks and skipped dependents
 
@@ -205,7 +218,7 @@ fix task is a task, and it goes through the same test-first loop as any other.
 | Path | Committed | Contents |
 |---|---|---|
 | `.foundry/state.json` | yes | `round`, `implemented`, `reviewed`, `verdict`, `summarized`, `halted` |
-| `.foundry/implement.lock` | no (gitignored) | the guard's re-block counter |
+| `.foundry/implement.lock` | no (gitignored) | JSON `{ count, armedAt, round }` — the guard's re-block counter (a legacy bare number still reads back correctly) |
 | `docs/PROGRESS.md` | yes | task checkboxes and the per-task log |
 | `docs/foundry.json` | yes | `verify`, `extraVerify`, `build`, `baseBranch`, `branchPrefix`, `maxRounds`, `commandTimeoutMs`, `roles`, `permissionMode` |
 | `.claude/agents/foundry-*.md` | no (`.git/info/exclude`) | the generated per-role agents; see [routing.md](./routing.md) |

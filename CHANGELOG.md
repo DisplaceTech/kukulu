@@ -19,6 +19,17 @@ All notable changes to this plugin. Format follows
 
 ### Changed
 
+- The implement guard is a Node script (`scripts/implement-guard.mjs`,
+  replacing `implement-guard.sh`) scoped to the implementer, not to every
+  `Stop`/`SubagentStop` in the project (F-07). `hooks/hooks.json` matches
+  `SubagentStop` to the implementer's agent type at the hook-registration
+  level; the script itself also checks `agent_type`, and for a bare `Stop`
+  checks whether the stopping session's own transcript called
+  `foundry_run_start`. A controller session merely waiting on a background
+  implementer is never blocked and never spends the re-block counter.
+  `foundry_run_start` now writes `.foundry/implement.lock` as JSON
+  (`{ count, armedAt, round }`); a legacy bare-number lock from a 0.2.x run
+  still reads back correctly. `foundry_status` gains `lockCounter`.
 - `go-flight` is model-invocable (F-01): `disable-model-invocation` is gone,
   so asking Claude to run the flight works alongside the literal
   `/foundry:go-flight` command. The loop section now describes an `Agent`

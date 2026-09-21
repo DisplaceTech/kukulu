@@ -533,6 +533,26 @@ function reviewRoundCount() {
   return (read(P.plan).match(/^## Review fixes \(round \d+\)/gm) || []).length;
 }
 
+/**
+ * The implement guard's re-block counter, tolerating both the JSON lock
+ * foundry_run_start writes from 0.3.0 and the legacy bare-number form a
+ * 0.2.x run may have left armed. `null` when there is no lock to read.
+ */
+function lockCounter() {
+  if (!exists(P.lock)) return null;
+  const raw = read(P.lock);
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return Number.isInteger(parsed.count) ? parsed.count : 0;
+    }
+  } catch {
+    // fall through to the legacy form below
+  }
+  const digits = raw.replace(/[^0-9]/g, "");
+  return digits ? Number(digits) : 0;
+}
+
 // ---------------------------------------------------------------- git facts
 
 function gitFacts() {
@@ -563,6 +583,7 @@ function status() {
     summaryPresent: exists(P.summary),
     configPresent: exists(P.config),
     lockPresent: exists(P.lock),
+    lockCounter: lockCounter(),
     git: g,
     state: st,
     round: st.round,
@@ -700,7 +721,7 @@ function runStart() {
   // .gitignore the lock, arm it, stamp PROGRESS, commit.
   ensureLineInFile(P.gitignore, ".foundry/implement.lock");
   fs.mkdirSync(P.stateDir, { recursive: true });
-  write(P.lock, "0\n");
+  write(P.lock, `${JSON.stringify({ count: 0, armedAt: new Date().toISOString(), round: st.round })}\n`);
   if (!pr.branch || pr.branch.startsWith("(")) setHeader(pr, "Branch", branch);
   if (!pr.started || pr.started.startsWith("(")) setHeader(pr, "Started", new Date().toISOString());
   writeProgress(pr);

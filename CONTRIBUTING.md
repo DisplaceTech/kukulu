@@ -22,7 +22,7 @@ it.
 | Path | What lives there |
 |---|---|
 | `mcp/server.mjs` | Every deterministic operation, and the JSON-RPC transport |
-| `scripts/implement-guard.sh` | The Stop / SubagentStop hook |
+| `scripts/implement-guard.mjs` | The Stop / SubagentStop hook |
 | `scripts/lint.sh` | Dependency-free syntax and manifest lint |
 | `scripts/check-diagrams.mjs` | Parses every Mermaid block; CI-only, needs mermaid + jsdom |
 | `agents/*.md` | Stage agents: default model, effort, and the skill each preloads |
@@ -66,7 +66,7 @@ npm install --no-save mermaid jsdom && node scripts/check-diagrams.mjs
 | `implement` | `run_start`, `task_next`, `task_done`, `task_block`, `verify`, `run_finish` |
 | `review` | `review_submit` and `summary_commit`, including every refusal |
 | `routing` | Config merge and precedence, `foundry_agents_sync`, `foundry_config_show`, every refusal |
-| `guard` | The Stop hook: blocking, counting, giving up, environment handling |
+| `guard` | The Stop / SubagentStop hook: scoping, blocking, counting, giving up, environment handling |
 | `drive` | One complete flight end to end over real stdio |
 
 Suites are plain Node programs that print TAP-ish lines and exit non-zero on

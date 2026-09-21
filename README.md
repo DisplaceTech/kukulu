@@ -268,11 +268,15 @@ Full arguments, return shapes and failure modes:
 
 ## The guard hook
 
-`scripts/implement-guard.sh` runs on `Stop` and `SubagentStop`. While
-`.foundry/implement.lock` exists and `## Tasks` still has `[ ]` or `[~]` lines,
-it returns `{"decision":"block"}` naming the next task. It counts re-blocks in
-the lock file and gives up at `FOUNDRY_GUARD_CAP` (default 500), so a wedged
-run ends rather than spinning.
+`scripts/implement-guard.mjs` runs on `Stop` and `SubagentStop`, but only
+considers a stop that actually belongs to the implementer — a `SubagentStop`
+naming it (`hooks/hooks.json`'s matcher already scopes the hook to it) or a
+`Stop` whose own transcript called `foundry_run_start`. A controller session
+merely waiting on a background implementer is never blocked. For a stop it
+does consider: while `.foundry/implement.lock` exists and `## Tasks` still
+has `[ ]` or `[~]` lines, it returns `{"decision":"block"}` naming the next
+task. It counts re-blocks in the lock and gives up at `FOUNDRY_GUARD_CAP`
+(default 500), so a wedged run ends rather than spinning.
 
 ## Resuming and halting
 
@@ -294,7 +298,7 @@ including what each failure looks like and how to unstick it.
 ├── mcp/server.mjs               the deterministic half of the pipeline
 ├── hooks/hooks.json             Stop / SubagentStop wiring
 ├── scripts/
-│   ├── implement-guard.sh       the guard hook
+│   ├── implement-guard.mjs      the guard hook
 │   ├── lint.sh                  dependency-free syntax + manifest lint
 │   └── check-diagrams.mjs       parses every Mermaid block (CI only)
 ├── agents/                      planner · implementer · reviewer · summarizer

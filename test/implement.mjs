@@ -76,7 +76,11 @@ for (const missing of ["docs/SPEC.md", "docs/PLAN.md", "docs/PROGRESS.md", "docs
     eq(r.round, 0, "a fresh run is round 0");
     eq(r.counts.open, 3, "run_start reports the open task count");
     ok(hasFile(repo, ".foundry/implement.lock"), "run_start arms the Stop-hook lock");
-    eq(readFile(repo, ".foundry/implement.lock").trim(), "0", "the lock starts its re-block counter at zero");
+    const lock = JSON.parse(readFile(repo, ".foundry/implement.lock"));
+    eq(lock.count, 0, "the lock starts its re-block counter at zero");
+    eq(lock.round, 0, "the lock records the round it was armed for");
+    ok(lock.armedAt, "the lock records when it was armed");
+    eq((await call("foundry_status")).lockCounter, 0, "status reads the lock's counter");
     like(readFile(repo, ".gitignore"), /^\.foundry\/implement\.lock$/m, "run_start gitignores the lock");
     like(readFile(repo, "docs/PROGRESS.md"), new RegExp(`^Branch: build/${TODAY}$`, "m"), "run_start stamps the branch into PROGRESS.md");
     like(readFile(repo, "docs/PROGRESS.md"), /^Started: \d{4}-\d\d-\d\dT/m, "run_start stamps a start timestamp");
