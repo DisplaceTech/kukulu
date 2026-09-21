@@ -61,13 +61,15 @@ stateDiagram-v2
     plan --> implement: PLAN + PROGRESS + foundry.json exist
     implement --> implement: open tasks remain
     implement --> review: zero open tasks, handoff recorded
+    implement --> halt_ops: foundry_run_halt called
     review --> summarize: APPROVED
     review --> implement: CHANGES REQUESTED, R-tasks queued
-    review --> halt_rounds: rounds exhausted
+    review --> halt_rounds: non-converging past maxRounds, or past maxRoundsHard
     summarize --> done: SUMMARY.md committed
 
     halt_nospec: halt — nothing to build from
     halt_rounds: halt — a human decides whether to continue
+    halt_ops: halt — an operator-level problem the implementer could not resolve
     done: done — a human merges the branch
 ```
 
@@ -76,20 +78,24 @@ The decision order, exactly as the server evaluates it:
 1. No `docs/SPEC.md` → **halt**.
 2. `state.halted` is set → **halt** with that reason.
 3. Any of `PLAN.md`, `PROGRESS.md`, `foundry.json` missing → **plan**.
-4. Open tasks and `round > maxRounds` → **halt**.
-5. Open tasks → **implement**.
-6. Lock present (a run died before its handoff) → **implement**.
-7. Nothing recorded as implemented → **implement**.
-8. Not yet reviewed → **review**.
-9. Verdict `CHANGES REQUESTED` but nothing open → **halt** (an impossible
+4. Open tasks → **implement**.
+5. Lock present (a run died before its handoff) → **implement**.
+6. Nothing recorded as implemented → **implement**.
+7. Not yet reviewed → **review**.
+8. Verdict `CHANGES REQUESTED` but nothing open → **halt** (an impossible
    state; the tool that queues fix tasks failed).
-10. `APPROVED` and not summarized → **summarize**.
-11. Summarized → **done**.
+9. `APPROVED` and not summarized → **summarize**.
+10. Summarized → **done**.
 
-Decision 2's `state.halted` is set by `foundry_review_submit` past
-`maxRounds` (see below) or, directly, by `foundry_run_halt` — the tool an
-implementer calls for an operator-level problem it cannot resolve itself
-(F-05): a dead signing agent, a full disk, a vanished base branch.
+The round-cap decision belongs solely to `foundry_review_submit`: it is the
+one place that decides a round is non-converging past `maxRounds` or has
+reached `maxRoundsHard`, and records that as decision 2's `state.halted`.
+`next()` never re-derives it from `round` and `maxRounds` — open tasks past
+a round that was *not* itself halted are just the next implement stage,
+exactly like any other round (V3-10). `state.halted` is also set directly
+by `foundry_run_halt` — the tool an implementer calls for an operator-level
+problem it cannot resolve itself (F-05): a dead signing agent, a full disk,
+a vanished base branch.
 
 Each stage comes back with a `prompt` the flight controller passes to the
 subagent verbatim; the implement, review and summarize prompts each end with
@@ -174,15 +180,20 @@ mechanisms keep it honest:
 sequenceDiagram
     participant IMP as implementer
     participant HOOK as implement-guard.mjs
+    participant MCP as foundry MCP
     participant DISK as PROGRESS.md + lock
 
-    IMP->>IMP: finishes a task, tries to stop and report
+    IMP->>IMP: tries to stop and report progress
     IMP->>HOOK: SubagentStop (agent_type: foundry-implementer)
     HOOK->>DISK: lock present? open tasks?
     DISK-->>HOOK: yes, 7 open
     HOOK-->>IMP: block — "next: P2-03, call foundry_task_next"
     Note over IMP,HOOK: count++ in the lock file
-    IMP->>IMP: continues the loop
+    IMP->>MCP: foundry_task_next, then work, then commit
+    IMP->>MCP: foundry_task_done(P2-03, log)
+    MCP->>DISK: mark [x], commit PROGRESS.md
+    Note over MCP,DISK: count reset to 0 — a completed task always clears the counter
+    IMP->>IMP: continues the loop, tries to stop again
 ```
 
 A controller session that merely spawned the implementer and is waiting on

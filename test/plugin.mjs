@@ -293,6 +293,26 @@ for (const rule of constraintsTemplate) {
 ok(read("docs/operations.md").includes("templates/constraints.example.json"), "the constraints template is referenced from docs/operations.md");
 ok(read("skills/plan-build/SKILL.md").includes("templates/constraints.example.json"), "...and from the plan-build skill that would actually use it");
 
+// ---------------------------------------------------------------- config keys documented
+
+// Every key cfg() actually returns has a row in operations.md's config
+// table — a knob nobody wrote down is a knob nobody will find.
+{
+  const cfgSrc = serverSrc.match(/function cfg\(\) \{[\s\S]*?\n\}/)[0];
+  const cfgKeys = Array.from(cfgSrc.matchAll(/^ {4}(\w+):/gm), (m) => m[1]);
+  ok(cfgKeys.length >= 9, "cfg()'s top-level keys were actually extracted from the source");
+  const opsDoc = read("docs/operations.md");
+  for (const key of cfgKeys) {
+    if (key === "policies") {
+      ok(opsDoc.includes("`policies.signing`"), "operations.md documents policies.signing");
+      ok(opsDoc.includes("`policies.push`"), "operations.md documents policies.push");
+      ok(opsDoc.includes("`policies.pr`"), "operations.md documents policies.pr");
+      continue;
+    }
+    ok(opsDoc.includes(`\`${key}\``), `operations.md's config table documents '${key}'`);
+  }
+}
+
 // ---------------------------------------------------------------- CI wiring
 
 const workflows = listDir(".github/workflows");

@@ -1,15 +1,17 @@
 # MCP tool reference
 
-Twelve tools, served over stdio by `mcp/server.mjs` with no dependencies. The
-server is launched by Claude Code from [`.mcp.json`](../.mcp.json) with
+Thirteen tools, served over stdio by `mcp/server.mjs` with no dependencies.
+The server is launched by Claude Code from [`.mcp.json`](../.mcp.json) with
 `FOUNDRY_PROJECT_DIR` set to the project root; every path below is relative to
 that root.
 
 Three of them — `foundry_status`, `foundry_next` and `foundry_config_show` —
 are read-only. The flight controller is allowed those plus
-`foundry_agents_sync`, which writes only the generated agent files and a
-`.git/info/exclude` line, never project state. Everything else changes
-project state and belongs to a stage agent.
+`foundry_agents_sync`, which writes only the generated agent files, the MCP
+allow rule and a `.git/info/exclude` line, never a task or a verdict; and
+`foundry_run_halt`, which it may call itself if it cannot even spawn a
+stage, so the next flight sees a clean halt instead of retrying blindly.
+Everything else changes project state and belongs to a stage agent.
 
 `foundry_next`, `foundry_status`, `foundry_config_show` and
 `foundry_agents_sync` all resolve the merged routing config (see
@@ -51,6 +53,7 @@ context.
 | `blocked`, `skipped` | Task ids in those states |
 | `reviewVerdictInFile` | The verdict parsed out of `REVIEW.md`, if one exists |
 | `agentsGenerated` | Role names whose `.claude/agents/foundry-<role>.md` currently exists |
+| `agentsGeneratedThisSession` | Role names this MCP server process itself wrote — diagnostic only, for understanding why `foundry_next` reported `agentFallback` |
 
 **Refuses when:** `PROGRESS.md` exists but has no `## Tasks` section,
 `foundry.json` is not valid JSON, or the merged routing config is malformed

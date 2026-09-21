@@ -99,7 +99,7 @@ flowchart TD
     NEXT -->|"open tasks"| IMPL["implementer<br/>sonnet · medium"]
     NEXT -->|"implemented, unreviewed"| REV["reviewer<br/>fable · high"]
     NEXT -->|"approved"| SUM["summarizer<br/>fable · medium"]
-    NEXT -->|"past maxRounds"| HALT["halt — a human decides"]
+    NEXT -->|"halted: rounds, or run_halt"| HALT["halt — a human decides"]
     NEXT -->|"summarized"| DONE["done — a human merges"]
 
     PLAN -->|"PLAN · PROGRESS · foundry.json · CLAUDE.md"| NEXT
@@ -326,6 +326,8 @@ to unstick it.
   `SPEC.md` the planner can turn into a plan worth executing
 - [**docs/operations.md**](./docs/operations.md) — running, resuming,
   halting, and what to do when a stage misbehaves
+- [**docs/plans/**](./docs/plans/) — the task-by-task plan behind each
+  release, kept for whoever plans the next one
 - [**CONTRIBUTING.md**](./CONTRIBUTING.md) — layout, tests, and the rules
   about where behaviour is allowed to live
 - [**CHANGELOG.md**](./CHANGELOG.md) — what shipped, when
@@ -350,7 +352,7 @@ npm test -- guard protocol     # one or more suites by name
 KEEP_REPO=1 npm test -- drive  # keep the temp repos to poke at afterwards
 ```
 
-Nine suites, about 930 assertions: the plugin manifests and documentation
+Nine suites, about 1040 assertions: the plugin manifests and documentation
 links, the JSON-RPC transport, the `foundry_next` decision table, the
 implement-stage tools, the review and summary tools, per-role routing
 (config merge, `foundry_agents_sync`, `foundry_config_show`),

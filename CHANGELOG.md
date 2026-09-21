@@ -43,6 +43,19 @@ All notable changes to this plugin. Format follows
   `foundry_next` report the halt like any other. The implement skill
   documents when to disable signing mid-run versus when to halt. The server
   now defines thirteen tools.
+- **Documentation pass for 0.3.** `docs/operations.md` gains a
+  "Calibrating" section with the real per-stage timings and token counts a
+  76-task flight produced, and what each tuned default (`guardCap: 60`,
+  `commandTimeoutMs: 600000`, `maxRounds: 3` / `maxRoundsHard: 6`) was set
+  from. Every key `cfg()` returns now has a row in the config table (a new
+  `plugin` suite assertion enforces it going forward). The symptom table
+  gains rows for a `Round:` refusal, a non-converging or hard-cap halt, a
+  missing permission rule, and states plainly that the controller itself
+  should never be blocked by the guard after 0.3.0. Two claims 0.3 itself
+  had made false were caught and fixed: `docs/architecture.md`'s decision
+  order still listed the round-cap check `foundry_next` no longer makes
+  (V3-10 removed it from `next()` but not from the doc), and its tool count
+  still said twelve. `docs/plans/` joins the documentation map.
 - **Stage agents declare their tools explicitly** (F-16): all four
   plugin agents (and the generated `foundry-<role>` files, which copy it
   verbatim) now carry a `tools:` frontmatter list — the six general tools

@@ -120,7 +120,8 @@ To continue anyway, after fixing the actual problem: set `"halted": null` in
 | Symptom | What it means | What to do |
 |---|---|---|
 | Controller stops immediately with `halt` | Read the `reason` — missing spec, or `halted` in state | Fix the named cause, re-run |
-| Implementer stops with tasks open | The guard blocked and the agent still stopped, or the cap tripped | Check the lock's counter; if it is at the cap, something is wedged — read the last task's log and block it by hand |
+| The controller session itself gets blocked from stopping | Should not happen after 0.3.0 (F-07) — the guard only considers a stop it can attribute to the implementer | Check `hooks/hooks.json`'s `SubagentStop` matcher is intact and that no project override replaced it; file it as a bug otherwise |
+| Implementer stops with tasks open mid-task | The guard blocked and the agent still stopped, or the per-task stall cap tripped | Check `foundry_status`'s `lockCounter` against the effective cap (`guardCap`, else `FOUNDRY_GUARD_CAP`, else 60); at the cap, something is genuinely wedged on one task — read its log and block it by hand |
 | Every task blocks with the same error | The plan assumes something that is not there | Stop the flight. Fix `SPEC.md`, re-plan; do not let it grind through 40 blocked tasks |
 | `foundry_task_done` keeps refusing | The implementer is not committing with `<ID>:` as the subject, or is leaving files uncommitted | The commit template lives in `CLAUDE.md`; check the planner wrote one |
 | `foundry_verify` fails on a clean checkout | The commands in `docs/foundry.json` are wrong | Fix them there — they came from `SPEC.md` §7, so fix that too |
@@ -132,6 +133,8 @@ To continue anyway, after fixing the actual problem: set `"halted": null` in
 | Flight stops immediately with a routing config error | The global file, a profile, or `docs/foundry.json`'s `roles`/`permissionMode` is malformed | Run `foundry_config_show` to see exactly what and where; fix it and re-run |
 | `foundry_run_start` refuses with a signing message | `policies.signing` is `"required"` and either signing is not configured or a real signed commit failed | Fix the signing agent, or set `policies.signing` to `"off"` in `docs/foundry.json` |
 | Flight halts with a reason naming a dead tool or agent | `foundry_run_halt` was called | Read the reason, fix the actual problem, clear `halted` in `.foundry/state.json`, re-run |
+| Flight halts with "non-converging" or "hard cap" in the reason | Review findings stopped shrinking for `maxRounds` rounds, or the round count reached `maxRoundsHard` | Read `foundry_status`'s `state.rounds` for the trail of counts; if the reviewer is genuinely still converging, raise `maxRounds`/`maxRoundsHard`; otherwise a human needs to look at why findings keep recurring |
+| `foundry_review_submit` refuses over the `Round:` line | `docs/REVIEW.md`'s `Round:` line is missing or does not equal `reviewRound` | The error names the expected value; `foundry_status`'s `reviewRound` always has it too |
 | A subagent's first `foundry_status` call is denied | The MCP allow rule is missing, or `foundry_agents_sync` reported `permissions: "failed: ..."` | Run `foundry_config_show` and check `permissionRule`; if a sync failed, the message names the broken `settings.local.json` — fix its JSON and re-run |
 
 ## Clearing a wedged run by hand
@@ -197,6 +200,49 @@ Environment variables:
 | `FOUNDRY_GUARD_CAP` | `60` | Re-blocks since the last task state change before the guard gives up; `docs/foundry.json`'s `guardCap` wins over this when set |
 | `FOUNDRY_CONFIG` | `~/.config/foundry/config.json` (or `$XDG_CONFIG_HOME/foundry/config.json`) | Path to the global routing config |
 | `FOUNDRY_PROFILE` | the global file's own `"profile"` key, if any | Which profile in the global file to apply; wins over the file's own choice |
+
+## Calibrating
+
+The defaults above are not guesses; they came from timing one real flight
+(a 76-task plan, four review rounds, on the `sonnet`/`fable` split) and are
+worth knowing when a plan of very different size or shape needs different
+numbers:
+
+| Stage | Tasks / findings | Wall clock | Subagent tokens |
+|---|---|---|---|
+| plan (fable) | 76 planned | 41 min | 315k |
+| implement round 0 (sonnet) | 76 | 8h 51m | 431k* |
+| review round 1 (fable) | 15 findings | 20 min | 264k |
+| implement round 1 (sonnet) | 15 | 2h 13m | 845k |
+| review round 2 (fable) | 3 findings | 12 min | 304k |
+| implement round 2 (sonnet) | 3 | 27 min | — |
+| review round 3 (fable) | 2 findings | ~10 min | — |
+| implement round 3 (sonnet) | 2 | 16 min | — |
+
+\* Under-reported relative to the tool-use count: the run was resumed once
+mid-round after a signing-agent stall (see `policies.signing`), and the
+figure likely covers only the second segment.
+
+What each default came from:
+
+- **`guardCap: 60`.** The implementer naturally ends its turn several times
+  per task (after each verify, after each commit); this flight averaged
+  roughly six re-blocks per completed task. Sixty is ten tasks' worth of
+  blocking with zero progress — comfortably past normal noise, tight enough
+  to catch a genuinely wedged task quickly. Counting since the last task
+  state change (rather than over the whole run) is what makes a single
+  small number work for a 3-task plan and a 300-task one alike.
+- **`commandTimeoutMs: 600000` (10 minutes).** The default suits ordinary
+  typecheck/lint/unit-test commands. This flight's browser- and
+  container-driven tasks (`wp-env`, Playwright) needed 15 minutes; give
+  those specific commands their own `{ cmd, timeoutMs }` (see per-command
+  timeouts, above) rather than raising the default for everything.
+- **`maxRounds: 3` / `maxRoundsHard: 6`.** This flight's findings shrank
+  15 → 3 → 2 every round — textbook convergence — and would never have
+  tripped the soft cap at any reasonable `maxRounds`. The hard cap exists
+  for the flight that never converges at all; six rounds is generous
+  headroom past three non-converging ones without letting a broken loop
+  run forever.
 
 ## Constraints
 
