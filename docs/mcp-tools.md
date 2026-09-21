@@ -40,9 +40,11 @@ context.
 | `lockPresent` | Whether an implementation run is armed |
 | `lockCounter` | The implement guard's re-block counter, read from the lock (either format); `null` when there is no lock |
 | `git` | `{ inRepo, branch, head, base, dirty, hasOrigin }` — `base` is the merge-base with `baseBranch` |
-| `state` | `{ round, implemented, reviewed, verdict, summarized, halted, preexistingUntracked }` from `.foundry/state.json` |
-| `round` | Current review round (0 = initial build) |
+| `state` | `{ round, implemented, reviewed, verdict, summarized, halted, preexistingUntracked, policies, signing }` from `.foundry/state.json` |
+| `round` | Fix rounds already queued (0 = initial build) |
+| `reviewRound` | Always `round + 1` — the number the *next* review must stamp on `docs/REVIEW.md`'s `Round:` line (F-10, F-11) |
 | `preexistingUntracked` | Paths that were already untracked before the current run started — invisible to every dirty-tree check (F-09) |
+| `policies`, `signing` | The run's resolved policies and signing outcome, from `foundry_run_start` — see [operations.md](./operations.md#configuration) |
 | `reviewRoundsInPlan` | How many `## Review fixes (round N)` sections `PLAN.md` carries |
 | `branch`, `started` | The `Branch:` and `Started:` headers in `PROGRESS.md` |
 | `counts` | `{ todo, inProgress, done, blocked, skipped, total, open }`; `open = todo + inProgress` |
@@ -65,7 +67,7 @@ report.
 **Arguments:** none.
 
 **Returns:** `{ stage, agent, agentFallback, fallbackAgent, restartRequired,
-model, round, reason, prompt }`.
+model, round, reviewRound, reason, prompt }`.
 
 - `stage` — `plan` · `implement` · `review` · `summarize` · `done` · `halt`
 - `agent` — the subagent to spawn: the generated `foundry-<role>` name when
@@ -86,8 +88,14 @@ model, round, reason, prompt }`.
   Anthropic alias or a `claude-*` id); `false` for `done` and `halt`
 - `model` — the resolved model string for that role from the routing config
   (see [routing.md](./routing.md)); `null` for `done` and `halt`
+- `reviewRound` — always `round + 1`; the review stage's prompt states it
+  explicitly and `foundry_review_submit` refuses a `Round:` line that
+  disagrees with it (F-10, F-11) — see
+  [architecture.md](./architecture.md#review-rounds)
 - `reason` — one sentence, written for a human reading the transcript
-- `prompt` — the text to hand the subagent **verbatim**
+- `prompt` — the text to hand the subagent **verbatim**; the implement,
+  review and summarize prompts each end with a sentence stating this run's
+  policies (see `foundry_run_start`)
 
 The full decision order is in [architecture.md](./architecture.md#the-stage-machine).
 
@@ -342,10 +350,13 @@ round exceeds `maxRounds` it also writes a `halted` reason into
 changes. `push` is the same shape `foundry_run_finish` returns.
 
 **Refuses when:** the verdict is neither legal value; `REVIEW.md` does not
-exist; no implementation handoff has been recorded for this round; an approval
-carries fix tasks or unblocks; changes are requested with neither; a fix task
-is missing `title`, `goal`, `files` or `tests`; or an unblock names a task that
-does not exist or is not blocked or skipped.
+exist; no implementation handoff has been recorded for this round;
+`REVIEW.md`'s `Round:` line is missing or does not equal `reviewRound`
+(F-10, F-11); an approval carries fix tasks or unblocks; changes are
+requested with neither; a fix task is missing `title`, `goal`, `files` or
+`tests`; a fix task's `dependsOn` names something that is neither an
+existing task nor one of this submission's own ids; or an unblock names a
+task that does not exist or is not blocked or skipped.
 
 ---
 

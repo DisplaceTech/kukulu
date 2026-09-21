@@ -737,6 +737,7 @@ function status() {
     git: g,
     state: st,
     round: st.round,
+    reviewRound: st.round + 1,
     preexistingUntracked: st.preexistingUntracked,
     policies: st.policies,
     signing: st.signing,
@@ -812,8 +813,9 @@ function next() {
       restartRequired: info.restartRequired,
       model: modelFor(name),
       round: st.round,
+      reviewRound: st.round + 1,
       reason,
-      prompt: PROMPTS[name] ? PROMPTS[name](st.round, s, policySentence) : null,
+      prompt: PROMPTS[name] ? PROMPTS[name](st.round, s, policySentence, st.round + 1) : null,
       ...extra,
     };
   };
@@ -844,8 +846,8 @@ const PROMPTS = {
     "Run the Foundry plan stage for this repository. Read docs/SPEC.md and everything else in docs/ in full, then produce docs/PLAN.md, docs/PROGRESS.md, docs/foundry.json and CLAUDE.md exactly as your plan-build instructions specify, commit them, and report. Do not write implementation code.",
   implement: (round, s, policies) =>
     `Run the Foundry implement stage. ${round === 0 ? "This is the initial build." : `This is review-fix round ${round}; the open tasks are R${round}-* fix tasks queued by the reviewer.`} Call foundry_run_start, then loop on foundry_task_next until it reports done, then write docs/HANDOFF.md and call foundry_run_finish. You are unattended; never ask a question and never stop with open tasks. ${s.counts ? `${s.counts.open} task(s) are open.` : ""} ${policies}`,
-  review: (round, s, policies) =>
-    `Run the Foundry review stage for round ${round}. Review the whole build branch against docs/SPEC.md and docs/PLAN.md as your review-build instructions specify, write docs/REVIEW.md, and call foundry_review_submit exactly once with your verdict. Do not fix code yourself. ${policies}`,
+  review: (round, s, policies, reviewRound) =>
+    `Run the Foundry review stage. This review is round ${reviewRound}; write \`Round: ${reviewRound}\` on the second line of docs/REVIEW.md, and use \`R${reviewRound}-<nn>\` when a fix task's dependsOn must reference another fix task in the same submission. Review the whole build branch against docs/SPEC.md and docs/PLAN.md as your review-build instructions specify, write docs/REVIEW.md, and call foundry_review_submit exactly once with your verdict. Do not fix code yourself. ${policies}`,
   summarize: (round, s, policies) =>
     `Run the Foundry summarize stage. The review is APPROVED. Write docs/SUMMARY.md as your summarize instructions specify and call foundry_summary_commit. Do not merge. ${policies}`,
 };
@@ -1150,6 +1152,12 @@ function formatTask(id, t) {
   ].join("\n");
 }
 
+/** The number stamped on `docs/REVIEW.md`'s `Round:` line, or `null` if it is missing or unparseable. */
+function reviewMdRound() {
+  const m = read(P.review).match(/^Round:\s*(\d+)\s*$/m);
+  return m ? Number(m[1]) : null;
+}
+
 function reviewSubmit({ verdict, tasks = [], unblock = [] }) {
   verdict = String(verdict || "").toUpperCase().trim();
   if (!["APPROVED", "CHANGES REQUESTED"].includes(verdict)) throw new ToolError("verdict must be APPROVED or CHANGES REQUESTED");
@@ -1157,23 +1165,40 @@ function reviewSubmit({ verdict, tasks = [], unblock = [] }) {
   const st = loadState();
   if (!st.implemented) throw new ToolError("no implementation handoff recorded for this round; nothing to review");
   const c = cfg();
+  // The round this review is itself stamped as: round is the count of fix
+  // rounds already queued, so the review being submitted right now is
+  // always round + 1 (F-10, F-11) — never guessed by the reviewer.
+  const N = st.round + 1;
+  const stampedRound = reviewMdRound();
+  if (stampedRound !== N) {
+    throw new ToolError(
+      `docs/REVIEW.md's 'Round:' line is ${stampedRound === null ? "missing" : `'${stampedRound}'`}; this review must be stamped 'Round: ${N}'`,
+    );
+  }
 
   if (verdict === "APPROVED") {
     if (tasks.length || unblock.length) throw new ToolError("an APPROVED verdict cannot carry fix tasks or unblocks");
     st.reviewed = true; st.verdict = "APPROVED";
     saveState(st);
-    const sha = gitCommitIfChanged([P.review, P.state], "review: approved");
+    const sha = gitCommitIfChanged([P.review, P.state], `review: round ${N} approved`);
     const push = pushBranch(gitFacts().branch, st.policies.push);
     return { verdict, round: st.round, commit: sha, push };
   }
 
   if (!tasks.length && !unblock.length) throw new ToolError("CHANGES REQUESTED requires at least one fix task or unblock");
-  const N = st.round + 1;
   const pr = parseProgress();
   for (const t of tasks) {
     for (const k of ["title", "goal", "files", "tests"]) if (!t[k] || (Array.isArray(t[k]) && !t[k].length)) throw new ToolError(`fix task '${t.title || "?"}' is missing '${k}'`);
   }
   const ids = tasks.map((_, i) => `R${N}-${String(i + 1).padStart(2, "0")}`);
+  // Every dependsOn must resolve to something that actually exists: an
+  // already-known task, or one of this same submission's own new ids.
+  for (const t of tasks) {
+    for (const dep of t.dependsOn || []) {
+      if (pr.tasks.some((x) => x.id === dep) || ids.includes(dep)) continue;
+      throw new ToolError(`fix task '${t.title}' depends on '${dep}', which is neither an existing task in PROGRESS.md nor one of this submission's own ids (${ids.join(", ") || "none"})`);
+    }
+  }
   if (tasks.length) {
     const block = [``, `## Review fixes (round ${N})`, ``, ...tasks.map((t, i) => formatTask(ids[i], t) + "\n")].join("\n");
     write(P.plan, read(P.plan).replace(/\s*$/, "\n") + block);

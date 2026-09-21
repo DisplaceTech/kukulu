@@ -91,8 +91,35 @@ await withServer(plannedRepo(), async ({ call }) => {
   await withServer(repo, async ({ call }) => {
     const n = await call("foundry_next");
     eq(n.round, 2, "next reports the current round");
+    eq(n.reviewRound, 3, "reviewRound is always round + 1");
     like(n.prompt, /review-fix round 2/, "a fix round's prompt names the round");
     like(n.prompt, /R2-\*/, "a fix round's prompt names the R-task pattern");
+  });
+}
+
+// reviewRound tracks round + 1 everywhere in the decision table, including
+// foundry_status, not only the implement-stage prompt above.
+for (const round of [0, 1, 5]) {
+  const repo = plannedRepo();
+  setState(repo, { round });
+  await withServer(repo, async ({ call }) => {
+    eq((await call("foundry_status")).reviewRound, round + 1, `status reports reviewRound as round + 1 at round ${round}`);
+    eq((await call("foundry_next")).reviewRound, round + 1, `next reports reviewRound as round + 1 at round ${round}`);
+  });
+}
+
+// The review stage's own prompt states the round it must be stamped with.
+{
+  const repo = plannedRepo();
+  markTasks(repo, ALL_DONE);
+  setState(repo, { implemented: true });
+  await withServer(repo, async ({ call }) => {
+    const n = await call("foundry_next");
+    eq(n.stage, "review", "implemented and unreviewed → review");
+    eq(n.reviewRound, 1, "the first review is round 1");
+    like(n.prompt, /This review is round 1/, "the review prompt states its own round");
+    like(n.prompt, /Round: 1.*docs\/REVIEW\.md/, "...and exactly what to write in REVIEW.md");
+    like(n.prompt, /R1-<nn>/, "...and the id prefix for any same-round dependsOn");
   });
 }
 

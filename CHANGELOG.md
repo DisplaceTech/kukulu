@@ -46,6 +46,16 @@ All notable changes to this plugin. Format follows
 
 ### Changed
 
+- **The MCP owns the review round number** (F-10, F-11): `foundry_status`
+  and `foundry_next` expose `reviewRound` (always `round + 1`), and the
+  review prompt states it explicitly ("This review is round N") instead of
+  leaving a reviewer to derive it from `round` and risk being off by one.
+  `foundry_review_submit` now reads `docs/REVIEW.md`'s `Round:` line and
+  refuses, for either verdict, when it is missing or does not equal
+  `reviewRound`. It also validates every fix task's `dependsOn`: each must
+  name an existing task or one of the same submission's own new ids.
+  Approval now commits as `review: round N approved` (was `review:
+  approved`), so `git log --grep '^review:'` lists every round uniformly.
 - **Every push-worthy commit is actually pushed** (F-18): after a flight,
   the `review:` commit from `foundry_review_submit` and the `chore: build
   summary` commit from `foundry_summary_commit` used to stay local, and the

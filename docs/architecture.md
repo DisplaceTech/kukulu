@@ -206,12 +206,29 @@ the reviewer not to give one.
 
 ## Review rounds
 
-`foundry_review_submit` with `CHANGES REQUESTED` is the only way findings
-become work:
+Two numbers, easy to conflate, so the server owns the distinction rather
+than any model computing it (F-10, F-11):
+
+- **`round`** — `state.round` — the number of review-fix rounds whose tasks
+  have already been queued. `0` during the initial build; a `CHANGES
+  REQUESTED` verdict is the only thing that increments it.
+- **`reviewRound`** — always `round + 1` — the number the *next* review is
+  stamped with, and the prefix of the fix tasks it may queue. `foundry_status`
+  and `foundry_next` both expose it, and the review prompt states it in
+  words ("This review is round N"), so a reviewer never has to compute it
+  from `round` and risk being off by one.
+
+`foundry_review_submit` reads `docs/REVIEW.md`'s `Round:` line and refuses,
+for either verdict, if it is missing or not equal to `reviewRound` — a wrong
+number never reaches a commit.
+
+For `CHANGES REQUESTED`, this is the only way findings become work:
 
 1. Each finding is validated — `title`, `goal`, `files` and `tests` are
    mandatory, so "this looks wrong" cannot become a task.
-2. Ids are assigned `R<N>-<nn>`, zero-padded, in submission order.
+2. Ids are assigned `R<reviewRound>-<nn>`, zero-padded, in submission order.
+   A `dependsOn` must name an existing task or one of this same
+   submission's own ids; anything else is refused.
 3. A `## Review fixes (round N)` section is appended to `PLAN.md` in the exact
    task format the implementer already reads.
 4. Checkbox lines are appended to `PROGRESS.md`, after the last task and before
@@ -220,7 +237,12 @@ become work:
    the log.
 6. Round, verdict and — if the cap is exceeded — the halt reason are written to
    `.foundry/state.json`.
-7. All of it lands in one commit: `review: round N`.
+7. All of it lands in one commit, `review: round N`, then pushed per
+   `policies.push` (F-18).
+
+An `APPROVED` verdict commits `REVIEW.md` as `review: round N approved` and
+pushes the same way; `round` itself does not change, since nothing new was
+queued.
 
 The round-trip matters: what the reviewer submits as structured JSON is
 rendered into PLAN.md and parsed straight back out by `foundry_task_next`. A

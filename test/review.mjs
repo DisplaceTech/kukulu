@@ -11,15 +11,19 @@ import {
 const TODAY = new Date().toISOString().slice(0, 10);
 const ALL_DONE = { "P0-01": "x", "P0-02": "x", "P0-03": "x" };
 
-/** A repo parked exactly where the reviewer picks it up. */
-function reviewableRepo({ config, verdict = "CHANGES REQUESTED", states = ALL_DONE } = {}) {
+/**
+ * A repo parked exactly where the reviewer picks it up, `round` fix rounds
+ * already queued (so this review is stamped `round + 1`, matching what
+ * foundry_status would call `reviewRound`).
+ */
+function reviewableRepo({ config, verdict = "CHANGES REQUESTED", states = ALL_DONE, round = 0 } = {}) {
   const repo = plannedRepo({ config });
   git(repo, ["checkout", "-q", "-b", `build/${TODAY}`]);
   markTasks(repo, states);
-  setState(repo, { round: 0, implemented: true });
-  writeFile(repo, "docs/REVIEW.md", `# Review\nRound: 0\n**Verdict**: ${verdict}\n`);
+  setState(repo, { round, implemented: true });
+  writeFile(repo, "docs/REVIEW.md", `# Review\nRound: ${round + 1}\n**Verdict**: ${verdict}\n`);
   git(repo, ["add", "-A"]);
-  git(repo, ["commit", "-qm", "chore: round 0 implemented"]);
+  git(repo, ["commit", "-qm", `chore: round ${round} implemented`]);
   return repo;
 }
 
@@ -80,6 +84,48 @@ const FIX = {
     );
     eq(subject(repo), "chore: round 0 implemented", "no refusal left a commit behind");
     eq(git(repo, ["status", "--porcelain"]), "", "no refusal left the tree dirty");
+  });
+}
+
+// ---------------------------------------------------------------- the Round: line (F-10, F-11)
+
+{
+  const repo = reviewableRepo();
+  writeFile(repo, "docs/REVIEW.md", "# Review\nRound: 0\n**Verdict**: APPROVED\n");
+  await withServer(repo, async ({ call }) => {
+    isError(
+      await call("foundry_review_submit", { verdict: "APPROVED" }),
+      /'Round:' line is '0'; this review must be stamped 'Round: 1'/,
+      "a review stamped with the current round, not the next one, is refused",
+    );
+  });
+}
+
+{
+  const repo = reviewableRepo();
+  writeFile(repo, "docs/REVIEW.md", "# Review\n**Verdict**: APPROVED\n");
+  await withServer(repo, async ({ call }) => {
+    isError(
+      await call("foundry_review_submit", { verdict: "APPROVED" }),
+      /'Round:' line is missing; this review must be stamped 'Round: 1'/,
+      "a review with no Round: line at all names the expected value",
+    );
+  });
+}
+
+{
+  const repo = reviewableRepo();
+  await withServer(repo, async ({ call }) => {
+    isError(
+      await call("foundry_review_submit", { verdict: "CHANGES REQUESTED", tasks: [{ ...FIX, dependsOn: ["R1-03"] }, FIX] }),
+      /depends on 'R1-03', which is neither an existing task[\s\S]*\(R1-01, R1-02\)/,
+      "a dependsOn one past the end of this submission is refused",
+    );
+    isError(
+      await call("foundry_review_submit", { verdict: "CHANGES REQUESTED", tasks: [{ ...FIX, dependsOn: ["R2-01"] }] }),
+      /depends on 'R2-01', which is neither an existing task/,
+      "a dependsOn naming a future round's id is refused",
+    );
   });
 }
 
@@ -157,8 +203,7 @@ const FIX = {
 // ---------------------------------------------------------------- round cap
 
 {
-  const repo = reviewableRepo({ config: { maxRounds: 1 } });
-  setState(repo, { round: 1 });
+  const repo = reviewableRepo({ config: { maxRounds: 1 }, round: 1 });
   await withServer(repo, async ({ call }) => {
     const r = await call("foundry_review_submit", { verdict: "CHANGES REQUESTED", tasks: [FIX] });
     eq(r.round, 2, "the round still increments past the cap");
@@ -182,7 +227,7 @@ const FIX = {
     const r = await call("foundry_review_submit", { verdict: "APPROVED" });
     eq(r.verdict, "APPROVED", "the approval is recorded");
     eq(r.round, 0, "approving does not open a new round");
-    eq(subject(repo), "review: approved", "approval is its own commit");
+    eq(subject(repo), "review: round 1 approved", "approval is its own commit");
 
     const n = await call("foundry_next");
     eq(n.stage, "summarize", "approval hands off to the summarizer");

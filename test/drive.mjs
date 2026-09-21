@@ -115,7 +115,7 @@ await withServer(repo, async ({ call }) => {
 
   // ---------------------------------------------------------------- review
 
-  writeFile(repo, "docs/REVIEW.md", "# Review\nRound: 0\n**Verdict**: CHANGES REQUESTED\n");
+  writeFile(repo, "docs/REVIEW.md", "# Review\nRound: 1\n**Verdict**: CHANGES REQUESTED\n");
   r = await call("foundry_review_submit", {
     verdict: "CHANGES REQUESTED",
     tasks: [{
@@ -162,10 +162,10 @@ await withServer(repo, async ({ call }) => {
   eq(n.stage, "review", "round 1 goes back for review");
   eq(n.agent, "foundry-reviewer", "still the generated reviewer agent, on round 1");
 
-  writeFile(repo, "docs/REVIEW.md", "# Review\nRound: 1\n**Verdict**: APPROVED\n");
+  writeFile(repo, "docs/REVIEW.md", "# Review\nRound: 2\n**Verdict**: APPROVED\n");
   isError(await call("foundry_summary_commit"), /docs\/SUMMARY\.md does not exist/, "there is no summary to commit yet");
   await call("foundry_review_submit", { verdict: "APPROVED" });
-  eq(subject(repo), "review: approved", "the approval is committed");
+  eq(subject(repo), "review: round 2 approved", "the approval is committed");
 
   n = await call("foundry_next");
   eq(n.stage, "summarize", "an approved branch needs its summary");
@@ -192,7 +192,7 @@ await withServer(repo, async ({ call }) => {
   eq(readFile(repo, "FOUNDRY_FEEDBACK.md"), "pipeline feedback notes, unrelated to this build\n", "...which the whole flight left byte-for-byte untouched");
   const log = sh(repo, "git log --oneline --format=%s");
   for (const expected of [
-    "chore: build summary", "review: approved", "chore: round 1 implemented",
+    "chore: build summary", "review: round 2 approved", "chore: round 1 implemented",
     "chore: handoff for review", "R1-01: Fix hello", "P0-02: Impossible task",
     "review: round 1", "P0-01: Create hello", "plan: derive build plan from SPEC",
   ]) {
