@@ -77,10 +77,21 @@ ok(!hooks.hooks.Stop[0].matcher, "Stop carries no matcher — a Stop event has n
 
 const skillNames = listDir("skills").filter((d) => exists(`skills/${d}/SKILL.md`));
 const agentNames = listDir("agents").map((f) => f.replace(/\.md$/, ""));
-eq(skillNames.sort().join(","), "go-flight,implement,plan-build,review-build,summarize", "the five skills are present");
+eq(skillNames.sort().join(","), "go-flight,implement,plan-build,pull-feedback,review-build,summarize", "the six skills are present");
 eq(agentNames.sort().join(","), "implementer,planner,reviewer,summarizer", "the four stage agents are present");
 
-for (const name of skillNames) {
+// pull-feedback is a standalone maintainer utility, not a pipeline stage: it
+// has no generated agent and no pinned model of its own, so it does not
+// belong in the stage-vs-controller either/or check the loop below runs.
+{
+  const fm = frontmatter(read("skills/pull-feedback/SKILL.md"));
+  ok(fm, "skills/pull-feedback has frontmatter");
+  eq(fm.name, "pull-feedback", "skills/pull-feedback's name matches its directory");
+  ok(fm.description && fm.description.length > 30, "skills/pull-feedback has a usable description");
+  eq(fm["disable-model-invocation"], undefined, "skills/pull-feedback is model-invocable, like go-flight");
+}
+
+for (const name of skillNames.filter((n) => n !== "pull-feedback")) {
   const fm = frontmatter(read(`skills/${name}/SKILL.md`));
   ok(fm, `skills/${name} has frontmatter`);
   eq(fm.name, name, `skills/${name}'s name matches its directory`);
@@ -369,5 +380,7 @@ like(read("skills/review-build/SKILL.md"), /foundry_feedback_log/, "the review-b
 like(read("skills/plan-build/SKILL.md"), /foundry_feedback_log/, "the plan-build skill calls foundry_feedback_log directly");
 like(read("skills/summarize/SKILL.md"), /feedbackCount/, "the summarize skill reads feedbackCount rather than scanning headings");
 like(read("skills/summarize/SKILL.md"), /\.foundry\/feedback\.jsonl/, "...and reads the feedback log itself for the entries");
+like(read("docs/feedback/README.md"), /foundry_feedback_log/, "docs/feedback/README.md documents the tool that produces the source log");
+like(read("docs/feedback/README.md"), /\/foundry:pull-feedback/, "...and the skill that pulls it back here");
 
 finish();
