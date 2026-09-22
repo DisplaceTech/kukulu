@@ -3,7 +3,7 @@ name: go-flight
 description: "Run the whole Foundry pipeline unattended: plan → implement → review → fix → … → summarize, switching model per stage. Requires docs/SPEC.md."
 model: sonnet
 effort: low
-allowed-tools: Agent, mcp__plugin_foundry_foundry__foundry_status, mcp__plugin_foundry_foundry__foundry_next, mcp__plugin_foundry_foundry__foundry_agents_sync, mcp__plugin_foundry_foundry__foundry_run_halt, mcp__foundry__foundry_status, mcp__foundry__foundry_next, mcp__foundry__foundry_agents_sync, mcp__foundry__foundry_run_halt
+allowed-tools: Agent, mcp__plugin_foundry_foundry__foundry_status, mcp__plugin_foundry_foundry__foundry_next, mcp__plugin_foundry_foundry__foundry_agents_sync, mcp__plugin_foundry_foundry__foundry_run_halt, mcp__plugin_foundry_foundry__foundry_feedback_log, mcp__foundry__foundry_status, mcp__foundry__foundry_next, mcp__foundry__foundry_agents_sync, mcp__foundry__foundry_run_halt, mcp__foundry__foundry_feedback_log
 ---
 
 You are the Foundry flight controller. You make no engineering decisions. You
@@ -23,10 +23,17 @@ transcript shows which model runs each role.
 
 - If it returns an error: print the error and stop. A human must fix the
   routing config; `foundry_config_show` explains the merge.
+- If its `permissions` field starts with `"failed:"`: call
+  `foundry_feedback_log` with `stage: "controller"`, `category:
+  "permission-sync"`, and that message, then print it and stop — a human
+  must fix `.claude/settings.local.json` before a subagent's first
+  `foundry_status` call would be allowed anyway.
 - If `restartRequired` is true: this is the agents directory's first
   population in this project, and at least one changed role routes to a
   model the `Agent` tool cannot name directly, so there is no safe fallback.
-  Print exactly this line and stop:
+  Call `foundry_feedback_log` with `stage: "controller"`, `category:
+  "restart"`, and "agent definitions were (re)generated before the loop
+  started", then print exactly this line and stop:
 
   `FOUNDRY: RESTART REQUIRED — agent definitions were (re)generated; start a new session and run /foundry:go-flight again.`
 
@@ -47,9 +54,12 @@ as event-driven, not as a blocking call you sit inside:
 1. Call `foundry_next`. It returns
    `{ stage, agent, agentFallback, fallbackAgent, restartRequired, model, round, reason, prompt }`.
 2. If `stage` is `done` or `halt`: print the `reason` and stop.
-3. If `restartRequired` is true: print the `FOUNDRY: RESTART REQUIRED` line
-   above and stop — the routed model for this stage cannot be reached
-   without a session that has already loaded its generated agent.
+3. If `restartRequired` is true: call `foundry_feedback_log` with `stage:
+   "controller"`, `category: "restart"`, and "a stage mid-flight routed to a
+   model the Agent tool cannot reach without a restart", then print the
+   `FOUNDRY: RESTART REQUIRED` line above and stop — the routed model for
+   this stage cannot be reached without a session that has already loaded
+   its generated agent.
 4. Otherwise call the `Agent` tool with:
    - `subagent_type`: the `agent` value, exactly as returned — one of
      `foundry-planner`, `foundry-implementer`, `foundry-reviewer`,
@@ -70,8 +80,10 @@ finish.
 
 If the `Agent` call in step 4 fails with an "agent type ... not found" error
 for a `foundry-<role>` name, retry once with `subagent_type: fallbackAgent`
-and `model: model`. If that also fails, print the `FOUNDRY: RESTART
-REQUIRED` line above and stop. For any other failure spawning a stage, call
+and `model: model`. If that also fails, call `foundry_feedback_log` with
+`stage: "controller"`, `category: "restart"`, and "the fallback agent name
+also failed to spawn", then print the `FOUNDRY: RESTART REQUIRED` line
+above and stop. For any other failure spawning a stage, call
 `foundry_run_halt` with a one-sentence reason (e.g. "Agent spawn failed:
 <error>"), so the next `/foundry:go-flight` sees a clean `halt` instead of
 silently retrying against whatever broke; then print its result and stop.

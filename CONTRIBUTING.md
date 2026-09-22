@@ -30,7 +30,7 @@ it.
 | `templates/SPEC.md` | The spec skeleton users copy |
 | `templates/foundry.config.example.json`, `templates/ccr/` | The global routing config and claude-code-router provider manifests |
 | `templates/constraints.example.json` | Three worked `docs/foundry.json` `constraints` rules, with fixtures |
-| `test/` | Harness plus nine suites |
+| `test/` | Harness plus ten suites |
 | `docs/` | Architecture, tool reference, routing guide, spec guide, runbook |
 | `docs/plans/` | The task-by-task plan behind each release |
 | `docs/feedback/` | Stumbling blocks a real flight hit, feeding the next release plan |
@@ -52,7 +52,7 @@ plugin that fails on someone else's machine.
 
 ```bash
 npm run lint                    # node --check, bash -n, JSON parse, exec bits
-npm test                        # all nine suites
+npm test                        # all ten suites
 npm test -- guard protocol      # named suites only
 node test/state.mjs             # one suite, directly
 KEEP_REPO=1 npm test -- drive   # keep the temp repos for inspection
@@ -70,6 +70,7 @@ npm install --no-save mermaid jsdom && node scripts/check-diagrams.mjs
 | `review` | `review_submit` and `summary_commit`, including every refusal |
 | `routing` | Config merge and precedence, `foundry_agents_sync`, `foundry_config_show`, every refusal |
 | `constraints` | `docs/foundry.json` constraints, fixture self-tests, the scan, every refusal |
+| `feedback` | `foundry_feedback_log`, `.foundry/feedback.jsonl`, and the `policies.feedback` opt-out |
 | `guard` | The Stop / SubagentStop hook: scoping, blocking, counting, giving up, environment handling |
 | `drive` | One complete flight end to end over real stdio |
 

@@ -77,10 +77,21 @@ ok(!hooks.hooks.Stop[0].matcher, "Stop carries no matcher — a Stop event has n
 
 const skillNames = listDir("skills").filter((d) => exists(`skills/${d}/SKILL.md`));
 const agentNames = listDir("agents").map((f) => f.replace(/\.md$/, ""));
-eq(skillNames.sort().join(","), "go-flight,implement,plan-build,review-build,summarize", "the five skills are present");
+eq(skillNames.sort().join(","), "go-flight,implement,plan-build,pull-feedback,review-build,summarize", "the six skills are present");
 eq(agentNames.sort().join(","), "implementer,planner,reviewer,summarizer", "the four stage agents are present");
 
-for (const name of skillNames) {
+// pull-feedback is a standalone maintainer utility, not a pipeline stage: it
+// has no generated agent and no pinned model of its own, so it does not
+// belong in the stage-vs-controller either/or check the loop below runs.
+{
+  const fm = frontmatter(read("skills/pull-feedback/SKILL.md"));
+  ok(fm, "skills/pull-feedback has frontmatter");
+  eq(fm.name, "pull-feedback", "skills/pull-feedback's name matches its directory");
+  ok(fm.description && fm.description.length > 30, "skills/pull-feedback has a usable description");
+  eq(fm["disable-model-invocation"], undefined, "skills/pull-feedback is model-invocable, like go-flight");
+}
+
+for (const name of skillNames.filter((n) => n !== "pull-feedback")) {
   const fm = frontmatter(read(`skills/${name}/SKILL.md`));
   ok(fm, `skills/${name} has frontmatter`);
   eq(fm.name, name, `skills/${name}'s name matches its directory`);
@@ -141,7 +152,7 @@ const goFlight = read("skills/go-flight/SKILL.md");
 const fmGo = frontmatter(goFlight);
 const allowed = String(fmGo["allowed-tools"]).split(",").map((s) => s.trim());
 const toolNames = Array.from(serverSrc.matchAll(/name: "(foundry_[a-z_]+)"/g), (m) => m[1]);
-eq(toolNames.length, 13, "the server defines thirteen tools");
+eq(toolNames.length, 14, "the server defines fourteen tools");
 
 // Every stage agent's own tool set is explicit (F-16): no agent is left to
 // discover by trial and error what it is allowed to call.
@@ -160,6 +171,7 @@ for (const name of agentNames) {
     ok(toolNames.includes(t.replace("mcp__plugin_foundry_foundry__", "")), `agents/${name}'s MCP tool ${t} actually exists`);
   }
   ok(mcpTools.some((t) => t.endsWith("foundry_status")), `agents/${name} can call foundry_status to re-orient itself`);
+  ok(tools.includes("mcp__plugin_foundry_foundry__foundry_feedback_log"), `agents/${name} can log pipeline friction the moment it happens`);
 }
 // A plugin-shipped MCP server's tools are exposed as
 // mcp__plugin_<plugin>_<server>__<tool> (verified with --plugin-dir), not as
@@ -169,7 +181,7 @@ for (const name of agentNames) {
 const MCP_PREFIXES = ["mcp__plugin_foundry_foundry__", "mcp__foundry__"];
 const bareTool = (t) => MCP_PREFIXES.reduce((s, p) => s.replace(p, ""), t);
 ok(allowed.includes("Agent"), "the flight controller may spawn agents");
-for (const t of ["foundry_status", "foundry_next", "foundry_agents_sync", "foundry_run_halt"]) {
+for (const t of ["foundry_status", "foundry_next", "foundry_agents_sync", "foundry_run_halt", "foundry_feedback_log"]) {
   for (const p of MCP_PREFIXES) ok(allowed.includes(p + t), `the flight controller may call ${p}${t}`);
 }
 for (const t of allowed.filter((a) => a.startsWith("mcp__"))) {
@@ -307,6 +319,7 @@ ok(read("skills/plan-build/SKILL.md").includes("templates/constraints.example.js
       ok(opsDoc.includes("`policies.signing`"), "operations.md documents policies.signing");
       ok(opsDoc.includes("`policies.push`"), "operations.md documents policies.push");
       ok(opsDoc.includes("`policies.pr`"), "operations.md documents policies.pr");
+      ok(opsDoc.includes("`policies.feedback`"), "operations.md documents policies.feedback");
       continue;
     }
     ok(opsDoc.includes(`\`${key}\``), `operations.md's config table documents '${key}'`);
@@ -358,8 +371,17 @@ ok(exists("docs/feedback/README.md"), "docs/feedback/ exists and explains its ow
 ok(exists("docs/plans"), "docs/plans/ exists");
 ok(readme.includes("docs/feedback/"), "docs/feedback/ is linked from the README");
 ok(readme.includes("docs/plans/"), "docs/plans/ is linked from the README");
-like(read("skills/summarize/SKILL.md"), /Pipeline friction/, "the summarize skill collects pipeline friction into SUMMARY.md");
-like(read("skills/implement/SKILL.md"), /Pipeline friction/, "the implement skill records pipeline friction in HANDOFF.md");
-like(read("skills/review-build/SKILL.md"), /Pipeline friction/, "the review-build skill records pipeline friction in REVIEW.md");
+// V3.1-03: the old "write a heading and hope the summarizer reads it"
+// convention is retired in favor of calling foundry_feedback_log the
+// moment friction happens, so it survives a flight that never summarizes.
+ok(!read("skills/implement/SKILL.md").includes("## Pipeline friction"), "the implement skill no longer collects friction into a HANDOFF.md heading");
+ok(!read("skills/review-build/SKILL.md").includes("## Pipeline friction"), "the review-build skill no longer collects friction into a REVIEW.md heading");
+like(read("skills/implement/SKILL.md"), /foundry_feedback_log/, "the implement skill calls foundry_feedback_log directly");
+like(read("skills/review-build/SKILL.md"), /foundry_feedback_log/, "the review-build skill calls foundry_feedback_log directly");
+like(read("skills/plan-build/SKILL.md"), /foundry_feedback_log/, "the plan-build skill calls foundry_feedback_log directly");
+like(read("skills/summarize/SKILL.md"), /feedbackCount/, "the summarize skill reads feedbackCount rather than scanning headings");
+like(read("skills/summarize/SKILL.md"), /\.foundry\/feedback\.jsonl/, "...and reads the feedback log itself for the entries");
+like(read("docs/feedback/README.md"), /foundry_feedback_log/, "docs/feedback/README.md documents the tool that produces the source log");
+like(read("docs/feedback/README.md"), /\/foundry:pull-feedback/, "...and the skill that pulls it back here");
 
 finish();

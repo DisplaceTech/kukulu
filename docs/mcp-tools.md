@@ -1,6 +1,6 @@
 # MCP tool reference
 
-Thirteen tools, served over stdio by `mcp/server.mjs` with no dependencies.
+Fourteen tools, served over stdio by `mcp/server.mjs` with no dependencies.
 The server is launched by Claude Code from [`.mcp.json`](../.mcp.json) with
 `FOUNDRY_PROJECT_DIR` set to the project root; every path below is relative to
 that root.
@@ -47,6 +47,7 @@ context.
 | `reviewRound` | Always `round + 1` — the number the *next* review must stamp on `docs/REVIEW.md`'s `Round:` line (F-10, F-11) |
 | `preexistingUntracked` | Paths that were already untracked before the current run started — invisible to every dirty-tree check (F-09) |
 | `policies`, `signing` | The run's resolved policies and signing outcome, from `foundry_run_start` — see [operations.md](./operations.md#configuration) |
+| `feedbackCount` | Number of entries in `.foundry/feedback.jsonl` so far, so a human watching a transcript can see friction accumulate without opening the file |
 | `reviewRoundsInPlan` | How many `## Review fixes (round N)` sections `PLAN.md` carries |
 | `branch`, `started` | The `Branch:` and `Started:` headers in `PROGRESS.md` |
 | `counts` | `{ todo, inProgress, done, blocked, skipped, total, open }`; `open = todo + inProgress` |
@@ -325,6 +326,49 @@ anything is left uncommitted, which after a halt is expected, not an error.
 The next `foundry_next` call returns `{ stage: "halt", reason }` with the
 same reason. Clearing it is the same hand edit as any other halt — see
 [operations.md](./operations.md#halts).
+
+---
+
+## `foundry_feedback_log`
+
+Record one pipeline-friction entry: something Foundry's own tooling cost
+time on, not the project it is building — a tool refused, a prompt was
+ambiguous, a stall needed a workaround. Any stage may call it, at the
+moment the friction happens, not saved up for end-of-stage prose. This is
+what makes friction capture survive a flight that halts, blocks, or gets
+abandoned before ever reaching `foundry_summary_commit`.
+
+**Arguments:** `{ stage, message, category? }` — `stage` is one of
+`plan` · `implement` · `review` · `summarize` · `controller`; `message` is
+one or two sentences; `category` is a short free-form label (e.g.
+`"tool-refusal"`, `"ambiguous-prompt"`, `"stall"`) and defaults to
+`"other"`.
+
+**Does:** unless `policies.feedback` is `false`, appends one JSON line to
+`.foundry/feedback.jsonl` — `{ at, stage, round, category, message, source:
+"agent" }`, with `at` an ISO timestamp and `round` filled in from
+`.foundry/state.json` — and commits that file alone as
+`chore: pipeline friction (<stage>)`. Unlike every other write tool, this
+one commits on every call rather than waiting for some later checkpoint:
+friction is rare by nature, so one small commit per entry is the right
+amount of noise, and it means the file is never a *pending* uncommitted
+change by the time `foundry_task_done` or `foundry_run_finish` run their
+dirty-tree checks.
+
+**Returns:** `{ logged: true, count, commit }` normally; `{ logged: false,
+reason: "disabled by policy" }` when `policies.feedback` is `false` —
+never a refusal for this case, so a model never has to branch on whether
+logging is allowed before calling it.
+
+**Refuses when:** `stage` is not one of the five legal values; `message`
+is missing or empty; `policies.feedback` is present but not a boolean.
+
+Some events are logged automatically, without any model calling this tool
+at all: a `foundry_run_halt`, a review round-cap halt, and a signing
+auto-fallback each fold a `source: "auto"` entry into the commit they are
+already making. See [operations.md](./operations.md#configuration) for
+`policies.feedback` and [architecture.md](./architecture.md) for the full
+list of what logs itself.
 
 ---
 

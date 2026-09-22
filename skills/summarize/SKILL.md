@@ -35,12 +35,14 @@ Write `docs/SUMMARY.md`, under 200 lines:
 8. **Pipeline friction**: anything the Foundry pipeline itself did that cost
    time — a tool refusal worked around, a wrong or ambiguous prompt, a
    stall, a permission prompt, anything an implementer or reviewer had to
-   route around rather than the project itself being hard. Collect it from
-   every `## Pipeline friction` heading in `HANDOFF.md` and each round's
-   `REVIEW.md`, one line per item with the stage it happened in. Write
-   "None" when there is nothing to report — that is a real, useful line,
-   not an empty section to skip. This section is what a human copies into
-   [`docs/feedback/`](../../docs/feedback/) to feed the next release plan.
+   route around rather than the project itself being hard. Call
+   `foundry_status` for `feedbackCount`; if it is greater than zero, read
+   `.foundry/feedback.jsonl` directly (`cat` it — it is small, plain JSONL)
+   and render one line per entry, in the order logged: stage, category, and
+   the message. Write "None" when `feedbackCount` is `0` — that is a real,
+   useful line, not an empty section to skip. This section is what a human
+   pulls into [`docs/feedback/`](../../docs/feedback/) to feed the next
+   release plan.
 
 Write `docs/SUMMARY.md` with the `Write` tool. If the harness refuses it
 (some builds tell subagents to return findings as text instead), write it

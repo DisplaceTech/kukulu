@@ -2,8 +2,13 @@
 
 Stumbling blocks a real flight hit, written down so the next release plan
 can fix them instead of the next flight hitting them again. This is the
-compound-engineering loop: a flight's `docs/SUMMARY.md` gets a "Pipeline
-friction" section, that friction becomes a feedback file here, and a
+compound-engineering loop: a running flight calls `foundry_feedback_log`
+the moment something is Foundry's own fault (a tool refused, a prompt was
+ambiguous, a stall needed a workaround), which appends one JSON line to
+that project's `.foundry/feedback.jsonl` and commits it immediately — so
+the entry survives even if the flight never reaches `summarize`. A
+maintainer then runs `/foundry:pull-feedback` against that project's
+checkout to turn its log into a new, properly numbered file here, and a
 release plan under [`../plans/`](../plans/) maps every item in it to a
 task.
 
@@ -22,6 +27,16 @@ task.
 - The file's header names the plugin version the flight ran against and,
   once one exists, the release plan that addressed it — see
   [`2026-09-21-project-a.md`](./2026-09-21-project-a.md) for the shape.
+
+## Pulling a project's log
+
+`.foundry/feedback.jsonl` (JSONL, one entry per line: `at`, `stage`,
+`round`, `category`, `message`, `source`) is the durable source a flight
+writes as it runs. `/foundry:pull-feedback` reads a given project's copy of
+that file and dedupes against every file already in this directory by each
+entry's exact `at` timestamp — an entry pulled once and pulled again is
+skipped silently, so re-running a pull against the same project is always
+safe.
 
 ## What happens to a feedback file
 

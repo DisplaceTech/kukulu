@@ -77,11 +77,11 @@ Write `docs/REVIEW.md` with:
   finding: it never blocks approval and never becomes a fix task. Use it
   instead of manufacturing a category-8 finding just to have somewhere to
   put an observation.
-- **`## Pipeline friction`** (optional): anything the Foundry pipeline
-  itself cost you time on during the review — a refused tool, an ambiguous
-  instruction, a stall — one line each, or omit the section entirely if
-  there is none. Not about the code under review; the summarizer collects
-  it from this exact heading to feed the next release.
+
+The moment something costs you time during the review that is Foundry's own
+fault, not the code under review's — a refused tool, an ambiguous
+instruction, a stall — call `foundry_feedback_log` with `stage: "review"`
+right then, rather than saving it up for this document.
 
 Then call `foundry_review_submit` exactly once:
 

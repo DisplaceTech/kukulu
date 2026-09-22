@@ -4,7 +4,7 @@
 
 import {
   finish, ok, eq, like, isError,
-  plannedRepo, withServer, readFile, writeFile, subject,
+  plannedRepo, withServer, readFile, writeFile, subject, hasFile,
   markTasks, setState, git, mkBareRemote,
 } from "./harness.mjs";
 
@@ -228,6 +228,7 @@ async function driveRounds(call, repo, counts) {
     const r = await driveRounds(call, repo, [15, 3, 2, 1]);
     eq(r.halted, null, "findings shrinking every round never halts, even across four rounds with a maxRounds of 3");
     eq(r.round, 4, "the round still counts up normally");
+    ok(!hasFile(repo, ".foundry/feedback.jsonl"), "a round that never halts logs no feedback entry");
   });
 }
 
@@ -241,6 +242,17 @@ async function driveRounds(call, repo, counts) {
     const n = await call("foundry_next");
     eq(n.stage, "halt", "the flight now halts");
     eq(n.reason, r.halted, "the halt reason is the one review_submit recorded");
+
+    like(subject(repo), /^review: round 3/, "the feedback entry lands in the same commit as the round's own review: commit");
+    const changed = git(repo, ["show", "--stat", "--format=", "HEAD"]);
+    like(changed, /\.foundry\/feedback\.jsonl/, "...the commit touches the feedback file");
+    const lines = readFile(repo, ".foundry/feedback.jsonl").trim().split("\n");
+    eq(lines.length, 1, "exactly one feedback entry for the one round that halted");
+    const entry = JSON.parse(lines[0]);
+    eq(entry.stage, "review", "logged from the review stage");
+    eq(entry.category, "round-cap", "tagged as a round-cap halt");
+    eq(entry.source, "auto", "recorded as an auto entry");
+    eq(entry.message, r.halted, "the message matches the halt reason verbatim");
   });
 }
 
@@ -249,6 +261,17 @@ async function driveRounds(call, repo, counts) {
   await withServer(repo, async ({ call }) => {
     const r = await driveRounds(call, repo, [10, 5, 2]);
     like(r.halted, /hard cap maxRoundsHard=2/, "the hard cap fires on round 3 even while every round is converging, since maxRounds=100 would never trip");
+    const entry = JSON.parse(readFile(repo, ".foundry/feedback.jsonl").trim());
+    eq(entry.category, "round-cap", "the hard-cap halt is logged the same way as a non-converging one");
+  });
+}
+
+{
+  const repo = reviewableRepo({ config: { maxRounds: 2, policies: { feedback: false } } });
+  await withServer(repo, async ({ call }) => {
+    const r = await driveRounds(call, repo, [4, 4, 4]);
+    like(r.halted, /non-converging/, "the halt itself is unaffected by policies.feedback");
+    ok(!hasFile(repo, ".foundry/feedback.jsonl"), "...but policies.feedback: false suppresses the auto entry");
   });
 }
 
