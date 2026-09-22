@@ -219,3 +219,7 @@ docs/foundry.json`, not from memory) in your report, and state the
 `baseBranch` and `branchPrefix` it actually contains — a report that
 disagrees with the file it just wrote is worse than no report (F-06). Do
 not start implementation.
+
+If something about writing the plan was needlessly hard because of Foundry
+itself, not because of SPEC, call `foundry_feedback_log` with `stage:
+"plan"`.

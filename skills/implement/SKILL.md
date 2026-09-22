@@ -102,6 +102,14 @@ operator-level problems, not task problems; `foundry_task_block` is for a
 task that cannot be finished, `foundry_run_halt` is for a run that cannot
 continue at all. Never invent a third way to stop.
 
+## When Foundry itself costs you time
+
+The moment something costs time that is Foundry's own fault, not the
+project's — a tool refused, a prompt was ambiguous, a stall needed a
+workaround — call `foundry_feedback_log` with `stage: "implement"` right
+then. Do not save it up for `docs/HANDOFF.md`: this entry has to survive a
+run that never reaches `foundry_run_finish`.
+
 ## Constraints you may not relax
 
 Everything under `## Constraints` in `CLAUDE.md`, on every task. SPEC.md wins
@@ -136,10 +144,6 @@ When `foundry_task_next` returns `{ done: true }`:
      was tuned.
    - What a human must check by hand, per phase.
    - Anything you would tell a reviewer who has not seen this code.
-   - A `## Pipeline friction` section: anything the Foundry pipeline itself
-     cost you time on — a refused tool, an ambiguous prompt, a stall you
-     had to work around — one line each, or "None". This is not about the
-     project; it is what the summarizer collects to feed the next release.
    If this is a review-fix round, rewrite only the `## Round N` section of
    HANDOFF.md rather than the whole file. Write it with the `Write` tool; if
    the harness refuses (some builds tell subagents to return findings as
