@@ -84,7 +84,11 @@ function git(args, { allowFail = false } = {}) {
 }
 
 function gitCommitIfChanged(paths, message) {
-  const rels = paths.map(rel);
+  // A path that neither exists on disk nor is tracked yet (e.g. a feedback
+  // log nothing has written to this run) is not "nothing changed" to `git
+  // add` — it is a pathspec error. Drop those before asking git about them.
+  const rels = paths.map(rel).filter((r) => exists(path.join(ROOT, r)) || git(["ls-files", "--error-unmatch", "--", r], { allowFail: true }).ok);
+  if (!rels.length) return null;
   git(["add", "-A", "--", ...rels]);
   const staged = git(["diff", "--cached", "--name-only", "--", ...rels]).out;
   if (!staged) return null;
@@ -629,7 +633,7 @@ const DEFAULT_STATE = {
   summarized: false,
   halted: null,
   preexistingUntracked: [],
-  policies: { signing: "auto", push: true, pr: "draft" },
+  policies: { signing: "auto", push: true, pr: "draft", feedback: true },
   signing: null,
   rounds: [],
 };
@@ -1073,7 +1077,13 @@ function runStart() {
   st.signing = probeSigning(c.policies.signing);
   st.implemented = false; st.reviewed = false; st.verdict = null;
   saveState(st);
-  const sha = gitCommitIfChanged([P.gitignore, P.progress, P.state], st.round === 0 ? "chore: start implementation run" : `chore: start review-fix round ${st.round}`);
+  // Only the auto fallback is friction — an explicit "off" or an
+  // unconfigured "none" is the operator's or the project's own choice
+  // working as intended, not something Foundry did wrong.
+  if (c.policies.feedback && st.signing.startsWith("off (probe failed")) {
+    appendFeedback("implement", `Signing disabled for this run: ${st.signing}`, "signing", "auto");
+  }
+  const sha = gitCommitIfChanged([P.gitignore, P.progress, P.state, P.feedback], st.round === 0 ? "chore: start implementation run" : `chore: start review-fix round ${st.round}`);
   return { alreadyStarted: false, branch, commit: sha, counts: counts(pr.tasks), round: st.round, policies: st.policies, signing: st.signing, basePush };
 }
 
@@ -1304,7 +1314,8 @@ function runHalt({ reason }) {
   st.halted = reason;
   saveState(st);
   if (exists(P.lock)) fs.unlinkSync(P.lock);
-  const commit = gitCommitIfChanged([P.state, P.progress], "chore: run halted");
+  if (cfg().policies.feedback) appendFeedback("controller", `Run halted: ${reason}`, "halt", "auto");
+  const commit = gitCommitIfChanged([P.state, P.progress, P.feedback], "chore: run halted");
   const g = gitFacts();
   const dirty = git(["status", "--porcelain"], { allowFail: true }).out !== "";
   return { halted: reason, branch: g.branch, head: g.head, commit, dirty };
@@ -1409,8 +1420,9 @@ function reviewSubmit({ verdict, tasks = [], unblock = [] }) {
   } else if (nonConvergingSoFar >= c.maxRounds) {
     st.halted = `round ${N} is non-converging (findings per round: ${trail}), the ${nonConvergingSoFar}th non-converging round, reaching maxRounds=${c.maxRounds}; a human must decide whether to continue (edit .foundry/state.json to clear 'halted' and raise maxRounds in docs/foundry.json)`;
   }
+  if (st.halted && c.policies.feedback) appendFeedback("review", st.halted, "round-cap", "auto");
   saveState(st);
-  const sha = gitCommitIfChanged([P.review, P.plan, P.progress, P.state], `review: round ${N}`);
+  const sha = gitCommitIfChanged([P.review, P.plan, P.progress, P.state, P.feedback], `review: round ${N}`);
   const push = pushBranch(gitFacts().branch, st.policies.push);
   return { verdict, round: N, fixTasks: ids, unblocked, commit: sha, halted: st.halted, counts: counts(pr.tasks), push };
 }

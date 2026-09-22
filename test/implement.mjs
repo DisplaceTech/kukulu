@@ -566,6 +566,18 @@ for (const [bad, re] of [
     const r = await call("foundry_run_start");
     eq(r.signing, "off", "policies.signing: off records off without even probing");
     eq(git(repo, ["config", "--local", "commit.gpgsign"]), "false", "...and disables signing locally");
+    ok(!hasFile(repo, ".foundry/feedback.jsonl"), "an explicit off is the operator's own choice, not friction — no feedback entry");
+  });
+}
+
+{
+  // Signing left unconfigured entirely ("none") is likewise a choice, not
+  // friction: only the auto-fallback path logs.
+  const repo = plannedRepo();
+  await withServer(repo, async ({ call }) => {
+    const r = await call("foundry_run_start");
+    eq(r.signing, "none", "no signing configured at all");
+    ok(!hasFile(repo, ".foundry/feedback.jsonl"), "no feedback entry for an unconfigured signer");
   });
 }
 
@@ -590,6 +602,28 @@ for (const [bad, re] of [
     const r = await call("foundry_run_start");
     like(r.signing, /^off \(probe failed: /, "auto falls back to off and records why, rather than refusing");
     eq(git(repo, ["config", "--local", "commit.gpgsign"]), "false", "...and disables signing locally so the first task commit does not hang");
+
+    const lines = readFile(repo, ".foundry/feedback.jsonl").trim().split("\n");
+    eq(lines.length, 1, "the auto fallback is the one case that logs itself as friction");
+    const entry = JSON.parse(lines[0]);
+    eq(entry.category, "signing", "...tagged with the signing category");
+    eq(entry.source, "auto", "...and recorded as an auto entry, not one the agent called explicitly");
+    like(entry.message, /off \(probe failed:/, "the message carries the same fallback reason");
+    like(git(repo, ["show", "--stat", "--format=", "HEAD"]), /\.foundry\/feedback\.jsonl/, "it lands in the same commit as the run-start stamp");
+  });
+}
+
+{
+  // policies.feedback: false is a global kill switch, including for the
+  // MCP's own internal auto-logging call sites, not just the tool.
+  const repo = plannedRepo({ config: { policies: { signing: "auto", feedback: false } } });
+  git(repo, ["config", "commit.gpgsign", "true"]);
+  git(repo, ["config", "gpg.format", "openpgp"]);
+  git(repo, ["config", "gpg.program", "/nonexistent-signing-agent"]);
+  await withServer(repo, async ({ call }) => {
+    const r = await call("foundry_run_start");
+    like(r.signing, /^off \(probe failed: /, "the fallback itself still happens");
+    ok(!hasFile(repo, ".foundry/feedback.jsonl"), "...but policies.feedback: false suppresses even the auto entry");
   });
 }
 
@@ -642,9 +676,28 @@ for (const [bad, re] of [
     ok(hasFile(repo, "half-finished.txt"), "run_halt never resets or cleans the tree");
     ok(r.dirty, "run_halt reports that the tree is still dirty");
 
+    eq(subject(repo), "chore: run halted", "one commit, not two, carries both the halt and its feedback entry");
+    const changed = git(repo, ["show", "--stat", "--format=", "HEAD"]);
+    like(changed, /\.foundry\/state\.json/, "...touching state");
+    like(changed, /\.foundry\/feedback\.jsonl/, "...and the feedback log, in the same commit");
+    const entry = JSON.parse(readFile(repo, ".foundry/feedback.jsonl").trim());
+    eq(entry.stage, "controller", "the halt is logged from the controller's own vantage point");
+    eq(entry.category, "halt", "...tagged as a halt");
+    eq(entry.source, "auto", "...recorded as an auto entry");
+    like(entry.message, /signing agent died: connection refused/, "...carrying the halt reason verbatim");
+
     const n = await call("foundry_next");
     eq(n.stage, "halt", "the flight now halts");
     eq(n.reason, "signing agent died: connection refused", "...with the recorded reason");
+  });
+}
+
+{
+  const repo = startedRepo({ config: { policies: { feedback: false } } });
+  await withServer(repo, async ({ call }) => {
+    const r = await call("foundry_run_halt", { reason: "operator intervened" });
+    eq(r.halted, "operator intervened", "the halt itself still works");
+    ok(!hasFile(repo, ".foundry/feedback.jsonl"), "policies.feedback: false skips even the auto entry");
   });
 }
 
