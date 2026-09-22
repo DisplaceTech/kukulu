@@ -250,6 +250,7 @@ Checkbox states in `PROGRESS.md`: `[ ]` todo · `[~]` in progress · `[x]` done 
 | `foundry_verify` | Run `verify` plus any `extraVerify` commands matching the touched paths; return exit codes and tails |
 | `foundry_run_finish` | Requires zero open tasks and `HANDOFF.md`; commit, push, draft a PR (unless policies say otherwise), disarm the lock |
 | `foundry_run_halt` | Record an operator-level reason the run cannot continue; disarm the lock; commit state; never resets or cleans the tree |
+| `foundry_feedback_log` | Append one pipeline-friction entry to `.foundry/feedback.jsonl` and commit it immediately, so it survives a flight that never reaches summarize |
 | `foundry_review_submit` | `APPROVED` → commit. `CHANGES REQUESTED` → assign `R<N>-<nn>`, append to PLAN and PROGRESS, unblock, commit `review: round N` |
 | `foundry_summary_commit` | Commit `SUMMARY.md`, mark the flight complete |
 | `foundry_agents_sync` | Write `.claude/agents/foundry-<role>.md` from the merged routing config; only changed files are written |
@@ -354,14 +355,15 @@ npm test -- guard protocol     # one or more suites by name
 KEEP_REPO=1 npm test -- drive  # keep the temp repos to poke at afterwards
 ```
 
-Nine suites, about 1040 assertions: the plugin manifests and documentation
+Ten suites, about 1130 assertions: the plugin manifests and documentation
 links, the JSON-RPC transport, the `foundry_next` decision table, the
 implement-stage tools, the review and summary tools, per-role routing
 (config merge, `foundry_agents_sync`, `foundry_config_show`),
-`docs/foundry.json` constraints and their fixture self-tests, the guard
-hook, and one end-to-end flight driven over real stdio against a real git
-repo. CI runs all of it on every supported Node line — 22, 24 and 26 —
-again on macOS, and again on a machine with no GitHub CLI installed.
+`docs/foundry.json` constraints and their fixture self-tests,
+`foundry_feedback_log` and the feedback policy, the guard hook, and one
+end-to-end flight driven over real stdio against a real git repo. CI runs
+all of it on every supported Node line — 22, 24 and 26 — again on macOS,
+and again on a machine with no GitHub CLI installed.
 
 ## Contributing
 
@@ -369,14 +371,16 @@ Single-author project, but the rules are written down: CI must pass on every
 PR, and `pre-commit install` runs the same checks locally that CI runs
 remotely. See [CONTRIBUTING.md](./CONTRIBUTING.md).
 
-**Feeding back.** A flight's `docs/SUMMARY.md` ends with a "Pipeline
-friction" section — anything the pipeline itself did that cost time, not
-the project it built. That section is the raw material for the next
-release: drop it (or a fuller writeup of what actually happened) into
-[docs/feedback/](./docs/feedback/) as a new dated file, and a future
-release plan works through it item by item. `docs/feedback/2026-09-21-project-a.md`
-is the first one, and every item in it maps to a task in
-[`docs/plans/v0.3.md`](./docs/plans/v0.3.md).
+**Feeding back.** Every stage calls `foundry_feedback_log` the moment
+Foundry itself costs it time — a refused tool, an ambiguous prompt, a
+stall — and the MCP logs its own halts and fallbacks the same way. Each
+entry lands in `.foundry/feedback.jsonl` and is committed immediately, so
+it survives even a flight that never reaches summarize. Run
+`/foundry:pull-feedback` against a project's checkout to turn its log into
+a new, numbered file under [docs/feedback/](./docs/feedback/), and a
+future release plan works through it item by item.
+`docs/feedback/2026-09-21-project-a.md` is the first one, and every item
+in it maps to a task in [`docs/plans/v0.3.md`](./docs/plans/v0.3.md).
 
 ## License
 

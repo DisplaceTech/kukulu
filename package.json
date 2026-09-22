@@ -1,6 +1,6 @@
 {
   "name": "foundry-claude-plugin",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": true,
   "description": "Claude Code plugin: spec-driven plan → implement → review → summarize pipeline with per-stage model switching",
   "type": "module",

@@ -319,6 +319,7 @@ ok(read("skills/plan-build/SKILL.md").includes("templates/constraints.example.js
       ok(opsDoc.includes("`policies.signing`"), "operations.md documents policies.signing");
       ok(opsDoc.includes("`policies.push`"), "operations.md documents policies.push");
       ok(opsDoc.includes("`policies.pr`"), "operations.md documents policies.pr");
+      ok(opsDoc.includes("`policies.feedback`"), "operations.md documents policies.feedback");
       continue;
     }
     ok(opsDoc.includes(`\`${key}\``), `operations.md's config table documents '${key}'`);

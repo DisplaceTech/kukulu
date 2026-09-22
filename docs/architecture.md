@@ -127,6 +127,16 @@ flowchart TD
 guard hook trustworthy — the file it counts open tasks in cannot be edited by
 the thing it is guarding.
 
+`.foundry/feedback.jsonl` does not fit this diagram's one-row-one-writer
+shape and is left out of it on purpose: every stage — planner, implementer,
+reviewer, summarizer — may append to it through `foundry_feedback_log`, and
+the MCP itself appends to it directly (never through the tool, so no extra
+commit appears) at its own halt and fallback points. It is still
+append-only and still MCP-owned in the sense that matters: nothing but
+`appendFeedback` ever writes a line, and every write is followed by a
+commit in the same call, so the file is never left dirty for something
+else to notice later.
+
 ## Why the models are split this way
 
 | Stage | Model | Effort | Why |
@@ -279,6 +289,7 @@ fix task is a task, and it goes through the same test-first loop as any other.
 | Path | Committed | Contents |
 |---|---|---|
 | `.foundry/state.json` | yes | `round`, `implemented`, `reviewed`, `verdict`, `summarized`, `halted`, `preexistingUntracked`, `policies`, `signing`, `rounds` |
+| `.foundry/feedback.jsonl` | yes | one JSON line per pipeline-friction entry — `at`, `stage`, `round`, `category`, `message`, `source`; see [mcp-tools.md](./mcp-tools.md#foundry_feedback_log) |
 | `.foundry/implement.lock` | no (gitignored) | JSON `{ count, armedAt, round }` — the guard's re-block counter (a legacy bare number still reads back correctly) |
 | `docs/PROGRESS.md` | yes | task checkboxes and the per-task log |
 | `docs/foundry.json` | yes | `verify`, `extraVerify`, `build`, `baseBranch`, `branchPrefix`, `maxRounds`, `commandTimeoutMs`, `roles`, `permissionMode` |

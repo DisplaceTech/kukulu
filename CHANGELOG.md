@@ -4,6 +4,57 @@ All notable changes to this plugin. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] — 2026-09-21
+
+Bookkeeping, not a pipeline behavior change: no stage gained judgment, no
+transition changed. This release automates the one manual step the
+compound-engineering loop still had — writing down what Foundry itself
+cost a flight time.
+
+### Added
+
+- **`foundry_feedback_log` and `.foundry/feedback.jsonl`**: a durable,
+  append-only, self-committing log of pipeline friction. Any stage calls
+  it the moment something is Foundry's own fault — a tool refused, a
+  prompt was ambiguous, a stall needed a workaround — and the entry
+  survives even a flight that never reaches `summarize`, since the tool
+  commits on every call rather than waiting for a later stage to notice
+  and transcribe it. `foundry_status` reports `feedbackCount`. Fourteen
+  tools now.
+- **Three MCP-internal auto-log points**: `foundry_run_halt` records why a
+  run stopped; `foundry_review_submit` records a round-cap halt
+  (non-converging or hard-cap); `foundry_run_start` records an `auto`
+  signing-policy fallback. None of these call the tool itself — they
+  append directly, in the same commit as the state change that triggered
+  them, so no extra commit appears. An explicit `signing: "off"` or an
+  unconfigured `"none"` is the operator's own choice, not friction, and
+  logs nothing.
+- **Every stage skill logs friction directly**: `implement`, `review-build`
+  and `plan-build` now call `foundry_feedback_log` the moment something
+  costs them time, instead of writing it into a document a later stage
+  might read. `go-flight` logs a failed permission sync and every
+  `RESTART REQUIRED` branch before it stops.
+- **`policies.feedback`** (default `true`): set `false` in
+  `docs/foundry.json` to disable `foundry_feedback_log` and every internal
+  auto-log point in one place.
+- **`/foundry:pull-feedback`**: a standalone, model-invocable maintainer
+  skill that reads another project's `.foundry/feedback.jsonl` and writes
+  it into this repo's `docs/feedback/` as a new, properly numbered file,
+  deduping against every existing file by each entry's exact timestamp so
+  a repeat pull never duplicates an entry.
+
+### Changed
+
+- **The `## Pipeline friction` heading convention is retired.** The
+  `implement` and `review-build` skills no longer write a "Pipeline
+  friction" section into `docs/HANDOFF.md` or `docs/REVIEW.md` — that
+  material now lives in `.foundry/feedback.jsonl` from the moment it
+  happens, not collected after the fact from a heading only the
+  summarizer read. The `summarize` skill's own "Pipeline friction" section
+  in `docs/SUMMARY.md` still exists, but now reads `foundry_status`'s
+  `feedbackCount` and `.foundry/feedback.jsonl` directly instead of
+  scanning headings across `HANDOFF.md` and every round's `REVIEW.md`.
+
 ## [0.3.0] — 2026-09-21
 
 ### Added

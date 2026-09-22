@@ -1,6 +1,6 @@
 # MCP tool reference
 
-Thirteen tools, served over stdio by `mcp/server.mjs` with no dependencies.
+Fourteen tools, served over stdio by `mcp/server.mjs` with no dependencies.
 The server is launched by Claude Code from [`.mcp.json`](../.mcp.json) with
 `FOUNDRY_PROJECT_DIR` set to the project root; every path below is relative to
 that root.
