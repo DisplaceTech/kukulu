@@ -9,7 +9,7 @@
 // here.
 
 import {
-  finish, ok, eq, isError,
+  finish, ok, eq, like, isError,
   ROOT, mkDir, plannedRepo, withServer,
   readFile, writeFile, hasFile, git, writeGlobalConfig, splitFrontmatter,
 } from "./harness.mjs";
@@ -75,12 +75,94 @@ const cfgDir = () => mkDir("foundry-cfg-");
       eq(fm.effort, plugin.frontmatter.effort, `${role}'s effort matches the plugin default`);
       eq(fm.permissionMode, "acceptEdits", `${role}'s permissionMode defaults to acceptEdits`);
       eq((fm.skills || []).join(","), (plugin.frontmatter.skills || []).join(","), `${role}'s skills match the plugin default`);
+      eq(fm.tools, plugin.frontmatter.tools, `${role}'s tools: list matches the plugin default exactly`);
       eq(fm.color, plugin.frontmatter.color, `${role}'s color matches the plugin default`);
       ok(body.startsWith(comment), `${role}'s body starts with the generated-by comment`);
       const expectedRest = plugin.body.replace(/^\n+/, "").replace(/\s+$/, "") + "\n";
       eq(body.slice(comment.length), expectedRest, `${role}'s body is otherwise the plugin agent's body, trimmed`);
       ok(text.endsWith("\n") && !text.endsWith("\n\n"), `${role}'s generated file ends with exactly one newline`);
     }
+  });
+}
+
+// ---------------------------------------------------------------- the MCP allow rule
+
+{
+  const repo = plannedRepo();
+  await withServer(repo, async ({ call }) => {
+    eq((await call("foundry_config_show")).permissionRule, "missing", "config_show reports the rule as missing before any sync");
+    const r = await call("foundry_agents_sync");
+    eq(r.permissions, "added", "the first sync adds the allow rule");
+    const settings = JSON.parse(readFile(repo, ".claude/settings.local.json"));
+    eq(settings.permissions.allow.join(","), "mcp__plugin_foundry_foundry", "settings.local.json carries exactly the one rule");
+    eq((await call("foundry_config_show")).permissionRule, "present", "config_show now reports it present");
+
+    const r2 = await call("foundry_agents_sync");
+    eq(r2.permissions, "present", "a second sync reports the rule already present and writes nothing new");
+    eq(
+      JSON.parse(readFile(repo, ".claude/settings.local.json")).permissions.allow.length,
+      1,
+      "the rule is not duplicated",
+    );
+  });
+}
+
+{
+  // An existing settings.local.json keeps every other key and allow entry.
+  const repo = plannedRepo();
+  writeFile(
+    repo,
+    ".claude/settings.local.json",
+    JSON.stringify({ theme: "dark", permissions: { allow: ["Bash(npm test)"], deny: ["Bash(rm -rf /)"] } }, null, 2) + "\n",
+  );
+  await withServer(repo, async ({ call }) => {
+    const r = await call("foundry_agents_sync");
+    eq(r.permissions, "added", "the rule is added alongside what was already there");
+    const settings = JSON.parse(readFile(repo, ".claude/settings.local.json"));
+    eq(settings.theme, "dark", "an unrelated top-level key survives");
+    eq(settings.permissions.allow.join(","), "Bash(npm test),mcp__plugin_foundry_foundry", "an existing allow entry survives, and the rule is appended");
+    eq(settings.permissions.deny.join(","), "Bash(rm -rf /)", "an existing deny list survives untouched");
+  });
+}
+
+{
+  // The committed settings.json can carry the rule instead; nothing is written.
+  const repo = plannedRepo();
+  writeFile(repo, ".claude/settings.json", JSON.stringify({ permissions: { allow: ["mcp__plugin_foundry_foundry"] } }, null, 2) + "\n");
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-qm", "chore: commit the allow rule"]);
+  await withServer(repo, async ({ call }) => {
+    eq((await call("foundry_config_show")).permissionRule, "present", "config_show honours the committed settings.json too");
+    const r = await call("foundry_agents_sync");
+    eq(r.permissions, "present", "sync reports present and writes nothing");
+    ok(!hasFile(repo, ".claude/settings.local.json"), "no local settings file is created when the committed one already covers it");
+  });
+}
+
+{
+  // Invalid JSON in settings.local.json is never overwritten.
+  const repo = plannedRepo();
+  writeFile(repo, ".claude/settings.local.json", "{not json");
+  await withServer(repo, async ({ call }) => {
+    const r = await call("foundry_agents_sync");
+    like(r.permissions, /^failed: .*settings\.local\.json.*not valid JSON/, "a corrupt settings.local.json is reported, not overwritten");
+    eq(readFile(repo, ".claude/settings.local.json"), "{not json", "the corrupt file is left exactly as it was");
+    eq((await call("foundry_config_show")).permissionRule, "missing", "config_show reports missing rather than crashing");
+  });
+}
+
+{
+  // The exclude field covers both per-clone patterns.
+  const repo = plannedRepo();
+  await withServer(repo, async ({ call }) => {
+    const r = await call("foundry_agents_sync");
+    eq(r.exclude, "added", "the first sync adds both exclude patterns");
+    const exclude = readFile(repo, ".git/info/exclude");
+    ok(exclude.includes(".claude/settings.local.json"), "settings.local.json is excluded per clone, the same way the agent files are");
+
+    const r2 = await call("foundry_agents_sync");
+    eq(r2.exclude, "present", "a second sync reports both patterns already present");
+    eq((readFile(repo, ".git/info/exclude").match(/settings\.local\.json/g) || []).length, 1, "the settings.local.json pattern is not duplicated");
   });
 }
 
@@ -102,6 +184,40 @@ const cfgDir = () => mkDir("foundry-cfg-");
     const exclude = readFile(repo, ".git/info/exclude");
     eq((exclude.match(/foundry-\*\.md/g) || []).length, 1, "the pattern still appears exactly once");
   });
+}
+
+// ---------------------------------------------------------------- restartRequired
+
+{
+  const repo = plannedRepo();
+  await withServer(repo, async ({ call }) => {
+    const r = await call("foundry_agents_sync");
+    eq(r.restartRequired, false, "syncing four Anthropic-routed roles for the first time needs no restart");
+  });
+}
+
+{
+  const repo = plannedRepo();
+  const globalPath = writeGlobalConfig(cfgDir(), { roles: { implementer: { model: "Ollama/qwen3.6:35b-a3b" } } });
+  await withServer(repo, async ({ call }) => {
+    const r = await call("foundry_agents_sync");
+    eq(r.restartRequired, true, "a first-time sync with a router-routed role among the changed ones needs a restart");
+  }, { env: { FOUNDRY_CONFIG: globalPath } });
+}
+
+{
+  // A routing change to an *existing* directory is not a first population,
+  // so even a router-routed role needs no restart the second time around.
+  const repo = plannedRepo();
+  await withServer(repo, async ({ call }) => {
+    await call("foundry_agents_sync");
+  });
+  const globalPath = writeGlobalConfig(cfgDir(), { roles: { implementer: { model: "Ollama/qwen3.6:35b-a3b" } } });
+  await withServer(repo, async ({ call }) => {
+    const r = await call("foundry_agents_sync");
+    eq(r.changed.join(","), "implementer", "the routing change is picked up");
+    eq(r.restartRequired, false, "but this process did not create the directory, so no restart is required");
+  }, { env: { FOUNDRY_CONFIG: globalPath } });
 }
 
 // ---------------------------------------------------------------- foundry_next before/after sync

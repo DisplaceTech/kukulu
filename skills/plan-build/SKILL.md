@@ -133,7 +133,8 @@ add other checkbox lines to this file.
   "build": ["<build command, if any>"],
   "baseBranch": "main",
   "branchPrefix": "build/",
-  "maxRounds": 3
+  "maxRounds": 3,
+  "maxRoundsHard": 6
 }
 ```
 
@@ -141,6 +142,26 @@ Take the commands from SPEC's commands/tooling section. `verify` runs after
 every task; `extraVerify` maps a path prefix to commands that run in addition
 when a task's Files touched fall under it. Leave `build` empty if there is no
 build step. Every command must exit non-zero on failure.
+
+Any command — in `verify`, `extraVerify`, or `build` — may instead be
+`{ "cmd": "<command>", "timeoutMs": <ms> }` when it needs a timeout other
+than the default (`commandTimeoutMs`, 10 minutes): a slow end-to-end suite
+should get its own longer timeout rather than raising the default for
+every other command. Leave `maxRounds` and `maxRoundsHard` at their
+defaults unless SPEC says the review loop needs a different tolerance;
+`maxRounds` bounds review rounds that fail to converge, `maxRoundsHard` is
+an absolute ceiling regardless.
+
+Leave `policies` and `guardCap` out entirely unless SPEC's commands section
+says otherwise — every key defaults sensibly for an ordinary flight, and
+naming a key here only to repeat its default adds nothing. `policies`
+covers commit signing, pushing and PR creation; `guardCap` raises the
+implement guard's stall tolerance for a plan with unusually many
+per-task blocked stops. `constraints` turns `CLAUDE.md`'s mechanically
+checkable rules into data the reviewer's `foundry_verify` call actually
+runs — see the dedicated section below. See
+[docs/operations.md](../../docs/operations.md#configuration)
+for every key and its default.
 
 ## `CLAUDE.md` contents
 
@@ -151,15 +172,50 @@ Under fixed headings so the implementer and reviewer can find them:
 - `## Module map` — from SPEC's architecture section.
 - `## Constraints` — every global invariant, one line each, phrased as a rule
   the reviewer can check mechanically ("no `Date.now` under `src/core/`").
+  Every constraint here that can be expressed as a single-line pattern must
+  also appear in `docs/foundry.json`'s `constraints` array (below) — a rule
+  stated only in prose is a rule the reviewer has to remember to grep for by
+  hand, three rounds running, and still might miss a shape (F-14). A
+  constraint that genuinely cannot be a line pattern (a structural rule, a
+  cross-file invariant) says so here explicitly: "reviewer checks by
+  reading" — never silently omit it from `constraints` without saying why.
 - `## Commit template` — title `<ID>: <title>`; body with Goal / Tests /
   Interpretation / Measurement (if tuning) / Manual check.
 - A closing note that SPEC.md wins over PLAN.md wins over code comments.
 
 Keep it under 150 lines. Do not describe the Foundry workflow in CLAUDE.md.
 
+### `constraints` in `docs/foundry.json`
+
+For each mechanically-checkable `## Constraints` line, add an entry:
+`{ "id", "description", "paths", "exclude"?, "pattern" (a JS regex source,
+line-based only — no multi-line patterns), "flags"?, "shouldMatch": [one or
+more lines the pattern must catch], "shouldNotMatch": [one or more lines it
+must not] }`. `foundry_verify` self-tests every rule against its own
+fixtures before scanning a single file, so a pattern with a blind spot
+fails immediately instead of passing for three review rounds — write a
+fixture for every syntactic shape an implementer might plausibly reach for,
+not just the one you thought of first (a hard-coded tunable, for instance,
+can show up as `const x = 5;`, `'x' => 5,`, or `x: 5,` — cover all of
+them). See `templates/constraints.example.json` for three fully worked
+examples and [docs/operations.md](../../docs/operations.md#constraints).
+
 ## When you finish
 
+Write `docs/PLAN.md`, `docs/PROGRESS.md`, `docs/foundry.json` and
+`CLAUDE.md` with the `Write` tool. If the harness refuses one (some builds
+tell subagents to return findings as text instead), write it with a shell
+heredoc in one `Bash` call and continue — do not argue with the refusal,
+and do not return the file's content as text in your own reply (F-16).
+
+Set `docs/foundry.json`'s `baseBranch` to the branch you are actually on
+when you commit, and say so in your report — do not assume it is `main`.
 Commit PLAN.md, PROGRESS.md, foundry.json and CLAUDE.md as
-`plan: derive build plan from SPEC`. Report: number of tasks per phase, the
-decisions you made, and the spec issues you found. Do not start
-implementation.
+`plan: derive build plan from SPEC`.
+
+Report: number of tasks per phase, the decisions you made, and the spec
+issues you found. Quote `docs/foundry.json` verbatim from disk (`cat
+docs/foundry.json`, not from memory) in your report, and state the
+`baseBranch` and `branchPrefix` it actually contains — a report that
+disagrees with the file it just wrote is worse than no report (F-06). Do
+not start implementation.

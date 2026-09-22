@@ -1,0 +1,49 @@
+[
+  {
+    "id": "no-direct-lodash-import",
+    "description": "Import from the project's own utils wrapper, not lodash directly, so a swap never touches every call site.",
+    "paths": ["src/"],
+    "exclude": ["src/utils/"],
+    "pattern": "from ['\"]lodash['\"]",
+    "shouldMatch": [
+      "import _ from 'lodash';",
+      "import { debounce } from \"lodash\";"
+    ],
+    "shouldNotMatch": [
+      "import { debounce } from '../utils/lodash-wrapper';",
+      "// see lodash's own docs for debounce semantics"
+    ]
+  },
+  {
+    "id": "no-hardcoded-tick-rate",
+    "description": "The simulation tick rate is an ⚠️ ASSUMPTION config value (config.TICK_RATE); a literal number anywhere else is a rule that was never actually wired to config. Three shapes an implementer reaches for are covered, because a grep that only catches one shape passes silently past the others (F-14).",
+    "paths": ["src/"],
+    "exclude": ["src/config/"],
+    "pattern": "(tickRate|TICK_RATE)['\"]?\\s*(=|:|=>)\\s*[0-9]",
+    "shouldMatch": [
+      "const tickRate = 60;",
+      "TICK_RATE: 60,",
+      "'tickRate' => 60,"
+    ],
+    "shouldNotMatch": [
+      "const tickRate = config.TICK_RATE;",
+      "TICK_RATE: config.tickRate,",
+      "'tickRate' => config.tickRate,"
+    ]
+  },
+  {
+    "id": "no-fetch-outside-net-client",
+    "description": "Every network call goes through src/net/client.ts, so retry, auth and logging live in one place instead of being re-implemented at each call site.",
+    "paths": ["src/"],
+    "exclude": ["src/net/"],
+    "pattern": "\\bfetch\\(",
+    "shouldMatch": [
+      "const res = fetch('/api/x');",
+      "return fetch(url, opts).then(toJson);"
+    ],
+    "shouldNotMatch": [
+      "const res = client.fetchJson('/api/x');",
+      "// network access is centralized in src/net/client.ts"
+    ]
+  }
+]

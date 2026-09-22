@@ -13,6 +13,7 @@ const EXPECTED_TOOLS = [
   "foundry_task_block",
   "foundry_verify",
   "foundry_run_finish",
+  "foundry_run_halt",
   "foundry_review_submit",
   "foundry_summary_commit",
   "foundry_agents_sync",

@@ -5,21 +5,25 @@
 import {
   finish, ok, eq, like, isError,
   plannedRepo, withServer, readFile, writeFile, subject,
-  markTasks, setState, git,
+  markTasks, setState, git, mkBareRemote,
 } from "./harness.mjs";
 
 const TODAY = new Date().toISOString().slice(0, 10);
 const ALL_DONE = { "P0-01": "x", "P0-02": "x", "P0-03": "x" };
 
-/** A repo parked exactly where the reviewer picks it up. */
-function reviewableRepo({ config, verdict = "CHANGES REQUESTED", states = ALL_DONE } = {}) {
+/**
+ * A repo parked exactly where the reviewer picks it up, `round` fix rounds
+ * already queued (so this review is stamped `round + 1`, matching what
+ * foundry_status would call `reviewRound`).
+ */
+function reviewableRepo({ config, verdict = "CHANGES REQUESTED", states = ALL_DONE, round = 0 } = {}) {
   const repo = plannedRepo({ config });
   git(repo, ["checkout", "-q", "-b", `build/${TODAY}`]);
   markTasks(repo, states);
-  setState(repo, { round: 0, implemented: true });
-  writeFile(repo, "docs/REVIEW.md", `# Review\nRound: 0\n**Verdict**: ${verdict}\n`);
+  setState(repo, { round, implemented: true });
+  writeFile(repo, "docs/REVIEW.md", `# Review\nRound: ${round + 1}\n**Verdict**: ${verdict}\n`);
   git(repo, ["add", "-A"]);
-  git(repo, ["commit", "-qm", "chore: round 0 implemented"]);
+  git(repo, ["commit", "-qm", `chore: round ${round} implemented`]);
   return repo;
 }
 
@@ -80,6 +84,48 @@ const FIX = {
     );
     eq(subject(repo), "chore: round 0 implemented", "no refusal left a commit behind");
     eq(git(repo, ["status", "--porcelain"]), "", "no refusal left the tree dirty");
+  });
+}
+
+// ---------------------------------------------------------------- the Round: line (F-10, F-11)
+
+{
+  const repo = reviewableRepo();
+  writeFile(repo, "docs/REVIEW.md", "# Review\nRound: 0\n**Verdict**: APPROVED\n");
+  await withServer(repo, async ({ call }) => {
+    isError(
+      await call("foundry_review_submit", { verdict: "APPROVED" }),
+      /'Round:' line is '0'; this review must be stamped 'Round: 1'/,
+      "a review stamped with the current round, not the next one, is refused",
+    );
+  });
+}
+
+{
+  const repo = reviewableRepo();
+  writeFile(repo, "docs/REVIEW.md", "# Review\n**Verdict**: APPROVED\n");
+  await withServer(repo, async ({ call }) => {
+    isError(
+      await call("foundry_review_submit", { verdict: "APPROVED" }),
+      /'Round:' line is missing; this review must be stamped 'Round: 1'/,
+      "a review with no Round: line at all names the expected value",
+    );
+  });
+}
+
+{
+  const repo = reviewableRepo();
+  await withServer(repo, async ({ call }) => {
+    isError(
+      await call("foundry_review_submit", { verdict: "CHANGES REQUESTED", tasks: [{ ...FIX, dependsOn: ["R1-03"] }, FIX] }),
+      /depends on 'R1-03', which is neither an existing task[\s\S]*\(R1-01, R1-02\)/,
+      "a dependsOn one past the end of this submission is refused",
+    );
+    isError(
+      await call("foundry_review_submit", { verdict: "CHANGES REQUESTED", tasks: [{ ...FIX, dependsOn: ["R2-01"] }] }),
+      /depends on 'R2-01', which is neither an existing task/,
+      "a dependsOn naming a future round's id is refused",
+    );
   });
 }
 
@@ -154,19 +200,77 @@ const FIX = {
   });
 }
 
-// ---------------------------------------------------------------- round cap
+// ---------------------------------------------------------------- convergence (F-13, F-15)
+
+/** `n` fix tasks, distinct titles, otherwise shaped like FIX. */
+const manyTasks = (n) => Array.from({ length: n }, (_, i) => ({ ...FIX, title: `Fix ${i + 1}` }));
+
+/**
+ * Drive a sequence of CHANGES REQUESTED rounds on `repo`, one call per entry
+ * in `counts` (the number of fix tasks that round). Stands in for a whole
+ * implement/review cycle between rounds: review_submit itself only requires
+ * `implemented: true` and a matching `Round:` line, not real task work.
+ */
+async function driveRounds(call, repo, counts) {
+  let last;
+  for (const [i, n] of counts.entries()) {
+    const round = i + 1;
+    writeFile(repo, "docs/REVIEW.md", `# Review\nRound: ${round}\n**Verdict**: CHANGES REQUESTED\n`);
+    setState(repo, { implemented: true });
+    last = await call("foundry_review_submit", { verdict: "CHANGES REQUESTED", tasks: manyTasks(n) });
+  }
+  return last;
+}
 
 {
-  const repo = reviewableRepo({ config: { maxRounds: 1 } });
-  setState(repo, { round: 1 });
+  const repo = reviewableRepo({ config: { maxRounds: 3 } });
   await withServer(repo, async ({ call }) => {
-    const r = await call("foundry_review_submit", { verdict: "CHANGES REQUESTED", tasks: [FIX] });
-    eq(r.round, 2, "the round still increments past the cap");
-    like(r.halted, /exceeds maxRounds=1/, "the flight records why it halted");
-    like(r.halted, /edit \.foundry\/state\.json/, "the halt message says how to resume");
+    const r = await driveRounds(call, repo, [15, 3, 2, 1]);
+    eq(r.halted, null, "findings shrinking every round never halts, even across four rounds with a maxRounds of 3");
+    eq(r.round, 4, "the round still counts up normally");
+  });
+}
+
+{
+  const repo = reviewableRepo({ config: { maxRounds: 2 } });
+  await withServer(repo, async ({ call }) => {
+    const r = await driveRounds(call, repo, [4, 4, 4]);
+    like(r.halted, /non-converging/, "three rounds that never shrink halt on the third");
+    like(r.halted, /reaching maxRounds=2/, "the message names the exceeded cap");
+    like(r.halted, /findings per round: 4 → 4 → 4/, "the message shows the trail of counts");
     const n = await call("foundry_next");
-    eq(n.stage, "halt", "the next stage is a halt, not another implement");
+    eq(n.stage, "halt", "the flight now halts");
     eq(n.reason, r.halted, "the halt reason is the one review_submit recorded");
+  });
+}
+
+{
+  const repo = reviewableRepo({ config: { maxRounds: 100, maxRoundsHard: 2 } });
+  await withServer(repo, async ({ call }) => {
+    const r = await driveRounds(call, repo, [10, 5, 2]);
+    like(r.halted, /hard cap maxRoundsHard=2/, "the hard cap fires on round 3 even while every round is converging, since maxRounds=100 would never trip");
+  });
+}
+
+{
+  const repo = reviewableRepo();
+  await withServer(repo, async ({ call }) => {
+    const r1 = await call("foundry_review_submit", { verdict: "CHANGES REQUESTED", tasks: manyTasks(2) });
+    eq(r1.halted, null, "round 1 is always allowed; there is nothing to compare it against yet");
+    let s = await call("foundry_status");
+    eq(s.state.rounds.length, 1, "state.rounds records the submission");
+    eq(s.state.rounds[0].fixTasks, 2, "...with its fix-task count");
+    eq(s.state.rounds[0].verdict, "CHANGES REQUESTED", "...and its verdict");
+    eq(s.state.rounds[0].nonConverging, false, "round 1 is never marked non-converging");
+    ok(s.state.rounds[0].at, "...and a timestamp");
+
+    writeFile(repo, "docs/REVIEW.md", "# Review\nRound: 2\n**Verdict**: APPROVED\n");
+    setState(repo, { implemented: true });
+    await call("foundry_review_submit", { verdict: "APPROVED" });
+    s = await call("foundry_status");
+    eq(s.state.rounds.length, 2, "an approval is recorded in the history too");
+    eq(s.state.rounds[1].verdict, "APPROVED", "...with its own verdict");
+    eq(s.state.rounds[1].fixTasks, 0, "...and no fix tasks, since an approval can carry none");
   });
 }
 
@@ -182,7 +286,7 @@ const FIX = {
     const r = await call("foundry_review_submit", { verdict: "APPROVED" });
     eq(r.verdict, "APPROVED", "the approval is recorded");
     eq(r.round, 0, "approving does not open a new round");
-    eq(subject(repo), "review: approved", "approval is its own commit");
+    eq(subject(repo), "review: round 1 approved", "approval is its own commit");
 
     const n = await call("foundry_next");
     eq(n.stage, "summarize", "approval hands off to the summarizer");
@@ -202,6 +306,58 @@ const FIX = {
   const repo = reviewableRepo({ verdict: "APPROVED" });
   await withServer(repo, async ({ call }) => {
     eq((await call("foundry_review_submit", { verdict: " approved " })).verdict, "APPROVED", "the verdict is normalised before it is trusted");
+  });
+}
+
+// ---------------------------------------------------------------- pushing (F-18)
+
+{
+  const repo = reviewableRepo({ verdict: "APPROVED" });
+  git(repo, ["remote", "add", "origin", mkBareRemote()]);
+  await withServer(repo, async ({ call }) => {
+    const r = await call("foundry_review_submit", { verdict: "APPROVED" });
+    eq(r.push, "pushed", "an APPROVED review pushes the branch");
+    eq(git(repo, ["rev-parse", `origin/build/${TODAY}`]), git(repo, ["rev-parse", "HEAD"]), "the remote branch head matches the local head");
+
+    writeFile(repo, "docs/SUMMARY.md", "# summary\n");
+    const sum = await call("foundry_summary_commit");
+    eq(sum.push, "pushed", "the summary commit pushes too");
+    eq(git(repo, ["rev-parse", `origin/build/${TODAY}`]), git(repo, ["rev-parse", "HEAD"]), "...and the remote catches up again");
+  });
+}
+
+{
+  const repo = reviewableRepo();
+  git(repo, ["remote", "add", "origin", mkBareRemote()]);
+  await withServer(repo, async ({ call }) => {
+    const r = await call("foundry_review_submit", { verdict: "CHANGES REQUESTED", tasks: [FIX] });
+    eq(r.push, "pushed", "a CHANGES REQUESTED review pushes the branch too");
+    eq(git(repo, ["rev-parse", `origin/build/${TODAY}`]), git(repo, ["rev-parse", "HEAD"]), "the remote branch head matches the local head");
+  });
+}
+
+{
+  const repo = reviewableRepo({ verdict: "APPROVED" });
+  await withServer(repo, async ({ call }) => {
+    eq((await call("foundry_review_submit", { verdict: "APPROVED" })).push, "skipped: no origin remote", "without a remote, review_submit says so");
+  });
+}
+
+{
+  // reviewableRepo bypasses foundry_run_start, which is what would normally
+  // copy docs/foundry.json's policies into state; set state directly to
+  // simulate what a real run_start earlier in the round would have recorded.
+  const repo = reviewableRepo({ config: { policies: { push: false } } });
+  setState(repo, { policies: { signing: "auto", push: false, pr: "draft" } });
+  git(repo, ["remote", "add", "origin", mkBareRemote()]);
+  await withServer(repo, async ({ call }) => {
+    const r = await call("foundry_review_submit", { verdict: "CHANGES REQUESTED", tasks: [FIX] });
+    eq(r.push, "skipped: policy", "push: false skips review_submit's push even with a remote present");
+
+    writeFile(repo, "docs/SUMMARY.md", "# summary\n");
+    setState(repo, { verdict: "APPROVED" }); // shortcut past the fix round, for summary_commit's own push check
+    const sum = await call("foundry_summary_commit");
+    eq(sum.push, "skipped: policy", "and summary_commit's push, too");
   });
 }
 

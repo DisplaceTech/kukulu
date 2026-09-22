@@ -24,8 +24,29 @@ Write `docs/SUMMARY.md`, under 200 lines:
    are edits the human should make to SPEC.md.
 6. **Manual checks owed**: the consolidated list, per phase, with what to
    look for.
-7. **Review history**: one line per round — findings count, fix tasks, and
-   whether any finding recurred.
+7. **Review history**: read `foundry_status`'s `state.rounds` — one recorded
+   entry per submission, in order, each with `round`, `fixTasks`,
+   `unblocked`, `verdict` and whether it was `nonConverging`. Render it as
+   one line per round: findings count, fix tasks, and whether any finding
+   recurred (a task id reappearing in consecutive rounds' `REVIEW.md`
+   files). Note any notes-only approval (an `APPROVED` round whose
+   `REVIEW.md` carried a `## Notes` section) so a human sees what was
+   flagged but not queued as work.
+8. **Pipeline friction**: anything the Foundry pipeline itself did that cost
+   time — a tool refusal worked around, a wrong or ambiguous prompt, a
+   stall, a permission prompt, anything an implementer or reviewer had to
+   route around rather than the project itself being hard. Collect it from
+   every `## Pipeline friction` heading in `HANDOFF.md` and each round's
+   `REVIEW.md`, one line per item with the stage it happened in. Write
+   "None" when there is nothing to report — that is a real, useful line,
+   not an empty section to skip. This section is what a human copies into
+   [`docs/feedback/`](../../docs/feedback/) to feed the next release plan.
+
+Write `docs/SUMMARY.md` with the `Write` tool. If the harness refuses it
+(some builds tell subagents to return findings as text instead), write it
+with a shell heredoc in one `Bash` call and continue — do not argue with the
+refusal, and do not return the summary as text in your own reply; the file
+on disk is what `foundry_summary_commit` reads (F-16).
 
 Then call `foundry_summary_commit`. It commits SUMMARY.md as
 `chore: build summary` and marks the flight complete.

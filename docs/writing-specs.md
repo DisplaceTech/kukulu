@@ -43,6 +43,16 @@ a grep, not an opinion:
 The reviewer treats a constraint violation as the most severe category of
 finding. A principle it cannot check is a principle that does not exist.
 
+Better still: a principle phrased as a single-line pattern becomes an entry
+in `docs/foundry.json`'s `constraints`, with fixture lines proving the
+pattern actually catches every shape you meant it to (a hard-coded tunable,
+for instance, can be `const x = 5;`, `'x' => 5,`, or `x: 5,` — a grep that
+only catches one shape passes silently past the other two for as many
+review rounds as it takes someone to notice by reading). `foundry_verify`
+then checks it mechanically, every task, instead of the reviewer having to
+remember to grep for it by hand each round. See
+[operations.md](./operations.md#constraints).
+
 ### 2. Commands that exit non-zero
 
 Section 7 becomes `verify` in `docs/foundry.json`, and `foundry_verify` runs it

@@ -63,10 +63,15 @@ for (const [event, entries] of Object.entries(hooks.hooks)) {
   eq(cmd.type, "command", `${event} runs a command hook`);
   like(cmd.command, /^"\$\{CLAUDE_PLUGIN_ROOT\}"\//, `${event}'s command quotes the plugin root, so a path with spaces still works`);
   const script = cmd.command.replace(/^"\$\{CLAUDE_PLUGIN_ROOT\}"\//, "");
+  eq(script, "scripts/implement-guard.mjs", `${event} points at the guard script`);
   ok(exists(script), `${event}'s script exists`);
   ok(fs.statSync(path.join(ROOT, script)).mode & 0o111, `${event}'s script is executable`);
-  like(read(script), /^#!\/usr\/bin\/env bash\n/, `${event}'s script has a shebang`);
+  like(read(script), /^#!\/usr\/bin\/env node\n/, `${event}'s script has a shebang`);
 }
+// SubagentStop is scoped to the implementer at the hook-registration level
+// (F-07): the harness never even runs the guard for any other subagent.
+like(hooks.hooks.SubagentStop[0].matcher, /foundry.implementer/, "SubagentStop's matcher names the implementer");
+ok(!hooks.hooks.Stop[0].matcher, "Stop carries no matcher — a Stop event has no agent to match against");
 
 // ---------------------------------------------------------------- agents and skills
 
@@ -81,9 +86,10 @@ for (const name of skillNames) {
   eq(fm.name, name, `skills/${name}'s name matches its directory`);
   ok(fm.description && fm.description.length > 30, `skills/${name} has a usable description`);
   if (name === "go-flight") {
-    // The controller is invoked deliberately and pins its own model/effort;
-    // it is a skill in its own right, not a stage preloaded into an agent.
-    eq(fm["disable-model-invocation"], true, `skills/${name} is invoked deliberately, never guessed into`);
+    // The controller makes no engineering decisions itself, so it carries no
+    // invocation restriction: a person or another agent can ask for it by
+    // name, and the literal slash command still works too.
+    eq(fm["disable-model-invocation"], undefined, `skills/${name} is model-invocable, not restricted to the literal command`);
     ok(MODELS.includes(fm.model), `skills/${name} pins a known model (${fm.model})`);
     ok(EFFORTS.includes(fm.effort), `skills/${name} pins an effort level (${fm.effort})`);
   } else {
@@ -96,6 +102,13 @@ for (const name of skillNames) {
     eq(fm.effort, undefined, `skills/${name} carries no effort of its own; the agent's does`);
     like(fm.description, /^Foundry pipeline stage/, `skills/${name}'s description marks it as a pipeline stage`);
   }
+}
+
+// A Write refusal should never cost a turn or a returned-as-text file
+// (F-16): every skill that writes a deliverable file states the heredoc
+// fallback.
+for (const name of ["summarize", "plan-build", "implement"]) {
+  like(read(`skills/${name}/SKILL.md`), /heredoc/, `skills/${name} states the shell-heredoc fallback for a refused Write`);
 }
 
 for (const name of agentNames) {
@@ -128,7 +141,26 @@ const goFlight = read("skills/go-flight/SKILL.md");
 const fmGo = frontmatter(goFlight);
 const allowed = String(fmGo["allowed-tools"]).split(",").map((s) => s.trim());
 const toolNames = Array.from(serverSrc.matchAll(/name: "(foundry_[a-z_]+)"/g), (m) => m[1]);
-eq(toolNames.length, 12, "the server defines twelve tools");
+eq(toolNames.length, 13, "the server defines thirteen tools");
+
+// Every stage agent's own tool set is explicit (F-16): no agent is left to
+// discover by trial and error what it is allowed to call.
+for (const name of agentNames) {
+  const fm = frontmatter(read(`agents/${name}.md`));
+  ok(typeof fm.tools === "string" && fm.tools.length > 0, `agents/${name} declares a tools: list`);
+  const tools = fm.tools.split(",").map((s) => s.trim());
+  for (const general of ["Read", "Write", "Edit", "Bash", "Grep", "Glob"]) {
+    ok(tools.includes(general), `agents/${name}'s tools include ${general}`);
+  }
+  ok(!tools.includes("Agent"), `agents/${name} cannot spawn further agents`);
+  const mcpTools = tools.filter((t) => t.startsWith("mcp__"));
+  ok(mcpTools.length > 0, `agents/${name} names at least one foundry MCP tool`);
+  for (const t of mcpTools) {
+    ok(t.startsWith("mcp__plugin_foundry_foundry__"), `agents/${name}'s MCP tool ${t} uses the plugin-prefixed form`);
+    ok(toolNames.includes(t.replace("mcp__plugin_foundry_foundry__", "")), `agents/${name}'s MCP tool ${t} actually exists`);
+  }
+  ok(mcpTools.some((t) => t.endsWith("foundry_status")), `agents/${name} can call foundry_status to re-orient itself`);
+}
 // A plugin-shipped MCP server's tools are exposed as
 // mcp__plugin_<plugin>_<server>__<tool> (verified with --plugin-dir), not as
 // the bare mcp__<server>__<tool> a project .mcp.json would give. The
@@ -137,7 +169,7 @@ eq(toolNames.length, 12, "the server defines twelve tools");
 const MCP_PREFIXES = ["mcp__plugin_foundry_foundry__", "mcp__foundry__"];
 const bareTool = (t) => MCP_PREFIXES.reduce((s, p) => s.replace(p, ""), t);
 ok(allowed.includes("Agent"), "the flight controller may spawn agents");
-for (const t of ["foundry_status", "foundry_next", "foundry_agents_sync"]) {
+for (const t of ["foundry_status", "foundry_next", "foundry_agents_sync", "foundry_run_halt"]) {
   for (const p of MCP_PREFIXES) ok(allowed.includes(p + t), `the flight controller may call ${p}${t}`);
 }
 for (const t of allowed.filter((a) => a.startsWith("mcp__"))) {
@@ -146,13 +178,18 @@ for (const t of allowed.filter((a) => a.startsWith("mcp__"))) {
 }
 ok(
   allowed.every((a) => a === "Agent" || MCP_PREFIXES.some((p) => a.startsWith(p))),
-  "the flight controller is allowed nothing beyond Agent, the read-only foundry tools, and agents_sync",
+  "the flight controller is allowed nothing beyond Agent, the read-only foundry tools, agents_sync, and run_halt",
 );
 ok(
+  // run_halt is the one deliberate exception: it records a clean halt reason
+  // when a stage cannot even be spawned, rather than leaving the flight to
+  // silently retry against whatever broke.
   !allowed.some((a) => /run_start|task_|run_finish|review_submit|summary_commit/.test(a)),
   "the flight controller cannot touch the tools that change project state",
 );
 for (const name of agentNames) like(goFlight, new RegExp(`foundry:${name}`), `go-flight names foundry:${name}`);
+like(goFlight, /notification/, "go-flight describes the loop as event-driven, not a blocking wait");
+like(goFlight, /do not poll/, "go-flight says not to poll while a stage is running");
 
 // ---------------------------------------------------------------- cross-references
 
@@ -222,6 +259,7 @@ for (const heading of [
   ok(template.includes(heading), `the SPEC template keeps "${heading}"`);
 }
 like(read("skills/plan-build/SKILL.md"), /⚠️ ASSUMPTION/, "the planner knows the template's assumption marker");
+like(read("skills/plan-build/SKILL.md"), /cat\s+docs\/foundry\.json/, "the planner is told to quote foundry.json from disk, not from memory, in its report (F-06)");
 like(template, /⚠️ ASSUMPTION/, "the template explains the assumption marker");
 
 // ---------------------------------------------------------------- routing config templates
@@ -239,6 +277,40 @@ for (const file of listDir("templates/ccr").filter((f) => f.endsWith(".json"))) 
   ok(provider?.base_url, `templates/ccr/${file} gives a base_url`);
   ok(provider?.protocol, `templates/ccr/${file} names a protocol`);
   ok(Array.isArray(provider?.models) && provider.models.length > 0, `templates/ccr/${file} lists at least one model`);
+}
+
+// ---------------------------------------------------------------- constraints template
+
+const constraintsTemplate = json("templates/constraints.example.json");
+ok(Array.isArray(constraintsTemplate) && constraintsTemplate.length >= 3, "the constraints template ships at least three worked rules");
+for (const rule of constraintsTemplate) {
+  ok(rule.id, `constraint template rule '${rule.id}' has an id`);
+  ok(Array.isArray(rule.paths) && rule.paths.length, `${rule.id} names at least one path`);
+  ok(rule.pattern, `${rule.id} has a pattern`);
+  ok(Array.isArray(rule.shouldMatch) && rule.shouldMatch.length, `${rule.id} has at least one shouldMatch fixture`);
+  ok(Array.isArray(rule.shouldNotMatch) && rule.shouldNotMatch.length, `${rule.id} has at least one shouldNotMatch fixture`);
+}
+ok(read("docs/operations.md").includes("templates/constraints.example.json"), "the constraints template is referenced from docs/operations.md");
+ok(read("skills/plan-build/SKILL.md").includes("templates/constraints.example.json"), "...and from the plan-build skill that would actually use it");
+
+// ---------------------------------------------------------------- config keys documented
+
+// Every key cfg() actually returns has a row in operations.md's config
+// table — a knob nobody wrote down is a knob nobody will find.
+{
+  const cfgSrc = serverSrc.match(/function cfg\(\) \{[\s\S]*?\n\}/)[0];
+  const cfgKeys = Array.from(cfgSrc.matchAll(/^ {4}(\w+):/gm), (m) => m[1]);
+  ok(cfgKeys.length >= 9, "cfg()'s top-level keys were actually extracted from the source");
+  const opsDoc = read("docs/operations.md");
+  for (const key of cfgKeys) {
+    if (key === "policies") {
+      ok(opsDoc.includes("`policies.signing`"), "operations.md documents policies.signing");
+      ok(opsDoc.includes("`policies.push`"), "operations.md documents policies.push");
+      ok(opsDoc.includes("`policies.pr`"), "operations.md documents policies.pr");
+      continue;
+    }
+    ok(opsDoc.includes(`\`${key}\``), `operations.md's config table documents '${key}'`);
+  }
 }
 
 // ---------------------------------------------------------------- CI wiring
@@ -277,5 +349,17 @@ for (const f of listDir("docs").filter((f) => f.endsWith(".md"))) {
   if (!readme.includes(`docs/${f}`) && !orphan) orphan = f;
 }
 eq(orphan, null, "every document in docs/ is linked from the README");
+
+// The compound-engineering loop (V3-15): a flight's SUMMARY.md friction
+// feeds docs/feedback/, and a release plan under docs/plans/ works through
+// it. Both directories are real (not just directory entries a moment
+// after `mkdir`) and linked from the README.
+ok(exists("docs/feedback/README.md"), "docs/feedback/ exists and explains its own convention");
+ok(exists("docs/plans"), "docs/plans/ exists");
+ok(readme.includes("docs/feedback/"), "docs/feedback/ is linked from the README");
+ok(readme.includes("docs/plans/"), "docs/plans/ is linked from the README");
+like(read("skills/summarize/SKILL.md"), /Pipeline friction/, "the summarize skill collects pipeline friction into SUMMARY.md");
+like(read("skills/implement/SKILL.md"), /Pipeline friction/, "the implement skill records pipeline friction in HANDOFF.md");
+like(read("skills/review-build/SKILL.md"), /Pipeline friction/, "the review-build skill records pipeline friction in REVIEW.md");
 
 finish();

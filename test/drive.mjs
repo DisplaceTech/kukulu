@@ -8,8 +8,8 @@
 
 import {
   finish, ok, eq, like, isError,
-  specRepo, withServer, writeFile, readFile, hasFile, subject,
-  planDoc, progressDoc, commitTask, runGuard, git, sh, mkFailingGhBin,
+  specRepo, plannedRepo, withServer, writeFile, readFile, hasFile, subject,
+  planDoc, progressDoc, commitTask, runGuard, git, sh, mkFailingGhBin, mkBareRemote,
 } from "./harness.mjs";
 
 const TASKS = [
@@ -20,6 +20,11 @@ const TASKS = [
 
 const repo = specRepo("# Spec\nBuild something small.\n");
 const noGh = { env: { PATH: `${mkFailingGhBin()}:${process.env.PATH}` } };
+git(repo, ["remote", "add", "origin", mkBareRemote()]);
+
+// An untracked operator file, predating the whole flight, must survive it
+// unchanged: not committed, not moved, not deleted (F-09, F-17).
+writeFile(repo, "FOUNDRY_FEEDBACK.md", "pipeline feedback notes, unrelated to this build\n");
 
 await withServer(repo, async ({ call }) => {
   // ---------------------------------------------------------------- routing
@@ -39,7 +44,10 @@ await withServer(repo, async ({ call }) => {
   writeFile(repo, "docs/PROGRESS.md", progressDoc(TASKS));
   writeFile(repo, "docs/foundry.json", JSON.stringify({ verify: ["test -f hello.txt"], extraVerify: { "src/": ["echo extra"] }, maxRounds: 2 }, null, 2) + "\n");
   writeFile(repo, "CLAUDE.md", "# rules\n## Constraints\n- greet in lowercase\n");
-  git(repo, ["add", "-A"]);
+  // The plan-build skill commits exactly its four deliverables, never a
+  // blanket `-A` — which would otherwise sweep up the untracked operator
+  // file seeded above.
+  git(repo, ["add", "--", "docs/PLAN.md", "docs/PROGRESS.md", "docs/foundry.json", "CLAUDE.md"]);
   git(repo, ["commit", "-qm", "plan: derive build plan from SPEC"]);
 
   n = await call("foundry_next");
@@ -107,7 +115,7 @@ await withServer(repo, async ({ call }) => {
 
   // ---------------------------------------------------------------- review
 
-  writeFile(repo, "docs/REVIEW.md", "# Review\nRound: 0\n**Verdict**: CHANGES REQUESTED\n");
+  writeFile(repo, "docs/REVIEW.md", "# Review\nRound: 1\n**Verdict**: CHANGES REQUESTED\n");
   r = await call("foundry_review_submit", {
     verdict: "CHANGES REQUESTED",
     tasks: [{
@@ -154,10 +162,10 @@ await withServer(repo, async ({ call }) => {
   eq(n.stage, "review", "round 1 goes back for review");
   eq(n.agent, "foundry-reviewer", "still the generated reviewer agent, on round 1");
 
-  writeFile(repo, "docs/REVIEW.md", "# Review\nRound: 1\n**Verdict**: APPROVED\n");
+  writeFile(repo, "docs/REVIEW.md", "# Review\nRound: 2\n**Verdict**: APPROVED\n");
   isError(await call("foundry_summary_commit"), /docs\/SUMMARY\.md does not exist/, "there is no summary to commit yet");
   await call("foundry_review_submit", { verdict: "APPROVED" });
-  eq(subject(repo), "review: approved", "the approval is committed");
+  eq(subject(repo), "review: round 2 approved", "the approval is committed");
 
   n = await call("foundry_next");
   eq(n.stage, "summarize", "an approved branch needs its summary");
@@ -178,16 +186,41 @@ await withServer(repo, async ({ call }) => {
   // foundry_agents_sync never commits anything (the generated files are
   // excluded via .git/info/exclude, not tracked), so the branch's commit
   // history is exactly what it would have been without routing at all.
-  eq(git(repo, ["status", "--porcelain"]), "", "the branch is clean");
+  // The only untracked thing left standing is the operator file the flight
+  // found sitting there before it started (F-09, F-17).
+  eq(git(repo, ["status", "--porcelain"]), "?? FOUNDRY_FEEDBACK.md", "the branch is clean apart from the pre-existing operator file");
+  eq(readFile(repo, "FOUNDRY_FEEDBACK.md"), "pipeline feedback notes, unrelated to this build\n", "...which the whole flight left byte-for-byte untouched");
   const log = sh(repo, "git log --oneline --format=%s");
   for (const expected of [
-    "chore: build summary", "review: approved", "chore: round 1 implemented",
+    "chore: build summary", "review: round 2 approved", "chore: round 1 implemented",
     "chore: handoff for review", "R1-01: Fix hello", "P0-02: Impossible task",
     "review: round 1", "P0-01: Create hello", "plan: derive build plan from SPEC",
   ]) {
     ok(log.includes(expected), `the history records "${expected}"`);
   }
+  ok(!log.includes("FOUNDRY_FEEDBACK"), "the operator file is never mentioned in a commit");
   eq(readFile(repo, "hello.txt"), "hello\n", "and the working tree holds the reviewed result");
+
+  // Every push-worthy commit actually reached the remote (F-18): the base
+  // branch (pushed by run_start before the build branch was cut) and the
+  // build branch (pushed after every review_submit and summary_commit).
+  eq(git(repo, ["rev-parse", "origin/main"]), git(repo, ["rev-parse", "main"]), "the remote's base branch carries the plan commits");
+  eq(git(repo, ["rev-parse", `origin/${r.branch}`]), git(repo, ["rev-parse", "HEAD"]), "the remote build branch head matches the local head");
 }, noGh);
+
+// A fresh server process trusts an agents directory that already existed
+// before it started, even though this process never called agents_sync
+// itself: only the directory's *first* population needs a session restart.
+{
+  const fresh = plannedRepo();
+  await withServer(fresh, async ({ call }) => {
+    await call("foundry_agents_sync");
+  });
+  await withServer(fresh, async ({ call }) => {
+    const n = await call("foundry_next");
+    eq(n.agentFallback, false, "a fresh process against an already-synced repo trusts the generated agent immediately");
+    eq(n.agent, "foundry-implementer", "...and names it directly");
+  });
+}
 
 finish();

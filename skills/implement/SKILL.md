@@ -45,11 +45,15 @@ Repeat until `foundry_task_next` returns `{ done: true }`:
    Confirm they fail for the right reason.
 4. **Implement** the smallest change that makes them pass, within Files
    touched.
-5. **Verify.** Call `foundry_verify` with the task's Files touched. It runs the
-   project's verify commands plus any path-specific extras and returns each
-   command's exit status and tail. All must pass: no skipped tests, no lint
-   suppressions added. Then do whatever the task's own Verification section
-   asks that a command cannot cover, and describe what you verified.
+5. **Verify.** Call `foundry_verify` with the task's Files touched. It
+   self-tests and runs every `docs/foundry.json` constraint against the
+   whole repo, then runs the project's verify commands plus any
+   path-specific extras, returning each command's exit status and tail. All
+   must pass: no skipped tests, no lint suppressions added. A constraint hit
+   is a failing test — fix the code it flagged, not the rule, unless the
+   task you are on explicitly changes the rule itself. Then do whatever the
+   task's own Verification section asks that a command cannot cover, and
+   describe what you verified.
 6. **Commit** with the template in CLAUDE.md: title `<ID>: <title>`, body with
    Goal / Tests / Interpretation / Measurement (if tuning) / Manual check.
    Stage only the files the task touched. Do not stage `docs/PROGRESS.md`.
@@ -61,10 +65,42 @@ Repeat until `foundry_task_next` returns `{ done: true }`:
 
 ## Phase-end tasks
 
-The last task of each phase pushes the branch and records what a human must
-check by hand. If the repo has no `origin` remote, skip the push and put
-`Push: no remote configured` in the log. Put `Manual check: NOT VERIFIED
-(human)` in the log. Do not wait for anyone to look at it.
+The last task of each phase pushes the branch, if this run's policies say
+`push=on` (stated in your prompt) and a remote exists, and records what a
+human must check by hand. `foundry_run_finish` will push again at the very
+end regardless, so a phase-end push is only there to let a human watch a
+long multi-phase run land as it goes. If policies say `push=off`, put
+`Push: skipped (policy)` in the log instead; if there is no `origin`
+remote, put `Push: no remote configured`. Put `Manual check: NOT VERIFIED
+(human)` in the log either way. Do not wait for anyone to look at it.
+
+## Files you did not create
+
+`foundry_run_start` records everything already untracked before this run
+began. Never move, delete, rename, or add to `.gitignore` a file that
+existed before you started — not to "tidy up", not because it looks like
+debris, not for any reason. `foundry_task_done` and `foundry_run_finish`
+already ignore it; it is invisible to your dirty-tree checks on purpose. If
+one is in your way, it is not — leave it exactly where it is.
+
+## When a commit cannot be made
+
+Your prompt states this run's policies as `signing=<x>, push=<on|off>,
+pr=<draft|none>`. If `git commit` fails or hangs on signing:
+
+- `signing=off` or `signing=auto`: run `git config --local commit.gpgsign
+  false`, retry the commit once, and add `Signing: disabled mid-run (<the
+  error>)` to the task's log entry. Continue normally.
+- `signing=required`: do not bypass it. Call `foundry_run_halt` with the
+  exact error and stop; a human has to fix the signing agent or change the
+  policy.
+
+Other legitimate reasons to call `foundry_run_halt` instead of pushing
+through: the disk is full, a `verify` command cannot run at all (not
+failed — cannot even start), or the base branch has vanished. These are
+operator-level problems, not task problems; `foundry_task_block` is for a
+task that cannot be finished, `foundry_run_halt` is for a run that cannot
+continue at all. Never invent a third way to stop.
 
 ## Constraints you may not relax
 
@@ -100,8 +136,16 @@ When `foundry_task_next` returns `{ done: true }`:
      was tuned.
    - What a human must check by hand, per phase.
    - Anything you would tell a reviewer who has not seen this code.
+   - A `## Pipeline friction` section: anything the Foundry pipeline itself
+     cost you time on — a refused tool, an ambiguous prompt, a stall you
+     had to work around — one line each, or "None". This is not about the
+     project; it is what the summarizer collects to feed the next release.
    If this is a review-fix round, rewrite only the `## Round N` section of
-   HANDOFF.md rather than the whole file.
+   HANDOFF.md rather than the whole file. Write it with the `Write` tool; if
+   the harness refuses (some builds tell subagents to return findings as
+   text instead), write it with a shell heredoc in one `Bash` call and
+   continue — do not argue with the refusal, and do not return it as text
+   in your own reply (F-16).
 3. Call `foundry_run_finish`. It commits HANDOFF.md, pushes and opens a draft
    PR if it can, disarms the Stop hook, and returns the handoff summary.
 4. Print one final message that starts with `READY FOR REVIEW` and contains

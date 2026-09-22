@@ -22,15 +22,18 @@ it.
 | Path | What lives there |
 |---|---|
 | `mcp/server.mjs` | Every deterministic operation, and the JSON-RPC transport |
-| `scripts/implement-guard.sh` | The Stop / SubagentStop hook |
+| `scripts/implement-guard.mjs` | The Stop / SubagentStop hook |
 | `scripts/lint.sh` | Dependency-free syntax and manifest lint |
 | `scripts/check-diagrams.mjs` | Parses every Mermaid block; CI-only, needs mermaid + jsdom |
 | `agents/*.md` | Stage agents: default model, effort, and the skill each preloads |
 | `skills/*/SKILL.md` | The prose each stage follows |
 | `templates/SPEC.md` | The spec skeleton users copy |
 | `templates/foundry.config.example.json`, `templates/ccr/` | The global routing config and claude-code-router provider manifests |
-| `test/` | Harness plus eight suites |
+| `templates/constraints.example.json` | Three worked `docs/foundry.json` `constraints` rules, with fixtures |
+| `test/` | Harness plus nine suites |
 | `docs/` | Architecture, tool reference, routing guide, spec guide, runbook |
+| `docs/plans/` | The task-by-task plan behind each release |
+| `docs/feedback/` | Stumbling blocks a real flight hit, feeding the next release plan |
 
 ## Setup
 
@@ -49,7 +52,7 @@ plugin that fails on someone else's machine.
 
 ```bash
 npm run lint                    # node --check, bash -n, JSON parse, exec bits
-npm test                        # all eight suites
+npm test                        # all nine suites
 npm test -- guard protocol      # named suites only
 node test/state.mjs             # one suite, directly
 KEEP_REPO=1 npm test -- drive   # keep the temp repos for inspection
@@ -66,7 +69,8 @@ npm install --no-save mermaid jsdom && node scripts/check-diagrams.mjs
 | `implement` | `run_start`, `task_next`, `task_done`, `task_block`, `verify`, `run_finish` |
 | `review` | `review_submit` and `summary_commit`, including every refusal |
 | `routing` | Config merge and precedence, `foundry_agents_sync`, `foundry_config_show`, every refusal |
-| `guard` | The Stop hook: blocking, counting, giving up, environment handling |
+| `constraints` | `docs/foundry.json` constraints, fixture self-tests, the scan, every refusal |
+| `guard` | The Stop / SubagentStop hook: scoping, blocking, counting, giving up, environment handling |
 | `drive` | One complete flight end to end over real stdio |
 
 Suites are plain Node programs that print TAP-ish lines and exit non-zero on

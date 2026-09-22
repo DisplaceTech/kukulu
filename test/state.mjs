@@ -28,13 +28,34 @@ await withServer(mkDir(), async ({ call }) => {
 // -------------------------------------------------------------- plan stage
 
 await withServer(specRepo(), async ({ call }) => {
-  const n = await call("foundry_next");
+  let n = await call("foundry_next");
   eq(n.stage, "plan", "SPEC alone → plan");
   eq(n.agent, "foundry:planner", "the plan stage delegates to the planner");
+  eq(n.agentFallback, true, "with nothing generated yet, the stage falls back to the plugin agent");
+  eq(n.fallbackAgent, "foundry:planner", "the fallback agent is always named");
+  eq(n.restartRequired, false, "an Anthropic-routed role never needs a restart");
   eq(n.round, 0, "a fresh flight is round 0");
   like(n.prompt, /docs\/SPEC\.md/, "the planner prompt points at the spec");
   like(n.prompt, /Do not write implementation code/, "the planner prompt forbids coding");
+
+  await call("foundry_agents_sync");
+  n = await call("foundry_next");
+  eq(n.agent, "foundry-planner", "once the file is on disk, next names the generated agent");
+  eq(n.agentFallback, true, "but this process created the agents directory itself, so fallback stays in effect");
+  eq(n.restartRequired, false, "still no restart needed for an Anthropic-routed role");
 });
+
+// A role routed to a model the Agent tool cannot name, with nothing generated yet.
+{
+  const repo = specRepo();
+  writeFile(repo, "docs/foundry.json", JSON.stringify({ verify: ["true"], roles: { planner: { model: "Ollama/x" } } }, null, 2) + "\n");
+  await withServer(repo, async ({ call }) => {
+    const n = await call("foundry_next");
+    eq(n.agent, null, "a router-routed role with nothing generated has no agent to spawn");
+    eq(n.agentFallback, true, "the file is absent, so fallback would apply if it could");
+    eq(n.restartRequired, true, "but the Agent tool cannot name the model directly, so a restart is required");
+  });
+}
 
 // A half-written plan is not a plan.
 for (const missing of ["docs/PLAN.md", "docs/PROGRESS.md", "docs/foundry.json"]) {
@@ -70,8 +91,57 @@ await withServer(plannedRepo(), async ({ call }) => {
   await withServer(repo, async ({ call }) => {
     const n = await call("foundry_next");
     eq(n.round, 2, "next reports the current round");
+    eq(n.reviewRound, 3, "reviewRound is always round + 1");
     like(n.prompt, /review-fix round 2/, "a fix round's prompt names the round");
     like(n.prompt, /R2-\*/, "a fix round's prompt names the R-task pattern");
+  });
+}
+
+// reviewRound tracks round + 1 everywhere in the decision table, including
+// foundry_status, not only the implement-stage prompt above.
+for (const round of [0, 1, 5]) {
+  const repo = plannedRepo();
+  setState(repo, { round });
+  await withServer(repo, async ({ call }) => {
+    eq((await call("foundry_status")).reviewRound, round + 1, `status reports reviewRound as round + 1 at round ${round}`);
+    eq((await call("foundry_next")).reviewRound, round + 1, `next reports reviewRound as round + 1 at round ${round}`);
+  });
+}
+
+// The review stage's own prompt states the round it must be stamped with.
+{
+  const repo = plannedRepo();
+  markTasks(repo, ALL_DONE);
+  setState(repo, { implemented: true });
+  await withServer(repo, async ({ call }) => {
+    const n = await call("foundry_next");
+    eq(n.stage, "review", "implemented and unreviewed → review");
+    eq(n.reviewRound, 1, "the first review is round 1");
+    like(n.prompt, /This review is round 1/, "the review prompt states its own round");
+    like(n.prompt, /Round: 1.*docs\/REVIEW\.md/, "...and exactly what to write in REVIEW.md");
+    like(n.prompt, /R1-<nn>/, "...and the id prefix for any same-round dependsOn");
+  });
+}
+
+// status reads the lock's counter, in either format, or reports null.
+{
+  const repo = plannedRepo();
+  await withServer(repo, async ({ call }) => {
+    eq((await call("foundry_status")).lockCounter, null, "no lock means no counter to report");
+  });
+}
+{
+  const repo = plannedRepo();
+  writeFile(repo, ".foundry/implement.lock", "3\n");
+  await withServer(repo, async ({ call }) => {
+    eq((await call("foundry_status")).lockCounter, 3, "a legacy bare-number lock still reads back its count");
+  });
+}
+{
+  const repo = plannedRepo();
+  writeFile(repo, ".foundry/implement.lock", '{"count":7,"round":1}\n');
+  await withServer(repo, async ({ call }) => {
+    eq((await call("foundry_status")).lockCounter, 7, "a JSON lock's count is read directly");
   });
 }
 
@@ -136,14 +206,17 @@ await withServer(plannedRepo(), async ({ call }) => {
 
 // -------------------------------------------------------------- round caps
 
+// The round-cap decision belongs solely to foundry_review_submit (V3-10);
+// next() never re-derives it from round/maxRounds — open tasks past a round
+// review_submit did *not* itself halt are still just the next implement
+// stage, exactly like any other round. See test/review.mjs for the actual
+// convergence and hard-cap halting behaviour.
 {
   const repo = plannedRepo({ config: { maxRounds: 2 } });
   setState(repo, { round: 3 });
   await withServer(repo, async ({ call }) => {
     const n = await call("foundry_next");
-    eq(n.stage, "halt", "a round past maxRounds with open tasks → halt");
-    like(n.reason, /maxRounds=2/, "the halt reason quotes the configured cap");
-    like(n.reason, /human intervention required/, "the halt reason says a human is needed");
+    eq(n.stage, "implement", "open tasks send the flight to implement regardless of round or maxRounds; only state.halted can stop it");
   });
 }
 

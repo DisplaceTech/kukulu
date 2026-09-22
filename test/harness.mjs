@@ -12,7 +12,7 @@ import { fileURLToPath } from "node:url";
 export const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const ROOT = path.resolve(HERE, "..");
 export const SERVER = path.join(ROOT, "mcp", "server.mjs");
-export const GUARD = path.join(ROOT, "scripts", "implement-guard.sh");
+export const GUARD = path.join(ROOT, "scripts", "implement-guard.mjs");
 
 const KEEP = Boolean(process.env.KEEP_REPO);
 const RPC_TIMEOUT_MS = Number(process.env.FOUNDRY_TEST_TIMEOUT_MS || 60_000);
@@ -379,10 +379,22 @@ export function writeGlobalConfig(dir, obj) {
 
 // ---------------------------------------------------------------- guard hook
 
-/** Run the Stop-hook script against `repo`; returns its stdout, trimmed. */
-export function runGuard(repo, env = {}) {
-  return execFileSync("/bin/bash", [GUARD], {
+/**
+ * Run the guard hook against `repo`, simulating a SubagentStop from the
+ * implementer — the common real-world shape of the check — unless `input`
+ * overrides fields on it. Returns stdout, trimmed.
+ */
+export function runGuard(repo, input = {}, env = {}) {
+  const payload = JSON.stringify({
+    hook_event_name: "SubagentStop",
+    agent_type: "foundry-implementer",
+    transcript_path: path.join(repo, ".foundry-test-transcript.jsonl"),
     cwd: repo,
+    ...input,
+  });
+  return execFileSync(process.execPath, [GUARD], {
+    cwd: repo,
+    input: payload,
     encoding: "utf8",
     env: { ...process.env, CLAUDE_PROJECT_DIR: repo, ...env },
   }).trim();

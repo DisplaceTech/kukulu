@@ -39,8 +39,9 @@ once. It does not cover MCP tool calls: verified directly, a generated
 agent's `foundry_status` call is denied under both `acceptEdits` and
 `bypassPermissions` unless the session carries an allow rule, and the rule
 that works (and reaches subagents) is the scoped server name
-`mcp__plugin_foundry_foundry` in `permissions.allow` — the README's
-per-project section shows it. Plugin-shipped agents cannot
+`mcp__plugin_foundry_foundry` in `permissions.allow` —
+`foundry_agents_sync` writes it for you; see
+[operations.md](./operations.md#running-a-flight). Plugin-shipped agents cannot
 do either of these things: [Claude Code's plugin
 reference](https://code.claude.com/docs/en/plugins-reference) states that
 "plugin subagents don't support the `hooks`, `mcpServers`, or
@@ -58,25 +59,41 @@ drop in `effortDropped`, rather than emitting a key the far end would not
 understand.
 
 **The one thing routing cannot do inside a single session.** Claude Code
-loads project-level agents from `.claude/agents/` at session start. Writing
-or editing a file there mid-session does not make the new agent callable in
-that same session — confirmed by launching a session, writing a fresh agent
-file, and calling it: Claude Code reports "Agent type '\<name>' not found"
-regardless of whether the `.claude/agents/` directory already existed. So
-`foundry_agents_sync` never assumes its own output is immediately usable:
-`/foundry:go-flight` calls it once before the loop, and if anything
-*changed* (first run in a project, or after any config edit), it prints the
-table and this line, then stops:
+hot-reloads a project-level agent file from `.claude/agents/` within seconds
+of it changing, with one documented exception: the *first* agent file
+created in a new `.claude/agents/` directory is not picked up until the
+session restarts. A routing edit to an already-populated directory, by
+contrast, is picked up live — this plugin relied on the stricter,
+conservative assumption through 0.2.0 and confirmed the actual behaviour for
+0.3.0.
+
+So the only case `foundry_agents_sync` cannot make immediately usable is a
+project's very first sync, and only when the routed model is not one the
+`Agent` tool can name directly (an Anthropic alias or a `claude-*` id) — for
+any other model, `foundry_next` falls back to the plugin's own
+`foundry:<role>` agent with the resolved model until this session's next
+launch, and the flight proceeds without stopping. `foundry_next` reports
+this per stage as `agentFallback` and `fallbackAgent`; `foundry_agents_sync`
+and `foundry_next` both report the one case that truly needs a restart as
+`restartRequired`. `/foundry:go-flight` checks it before the loop and, when
+true, prints the table and this line, then stops:
 
 ```text
 FOUNDRY: RESTART REQUIRED — agent definitions were (re)generated; start a new session and run /foundry:go-flight again.
 ```
 
-The second run finds nothing changed and proceeds. In practice this costs one
-extra launch per project, the first time, and one more each time you edit the
-routing config — never mid-flight. See
+In practice this costs at most one extra launch per project — the first
+time, and only for a role routed off-platform before that first sync — and
+never again, and never mid-flight. See
 [docs/operations.md](./operations.md#routing) for a two-line headless
 wrapper that handles the restart itself.
+
+While `agentFallback` is in effect, the controller spawns the plugin's own
+`foundry:<role>` agent with the resolved `model` passed as the `Agent`
+tool's `model` argument. `effort` is lost in that case: it lives only in the
+generated agent's own frontmatter, and the `Agent` tool has no `effort`
+parameter to carry it around. This costs at most one stage's worth of
+effort, since the generated file becomes usable from the very next session.
 
 The generated files are excluded from git per clone, via
 `.git/info/exclude` rather than `.gitignore` — they encode a person's own

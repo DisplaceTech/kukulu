@@ -3,6 +3,7 @@ name: summarizer
 description: Foundry stage 4 — writes docs/SUMMARY.md after an approved review. Invoked by go-flight.
 model: fable
 effort: medium
+tools: Read, Write, Edit, Bash, Grep, Glob, mcp__plugin_foundry_foundry__foundry_status, mcp__plugin_foundry_foundry__foundry_summary_commit
 skills:
   - foundry:summarize
 color: green

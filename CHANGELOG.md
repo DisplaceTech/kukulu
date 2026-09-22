@@ -4,6 +4,182 @@ All notable changes to this plugin. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] — 2026-09-21
+
+### Added
+
+- `foundry_next` and `foundry_agents_sync` report `agentFallback`,
+  `fallbackAgent` and `restartRequired`. Claude Code hot-reloads a routing
+  change to an already-populated `.claude/agents/` directory within
+  seconds; only a project's very first sync, and only for a role routed to
+  a model the `Agent` tool cannot name directly, still needs
+  `FOUNDRY: RESTART REQUIRED` (F-02, F-04, F-06). Every other case falls
+  back to the plugin's own agent with the resolved `model` and proceeds
+  without stopping.
+- **`foundry_agents_sync` sets up the MCP allow rule** (F-03): without
+  `{ "permissions": { "allow": ["mcp__plugin_foundry_foundry"] } }`, the
+  first `foundry_status` call in a subagent is denied under every
+  permission mode and the flight stalls silently. The sync now read-merges
+  this rule into `.claude/settings.local.json`, unless it is already
+  covered there or in the committed `.claude/settings.json`, preserving
+  every other key and allow entry; a `settings.local.json` that fails to
+  parse is reported (`permissions: "failed: ..."`) rather than overwritten.
+  `foundry_config_show` reports `permissionRule: "present" | "missing"`.
+  Both `settings.local.json` and the generated agent files are excluded
+  from git per clone via `.git/info/exclude`.
+- **Run policies and `foundry_run_halt`** (F-05): after 14 tasks a signing
+  agent stopped responding mid-flight, and the implementer had no way to
+  learn the operator had already authorized unsigned commits, nor a clean
+  way to stop. `docs/foundry.json` gains a `policies` block —
+  `signing: "auto" | "off" | "required"`, `push: boolean`, `pr: "draft" |
+  "none"` — resolved and recorded by `foundry_run_start`, which also probes
+  signing for real (`git commit-tree -S`, never a dry run): `off` disables
+  it locally; `required` refuses to start unless a genuine signed commit
+  succeeds; `auto` falls back to disabling it and records why. Every stage
+  prompt from `foundry_next` states the run's policies in one sentence. The
+  new `foundry_run_halt` tool lets a run stop cleanly for an operator-level
+  problem — a dead signing agent, a full disk, a vanished base branch —
+  without resetting or cleaning the tree; `foundry_status` and
+  `foundry_next` report the halt like any other. The implement skill
+  documents when to disable signing mid-run versus when to halt. The server
+  now defines thirteen tools.
+- **The compound step: feedback in, friction out.** `FEEDBACK.md` — the
+  untracked notes from the flight this release was built to fix — moves to
+  `docs/feedback/2026-09-21-project-a.md`, the first entry in a tracked
+  convention (`docs/feedback/README.md`) for collecting what a real flight
+  hits. `docs/SUMMARY.md` gains a "Pipeline friction" section: anything the
+  pipeline itself cost time on, not the project it built, collected from a
+  new `## Pipeline friction` heading the implement and review-build skills
+  now record in `HANDOFF.md` and each round's `REVIEW.md`. "None" is a
+  valid entry. README's Contributing section explains the loop: a flight's
+  friction feeds a feedback file, and a release plan works through it.
+- **Documentation pass for 0.3.** `docs/operations.md` gains a
+  "Calibrating" section with the real per-stage timings and token counts a
+  76-task flight produced, and what each tuned default (`guardCap: 60`,
+  `commandTimeoutMs: 600000`, `maxRounds: 3` / `maxRoundsHard: 6`) was set
+  from. Every key `cfg()` returns now has a row in the config table (a new
+  `plugin` suite assertion enforces it going forward). The symptom table
+  gains rows for a `Round:` refusal, a non-converging or hard-cap halt, a
+  missing permission rule, and states plainly that the controller itself
+  should never be blocked by the guard after 0.3.0. Two claims 0.3 itself
+  had made false were caught and fixed: `docs/architecture.md`'s decision
+  order still listed the round-cap check `foundry_next` no longer makes
+  (V3-10 removed it from `next()` but not from the doc), and its tool count
+  still said twelve. `docs/plans/` joins the documentation map.
+- **Stage agents declare their tools explicitly** (F-16): all four
+  plugin agents (and the generated `foundry-<role>` files, which copy it
+  verbatim) now carry a `tools:` frontmatter list — the six general tools
+  plus exactly the `foundry` MCP tools that role actually calls, in the
+  plugin-prefixed form, never `Agent` (a stage never spawns). The
+  summarize, plan-build and implement skills also state a shell-heredoc
+  fallback for writing their deliverable file if the harness refuses the
+  `Write` tool, so a refusal costs no turn and the file is never returned
+  as text instead of being written. The plan-build skill's report must now
+  quote `docs/foundry.json` from disk (`cat docs/foundry.json`), not from
+  memory, and the planner sets `baseBranch` to the branch it is actually on
+  when it commits — closing the gap where a planner's report and the file
+  it wrote once disagreed (F-06).
+- **Constraints as data, checked mechanically** (F-14): three consecutive
+  review rounds found a hard-coded tunable that `CLAUDE.md`'s own grep
+  missed — array `=>` syntax only, then an allow-list left in place, then
+  plain `= N;` — because the rule lived only in prose and had to be
+  re-checked by hand each round. `docs/foundry.json` gains a `constraints`
+  array: `{ id, description, paths, exclude?, pattern, flags?, shouldMatch,
+  shouldNotMatch }`. `foundry_verify` self-tests every rule against its own
+  fixtures before scanning a single file — a fixture that disagrees fails
+  the rule outright, reported as `fixture` in the result — then scans every
+  *tracked* file (untracked and gitignored files are never touched) under
+  `paths` minus `exclude`, reporting each hit as `{ file, line, text }`.
+  Line-based only. This runs whole-repo on every `foundry_verify` call,
+  regardless of `files`. `templates/constraints.example.json` ships three
+  fully worked rules with fixtures covering multiple syntactic shapes. The
+  plan-build skill requires a `constraints` entry for every mechanically
+  checkable `CLAUDE.md` rule; the review-build skill treats a rule that
+  missed a real violation as a defect in the rule, closed by adding the
+  missed shape to `shouldMatch`; the implement skill treats a constraint
+  hit as a failing test. New `constraints` test suite.
+- **Per-command verify timeouts.** A `verify`, `extraVerify` or `build`
+  entry in `docs/foundry.json` may now be `{ "cmd": "...", "timeoutMs": N }`
+  instead of a bare string, so one slow end-to-end command can get a longer
+  timeout without raising `commandTimeoutMs` for every other command. A
+  malformed entry (missing `cmd`, a non-positive or non-integer
+  `timeoutMs`) refuses with the offending entry named. `foundry_verify`'s
+  per-result `timeoutMs` reports which timeout each command actually ran
+  with. The plan-build skill's `docs/foundry.json` template documents the
+  form and every key introduced since 0.2.0 (`guardCap`, `policies`,
+  `maxRoundsHard`), which had gone undocumented there.
+
+### Changed
+
+- **Converging review rounds no longer halt the flight** (F-13, F-15): every
+  round used to count against `maxRounds` regardless of whether findings
+  were shrinking, so a flight whose findings went 15 → 3 → 2 could halt on
+  a round that was, by every measure, converging. `maxRounds` (default 3)
+  now bounds *non-converging* rounds only — a round whose fix-task count
+  did not shrink from the round before it; round 1 is always allowed. A
+  new `maxRoundsHard` (default 6) is the absolute ceiling regardless of
+  convergence. `state.rounds` records every submission
+  (`{ round, fixTasks, unblocked, verdict, nonConverging, at }`), and the
+  halt message shows the trail of counts. The summarize skill's review
+  history now reads it directly instead of reconstructing it from git.
+- **The MCP owns the review round number** (F-10, F-11): `foundry_status`
+  and `foundry_next` expose `reviewRound` (always `round + 1`), and the
+  review prompt states it explicitly ("This review is round N") instead of
+  leaving a reviewer to derive it from `round` and risk being off by one.
+  `foundry_review_submit` now reads `docs/REVIEW.md`'s `Round:` line and
+  refuses, for either verdict, when it is missing or does not equal
+  `reviewRound`. It also validates every fix task's `dependsOn`: each must
+  name an existing task or one of the same submission's own new ids.
+  Approval now commits as `review: round N approved` (was `review:
+  approved`), so `git log --grep '^review:'` lists every round uniformly.
+- **Every push-worthy commit is actually pushed** (F-18): after a flight,
+  the `review:` commit from `foundry_review_submit` and the `chore: build
+  summary` commit from `foundry_summary_commit` used to stay local, and the
+  base branch never received the planner's commits at all, so a PR
+  silently included `PLAN.md`/`PROGRESS.md`/`foundry.json` as if they were
+  build work. Both tools now push after their commit, `foundry_run_start`
+  pushes the base branch before cutting the first build branch, and all
+  three honour `policies.push`. A shared helper makes every push report the
+  same shape: `"pushed"`, `"skipped: policy"`, `"skipped: no origin
+  remote"`, or `"failed: <git's first line>"`.
+- Pre-existing untracked files are invisible to a run (F-09, F-17):
+  `foundry_run_start` records every path already untracked before it arms
+  the lock. `foundry_task_done` and `foundry_run_finish` ignore those paths
+  in their dirty-tree checks, and `foundry_task_block`'s `git clean` now
+  excludes them instead of deleting them outright. `foundry_run_start`'s own
+  "working tree is dirty" gate on the base branch also now considers only
+  *tracked* changes, since an untracked file blocking a run from starting at
+  all defeated the purpose. `foundry_status` exposes the recorded list as
+  `preexistingUntracked`. The implement and review-build skills say so:
+  never move, delete, rename, or gitignore a file you did not create, and an
+  unexplained edit to `.gitignore` or similar is a review finding.
+- The implement guard's cap counts stalls, not stops (F-08): `foundry_task_done`,
+  `foundry_task_block` and `foundry_run_start` all reset the re-block counter
+  to zero, so the cap bounds re-blocks since the last time work actually
+  moved, not the whole run. The default drops from 500 to 60 — at the
+  ~6 blocked stops per healthy task observed in practice, 60 is ten tasks'
+  worth of blocking with no progress. A new `guardCap` key in
+  `docs/foundry.json` overrides the default per project, carried into
+  `.foundry/implement.lock` at `foundry_run_start` and taking precedence
+  over the `FOUNDRY_GUARD_CAP` environment variable. The trip message now
+  names the stalled task. `foundry_task_done`'s return gains `guardReset`.
+- The implement guard is a Node script (`scripts/implement-guard.mjs`,
+  replacing `implement-guard.sh`) scoped to the implementer, not to every
+  `Stop`/`SubagentStop` in the project (F-07). `hooks/hooks.json` matches
+  `SubagentStop` to the implementer's agent type at the hook-registration
+  level; the script itself also checks `agent_type`, and for a bare `Stop`
+  checks whether the stopping session's own transcript called
+  `foundry_run_start`. A controller session merely waiting on a background
+  implementer is never blocked and never spends the re-block counter.
+  `foundry_run_start` now writes `.foundry/implement.lock` as JSON
+  (`{ count, armedAt, round }`); a legacy bare-number lock from a 0.2.x run
+  still reads back correctly. `foundry_status` gains `lockCounter`.
+- `go-flight` is model-invocable (F-01): `disable-model-invocation` is gone,
+  so asking Claude to run the flight works alongside the literal
+  `/foundry:go-flight` command. The loop section now describes an `Agent`
+  call as event-driven rather than a blocking wait, since some harnesses
+  return immediately and deliver the result as a later notification (F-04).
+
 ## [0.2.0] — 2026-09-19
 
 ### Added
