@@ -28,6 +28,7 @@ const P = {
   stateDir: path.join(ROOT, ".foundry"),
   state: path.join(ROOT, ".foundry", "state.json"),
   lock: path.join(ROOT, ".foundry", "implement.lock"),
+  feedback: path.join(ROOT, ".foundry", "feedback.jsonl"),
   gitignore: path.join(ROOT, ".gitignore"),
   agentsDir: path.join(ROOT, ".claude", "agents"),
   settings: path.join(ROOT, ".claude", "settings.json"),
@@ -135,7 +136,7 @@ function loadConfig() {
 
 const SIGNING_POLICIES = ["auto", "off", "required"];
 const PR_POLICIES = ["draft", "none"];
-const POLICY_KEYS = ["signing", "push", "pr"];
+const POLICY_KEYS = ["signing", "push", "pr", "feedback"];
 
 /** Validate `docs/foundry.json`'s `policies` block; throws, never defaults a bad value away. */
 function validatePolicies(policies) {
@@ -154,6 +155,9 @@ function validatePolicies(policies) {
   }
   if (policies.pr !== undefined && !PR_POLICIES.includes(policies.pr)) {
     throw new ToolError(`docs/foundry.json policies.pr must be one of ${PR_POLICIES.join(", ")}`);
+  }
+  if (policies.feedback !== undefined && typeof policies.feedback !== "boolean") {
+    throw new ToolError("docs/foundry.json policies.feedback must be a boolean");
   }
 }
 
@@ -241,6 +245,7 @@ function cfg() {
       signing: c.policies?.signing ?? "auto",
       push: c.policies?.push ?? true,
       pr: c.policies?.pr ?? "draft",
+      feedback: c.policies?.feedback ?? true,
     },
   };
 }
@@ -774,6 +779,58 @@ function resetLockCounter() {
   write(P.lock, `${lock.json ? JSON.stringify({ ...lock.json, count: 0 }) : "0"}\n`);
 }
 
+// ---------------------------------------------------------------- feedback
+
+const FEEDBACK_STAGES = ["plan", "implement", "review", "summarize", "controller"];
+
+/**
+ * Append one pipeline-friction entry to `.foundry/feedback.jsonl` — never
+ * commits; callers decide whether to commit alone (the externally-callable
+ * `foundry_feedback_log` tool) or fold it into a commit they are already
+ * making (every MCP-internal auto-log call site). `source` is `"agent"`
+ * for entries written through the tool, `"auto"` for entries the MCP
+ * writes about its own decisions.
+ */
+function appendFeedback(stage, message, category, source) {
+  if (!FEEDBACK_STAGES.includes(stage)) throw new ToolError(`stage must be one of ${FEEDBACK_STAGES.join(", ")}`);
+  if (!message || typeof message !== "string") throw new ToolError("message is required");
+  const st = loadState();
+  const entry = { at: new Date().toISOString(), stage, round: st.round, category: category || "other", message, source };
+  fs.mkdirSync(P.stateDir, { recursive: true });
+  fs.appendFileSync(P.feedback, `${JSON.stringify(entry)}\n`);
+}
+
+/** Number of parseable entries in `.foundry/feedback.jsonl`; `0` if the file does not exist. A line that fails to parse — a partial write from an interrupted process — is skipped, not fatal. */
+function countFeedback() {
+  if (!exists(P.feedback)) return 0;
+  let n = 0;
+  for (const line of read(P.feedback).split("\n")) {
+    if (!line.trim()) continue;
+    try {
+      JSON.parse(line);
+      n++;
+    } catch {
+      // skip a corrupt line rather than failing the whole read
+    }
+  }
+  return n;
+}
+
+/**
+ * The externally-callable half of feedback capture: a stage agent calls
+ * this the moment something costs it time that is Foundry's own fault, not
+ * the project's. Unlike the MCP's internal auto-logging (which folds a
+ * feedback entry into a commit it is already making), this commits on its
+ * own every time, because the calling agent has no other commit happening
+ * at that instant.
+ */
+function feedbackLog({ stage, message, category }) {
+  if (!cfg().policies.feedback) return { logged: false, reason: "disabled by policy" };
+  appendFeedback(stage, message, category, "agent");
+  const commit = gitCommitIfChanged([P.feedback], `chore: pipeline friction (${stage})`);
+  return { logged: true, count: countFeedback(), commit };
+}
+
 // ---------------------------------------------------------------- git facts
 
 function gitFacts() {
@@ -812,6 +869,7 @@ function status() {
     preexistingUntracked: st.preexistingUntracked,
     policies: st.policies,
     signing: st.signing,
+    feedbackCount: countFeedback(),
     reviewRoundsInPlan: reviewRoundCount(),
     branch: null,
     started: null,
@@ -1392,6 +1450,19 @@ const TOOLS = [
     description: "Stop the flight for an operator-level reason the implementer cannot resolve (a dead signing agent, a full disk, a vanished base branch): records the reason, disarms the lock, commits state and PROGRESS.md if they changed. Never resets or cleans the tree.",
     inputSchema: S({ reason: { type: "string", description: "why the flight cannot continue" } }, ["reason"]),
     fn: runHalt,
+  },
+  {
+    name: "foundry_feedback_log",
+    description: "Record one pipeline-friction entry — something Foundry's own tooling cost time on, not the project it is building. Appends to .foundry/feedback.jsonl and commits it immediately, so it survives even if the flight never reaches summarize. Call it the moment friction happens.",
+    inputSchema: S(
+      {
+        stage: { type: "string", enum: FEEDBACK_STAGES, description: "which role is logging this" },
+        message: { type: "string", description: "one or two sentences: what happened and why it cost time" },
+        category: { type: "string", description: "short free-form label, e.g. 'tool-refusal', 'ambiguous-prompt', 'stall' — defaults to 'other'" },
+      },
+      ["stage", "message"],
+    ),
+    fn: feedbackLog,
   },
   {
     name: "foundry_review_submit",
