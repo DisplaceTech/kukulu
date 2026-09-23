@@ -209,6 +209,21 @@ ok(String(frontmatter(read("agents/reviewer.md")).tools).includes("mcp__plugin_f
   like(reviewSkill, /foundry_mutate/, "review-build tells the reviewer to mutation-test with foundry_mutate");
   ok(!reviewSkill.includes("git checkout -- <file>"), "review-build no longer tells the reviewer to hand-edit source and git checkout it");
 }
+// V4-06: the planner carves streams, and only where they are safe.
+{
+  const planSkill = read("skills/plan-build/SKILL.md");
+  like(planSkill, /## Parallel streams \(optional\)/, "plan-build has a Parallel streams section");
+  like(planSkill, /\*\*Stream:\*\* <slug>/, "...documenting the PLAN.md Stream field");
+  like(planSkill, /\{stream: <slug>\}/, "...and the PROGRESS.md suffix tag");
+  like(planSkill, /disjoint across the streams of a\s+wave/, "...the disjoint-files rule");
+  like(planSkill, /Keep shared-edit hotspots out of waves/, "...the hotspots rule");
+  like(planSkill, /package manifests and lockfiles/, "...naming the usual hotspots");
+  like(planSkill, /Phase-end tasks are always serial/, "...that phase-end tasks stay serial");
+  like(planSkill, /"exclusive": true/, "...the exclusive marker for port- or directory-bound commands");
+  like(planSkill, /`parallel\.setup`/, "...parallel.setup for a fresh worktree");
+  like(planSkill, /do not force them/, "...and that a fully serial plan is fine");
+  like(read("docs/writing-specs.md"), /Independent components parallelize/, "writing-specs.md tells spec authors how to help");
+}
 // V4-04: parallel waves.
 like(goFlight, /streams/, "go-flight describes the streams a parallel wave returns");
 like(goFlight, /in a single message/, "go-flight spawns a wave's streams in a single message so they run concurrently");

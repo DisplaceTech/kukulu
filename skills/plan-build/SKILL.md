@@ -66,6 +66,55 @@ or any source files; the first task of the first phase does that.
 - Because there is no human between tasks, be explicit about interpretation
   points: where SPEC allows two readings, pick one in the task text.
 
+## Parallel streams (optional)
+
+A plan may split independent tasks into **streams**; the implement stage then
+runs each stream on its own implementer, in its own git worktree, at the same
+time. This is an optimisation, never a requirement: a plan with no streams is
+always correct, and a wrong partition costs more than it saves. Use streams
+only where the tasks genuinely do not need each other.
+
+- **What a stream is.** Tag a task with `**Stream:** <slug>` in `PLAN.md` (a
+  lowercase slug: letters, digits and `-`, at most 24 characters, starting
+  with a letter) and end its `PROGRESS.md` line with `{stream: <slug>}`.
+  Both files must say the same thing for every tagged task; a disagreement
+  is treated as a broken partition.
+- **What a wave is.** A **wave** is a run of *consecutive* streamed tasks in
+  `PROGRESS.md` order, and a task without a stream is a barrier between
+  waves. So "scaffold → parallel pieces → integration" is serial tasks, then
+  a wave, then serial tasks. Within a wave, tasks sharing a stream run in
+  order on one implementer; different streams run concurrently. Use at least
+  two streams per wave, and at most `parallel.maxStreams` (3 unless
+  `docs/foundry.json` says otherwise).
+- **Put tasks in a stream only when they can be built without seeing each
+  other's code.** Every streamed task's `Files touched` must be a list of
+  concrete backticked paths (`` `src/api/routes.ts` ``; a trailing `/` names a
+  directory), and those paths must be **disjoint across the streams of a
+  wave**. A task listing no backticked paths, or two streams naming the same
+  file or overlapping directories, makes Foundry run the whole wave serially.
+- **Depend only backwards.** A streamed task may depend on tasks *before* its
+  wave, or on earlier tasks of its *own* stream. It must never depend on a
+  task of a different stream in the same wave.
+- **Keep shared-edit hotspots out of waves.** Anything several tasks would
+  each append to belongs in a serial task *after* the wave, which does the
+  wiring: package manifests and lockfiles, a test runner's registry, a
+  changelog or docs index, dependency-injection or container registration,
+  routes tables.
+- **Phase-end tasks are always serial** (they push the branch and list the
+  manual checks). A wave never spans a phase-end task.
+- **Environments that cannot be shared.** Any command that starts a port-,
+  container- or directory-keyed environment (wp-env, docker compose, a dev
+  server) must be marked `exclusive` in `docs/foundry.json` (see below), and
+  the tasks that trigger it stay out of waves: two copies would collide on the
+  same ports no matter how the commands are scheduled.
+- **A fresh checkout must be verifiable.** Each stream works in a newly
+  created worktree with none of the installed dependencies. Fill in
+  `parallel.setup` with whatever makes one verifiable (`npm ci`,
+  `composer install`, generated files). If the project needs setup and you
+  cannot tell what it is from SPEC, do not use streams at all.
+- **If streams do not make sense for this project, do not force them.** Most
+  small plans should be fully serial.
+
 ## `docs/PLAN.md` format
 
 ```
@@ -88,6 +137,7 @@ Derived from docs/SPEC.md v<version> on <date>. SPEC.md wins over this file.
 **Out of scope:** ...
 **Verification:** ...
 **Depends on:** none
+**Stream:** <slug>
 
 ### P0-02: ...
 
@@ -98,8 +148,9 @@ Derived from docs/SPEC.md v<version> on <date>. SPEC.md wins over this file.
 <anything ambiguous or contradictory in SPEC, with your proposed resolution>
 ```
 
-Headings must be exactly `### <ID>: <title>`; the MCP extracts task text by
-that heading. Review rounds later append `## Review fixes (round N)` sections
+The `**Stream:**` line appears only on a task in a parallel wave (see
+"Parallel streams" above); leave it out of every serial task. Headings must
+be exactly `### <ID>: <title>`; the MCP extracts task text by that heading. Review rounds later append `## Review fixes (round N)` sections
 in the same task format; leave room for nothing else at the end.
 
 ## `docs/PROGRESS.md` format
@@ -112,13 +163,15 @@ Started: (set by implement)
 ## Tasks
 - [ ] P0-01 <title>
 - [ ] P0-02 <title>
+- [ ] P1-01 <title> {stream: api}
 ...
 
 ## Log
 (one entry per task, appended by implement)
 ```
 
-One line per task, same order as PLAN.md, all unchecked. Checkbox states are
+One line per task, same order as PLAN.md, all unchecked. A streamed task's
+line ends in `{stream: <slug>}`, matching its `**Stream:**` in `PLAN.md`. Checkbox states are
 `[ ]` todo, `[~]` in progress, `[x]` done, `[!]` blocked, `[-]` skipped
 because a dependency is blocked. The implement guard hook counts `[ ]` and
 `[~]` lines under `## Tasks` to decide whether the run is finished, so do not
@@ -134,7 +187,8 @@ add other checkbox lines to this file.
   "baseBranch": "main",
   "branchPrefix": "build/",
   "maxRounds": 3,
-  "maxRoundsHard": 6
+  "maxRoundsHard": 6,
+  "parallel": { "maxStreams": 3, "setup": ["<command that makes a fresh checkout verifiable>"] }
 }
 ```
 
@@ -144,10 +198,17 @@ when a task's Files touched fall under it. Leave `build` empty if there is no
 build step. Every command must exit non-zero on failure.
 
 Any command — in `verify`, `extraVerify`, or `build` — may instead be
-`{ "cmd": "<command>", "timeoutMs": <ms> }` when it needs a timeout other
-than the default (`commandTimeoutMs`, 10 minutes): a slow end-to-end suite
-should get its own longer timeout rather than raising the default for
-every other command. Leave `maxRounds` and `maxRoundsHard` at their
+`{ "cmd": "<command>", "timeoutMs": <ms>, "exclusive": true }` when it needs
+a timeout other than the default (`commandTimeoutMs`, 10 minutes): a slow
+end-to-end suite should get its own longer timeout rather than raising the
+default for every other command. `exclusive: true` marks a command that
+starts a port-, container- or directory-keyed environment (wp-env, docker
+compose, a dev server): it only ever runs from the main checkout, never from
+a parallel stream's worktree, and any task that triggers it stays out of
+waves. Leave the `parallel` block out entirely unless the plan uses streams;
+when it does, `parallel.setup` lists commands (same string-or-object entries
+as `verify`) that run once in each new stream worktree, and
+`parallel.maxStreams` caps how many streams of one wave run at once. Leave `maxRounds` and `maxRoundsHard` at their
 defaults unless SPEC says the review loop needs a different tolerance;
 `maxRounds` bounds review rounds that fail to converge, `maxRoundsHard` is
 an absolute ceiling regardless.
