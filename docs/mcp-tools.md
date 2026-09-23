@@ -67,12 +67,14 @@ guessing past them would produce confident nonsense.
 ## `foundry_next`
 
 The stage machine. A pure function of disk state — it never sees a subagent's
-report.
+report. Its one write is recording, once, that a parallel wave must run
+serially (see `streams` below).
 
 **Arguments:** none.
 
 **Returns:** `{ stage, agent, agentFallback, fallbackAgent, restartRequired,
-model, agentModel, agentModelExact, round, reviewRound, reason, prompt }`.
+model, agentModel, agentModelExact, round, reviewRound, reason, prompt,
+streams? }`.
 
 - `stage` — `plan` · `implement` · `review` · `summarize` · `done` · `halt`
 - `agent` — the subagent to spawn: the generated `foundry-<role>` name when
@@ -111,6 +113,28 @@ model, agentModel, agentModelExact, round, reviewRound, reason, prompt }`.
 - `prompt` — the text to hand the subagent **verbatim**; the implement,
   review and summarize prompts each end with a sentence stating this run's
   policies (see `foundry_run_start`)
+- `streams` — present only on an `implement` result that is a parallel wave:
+  `[{ stream, agent, agentFallback, fallbackAgent, agentModel,
+  agentModelExact, prompt }]`, one entry per stream to run concurrently. The
+  controller spawns one implementer per entry, all at once, passes each
+  entry's `prompt` verbatim, and waits for all of them before calling
+  `foundry_next` again. The list holds, in order: streams already in flight
+  (a worktree exists — an unfinished one is re-handed out, a finished one is
+  offered so it gets merged), then streams with open tasks in plan order,
+  capped at `parallel.maxStreams`; the rest go out on a later call. It is
+  absent when the flight is serial here: no streams, `maxStreams` of `1`, or a
+  wave that runs serially. The top-level `prompt` is then the ordinary serial
+  one and is to be ignored when `streams` is present.
+
+  A wave whose partition is invalid (see
+  [architecture.md](./architecture.md#parallel-workstreams)) runs serially.
+  Once a build branch exists, `foundry_next` records that in
+  `state.serialWaves` with one `stream-partition` feedback entry
+  (`stage: "plan"`, a bad partition being a planning defect), committed as
+  `chore: wave <n> runs serially`; it is never a halt. Before a run has
+  started, nothing is written to the base branch. An exclusive `verify`
+  command makes every wave serial and is logged once per flight, as
+  `stream-exclusive`.
 
 The full decision order is in [architecture.md](./architecture.md#the-stage-machine).
 

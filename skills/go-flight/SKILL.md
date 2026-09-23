@@ -52,7 +52,8 @@ result later as a completion notification. Both are normal. Treat the loop
 as event-driven, not as a blocking call you sit inside:
 
 1. Call `foundry_next`. It returns
-   `{ stage, agent, agentFallback, fallbackAgent, restartRequired, model, agentModel, agentModelExact, round, reason, prompt }`.
+   `{ stage, agent, agentFallback, fallbackAgent, restartRequired, model, agentModel, agentModelExact, round, reason, prompt, streams? }`.
+   `streams` appears only for an implement stage that is a parallel wave; see step 4.
 2. If `stage` is `done` or `halt`: print the `reason` and stop.
 3. If `restartRequired` is true: call `foundry_feedback_log` with `stage:
    "controller"`, `category: "restart"`, and "a stage mid-flight routed to a
@@ -76,14 +77,29 @@ as event-driven, not as a blocking call you sit inside:
    line before spawning: `note: <role> routed to <model>; the Agent tool
    only takes aliases, so this stage runs on <agentModel> (latest of that
    family) until the session loads the generated agent.`
+   **When `streams` is present and non-empty**, the stage is a parallel wave:
+   ignore the top-level `prompt` and spawn one `Agent` per `streams` entry,
+   **all in a single message** so they run concurrently. Each entry carries
+   its own `agent`, `agentFallback`, `agentModel`, `agentModelExact` and
+   `prompt`; apply the rules above to each one separately (pass `model:
+   agentModel` only when that entry's `agentFallback` is true, and print the
+   inexact-model note for each entry that needs it). Pass each entry's
+   `prompt` verbatim.
 5. When the stage has finished — the `Agent` call returned, or a completion
-   notification for it arrived — do not interpret its report. Go to step 1;
-   the MCP decides the next stage from what is on disk, not from the report.
+   notification for it arrived — do not interpret its report. For a parallel
+   wave, that means **every** spawned stream has finished: wait until all of
+   them have returned or notified before going on. Go to step 1; the MCP
+   decides the next stage from what is on disk, not from the report. A
+   stream that stopped early is simply handed out again by the next
+   `foundry_next`.
 
 While a stage is running: do not poll `foundry_status`, do not sleep, do not
 spawn a second stage, and do not re-spawn a stage just because its
-notification is slow to arrive. Exactly one stage runs at a time, start to
-finish.
+notification is slow to arrive. Exactly one `foundry_next` result is in
+flight at a time, start to finish: a normal stage is one `Agent`, and a
+parallel wave is all of its `streams` at once, which count as that one result.
+Never call `foundry_next` again while any stream of the previous result is
+still running.
 
 If the `Agent` call in step 4 fails with an "agent type ... not found" error
 for a `foundry-<role>` name, retry once with `subagent_type: fallbackAgent`

@@ -516,4 +516,133 @@ const UI = [["P1-03", "src/ui/a.txt", "u\n"], ["P1-04", "src/ui/b.txt", "v\n"]];
   });
 }
 
+
+// ---------------------------------------------------------------- V4-04: foundry_next hands out waves
+
+const feedbackOf = (repo) => (hasFile(repo, ".foundry/feedback.jsonl") ? readFile(repo, ".foundry/feedback.jsonl").trim().split("\n").map((l) => JSON.parse(l)) : []);
+
+{
+  const repo = waveRepo();
+  await withServer(repo, async ({ call }) => {
+    const n = await call("foundry_next");
+    eq(n.stage, "implement", "a current wave is an implement stage");
+    eq(n.streams.length, 2, "a valid two-stream wave returns both streams");
+    eq(n.streams.map((x) => x.stream).join(","), "api,ui", "in plan order");
+    ok(n.streams[0].prompt !== n.streams[1].prompt, "with distinct prompts");
+    like(n.streams[0].prompt, /stream `api` of wave 1.*foundry_run_start with stream: "api".*cwd.*foundry_stream_finish with stream: "api".*do not call foundry_run_finish/, "each prompt names its stream and the whole loop");
+    like(n.streams[1].prompt, /stream `ui`/, "the second names its own");
+    like(n.streams[0].prompt, /Run policies: signing=/, "and ends with the run policies");
+    eq(n.streams[0].agent, n.agent, "each entry carries the stage's agent");
+    ok("agentModel" in n.streams[0] && "agentFallback" in n.streams[0] && "agentModelExact" in n.streams[0], "and the fallback fields");
+    like(n.reason, /wave 1: 2 stream\(s\) to run in parallel \(api, ui\)/, "the reason says so");
+    eq(git(repo, ["rev-parse", "--abbrev-ref", "HEAD"]), "main", "next() on the base branch changed nothing");
+  });
+}
+
+// maxStreams 1 disables parallelism silently.
+{
+  const repo = waveRepo({ config: { parallel: { maxStreams: 1 } } });
+  await withServer(repo, async ({ call }) => {
+    await call("foundry_run_start");
+    const n = await call("foundry_next");
+    eq(n.stage, "implement", "still an implement stage");
+    ok(!("streams" in n), "maxStreams 1 returns no streams");
+    eq(feedbackOf(repo).length, 0, "and logs nothing: it is the operator's choice");
+  });
+}
+
+// Three streams, maxStreams 2: the first two go out, the third after they finish.
+{
+  const tasks = [
+    T("P0-01", ["package.json"]),
+    T("P1-01", ["src/a.txt"], { stream: "a" }), T("P1-02", ["src/b.txt"], { stream: "b" }), T("P1-03", ["src/c.txt"], { stream: "c" }),
+  ];
+  const repo = plannedRepo({ tasks, config: { parallel: { maxStreams: 2 } } });
+  markTasks(repo, { "P0-01": "x" });
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-qm", "serial done"]);
+  await withServer(repo, async ({ call }) => {
+    const n = await call("foundry_next");
+    eq(n.streams.map((x) => x.stream).join(","), "a,b", "the first maxStreams streams go out");
+    await workStream(call, "a", [["P1-01", "src/a.txt", "a\n"]]);
+    await workStream(call, "b", [["P1-02", "src/b.txt", "b\n"]]);
+    const mid = await call("foundry_next");
+    eq(mid.streams.map((x) => x.stream).join(","), "a,b", "finished-but-unmerged streams are offered first, so they get merged");
+    await call("foundry_stream_finish", { stream: "a" });
+    await call("foundry_stream_finish", { stream: "b" });
+    const after = await call("foundry_next");
+    eq(after.streams.map((x) => x.stream).join(","), "c", "the third goes out on the next foundry_next");
+    await workStream(call, "c", [["P1-03", "src/c.txt", "c\n"]]);
+    const last = await call("foundry_next");
+    eq(last.streams.map((x) => x.stream).join(","), "c", "and is offered until it is merged, though the plan has no open tasks left");
+    await call("foundry_stream_finish", { stream: "c" });
+    const done = await call("foundry_next");
+    ok(!("streams" in done), "once every stream is merged, no streams are offered");
+    like(done.reason, /lock present but no open tasks|no handoff/, "the flight falls through to the ordinary handoff");
+  });
+}
+
+// An unfinished stream is handed out again (a stopped implementer is not a stuck flight).
+{
+  const repo = waveRepo();
+  await withServer(repo, async ({ call }) => {
+    await call("foundry_run_start", { stream: "api" });
+    await call("foundry_task_next", { stream: "api" });
+    const n = await call("foundry_next");
+    eq(n.streams.map((x) => x.stream).join(","), "api,ui", "an in-flight stream comes first and is re-handed out");
+    const again = await call("foundry_run_start", { stream: "api" });
+    eq(again.created, false, "run_start resumes its worktree");
+    const t = await call("foundry_task_next", { stream: "api" });
+    eq(t.resumed, true, "and task_next resumes the in-progress task");
+  });
+}
+
+// An invalid partition degrades the wave to serial: once recorded, once logged, never halting.
+{
+  const tasks = [T("P0-01", ["shared.txt"], { stream: "a" }), T("P0-02", ["shared.txt"], { stream: "b" })];
+  const repo = plannedRepo({ tasks });
+  await withServer(repo, async ({ call }) => {
+    const before = await call("foundry_next");
+    ok(!("streams" in before), "an invalid wave offers no streams");
+    eq(feedbackOf(repo).length, 0, "before a run starts on a build branch, nothing is recorded on the base branch");
+    eq(git(repo, ["log", "--format=%s", "-1"]), "plan: derive build plan from SPEC", "no commit landed on the base branch");
+
+    await call("foundry_run_start");
+    for (let i = 0; i < 3; i++) {
+      const n = await call("foundry_next");
+      eq(n.stage, "implement", `call ${i + 1}: the flight is not halted`);
+      ok(!("streams" in n), `call ${i + 1}: still serial`);
+    }
+    const fb = feedbackOf(repo);
+    eq(fb.length, 1, "exactly one feedback entry across three foundry_next calls");
+    eq(fb[0].category, "stream-partition", "of category stream-partition");
+    eq(fb[0].stage, "plan", "against the plan stage, since a bad partition is a planning defect");
+    like(fb[0].message, /Wave 1 runs serially: .*both touch `shared\.txt`/, "naming the conflict");
+    eq(git(repo, ["log", "--format=%s"]).split("\n").filter((l) => l === "chore: wave 1 runs serially").length, 1, "and exactly one 'wave 1 runs serially' commit");
+    eq(stateOf(repo).serialWaves.length, 1, "state records the wave once");
+    const t = await call("foundry_task_next");
+    eq(t.id, "P0-01", "the wave's tasks are served serially");
+  });
+}
+
+// An exclusive verify command makes every wave serial, logged once per flight.
+{
+  const tasks = [
+    T("P0-01", ["a"], { stream: "a" }), T("P0-02", ["b"], { stream: "b" }),
+    T("P0-03", ["c"]),
+    T("P0-04", ["d"], { stream: "a" }), T("P0-05", ["e"], { stream: "b" }),
+  ];
+  const repo = plannedRepo({ tasks, config: { verify: [{ cmd: "true", exclusive: true }] } });
+  await withServer(repo, async ({ call }) => {
+    await call("foundry_run_start");
+    await call("foundry_next");
+    eq(feedbackOf(repo).length, 1, "one stream-exclusive entry for the first wave");
+    eq(feedbackOf(repo)[0].category, "stream-exclusive", "of category stream-exclusive");
+    markTasks(repo, { "P0-01": "x", "P0-02": "x", "P0-03": "x" });
+    await call("foundry_next");
+    eq(stateOf(repo).serialWaves.map((w) => w.wave).join(","), "1,2", "the second wave is recorded serial too");
+    eq(feedbackOf(repo).length, 1, "but the flight-wide cause is logged only once");
+  });
+}
+
 finish();

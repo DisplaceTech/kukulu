@@ -256,6 +256,14 @@ did before.
   An invalid wave runs serially, as if it had no stream tags, and a bad
   partition is recorded as feedback rather than halting an unattended
   flight.
+- **Concurrency at the controller.** For a valid wave, `foundry_next`
+  returns the implement stage with a `streams` list, and `go-flight` spawns
+  one implementer per entry in a single message and waits for all of them,
+  so "one stage at a time" becomes "one `foundry_next` result at a time".
+  A stream that stops early is simply handed out again on the next
+  `foundry_next`; `foundry_run_start({ stream })` resumes its worktree, so
+  the controller never reasons about it. Streams are capped at
+  `parallel.maxStreams` (default 3; `1` turns parallelism off).
 - **`exclusive` commands.** A command entry marked `exclusive: true`
   starts something keyed to the directory or a port it runs from — wp-env
   is the motivating case — so two of them collide, and serializing their

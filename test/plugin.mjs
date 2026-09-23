@@ -209,6 +209,18 @@ ok(String(frontmatter(read("agents/reviewer.md")).tools).includes("mcp__plugin_f
   like(reviewSkill, /foundry_mutate/, "review-build tells the reviewer to mutation-test with foundry_mutate");
   ok(!reviewSkill.includes("git checkout -- <file>"), "review-build no longer tells the reviewer to hand-edit source and git checkout it");
 }
+// V4-04: parallel waves.
+like(goFlight, /streams/, "go-flight describes the streams a parallel wave returns");
+like(goFlight, /in a single message/, "go-flight spawns a wave's streams in a single message so they run concurrently");
+like(goFlight, /every\*\* spawned stream has finished|all of\s+them have returned/, "go-flight waits for every stream before calling foundry_next again");
+like(goFlight, /Exactly one `foundry_next` result is in\s+flight at a time/, "go-flight's one-at-a-time rule is restated per foundry_next result");
+{
+  const implSkill = read("skills/implement/SKILL.md");
+  like(implSkill, /## Stream mode/, "the implement skill has a Stream mode section");
+  like(implSkill, /foundry_stream_finish/, "...naming foundry_stream_finish");
+  like(implSkill, /never `cd` out of `cwd`|`cd <cwd> &&`/, "...and telling the implementer to work only inside its cwd");
+  like(implSkill, /docs\/PROGRESS\.md`,\s+`docs\/PLAN\.md`,\s+`docs\/HANDOFF\.md`/, "...and to leave the shared files to the MCP");
+}
 like(goFlight, /agentModel/, "go-flight passes agentModel (an Agent-legal alias) on a fallback spawn");
 ok(!/`model: model`|and `model: model`/.test(goFlight), "go-flight no longer passes the raw routed model to the Agent tool (F-02)");
 

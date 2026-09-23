@@ -110,6 +110,40 @@ workaround — call `foundry_feedback_log` with `stage: "implement"` right
 then. Do not save it up for `docs/HANDOFF.md`: this entry has to survive a
 run that never reaches `foundry_run_finish`.
 
+## Stream mode
+
+Your prompt may instead name one **stream** of a parallel wave ("Run the
+Foundry implement stage for stream `<s>` of wave `<n>`"). Other implementers
+are working on the other streams at the same time, in their own worktrees;
+everything above still applies, with these changes:
+
+- **Setup.** Call `foundry_run_start` with `stream: "<s>"`. It returns a
+  `cwd`: the absolute path of your own git worktree, already set up. Work
+  only there.
+- **Absolute paths under `cwd`.** Every Read, Write and Edit uses an
+  absolute path under `cwd`. Every Bash command starts with `cd <cwd> &&`,
+  because your shell does not stay in it. Never read or edit files in the
+  main checkout, and never `cd` out of `cwd` to run git.
+- **Pass `stream` on every call.** `foundry_task_next`, `foundry_task_done`,
+  `foundry_task_block` and `foundry_verify` each take `stream: "<s>"`. Without
+  it they refuse, or would act on the main checkout.
+- **The MCP owns the shared files.** Never touch `docs/PROGRESS.md`,
+  `docs/PLAN.md`, `docs/HANDOFF.md` or anything under `.foundry/`. Your
+  worktree's copies of them are stale by design. Stage only the task's own
+  files.
+- **No handoff.** You do not write `docs/HANDOFF.md`, and you do not call
+  `foundry_run_finish`: another implementer does, after every stream is
+  merged. Put your Interpretation choices in your `foundry_task_done` log
+  entries, since that is the only place the handoff writer will find them.
+- **Finishing.** When `foundry_task_next` returns `{ done: true }` for your
+  stream, call `foundry_stream_finish` with `stream: "<s>"`. It merges your
+  branch into the build branch and removes your worktree. If it reports a
+  merge conflict, the flight is halted for a human: print what it returned
+  and stop. Then print one line starting `STREAM DONE` with the stream name
+  and the counts of done and blocked tasks.
+- Blocking works the same way, in your worktree only: `foundry_task_block`
+  with your `stream`.
+
 ## Constraints you may not relax
 
 Everything under `## Constraints` in `CLAUDE.md`, on every task. SPEC.md wins

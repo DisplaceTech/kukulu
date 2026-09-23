@@ -1266,11 +1266,65 @@ function next() {
     };
   };
 
+  /**
+   * The parallel-wave half of the implement stage. `{}` when the flight is
+   * serial here; otherwise `{ streams, reason }`, one entry per stream to
+   * spawn concurrently. Streams already in flight (a worktree exists) come
+   * first and are always offered — an unfinished one is re-handed out, and a
+   * finished-but-unmerged one is offered so it can be merged — and the rest
+   * follow in plan order, up to `parallel.maxStreams`.
+   *
+   * A wave whose partition is invalid runs serially. That decision is
+   * recorded once (state.serialWaves plus one feedback entry, one commit) but
+   * only on a build branch: a flight owns its build branch's history, and
+   * this must never commit to the base branch before a run has started.
+   */
+  const streamOffer = () => {
+    if (!s.progressPresent) return {};
+    const pr = parseProgress();
+    if (!pr.tasks.some((t) => t.stream)) return {};
+    let cur = st;
+    const waves = computeWaves(pr, c);
+    const wave = currentWave(pr, waves);
+    if (!wave) return {};
+    const onBuildBranch = Boolean(s.git.branch && s.git.branch.startsWith(c.branchPrefix) && !s.git.branch.includes("--"));
+    if (!wave.valid && c.parallel.maxStreams > 1 && onBuildBranch && !serialWavesOf(cur).some((x) => x.wave === wave.index)) {
+      // An exclusive verify command makes every wave serial: say so once per
+      // flight, not once per wave.
+      const already = serialWavesOf(cur).some((x) => x.category === wave.category);
+      cur = loadState();
+      cur.serialWaves = [...serialWavesOf(cur), { wave: wave.index, category: wave.category, reason: wave.reason }];
+      saveState(cur);
+      const logIt = c.policies.feedback && !(wave.category === "stream-exclusive" && already);
+      if (logIt) appendFeedback("plan", `Wave ${wave.index} runs serially: ${wave.reason}`, wave.category, "auto");
+      gitCommitIfChanged([P.state, P.feedback], `chore: wave ${wave.index} runs serially`);
+    }
+    const info = agentInfo("implement");
+    const avail = availableStreams(wave, pr, c, cur);
+    const inFlight = new Set(streamWorktrees());
+    const ordered = [...avail.filter((n) => inFlight.has(n)), ...avail.filter((n) => !inFlight.has(n))].slice(0, c.parallel.maxStreams);
+    if (!ordered.length) return {};
+    return {
+      reason: `wave ${wave.index}: ${ordered.length} stream(s) to run in parallel (${ordered.join(", ")})`,
+      streams: ordered.map((name) => ({
+        stream: name,
+        agent: info.agent,
+        agentFallback: info.agentFallback,
+        fallbackAgent: info.fallbackAgent,
+        agentModel: info.agentModel,
+        agentModelExact: info.agentModelExact,
+        prompt: PROMPTS.implementStream(name, wave.index, policySentence),
+      })),
+    };
+  };
+
   if (!s.specPresent) return stage("halt", "docs/SPEC.md is missing; nothing to build from");
   if (st.halted) return stage("halt", st.halted);
   if (!s.planPresent || !s.progressPresent || !s.configPresent) {
     return stage("plan", "no plan on disk (docs/PLAN.md, docs/PROGRESS.md and docs/foundry.json are all required)");
   }
+  const offer = streamOffer();
+  if (offer.streams) return stage("implement", offer.reason, { streams: offer.streams });
   const open = s.counts.open;
   // The round cap decision is made once, by foundry_review_submit, and
   // recorded as state.halted (checked above) — next() never re-derives it,
@@ -1292,6 +1346,9 @@ const PROMPTS = {
     "Run the Foundry plan stage for this repository. Read docs/SPEC.md and everything else in docs/ in full, then produce docs/PLAN.md, docs/PROGRESS.md, docs/foundry.json and CLAUDE.md exactly as your plan-build instructions specify, commit them, and report. Do not write implementation code.",
   implement: (round, s, policies) =>
     `Run the Foundry implement stage. ${round === 0 ? "This is the initial build." : `This is review-fix round ${round}; the open tasks are R${round}-* fix tasks queued by the reviewer.`} Call foundry_run_start, then loop on foundry_task_next until it reports done, then write docs/HANDOFF.md and call foundry_run_finish. You are unattended; never ask a question and never stop with open tasks. ${s.counts ? `${s.counts.open} task(s) are open.` : ""} ${policies}`,
+  // Not a stage of its own: one entry of `streams` in an implement result.
+  implementStream: (stream, wave, policies) =>
+    `Run the Foundry implement stage for stream \`${stream}\` of wave ${wave}. Call foundry_run_start with stream: "${stream}", and work only inside the cwd it returns: every file you read, edit or commit is under it. Pass stream: "${stream}" to every foundry_task_next, foundry_task_done, foundry_task_block and foundry_verify call. Loop on foundry_task_next until it reports done, then call foundry_stream_finish with stream: "${stream}". Do not write docs/HANDOFF.md and do not call foundry_run_finish: another stage does. You are unattended; never ask a question and never stop with open tasks in your stream. ${policies}`,
   review: (round, s, policies, reviewRound) =>
     `Run the Foundry review stage. This review is round ${reviewRound}; write \`Round: ${reviewRound}\` on the second line of docs/REVIEW.md, and use \`R${reviewRound}-<nn>\` when a fix task's dependsOn must reference another fix task in the same submission. Review the whole build branch against docs/SPEC.md and docs/PLAN.md as your review-build instructions specify, write docs/REVIEW.md, and call foundry_review_submit exactly once with your verdict. Do not fix code yourself. ${policies}`,
   summarize: (round, s, policies) =>
@@ -2086,7 +2143,7 @@ const S = (props, required = []) => ({
 });
 const TOOLS = [
   { name: "foundry_status", description: "Everything the pipeline knows from disk: which docs exist, task counts by state, branch/base/head, lock, round, review verdict. Read-only.", inputSchema: S({}), fn: status },
-  { name: "foundry_next", description: "Deterministic stage selection: returns { stage, agent, agentFallback, fallbackAgent, restartRequired, model, agentModel, agentModelExact, round, reason, prompt }. stage is plan | implement | review | summarize | done | halt. agentModel is the value to pass as the Agent tool's model when agentFallback is true (an alias, or null to pass none); agentModelExact is false when a full claude-* id was mapped to its family alias. restartRequired is true only when the routed model cannot be reached without relaunching the session. Read-only.", inputSchema: S({}), fn: next },
+  { name: "foundry_next", description: "Deterministic stage selection: returns { stage, agent, agentFallback, fallbackAgent, restartRequired, model, agentModel, agentModelExact, round, reason, prompt, streams? }. stage is plan | implement | review | summarize | done | halt. agentModel is the value to pass as the Agent tool's model when agentFallback is true (an alias, or null to pass none); agentModelExact is false when a full claude-* id was mapped to its family alias. restartRequired is true only when the routed model cannot be reached without relaunching the session. Read-only, except that when a parallel wave's partition is invalid it records once (state, one feedback entry, one commit, only on a build branch) that the wave runs serially. When streams is present, spawn one implementer per entry, all at once, and wait for all of them.", inputSchema: S({}), fn: next },
   { name: "foundry_run_start", description: "Begin (or resume) an implementation run: create/reuse the build branch, arm the implement guard lock, stamp Branch/Started in PROGRESS.md, commit. Idempotent. With stream, also create (or resume) that stream's git worktree for a parallel wave, run parallel.setup in it, and return its cwd: do all of that stream's work inside cwd.", inputSchema: S({ stream: { type: "string", description: "a stream of the current parallel wave, when foundry_next handed you one" } }), fn: runStart },
   { name: "foundry_task_next", description: "Select the next task (first [~], else first [ ]), auto-skip tasks whose dependencies are blocked, mark it [~], and return its PLAN.md text plus dependency log entries. Returns { done: true } when none remain.", inputSchema: S({ stream: { type: "string", description: "restrict to this stream's tasks (parallel waves only)" } }), fn: taskNext },
   { name: "foundry_task_done", description: "Mark a task [x] and append its log entry stamped with HEAD's sha. Requires HEAD's commit subject to start with '<id>:' and a clean tree. Commits PROGRESS.md.", inputSchema: S({ stream: { type: "string", description: "the stream this task belongs to, when working in a parallel wave" }, id: { type: "string" }, log: { type: "string", description: "Log entry body, under 15 lines" } }, ["id", "log"]), fn: taskDone },
