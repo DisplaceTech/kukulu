@@ -406,4 +406,166 @@ async function driveRounds(call, repo, counts) {
   });
 }
 
+// ---------------------------------------------------------------- foundry_mutate (F-04)
+//
+// The reviewer's mutation check: one exact find/replace, the file's own
+// verify commands, an unconditional restore, and no commit.
+
+const ADD_SRC = "export const add = (a, b) => a + b;\nexport const unused = () => 1;\n";
+const ADD_TEST = 'import { add } from "../src/add.mjs";\nif (add(2, 3) !== 5) { console.error("add is broken"); process.exit(1); }\n';
+
+/** A committed project whose verify command really tests src/add.mjs. */
+function mutationRepo({ config = {} } = {}) {
+  const repo = plannedRepo({ config: { verify: ["node test/add.test.mjs"], ...config } });
+  writeFile(repo, "src/add.mjs", ADD_SRC);
+  writeFile(repo, "src/special/thing.mjs", "export const thing = 1;\n");
+  writeFile(repo, "test/add.test.mjs", ADD_TEST);
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-qm", "add the fixture sources"]);
+  return repo;
+}
+
+const untouched = (repo, head) => {
+  eq(git(repo, ["status", "--porcelain"]), "", "the tree is clean afterwards");
+  eq(git(repo, ["rev-parse", "HEAD"]), head, "no commit was made");
+  ok(!hasFile(repo, ".foundry/mutation.json"), "no sentinel is left behind");
+};
+
+{
+  const repo = mutationRepo();
+  const head = git(repo, ["rev-parse", "HEAD"]);
+  await withServer(repo, async ({ call }) => {
+    const r = await call("foundry_mutate", { file: "src/add.mjs", find: "a + b", replace: "a - b" });
+    eq(r.killed, true, "mutating the tested line is killed");
+    like(r.verdict, /^killed/, "the verdict says so");
+    eq(r.file, "src/add.mjs", "the repo-relative file is echoed");
+    eq(r.results.length, 1, "the one verify command ran");
+    eq(r.results[0].ok, false, "...and failed against the mutation");
+    eq(r.recoveredMutation, null, "nothing needed recovering");
+    eq(readFile(repo, "src/add.mjs"), ADD_SRC, "the file is byte-identical to what was committed");
+    untouched(repo, head);
+
+    const s = await call("foundry_mutate", { file: "src/add.mjs", find: "() => 1", replace: "() => 2" });
+    eq(s.killed, false, "mutating a line no test covers survives");
+    like(s.verdict, /^survived/, "the verdict says the mechanic is untested");
+    eq(readFile(repo, "src/add.mjs"), ADD_SRC, "the file is restored after a surviving mutation too");
+    untouched(repo, head);
+
+    const v = await call("foundry_verify");
+    eq(v.ok, true, "and the real tree still verifies clean afterwards");
+  });
+}
+
+// A timed-out command still restores the file.
+{
+  const repo = mutationRepo({ config: { verify: [{ cmd: "exec sleep 5", timeoutMs: 300 }] } });
+  const head = git(repo, ["rev-parse", "HEAD"]);
+  await withServer(repo, async ({ call }) => {
+    const r = await call("foundry_mutate", { file: "src/add.mjs", find: "a + b", replace: "a * b" });
+    eq(r.results[0].timedOut, true, "the command timed out");
+    eq(r.killed, true, "a timeout counts as the mutation being noticed");
+    eq(readFile(repo, "src/add.mjs"), ADD_SRC, "the file is restored after a timeout");
+    untouched(repo, head);
+  });
+}
+
+// Every refusal leaves the file exactly as it was.
+{
+  const repo = mutationRepo();
+  writeFile(repo, "untracked.mjs", "export const x = 1;\n");
+  writeFile(repo, "src/twice.mjs", "const a = 1;\nconst b = 1;\n");
+  git(repo, ["add", "src/twice.mjs"]);
+  git(repo, ["commit", "-qm", "twice"]);
+  const head = git(repo, ["rev-parse", "HEAD"]);
+  await withServer(repo, async ({ call }) => {
+    isError(await call("foundry_mutate", { file: "src/add.mjs", find: "no such text", replace: "x" }), /does not appear in src\/add\.mjs/, "find matching zero times is refused");
+    isError(await call("foundry_mutate", { file: "src/twice.mjs", find: " = 1;", replace: " = 2;" }), /appears 2 times[\s\S]*more surrounding context/, "find matching twice is refused, asking for more context");
+    isError(await call("foundry_mutate", { file: "untracked.mjs", find: "1", replace: "2" }), /not tracked/, "an untracked file is refused");
+    isError(await call("foundry_mutate", { file: "../outside.txt", find: "a", replace: "b" }), /outside the project/, "a path outside the repo is refused");
+    isError(await call("foundry_mutate", { file: "/etc/hosts", find: "a", replace: "b" }), /outside the project/, "an absolute path outside the repo is refused");
+    isError(await call("foundry_mutate", { file: "src/add.mjs", find: "a + b", replace: "a - b", commands: ["rm -rf /"] }), /unknown: "rm -rf \/"[\s\S]*Legal: "node test\/add\.test\.mjs"/, "a command that is not configured is refused, listing the legal ones");
+    isError(await call("foundry_mutate", { file: "src/add.mjs", find: "", replace: "x" }), /find is required/, "an empty find is refused");
+    isError(await call("foundry_mutate", { file: "src/add.mjs", find: "a + b", replace: "a + b" }), /identical/, "a no-op mutation is refused");
+    isError(await call("foundry_mutate", { file: "src/add.mjs", find: "a + b" }), /replace is required/, "a missing replace is refused");
+    eq(readFile(repo, "src/add.mjs"), ADD_SRC, "no refusal touched the file");
+    eq(git(repo, ["rev-parse", "HEAD"]), head, "no refusal committed anything");
+    ok(!hasFile(repo, ".foundry/mutation.json"), "no refusal left a sentinel");
+  });
+}
+
+// A file with a pre-existing uncommitted edit survives exactly as it was.
+{
+  const repo = mutationRepo();
+  const edited = ADD_SRC + "// a reviewer's own note\n";
+  writeFile(repo, "src/add.mjs", edited);
+  await withServer(repo, async ({ call }) => {
+    isError(await call("foundry_mutate", { file: "src/add.mjs", find: "a + b", replace: "a - b" }), /has uncommitted changes/, "a file with uncommitted edits is refused");
+    eq(readFile(repo, "src/add.mjs"), edited, "...and the pre-existing edit is untouched");
+  });
+}
+
+// Mutation testing is a review-stage tool, not something to run mid-implement.
+{
+  const repo = mutationRepo();
+  writeFile(repo, ".foundry/implement.lock", "0\n");
+  await withServer(repo, async ({ call }) => {
+    isError(await call("foundry_mutate", { file: "src/add.mjs", find: "a + b", replace: "a - b" }), /implementation run is in progress/, "a present implement lock refuses");
+    eq(readFile(repo, "src/add.mjs"), ADD_SRC, "...and leaves the file alone");
+  });
+}
+
+// extraVerify selection mirrors foundry_verify: the suites a file's own change would trigger.
+{
+  const repo = mutationRepo({ config: { verify: ["true"], extraVerify: { "src/special/": ["false"] } } });
+  await withServer(repo, async ({ call }) => {
+    const special = await call("foundry_mutate", { file: "src/special/thing.mjs", find: "= 1", replace: "= 2" });
+    eq(special.results.map((r) => r.command).join("|"), "true|false", "a file under an extraVerify prefix runs verify plus that prefix's commands");
+    eq(special.killed, true, "...and the failing extra command kills the mutation");
+    const plain = await call("foundry_mutate", { file: "src/add.mjs", find: "a + b", replace: "a - b" });
+    eq(plain.results.map((r) => r.command).join("|"), "true", "a file elsewhere runs only verify");
+    eq(plain.killed, false, "...so this mutation survives");
+
+    const only = await call("foundry_mutate", { file: "src/special/thing.mjs", find: "= 1", replace: "= 2", commands: ["false"] });
+    eq(only.results.map((r) => r.command).join("|"), "false", "an explicit commands list runs only those");
+  });
+}
+
+// Crash recovery: a sentinel left by a mutate that never restored is repaired by the next call.
+{
+  const repo = mutationRepo();
+  const head = git(repo, ["rev-parse", "HEAD"]);
+  writeFile(repo, "src/add.mjs", ADD_SRC.replace("a + b", "a - b"));
+  writeFile(repo, ".foundry/mutation.json", JSON.stringify({ file: "src/add.mjs", at: new Date().toISOString(), original: "0".repeat(40) }) + "\n");
+  await withServer(repo, async ({ call }) => {
+    const v = await call("foundry_verify");
+    eq(v.recoveredMutation, "src/add.mjs", "verify names the file it restored");
+    eq(v.ok, true, "and verifies the restored tree, not the mutated one");
+    eq(readFile(repo, "src/add.mjs"), ADD_SRC, "the file is back to HEAD");
+    ok(!hasFile(repo, ".foundry/mutation.json"), "the sentinel is gone");
+    eq(git(repo, ["rev-parse", "HEAD"]), head, "recovery commits nothing");
+  });
+}
+
+{
+  const repo = reviewableRepo();
+  writeFile(repo, "hello.txt", "hello\n");
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-qm", "hello"]);
+  writeFile(repo, "hello.txt", "goodbye\n");
+  writeFile(repo, ".foundry/mutation.json", JSON.stringify({ file: "hello.txt", at: new Date().toISOString(), original: "0".repeat(40) }) + "\n");
+  await withServer(repo, async ({ call }) => {
+    const r = await call("foundry_review_submit", { verdict: "CHANGES REQUESTED", tasks: [FIX] });
+    eq(r.recoveredMutation, "hello.txt", "review_submit also recovers a crashed mutation and says so");
+    eq(readFile(repo, "hello.txt"), "hello\n", "the file under review is restored");
+  });
+}
+
+{
+  const repo = mutationRepo();
+  writeFile(repo, ".foundry/mutation.json", "{not json");
+  await withServer(repo, async ({ call }) => {
+    isError(await call("foundry_verify"), /unreadable[\s\S]*git checkout HEAD -- <file>/, "an unreadable sentinel is loud, and says how to recover by hand");
+  });
+}
+
 finish();

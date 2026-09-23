@@ -137,6 +137,14 @@ append-only and still MCP-owned in the sense that matters: nothing but
 commit in the same call, so the file is never left dirty for something
 else to notice later.
 
+The reviewer is the one role that may cause a *transient* source edit, and
+only through the MCP: `foundry_mutate` applies one find/replace to one clean
+tracked file, runs that file's verify commands, and restores it from `HEAD`
+before returning — a sentinel in `.foundry/mutation.json` lets the next
+Foundry call repair the file if the server dies in between. The reviewer
+holds no other way to edit source, and never commits one; a surviving
+mutation is a finding, and the fix still goes through the fix-task loop.
+
 ## Why the models are split this way
 
 | Stage | Model | Effort | Why |
@@ -296,6 +304,7 @@ fix task is a task, and it goes through the same test-first loop as any other.
 | `.foundry/state.json` | yes | `round`, `implemented`, `reviewed`, `verdict`, `summarized`, `halted`, `preexistingUntracked`, `policies`, `signing`, `rounds` |
 | `.foundry/feedback.jsonl` | yes | one JSON line per pipeline-friction entry — `at`, `stage`, `round`, `category`, `message`, `source`; see [mcp-tools.md](./mcp-tools.md#foundry_feedback_log) |
 | `.foundry/implement.lock` | no (gitignored) | JSON `{ count, armedAt, round }` — the guard's re-block counter (a legacy bare number still reads back correctly) |
+| `.foundry/mutation.json` | no (`.git/info/exclude`) | present only while `foundry_mutate` has a file mutated: `{ file, at, original }`, so a crash can be repaired by the next call |
 | `docs/PROGRESS.md` | yes | task checkboxes and the per-task log |
 | `docs/foundry.json` | yes | `verify`, `extraVerify`, `build`, `baseBranch`, `branchPrefix`, `maxRounds`, `commandTimeoutMs`, `roles`, `permissionMode` |
 | `.claude/agents/foundry-*.md` | no (`.git/info/exclude`) | the generated per-role agents; see [routing.md](./routing.md) |

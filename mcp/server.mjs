@@ -29,6 +29,7 @@ const P = {
   state: path.join(ROOT, ".foundry", "state.json"),
   lock: path.join(ROOT, ".foundry", "implement.lock"),
   feedback: path.join(ROOT, ".foundry", "feedback.jsonl"),
+  mutation: path.join(ROOT, ".foundry", "mutation.json"),
   gitignore: path.join(ROOT, ".gitignore"),
   agentsDir: path.join(ROOT, ".claude", "agents"),
   settings: path.join(ROOT, ".claude", "settings.json"),
@@ -1255,7 +1256,22 @@ function checkConstraints(constraints) {
   return { ok: results.every((r) => r.ok), results };
 }
 
+/**
+ * The commands `foundry_verify` would run for `touched`: every `verify`
+ * command, plus each `extraVerify` prefix that any touched file starts
+ * with, skipping duplicates by command text. Shared with `foundry_mutate`,
+ * so a mutation runs exactly the suites the file's own change would.
+ */
+function verifyCommands(cc, touched) {
+  const cmds = [...cc.verify];
+  for (const [prefix, extra] of Object.entries(cc.extraVerify)) {
+    if (touched.some((f) => f.startsWith(prefix))) for (const x of extra) if (!cmds.some((c2) => c2.cmd === x.cmd)) cmds.push(x);
+  }
+  return cmds;
+}
+
 function verify({ files = [] } = {}) {
+  const recovered = recoverMutation();
   const c = loadConfig();
   if (!c) throw new ToolError("docs/foundry.json is missing; the plan stage must write it");
   const cc = cfg();
@@ -1263,13 +1279,141 @@ function verify({ files = [] } = {}) {
   // Constraints are whole-repo, always — `files` narrows which shell
   // commands' extras run, never what a constraint scans.
   const constraints = checkConstraints(cc.constraints);
-  const cmds = [...cc.verify];
   const touched = Array.isArray(files) ? files : String(files).split(/[\s,]+/).filter(Boolean);
-  for (const [prefix, extra] of Object.entries(cc.extraVerify)) {
-    if (touched.some((f) => f.startsWith(prefix))) for (const x of extra) if (!cmds.some((c2) => c2.cmd === x.cmd)) cmds.push(x);
+  const results = verifyCommands(cc, touched).map((c2) => runShell(c2.cmd, c2.timeoutMs));
+  return { ok: constraints.ok && results.every((r) => r.ok), constraints, results, ...(recovered ? { recoveredMutation: recovered } : {}) };
+}
+
+// ---------------------------------------------------------------- mutation testing
+//
+// The reviewer's "delete or invert the mechanic and confirm the test fails"
+// check used to be a hand edit of the working tree followed by `git checkout`.
+// Auto mode refuses that edit (a reviewer told not to fix code, editing
+// source), and a scratch copy cannot run suites bound to the repo root
+// (wp-env). So the MCP does it: one exact find/replace on one clean tracked
+// file, the file's own verify commands, and an unconditional restore.
+
+/** A repo-relative POSIX path for `file` if it is a regular, non-symlink file inside the project; throws otherwise. */
+function projectFile(file) {
+  const abs = path.resolve(ROOT, file);
+  const relPath = path.relative(ROOT, abs);
+  if (!relPath || relPath.startsWith("..") || path.isAbsolute(relPath)) throw new ToolError(`'${file}' is outside the project; pass a path inside ${ROOT}`);
+  if (!exists(abs)) throw new ToolError(`'${file}' does not exist`);
+  const lst = fs.lstatSync(abs);
+  if (lst.isSymbolicLink() || !lst.isFile()) throw new ToolError(`'${file}' is not a regular file; foundry_mutate only edits plain tracked files`);
+  return { abs, rel: relPath.split(path.sep).join("/") };
+}
+
+/** `policies.feedback`, without letting a malformed config keep a recovery from running. */
+function feedbackEnabled() {
+  try {
+    return cfg().policies.feedback;
+  } catch {
+    return true;
   }
-  const results = cmds.map((c2) => runShell(c2.cmd, c2.timeoutMs));
-  return { ok: constraints.ok && results.every((r) => r.ok), constraints, results };
+}
+
+/**
+ * If a previous foundry_mutate never reached its restore (the server was
+ * killed mid-run), put the file back from HEAD and clear the sentinel.
+ * Returns the restored repo-relative path, or `null` when there was nothing
+ * to recover. Loud on purpose: something crashed.
+ */
+function recoverMutation() {
+  if (!exists(P.mutation)) return null;
+  let m;
+  try {
+    m = JSON.parse(read(P.mutation));
+  } catch {
+    m = null;
+  }
+  if (!m || typeof m.file !== "string") {
+    throw new ToolError(`${rel(P.mutation)} exists but is unreadable, so Foundry cannot tell which file a crashed mutation left edited. Run \`git status\`, restore the file with \`git checkout HEAD -- <file>\`, then delete ${rel(P.mutation)}.`);
+  }
+  const { rel: relPath } = projectFile(m.file);
+  git(["checkout", "-q", "HEAD", "--", relPath]);
+  fs.rmSync(P.mutation, { force: true });
+  if (feedbackEnabled()) {
+    appendFeedback("review", `Restored ${relPath}, left mutated by a foundry_mutate call that never finished.`, "mutation-recovered", "auto");
+  }
+  return relPath;
+}
+
+function mutate({ file, find, replace, commands } = {}) {
+  if (typeof file !== "string" || !file) throw new ToolError("file is required: a repo-relative path to a tracked source file");
+  if (typeof find !== "string" || !find) throw new ToolError("find is required and must be a non-empty string: the exact text to replace");
+  if (typeof replace !== "string") throw new ToolError('replace is required and must be a string (use "" to delete the matched text)');
+  if (find === replace) throw new ToolError("find and replace are identical; that is not a mutation");
+  if (commands !== undefined && (!Array.isArray(commands) || !commands.length || !commands.every((x) => typeof x === "string"))) {
+    throw new ToolError("commands must be a non-empty array of command strings taken from docs/foundry.json's verify/extraVerify");
+  }
+  if (!gitFacts().inRepo) throw new ToolError("not a git repository");
+  if (!loadConfig()) throw new ToolError("docs/foundry.json is missing; the plan stage must write it");
+  const cc = cfg();
+  const recovered = recoverMutation();
+  if (exists(P.lock)) {
+    throw new ToolError("an implementation run is in progress (.foundry/implement.lock exists); foundry_mutate is a review-stage tool — run it after foundry_run_finish");
+  }
+  if (!cc.verify.length) throw new ToolError("docs/foundry.json has no 'verify' commands");
+
+  const { abs, rel: relPath } = projectFile(file);
+  if (!git(["ls-files", "--error-unmatch", "--", relPath], { allowFail: true }).ok) {
+    throw new ToolError(`'${relPath}' is not tracked by git; foundry_mutate only mutates committed files it can restore`);
+  }
+  if (!git(["diff", "--quiet", "HEAD", "--", relPath], { allowFail: true }).ok) {
+    throw new ToolError(`'${relPath}' has uncommitted changes; commit or discard them first so foundry_mutate can restore the file exactly`);
+  }
+  const original = read(abs);
+  if (original.includes("\0")) throw new ToolError(`'${relPath}' looks binary; foundry_mutate edits text files only`);
+  const first = original.indexOf(find);
+  const occurrences = first < 0 ? 0 : original.split(find).length - 1;
+  if (occurrences !== 1) {
+    throw new ToolError(
+      occurrences === 0
+        ? `find text does not appear in ${relPath}; copy it exactly, including whitespace`
+        : `find text appears ${occurrences} times in ${relPath}; include more surrounding context in find so it matches exactly once`,
+    );
+  }
+
+  let cmds;
+  if (commands) {
+    const legal = new Map([...cc.verify, ...Object.values(cc.extraVerify).flat()].map((x) => [x.cmd, x]));
+    const unknown = commands.filter((x) => !legal.has(x));
+    if (unknown.length) {
+      throw new ToolError(`commands must each equal a configured verify/extraVerify command; unknown: ${unknown.map((u) => JSON.stringify(u)).join(", ")}. Legal: ${[...legal.keys()].map((k) => JSON.stringify(k)).join(", ")}`);
+    }
+    cmds = commands.map((x) => legal.get(x));
+  } else {
+    cmds = verifyCommands(cc, [relPath]);
+  }
+
+  // The sentinel is per-clone state, not part of the reviewed branch: exclude
+  // it through .git/info/exclude rather than .gitignore, which would dirty
+  // the very tree under review.
+  ensureLineInFile(gitPath("info/exclude"), rel(P.mutation));
+  write(P.mutation, `${JSON.stringify({ file: relPath, at: new Date().toISOString(), original: git(["rev-parse", `HEAD:${relPath}`]).out })}\n`);
+  let results;
+  try {
+    fs.writeFileSync(abs, original.slice(0, first) + replace + original.slice(first + find.length));
+    results = cmds.map((c2) => runShell(c2.cmd, c2.timeoutMs));
+  } finally {
+    // Restore unconditionally. If git cannot, write the bytes back ourselves.
+    if (!git(["checkout", "-q", "HEAD", "--", relPath], { allowFail: true }).ok) fs.writeFileSync(abs, original);
+  }
+  if (!git(["diff", "--quiet", "HEAD", "--", relPath], { allowFail: true }).ok) {
+    if (cc.policies.feedback) appendFeedback("review", `foundry_mutate could not restore ${relPath} after mutating it.`, "mutation-restore", "auto");
+    throw new ToolError(`foundry_mutate could NOT restore ${relPath}: it still differs from HEAD. Run \`git checkout HEAD -- ${relPath}\` before doing anything else. The sentinel ${rel(P.mutation)} is left in place.`);
+  }
+  fs.rmSync(P.mutation, { force: true });
+
+  const killed = results.some((r) => !r.ok);
+  return {
+    file: relPath,
+    killed,
+    verdict: killed ? "killed: the tests caught the mutation" : "survived: no command failed — the mechanic is untested",
+    results,
+    recoveredMutation: recovered,
+  };
 }
 
 /**
@@ -1369,6 +1513,9 @@ function reviewMdRound() {
 }
 
 function reviewSubmit({ verdict, tasks = [], unblock = [] }) {
+  // A crashed foundry_mutate must not leave a mutated file under review.
+  const recovered = recoverMutation();
+  const recoveredField = recovered ? { recoveredMutation: recovered } : {};
   verdict = String(verdict || "").toUpperCase().trim();
   if (!["APPROVED", "CHANGES REQUESTED"].includes(verdict)) throw new ToolError("verdict must be APPROVED or CHANGES REQUESTED");
   if (!exists(P.review)) throw new ToolError("docs/REVIEW.md does not exist; write it before submitting");
@@ -1393,7 +1540,7 @@ function reviewSubmit({ verdict, tasks = [], unblock = [] }) {
     saveState(st);
     const sha = gitCommitIfChanged([P.review, P.state], `review: round ${N} approved`);
     const push = pushBranch(gitFacts().branch, st.policies.push);
-    return { verdict, round: st.round, commit: sha, push };
+    return { verdict, round: st.round, commit: sha, push, ...recoveredField };
   }
 
   if (!tasks.length && !unblock.length) throw new ToolError("CHANGES REQUESTED requires at least one fix task or unblock");
@@ -1454,7 +1601,7 @@ function reviewSubmit({ verdict, tasks = [], unblock = [] }) {
   // Re-read rather than reuse `pr`: appendTaskLines edits pr.lines but not
   // pr.tasks, so counts(pr.tasks) would describe the file as it was before
   // this call queued its own fix tasks (F-03 of the 2026-09-23 flight feedback).
-  return { verdict, round: N, fixTasks: ids, unblocked, commit: sha, halted: st.halted, counts: counts(parseProgress().tasks), push };
+  return { verdict, round: N, fixTasks: ids, unblocked, commit: sha, halted: st.halted, counts: counts(parseProgress().tasks), push, ...recoveredField };
 }
 
 function summaryCommit() {
@@ -1505,6 +1652,20 @@ const TOOLS = [
       ["stage", "message"],
     ),
     fn: feedbackLog,
+  },
+  {
+    name: "foundry_mutate",
+    description: "Mutation-test one file: apply one exact find/replace to a clean tracked file, run the verify commands that file triggers (verify plus matching extraVerify), always restore the file, and commit nothing. Returns { file, killed, verdict, results, recoveredMutation }; killed is true when at least one command failed. For reviewers checking that a test fails without the mechanic it covers — never edit source by hand instead.",
+    inputSchema: S(
+      {
+        file: { type: "string", description: "repo-relative path of a tracked, clean text file" },
+        find: { type: "string", description: "exact text to replace; must appear exactly once in the file" },
+        replace: { type: "string", description: "the mutated text (\"\" deletes the match)" },
+        commands: { type: "array", items: { type: "string" }, description: "optional: run only these configured verify/extraVerify commands, each spelled exactly as in docs/foundry.json" },
+      },
+      ["file", "find", "replace"],
+    ),
+    fn: mutate,
   },
   {
     name: "foundry_review_submit",
