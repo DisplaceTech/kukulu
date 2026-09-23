@@ -1,6 +1,6 @@
 # MCP tool reference
 
-Fourteen tools, served over stdio by `mcp/server.mjs` with no dependencies.
+Fifteen tools, served over stdio by `mcp/server.mjs` with no dependencies.
 The server is launched by Claude Code from [`.mcp.json`](../.mcp.json) with
 `FOUNDRY_PROJECT_DIR` set to the project root; every path below is relative to
 that root.
@@ -11,7 +11,7 @@ are read-only. The flight controller is allowed those plus
 allow rule and a `.git/info/exclude` line, never a task or a verdict; and
 `foundry_run_halt`, which it may call itself if it cannot even spawn a
 stage, so the next flight sees a clean halt instead of retrying blindly.
-Everything else changes project state and belongs to a stage agent.
+Everything else changes project state and belongs to a stage agent. (`foundry_mutate` changes a source file only for the length of one call and always restores it.)
 
 `foundry_next`, `foundry_status`, `foundry_config_show` and
 `foundry_agents_sync` all resolve the merged routing config (see
@@ -71,7 +71,7 @@ report.
 **Arguments:** none.
 
 **Returns:** `{ stage, agent, agentFallback, fallbackAgent, restartRequired,
-model, round, reviewRound, reason, prompt }`.
+model, agentModel, agentModelExact, round, reviewRound, reason, prompt }`.
 
 - `stage` — `plan` · `implement` · `review` · `summarize` · `done` · `halt`
 - `agent` — the subagent to spawn: the generated `foundry-<role>` name when
@@ -88,10 +88,20 @@ model, round, reviewRound, reason, prompt }`.
   for a stage that has a role, so a controller can retry with it if spawning
   `agent` fails with "not found"
 - `restartRequired` — true only when `agentFallback` is true **and** the
-  resolved model is not one the `Agent` tool can name directly (an
-  Anthropic alias or a `claude-*` id); `false` for `done` and `halt`
+  resolved model is one the `Agent` tool cannot name (a non-Anthropic model,
+  or a `claude-*` id of a family Foundry does not know); `false` for `done`
+  and `halt`
 - `model` — the resolved model string for that role from the routing config
-  (see [routing.md](./routing.md)); `null` for `done` and `halt`
+  (see [routing.md](./routing.md)); `null` for `done` and `halt`. Display
+  only: it may be a full `claude-*` id, which the `Agent` tool's `model`
+  parameter rejects
+- `agentModel` — what to pass as the `Agent` tool's `model` when
+  `agentFallback` is true: a family alias (`opus`, `sonnet`, `haiku`,
+  `fable`), or `null` to pass none (`inherit`, and `done`/`halt`). A full
+  `claude-<family>-…` id maps to its family alias
+- `agentModelExact` — false when `agentModel` was mapped down from a full
+  id: an alias means the latest of that family, which may not be the version
+  pinned in routing. Always true otherwise
 - `reviewRound` — always `round + 1`; the review stage's prompt states it
   explicitly and `foundry_review_submit` refuses a `Round:` line that
   disagrees with it (F-10, F-11) — see
@@ -256,7 +266,9 @@ command runs in a shell from the project root with its own timeout:
 command alone.
 
 **Returns:** `{ ok, constraints: { ok, results: [{ id, ok, fixture, hits }] },
-results: [{ command, ok, exitCode, timedOut, timeoutMs, stdoutTail, stderrTail }] }`.
+results: [{ command, ok, exitCode, timedOut, timeoutMs, stdoutTail, stderrTail }] }`,
+plus `recoveredMutation` (a path) when it first had to restore a file a
+crashed [`foundry_mutate`](#foundry_mutate) left edited.
 The tails are the last 60 lines of each stream; `timeoutMs` is whichever
 timeout that command actually ran with. For a constraint result: `fixture`
 is `null` when the rule's own self-test passed, else a message naming the
@@ -271,6 +283,63 @@ every constraint and every command passed.
 or any `constraints` entry is malformed — missing `id`, `paths`, `pattern`,
 `shouldMatch` or `shouldNotMatch`, an unparseable `pattern`, or a duplicate
 `id`.
+
+---
+
+## `foundry_mutate`
+
+Mutation-test one file: prove that a test fails without the mechanic it
+covers. Used by the reviewer in place of hand-editing source and restoring it
+with `git checkout` — an in-tree edit the auto-mode classifier refuses for a
+reviewer told not to fix code, and one a scratch copy cannot replace for
+suites bound to the repo root (wp-env).
+
+**Arguments:** `{ file, find, replace, commands? }`.
+
+- `file` — a repo-relative path to a tracked text file with no uncommitted
+  changes
+- `find` — the exact text to replace; it must appear in the file exactly
+  once (the refusal says how many times it did and asks for more context)
+- `replace` — the mutated text; `""` deletes the match
+- `commands` — optional: run only these commands, each spelled exactly as
+  in `docs/foundry.json`'s `verify` or `extraVerify`
+
+**Does:** writes `.foundry/mutation.json` (a sentinel naming the file), applies
+the one replacement, runs the commands, and then — whatever happened,
+including a timeout — restores the file from `HEAD` and deletes the
+sentinel. Commands default to what `foundry_verify` would run for that file:
+every `verify` command plus the `extraVerify` commands whose prefix the file
+falls under. Constraints are not run. It commits nothing, and the sentinel is
+excluded through `.git/info/exclude`, never `.gitignore`, so the tree under
+review stays clean.
+
+If the restore did not take, it says so plainly (naming the file and the
+command to run by hand), leaves the sentinel, and auto-logs a
+`mutation-restore` feedback entry under the usual `policies.feedback` guard.
+
+**Crash recovery:** if the server died between mutating and restoring, the
+sentinel is still there. `foundry_mutate`, `foundry_verify` and
+`foundry_review_submit` each restore the file from it before doing anything
+else and report the path as `recoveredMutation`, and log a
+`mutation-recovered` feedback entry, committed on its own as
+`chore: pipeline friction (review)` so the tree is never left dirty. An unreadable sentinel is a refusal
+that tells you how to recover by hand.
+
+**Returns:** `{ file, killed, verdict, results, recoveredMutation }`.
+`killed` is true when at least one command failed — the tests noticed (a
+timeout counts). `verdict` is `"killed: the tests caught the mutation"` or
+`"survived: no command failed — the mechanic is untested"`; a survivor is a
+category-3 review finding. `results` has the same per-command shape as
+`foundry_verify`. Run `foundry_verify` first: on a tree that already fails,
+every mutation looks killed.
+
+**Refuses when:** an implementation run is in progress
+(`.foundry/implement.lock` exists) — this is a review-stage tool; `file` is
+outside the project, missing, a symlink, untracked, binary, or has
+uncommitted changes; `find` is empty, or matches zero or several times, or
+equals `replace`; `commands` names something that is not a configured
+`verify`/`extraVerify` command (the message lists the legal ones); or the
+config has no `verify` commands.
 
 ---
 
@@ -418,7 +487,11 @@ when the count of non-converging rounds so far reaches `maxRounds` — see
 
 **Returns:** `{ verdict, round, commit, push }` for an approval;
 `{ verdict, round, fixTasks, unblocked, commit, halted, counts, push }` for
-changes. `push` is the same shape `foundry_run_finish` returns.
+changes. `push` is the same shape `foundry_run_finish` returns. `counts`
+describes `PROGRESS.md` as this call left it, including the fix tasks it
+just queued. Either shape also carries `recoveredMutation` (a path) when the
+call first had to restore a file a crashed
+[`foundry_mutate`](#foundry_mutate) left edited.
 
 **Refuses when:** the verdict is neither legal value; `REVIEW.md` does not
 exist; no implementation handoff has been recorded for this round;

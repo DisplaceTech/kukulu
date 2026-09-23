@@ -152,7 +152,7 @@ const goFlight = read("skills/go-flight/SKILL.md");
 const fmGo = frontmatter(goFlight);
 const allowed = String(fmGo["allowed-tools"]).split(",").map((s) => s.trim());
 const toolNames = Array.from(serverSrc.matchAll(/name: "(foundry_[a-z_]+)"/g), (m) => m[1]);
-eq(toolNames.length, 14, "the server defines fourteen tools");
+eq(toolNames.length, 15, "the server defines fifteen tools");
 
 // Every stage agent's own tool set is explicit (F-16): no agent is left to
 // discover by trial and error what it is allowed to call.
@@ -202,6 +202,15 @@ ok(
 for (const name of agentNames) like(goFlight, new RegExp(`foundry:${name}`), `go-flight names foundry:${name}`);
 like(goFlight, /notification/, "go-flight describes the loop as event-driven, not a blocking wait");
 like(goFlight, /do not poll/, "go-flight says not to poll while a stage is running");
+// F-04: the reviewer mutation-tests through the MCP, never by hand-editing source.
+ok(String(frontmatter(read("agents/reviewer.md")).tools).includes("mcp__plugin_foundry_foundry__foundry_mutate"), "agents/reviewer can call foundry_mutate");
+{
+  const reviewSkill = read("skills/review-build/SKILL.md");
+  like(reviewSkill, /foundry_mutate/, "review-build tells the reviewer to mutation-test with foundry_mutate");
+  ok(!reviewSkill.includes("git checkout -- <file>"), "review-build no longer tells the reviewer to hand-edit source and git checkout it");
+}
+like(goFlight, /agentModel/, "go-flight passes agentModel (an Agent-legal alias) on a fallback spawn");
+ok(!/`model: model`|and `model: model`/.test(goFlight), "go-flight no longer passes the raw routed model to the Agent tool (F-02)");
 
 // ---------------------------------------------------------------- cross-references
 

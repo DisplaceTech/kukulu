@@ -4,6 +4,57 @@ All notable changes to this plugin. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.2] — 2026-09-23
+
+Fixes from the first real flight on 0.3.1
+([`docs/feedback/2026-09-23-project-b.md`](./docs/feedback/2026-09-23-project-b.md)),
+whose friction the new feedback channel captured by itself. No pipeline
+behavior change: no stage gained judgment, no `foundry_next` transition
+moved, and nothing about rounds, verdicts or policies changed.
+
+### Fixed
+
+- **The implement guard no longer blocks the flight controller** (F-01).
+  The guard treated a `Stop` as the implementer's when the session
+  transcript contained the text `foundry_run_start`, and a controller's
+  always does — the implement prompt it relays says "Call
+  foundry_run_start" — so every controller turn end was blocked and each
+  block spent a re-block from `guardCap`. The guard now parses the
+  transcript and matches only an actual `foundry_run_start` `tool_use`.
+- **Fallback spawns pass a model the `Agent` tool accepts** (F-02). The
+  tool's `model` parameter takes only `sonnet`/`opus`/`haiku`/`fable`, but
+  the controller passed the routed value, so a role routed to a full id
+  such as `claude-opus-5-5` failed with `InputValidationError` on the
+  fallback path. `foundry_next` now returns `agentModel` (the alias to pass,
+  or `null`) and `agentModelExact` (false when a full id was mapped to its
+  family, in which case the controller prints a one-line note). A
+  `claude-*` id of an unknown family counts as unreachable and needs a
+  restart, like a non-Anthropic model; generated agent files still carry
+  the full id verbatim.
+- **`foundry_review_submit`'s `counts` include the fix tasks it just
+  queued** (F-03). They were taken before the new `R<N>-<nn>` lines were
+  appended, so a submit that queued three tasks reported `open: 0`.
+
+### Added
+
+- **`foundry_mutate`** (F-04): the reviewer's mutation check as an MCP
+  tool. It applies one exact find/replace to one clean tracked file, runs
+  the verify commands that file triggers (`verify` plus matching
+  `extraVerify`, so root-bound suites such as wp-env run), always restores
+  the file, and commits nothing. A sentinel lets `foundry_mutate`,
+  `foundry_verify` and `foundry_review_submit` repair a file left mutated
+  by a crash, reported as `recoveredMutation`. Fifteen tools now.
+
+### Changed
+
+- **`review-build` uses `foundry_mutate` instead of hand edits.** The
+  reviewer is told never to edit source in the working tree, even
+  temporarily; a surviving mutation is a category-3 finding. The reviewer
+  agent gains the tool.
+
+Parallel workstreams (F-05 of the same file) change how a flight flows and
+are planned for 0.4.0 in [`docs/plans/v0.4.md`](./docs/plans/v0.4.md).
+
 ## [0.3.1] — 2026-09-21
 
 Bookkeeping, not a pipeline behavior change: no stage gained judgment, no

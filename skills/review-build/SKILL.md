@@ -54,8 +54,15 @@ severe first:
    real, and what unblocks it (a fix task, a plan change, or a spec change).
 8. Only then: readability and naming.
 
-Sample at least one test per module by deleting or inverting the mechanic and
-confirming the test fails. Restore it afterwards (`git checkout -- <file>`).
+Sample at least one test per module by calling `foundry_mutate` with a
+`file` and an exact `find`/`replace` that deletes or inverts the mechanic.
+The tool runs the verify commands that file triggers (including any
+`extraVerify` suite bound to the repo root), restores the file itself, and
+commits nothing. Expect `killed: true`: the tests noticed. A `survived`
+result means no test covers that mechanic, which is a category-3 finding.
+Never edit source in the working tree yourself, not even temporarily — you
+are not to fix code, and the tool restores the file where you cannot
+guarantee you would.
 
 ## Output
 

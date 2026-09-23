@@ -137,6 +137,14 @@ append-only and still MCP-owned in the sense that matters: nothing but
 commit in the same call, so the file is never left dirty for something
 else to notice later.
 
+The reviewer is the one role that may cause a *transient* source edit, and
+only through the MCP: `foundry_mutate` applies one find/replace to one clean
+tracked file, runs that file's verify commands, and restores it from `HEAD`
+before returning — a sentinel in `.foundry/mutation.json` lets the next
+Foundry call repair the file if the server dies in between. The reviewer
+holds no other way to edit source, and never commits one; a surviving
+mutation is a finding, and the fix still goes through the fix-task loop.
+
 ## Why the models are split this way
 
 | Stage | Model | Effort | Why |
@@ -167,10 +175,14 @@ mechanisms keep it honest:
   `SubagentStop` whose `agent_type` names it (scoped further at the
   hook-registration level by `hooks/hooks.json`'s matcher, so the harness
   never even runs the guard for another subagent), or a `Stop` whose own
-  transcript called `foundry_run_start` (the implement stage run directly in
-  a session, not a background flight another session is merely waiting on —
-  see [operations.md](./operations.md) and F-07 in the project's feedback
-  history). For a stop it does consider, it counts `[ ]` and `[~]` lines
+  transcript holds a `tool_use` of `foundry_run_start` (the implement stage
+  run directly in a session, not a background flight another session is
+  merely waiting on — see [operations.md](./operations.md) and F-07 in the
+  project's feedback history). The guard parses the transcript for the
+  call itself, not for the text: a controller's transcript always
+  *mentions* `foundry_run_start`, because the implement prompt it relays
+  says "Call foundry_run_start", and matching on the text blocked every one
+  of its turn ends (F-01 of the 0.3.1 flight feedback). For a stop it does consider, it counts `[ ]` and `[~]` lines
   under `## Tasks`; if the lock exists and the count is non-zero it returns
   `{"decision":"block"}` with the next task's id and instructions to call
   `foundry_task_next`. `foundry_task_done`, `foundry_task_block` and
@@ -208,8 +220,9 @@ sequenceDiagram
 
 A controller session that merely spawned the implementer and is waiting on
 it receives its own, unrelated `Stop` events; since that session's own
-transcript never called `foundry_run_start`, the guard allows those without
-touching the counter (F-07).
+transcript never *called* `foundry_run_start` (a `tool_use`, not a mention in
+a relayed prompt), the guard allows those without touching the counter (F-07,
+and F-01 of the 0.3.1 flight feedback).
 
 ## Blocked tasks and skipped dependents
 
@@ -291,6 +304,7 @@ fix task is a task, and it goes through the same test-first loop as any other.
 | `.foundry/state.json` | yes | `round`, `implemented`, `reviewed`, `verdict`, `summarized`, `halted`, `preexistingUntracked`, `policies`, `signing`, `rounds` |
 | `.foundry/feedback.jsonl` | yes | one JSON line per pipeline-friction entry — `at`, `stage`, `round`, `category`, `message`, `source`; see [mcp-tools.md](./mcp-tools.md#foundry_feedback_log) |
 | `.foundry/implement.lock` | no (gitignored) | JSON `{ count, armedAt, round }` — the guard's re-block counter (a legacy bare number still reads back correctly) |
+| `.foundry/mutation.json` | no (`.git/info/exclude`) | present only while `foundry_mutate` has a file mutated: `{ file, at, original }`, so a crash can be repaired by the next call |
 | `docs/PROGRESS.md` | yes | task checkboxes and the per-task log |
 | `docs/foundry.json` | yes | `verify`, `extraVerify`, `build`, `baseBranch`, `branchPrefix`, `maxRounds`, `commandTimeoutMs`, `roles`, `permissionMode` |
 | `.claude/agents/foundry-*.md` | no (`.git/info/exclude`) | the generated per-role agents; see [routing.md](./routing.md) |

@@ -29,6 +29,7 @@ const P = {
   state: path.join(ROOT, ".foundry", "state.json"),
   lock: path.join(ROOT, ".foundry", "implement.lock"),
   feedback: path.join(ROOT, ".foundry", "feedback.jsonl"),
+  mutation: path.join(ROOT, ".foundry", "mutation.json"),
   gitignore: path.join(ROOT, ".gitignore"),
   agentsDir: path.join(ROOT, ".claude", "agents"),
   settings: path.join(ROOT, ".claude", "settings.json"),
@@ -48,7 +49,7 @@ const MCP_ALLOW_RULE = "mcp__plugin_foundry_foundry";
 const PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 // Keep in sync with .claude-plugin/plugin.json and package.json; test/plugin.mjs checks it.
-const VERSION = "0.3.1";
+const VERSION = "0.3.2";
 
 const TASK_ID = /\b[PR]\d+-\d+\b/g;
 const TASK_LINE = /^- \[( |~|x|!|-)\] ([PR]\d+-\d+)(?: (.*))?$/;
@@ -272,6 +273,29 @@ const PERMISSION_MODES = ["default", "acceptEdits", "auto", "dontAsk", "bypassPe
 const GLOBAL_KEYS = ["roles", "profiles", "profile", "permissionMode"];
 
 const isAnthropicModel = (m) => ANTHROPIC_ALIASES.includes(m) || m.startsWith("claude-");
+
+// The `Agent` tool's own `model` parameter takes only a family alias, never
+// a full `claude-*` id — unlike the `model:` line of an agent file, which
+// takes either. So the fallback spawn (the plugin's own agent, with the
+// routed model handed over as a parameter) needs the alias form (F-02 of the
+// 2026-09-23 flight feedback).
+const AGENT_TOOL_ALIASES = ["fable", "opus", "sonnet", "haiku"];
+const CLAUDE_FAMILY = /^claude-(opus|sonnet|haiku|fable)-/;
+
+/**
+ * The value to pass as the `Agent` tool's `model` for a routed model:
+ * `{ value, exact }`, where `value` is `null` for "pass no model" and `exact`
+ * is false when a full id was mapped down to its family alias (the alias
+ * means "latest of that family", which may not be the pinned version).
+ * `null` when the Agent tool cannot name the model at all — a non-Anthropic
+ * model, or a `claude-*` id of a family this map does not know.
+ */
+function agentToolModel(model) {
+  if (model === "inherit") return { value: null, exact: true };
+  if (AGENT_TOOL_ALIASES.includes(model)) return { value: model, exact: true };
+  const family = typeof model === "string" ? model.match(CLAUDE_FAMILY) : null;
+  return family ? { value: family[1], exact: false } : null;
+}
 
 /** Minimal YAML frontmatter reader: scalars and `- ` lists, which is all an agent file uses. */
 function parseFrontmatter(text) {
@@ -587,7 +611,7 @@ function agentsSync() {
   // this process just created the agents directory itself (so Claude Code
   // cannot have hot-loaded it), and one of the roles that changed resolves to
   // a model the Agent tool cannot name directly, so there is no fallback.
-  const restartRequired = agentsDirCreatedThisProcess && changed.some((role) => !isAnthropicModel(r.roles[role].model));
+  const restartRequired = agentsDirCreatedThisProcess && changed.some((role) => agentToolModel(r.roles[role].model) === null);
 
   const permissions = ensureMcpAllowRule();
 
@@ -913,20 +937,22 @@ function next() {
    * did not just create the agents directory itself (the one case Claude
    * Code does not hot-load — the directory's first population needs a
    * restart). When it cannot be trusted and the routed model is not one the
-   * Agent tool can name directly (an Anthropic alias or a claude-* id), there
-   * is no safe fallback and a restart is required.
+   * Agent tool can name directly (see agentToolModel), there is no safe
+   * fallback and a restart is required.
    */
   const agentInfo = (name) => {
     const role = ROLE_OF_STAGE[name];
     const fallbackAgent = role ? AGENT[name] : null;
-    if (!role) return { agent: null, agentFallback: false, fallbackAgent: null, restartRequired: false };
+    if (!role) return { agent: null, agentFallback: false, fallbackAgent: null, agentModel: null, agentModelExact: true, restartRequired: false };
     const onDisk = exists(path.join(P.agentsDir, `foundry-${role}.md`));
     const agentFallback = !onDisk || agentsDirCreatedThisProcess;
-    const model = routing.roles[role].model;
-    if (agentFallback && !isAnthropicModel(model)) {
-      return { agent: null, agentFallback: true, fallbackAgent, restartRequired: true };
+    const mapped = agentToolModel(routing.roles[role].model);
+    const agentModel = mapped ? mapped.value : null;
+    const agentModelExact = mapped ? mapped.exact : true;
+    if (agentFallback && mapped === null) {
+      return { agent: null, agentFallback: true, fallbackAgent, agentModel, agentModelExact, restartRequired: true };
     }
-    return { agent: onDisk ? `foundry-${role}` : fallbackAgent, agentFallback, fallbackAgent, restartRequired: false };
+    return { agent: onDisk ? `foundry-${role}` : fallbackAgent, agentFallback, fallbackAgent, agentModel, agentModelExact, restartRequired: false };
   };
   const modelFor = (name) => {
     const role = ROLE_OF_STAGE[name];
@@ -945,6 +971,8 @@ function next() {
       fallbackAgent: info.fallbackAgent,
       restartRequired: info.restartRequired,
       model: modelFor(name),
+      agentModel: info.agentModel,
+      agentModelExact: info.agentModelExact,
       round: st.round,
       reviewRound: st.round + 1,
       reason,
@@ -1228,7 +1256,22 @@ function checkConstraints(constraints) {
   return { ok: results.every((r) => r.ok), results };
 }
 
+/**
+ * The commands `foundry_verify` would run for `touched`: every `verify`
+ * command, plus each `extraVerify` prefix that any touched file starts
+ * with, skipping duplicates by command text. Shared with `foundry_mutate`,
+ * so a mutation runs exactly the suites the file's own change would.
+ */
+function verifyCommands(cc, touched) {
+  const cmds = [...cc.verify];
+  for (const [prefix, extra] of Object.entries(cc.extraVerify)) {
+    if (touched.some((f) => f.startsWith(prefix))) for (const x of extra) if (!cmds.some((c2) => c2.cmd === x.cmd)) cmds.push(x);
+  }
+  return cmds;
+}
+
 function verify({ files = [] } = {}) {
+  const recovered = recoverMutation();
   const c = loadConfig();
   if (!c) throw new ToolError("docs/foundry.json is missing; the plan stage must write it");
   const cc = cfg();
@@ -1236,13 +1279,145 @@ function verify({ files = [] } = {}) {
   // Constraints are whole-repo, always — `files` narrows which shell
   // commands' extras run, never what a constraint scans.
   const constraints = checkConstraints(cc.constraints);
-  const cmds = [...cc.verify];
   const touched = Array.isArray(files) ? files : String(files).split(/[\s,]+/).filter(Boolean);
-  for (const [prefix, extra] of Object.entries(cc.extraVerify)) {
-    if (touched.some((f) => f.startsWith(prefix))) for (const x of extra) if (!cmds.some((c2) => c2.cmd === x.cmd)) cmds.push(x);
+  const results = verifyCommands(cc, touched).map((c2) => runShell(c2.cmd, c2.timeoutMs));
+  return { ok: constraints.ok && results.every((r) => r.ok), constraints, results, ...(recovered ? { recoveredMutation: recovered } : {}) };
+}
+
+// ---------------------------------------------------------------- mutation testing
+//
+// The reviewer's "delete or invert the mechanic and confirm the test fails"
+// check used to be a hand edit of the working tree followed by `git checkout`.
+// Auto mode refuses that edit (a reviewer told not to fix code, editing
+// source), and a scratch copy cannot run suites bound to the repo root
+// (wp-env). So the MCP does it: one exact find/replace on one clean tracked
+// file, the file's own verify commands, and an unconditional restore.
+
+/** A repo-relative POSIX path for `file` if it is a regular, non-symlink file inside the project; throws otherwise. */
+function projectFile(file) {
+  const abs = path.resolve(ROOT, file);
+  const relPath = path.relative(ROOT, abs);
+  if (!relPath || relPath.startsWith("..") || path.isAbsolute(relPath)) throw new ToolError(`'${file}' is outside the project; pass a path inside ${ROOT}`);
+  if (!exists(abs)) throw new ToolError(`'${file}' does not exist`);
+  const lst = fs.lstatSync(abs);
+  if (lst.isSymbolicLink() || !lst.isFile()) throw new ToolError(`'${file}' is not a regular file; foundry_mutate only edits plain tracked files`);
+  return { abs, rel: relPath.split(path.sep).join("/") };
+}
+
+/** `policies.feedback`, without letting a malformed config keep a recovery from running. */
+function feedbackEnabled() {
+  try {
+    return cfg().policies.feedback;
+  } catch {
+    return true;
   }
-  const results = cmds.map((c2) => runShell(c2.cmd, c2.timeoutMs));
-  return { ok: constraints.ok && results.every((r) => r.ok), constraints, results };
+}
+
+/**
+ * If a previous foundry_mutate never reached its restore (the server was
+ * killed mid-run), put the file back from HEAD and clear the sentinel.
+ * Returns the restored repo-relative path, or `null` when there was nothing
+ * to recover. Loud on purpose: something crashed.
+ */
+function recoverMutation() {
+  if (!exists(P.mutation)) return null;
+  let m;
+  try {
+    m = JSON.parse(read(P.mutation));
+  } catch {
+    m = null;
+  }
+  if (!m || typeof m.file !== "string") {
+    throw new ToolError(`${rel(P.mutation)} exists but is unreadable, so Foundry cannot tell which file a crashed mutation left edited. Run \`git status\`, restore the file with \`git checkout HEAD -- <file>\`, then delete ${rel(P.mutation)}.`);
+  }
+  const { rel: relPath } = projectFile(m.file);
+  git(["checkout", "-q", "HEAD", "--", relPath]);
+  fs.rmSync(P.mutation, { force: true });
+  // Commit the entry on its own, like foundry_feedback_log: recovery can run
+  // inside foundry_verify mid-task, where an uncommitted feedback line would
+  // make the implementer's next foundry_task_done refuse on a dirty tree.
+  if (feedbackEnabled()) {
+    appendFeedback("review", `Restored ${relPath}, left mutated by a foundry_mutate call that never finished.`, "mutation-recovered", "auto");
+    gitCommitIfChanged([P.feedback], "chore: pipeline friction (review)");
+  }
+  return relPath;
+}
+
+function mutate({ file, find, replace, commands } = {}) {
+  if (typeof file !== "string" || !file) throw new ToolError("file is required: a repo-relative path to a tracked source file");
+  if (typeof find !== "string" || !find) throw new ToolError("find is required and must be a non-empty string: the exact text to replace");
+  if (typeof replace !== "string") throw new ToolError('replace is required and must be a string (use "" to delete the matched text)');
+  if (find === replace) throw new ToolError("find and replace are identical; that is not a mutation");
+  if (commands !== undefined && (!Array.isArray(commands) || !commands.length || !commands.every((x) => typeof x === "string"))) {
+    throw new ToolError("commands must be a non-empty array of command strings taken from docs/foundry.json's verify/extraVerify");
+  }
+  if (!gitFacts().inRepo) throw new ToolError("not a git repository");
+  if (!loadConfig()) throw new ToolError("docs/foundry.json is missing; the plan stage must write it");
+  const cc = cfg();
+  const recovered = recoverMutation();
+  if (exists(P.lock)) {
+    throw new ToolError("an implementation run is in progress (.foundry/implement.lock exists); foundry_mutate is a review-stage tool — run it after foundry_run_finish");
+  }
+  if (!cc.verify.length) throw new ToolError("docs/foundry.json has no 'verify' commands");
+
+  const { abs, rel: relPath } = projectFile(file);
+  if (!git(["ls-files", "--error-unmatch", "--", relPath], { allowFail: true }).ok) {
+    throw new ToolError(`'${relPath}' is not tracked by git; foundry_mutate only mutates committed files it can restore`);
+  }
+  if (!git(["diff", "--quiet", "HEAD", "--", relPath], { allowFail: true }).ok) {
+    throw new ToolError(`'${relPath}' has uncommitted changes; commit or discard them first so foundry_mutate can restore the file exactly`);
+  }
+  const original = read(abs);
+  if (original.includes("\0")) throw new ToolError(`'${relPath}' looks binary; foundry_mutate edits text files only`);
+  const first = original.indexOf(find);
+  const occurrences = first < 0 ? 0 : original.split(find).length - 1;
+  if (occurrences !== 1) {
+    throw new ToolError(
+      occurrences === 0
+        ? `find text does not appear in ${relPath}; copy it exactly, including whitespace`
+        : `find text appears ${occurrences} times in ${relPath}; include more surrounding context in find so it matches exactly once`,
+    );
+  }
+
+  let cmds;
+  if (commands) {
+    const legal = new Map([...cc.verify, ...Object.values(cc.extraVerify).flat()].map((x) => [x.cmd, x]));
+    const unknown = commands.filter((x) => !legal.has(x));
+    if (unknown.length) {
+      throw new ToolError(`commands must each equal a configured verify/extraVerify command; unknown: ${unknown.map((u) => JSON.stringify(u)).join(", ")}. Legal: ${[...legal.keys()].map((k) => JSON.stringify(k)).join(", ")}`);
+    }
+    cmds = commands.map((x) => legal.get(x));
+  } else {
+    cmds = verifyCommands(cc, [relPath]);
+  }
+
+  // The sentinel is per-clone state, not part of the reviewed branch: exclude
+  // it through .git/info/exclude rather than .gitignore, which would dirty
+  // the very tree under review.
+  ensureLineInFile(gitPath("info/exclude"), rel(P.mutation));
+  write(P.mutation, `${JSON.stringify({ file: relPath, at: new Date().toISOString(), original: git(["rev-parse", `HEAD:${relPath}`]).out })}\n`);
+  let results;
+  try {
+    fs.writeFileSync(abs, original.slice(0, first) + replace + original.slice(first + find.length));
+    results = cmds.map((c2) => runShell(c2.cmd, c2.timeoutMs));
+  } finally {
+    // Restore unconditionally. If git cannot, write the bytes back ourselves.
+    if (!git(["checkout", "-q", "HEAD", "--", relPath], { allowFail: true }).ok) fs.writeFileSync(abs, original);
+  }
+  if (!git(["diff", "--quiet", "HEAD", "--", relPath], { allowFail: true }).ok) {
+    if (cc.policies.feedback) appendFeedback("review", `foundry_mutate could not restore ${relPath} after mutating it.`, "mutation-restore", "auto");
+    throw new ToolError(`foundry_mutate could NOT restore ${relPath}: it still differs from HEAD. Run \`git checkout HEAD -- ${relPath}\` before doing anything else. The sentinel ${rel(P.mutation)} is left in place.`);
+  }
+  fs.rmSync(P.mutation, { force: true });
+
+  const killed = results.some((r) => !r.ok);
+  return {
+    file: relPath,
+    killed,
+    verdict: killed ? "killed: the tests caught the mutation" : "survived: no command failed — the mechanic is untested",
+    results,
+    recoveredMutation: recovered,
+  };
 }
 
 /**
@@ -1342,6 +1517,9 @@ function reviewMdRound() {
 }
 
 function reviewSubmit({ verdict, tasks = [], unblock = [] }) {
+  // A crashed foundry_mutate must not leave a mutated file under review.
+  const recovered = recoverMutation();
+  const recoveredField = recovered ? { recoveredMutation: recovered } : {};
   verdict = String(verdict || "").toUpperCase().trim();
   if (!["APPROVED", "CHANGES REQUESTED"].includes(verdict)) throw new ToolError("verdict must be APPROVED or CHANGES REQUESTED");
   if (!exists(P.review)) throw new ToolError("docs/REVIEW.md does not exist; write it before submitting");
@@ -1366,7 +1544,7 @@ function reviewSubmit({ verdict, tasks = [], unblock = [] }) {
     saveState(st);
     const sha = gitCommitIfChanged([P.review, P.state], `review: round ${N} approved`);
     const push = pushBranch(gitFacts().branch, st.policies.push);
-    return { verdict, round: st.round, commit: sha, push };
+    return { verdict, round: st.round, commit: sha, push, ...recoveredField };
   }
 
   if (!tasks.length && !unblock.length) throw new ToolError("CHANGES REQUESTED requires at least one fix task or unblock");
@@ -1424,7 +1602,10 @@ function reviewSubmit({ verdict, tasks = [], unblock = [] }) {
   saveState(st);
   const sha = gitCommitIfChanged([P.review, P.plan, P.progress, P.state, P.feedback], `review: round ${N}`);
   const push = pushBranch(gitFacts().branch, st.policies.push);
-  return { verdict, round: N, fixTasks: ids, unblocked, commit: sha, halted: st.halted, counts: counts(pr.tasks), push };
+  // Re-read rather than reuse `pr`: appendTaskLines edits pr.lines but not
+  // pr.tasks, so counts(pr.tasks) would describe the file as it was before
+  // this call queued its own fix tasks (F-03 of the 2026-09-23 flight feedback).
+  return { verdict, round: N, fixTasks: ids, unblocked, commit: sha, halted: st.halted, counts: counts(parseProgress().tasks), push, ...recoveredField };
 }
 
 function summaryCommit() {
@@ -1450,7 +1631,7 @@ const S = (props, required = []) => ({
 });
 const TOOLS = [
   { name: "foundry_status", description: "Everything the pipeline knows from disk: which docs exist, task counts by state, branch/base/head, lock, round, review verdict. Read-only.", inputSchema: S({}), fn: status },
-  { name: "foundry_next", description: "Deterministic stage selection: returns { stage, agent, agentFallback, fallbackAgent, restartRequired, model, round, reason, prompt }. stage is plan | implement | review | summarize | done | halt. restartRequired is true only when the routed model cannot be reached without relaunching the session. Read-only.", inputSchema: S({}), fn: next },
+  { name: "foundry_next", description: "Deterministic stage selection: returns { stage, agent, agentFallback, fallbackAgent, restartRequired, model, agentModel, agentModelExact, round, reason, prompt }. stage is plan | implement | review | summarize | done | halt. agentModel is the value to pass as the Agent tool's model when agentFallback is true (an alias, or null to pass none); agentModelExact is false when a full claude-* id was mapped to its family alias. restartRequired is true only when the routed model cannot be reached without relaunching the session. Read-only.", inputSchema: S({}), fn: next },
   { name: "foundry_run_start", description: "Begin (or resume) an implementation run: create/reuse the build branch, arm the implement guard lock, stamp Branch/Started in PROGRESS.md, commit. Idempotent.", inputSchema: S({}), fn: runStart },
   { name: "foundry_task_next", description: "Select the next task (first [~], else first [ ]), auto-skip tasks whose dependencies are blocked, mark it [~], and return its PLAN.md text plus dependency log entries. Returns { done: true } when none remain.", inputSchema: S({}), fn: taskNext },
   { name: "foundry_task_done", description: "Mark a task [x] and append its log entry stamped with HEAD's sha. Requires HEAD's commit subject to start with '<id>:' and a clean tree. Commits PROGRESS.md.", inputSchema: S({ id: { type: "string" }, log: { type: "string", description: "Log entry body, under 15 lines" } }, ["id", "log"]), fn: taskDone },
@@ -1475,6 +1656,20 @@ const TOOLS = [
       ["stage", "message"],
     ),
     fn: feedbackLog,
+  },
+  {
+    name: "foundry_mutate",
+    description: "Mutation-test one file: apply one exact find/replace to a clean tracked file, run the verify commands that file triggers (verify plus matching extraVerify), always restore the file, and commit nothing. Returns { file, killed, verdict, results, recoveredMutation }; killed is true when at least one command failed. For reviewers checking that a test fails without the mechanic it covers — never edit source by hand instead.",
+    inputSchema: S(
+      {
+        file: { type: "string", description: "repo-relative path of a tracked, clean text file" },
+        find: { type: "string", description: "exact text to replace; must appear exactly once in the file" },
+        replace: { type: "string", description: "the mutated text (\"\" deletes the match)" },
+        commands: { type: "array", items: { type: "string" }, description: "optional: run only these configured verify/extraVerify commands, each spelled exactly as in docs/foundry.json" },
+      },
+      ["file", "find", "replace"],
+    ),
+    fn: mutate,
   },
   {
     name: "foundry_review_submit",

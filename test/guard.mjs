@@ -36,9 +36,15 @@ const implementerStop = (repo, extra = {}) => ({
   ...extra,
 });
 
+/** One transcript line: an assistant turn holding a single tool_use, as Claude Code writes it. */
+const toolUseLine = (name, input = {}, extra = {}) =>
+  JSON.stringify({ type: "assistant", isSidechain: false, message: { role: "assistant", content: [{ type: "tool_use", id: "toolu_1", name, input }] }, ...extra });
+
+const RUN_START = "mcp__plugin_foundry_foundry__foundry_run_start";
+
 /** A Stop whose transcript does (or does not) call foundry_run_start. */
 function stopWithTranscript(repo, calledRunStart, extra = {}) {
-  writeFile(repo, "transcript.jsonl", calledRunStart ? '{"tool":"foundry_run_start"}\n' : '{"tool":"something_else"}\n');
+  writeFile(repo, "transcript.jsonl", `${toolUseLine(calledRunStart ? RUN_START : "mcp__plugin_foundry_foundry__foundry_status")}\n`);
   return { hook_event_name: "Stop", transcript_path: TRANSCRIPT(repo), ...extra };
 }
 
@@ -93,14 +99,14 @@ eq(
 
 {
   const repo = armed();
-  writeFile(repo, "transcript.jsonl", '{"tool":"foundry_run_start"}\n');
+  writeFile(repo, "transcript.jsonl", `${toolUseLine(RUN_START)}\n`);
   const j = JSON.parse(guard(repo, { input: { hook_event_name: "SubagentStop", transcript_path: TRANSCRIPT(repo) } }));
   eq(j.decision, "block", "a SubagentStop with no agent_type falls back to the transcript check");
 }
 
 {
   const repo = armed();
-  writeFile(repo, "transcript.jsonl", '{"tool":"something_else"}\n');
+  writeFile(repo, "transcript.jsonl", `${toolUseLine("Bash", { command: "ls" })}\n`);
   eq(
     guard(repo, { input: { hook_event_name: "SubagentStop", transcript_path: TRANSCRIPT(repo) } }),
     "",
@@ -117,6 +123,49 @@ eq(
 {
   const repo = armed();
   eq(guard(repo, { input: stopWithTranscript(repo, false) }), "", "a Stop whose transcript never called foundry_run_start is allowed — a controller merely waiting on a background flight (F-07)");
+}
+
+// F-01 (0.3.1 flight feedback): a controller's transcript mentions
+// foundry_run_start in text — the implement prompt it relays says "Call
+// foundry_run_start" — without ever calling it. It must not be blocked, and
+// the mention must not spend a re-block from the shared counter.
+{
+  const repo = armed();
+  const prompt = "Run the Foundry implement stage. Call foundry_run_start, then loop on foundry_task_next until it reports done.";
+  writeFile(
+    repo,
+    "transcript.jsonl",
+    [
+      toolUseLine("mcp__plugin_foundry_foundry__foundry_next"),
+      JSON.stringify({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_1", content: JSON.stringify({ stage: "implement", prompt }) }] } }),
+      toolUseLine("Agent", { subagent_type: "foundry-implementer", prompt }),
+    ].join("\n") + "\n",
+  );
+  eq(guard(repo, { input: { hook_event_name: "Stop", transcript_path: TRANSCRIPT(repo) } }), "", "a controller transcript that only mentions foundry_run_start is allowed (F-01)");
+  eq(readFile(repo, ".foundry/implement.lock").trim(), "0", "...and the counter is untouched");
+}
+
+{
+  const repo = armed();
+  writeFile(repo, "transcript.jsonl", `${toolUseLine("foundry_run_start")}\n`);
+  eq(JSON.parse(guard(repo, { input: { hook_event_name: "Stop", transcript_path: TRANSCRIPT(repo) } })).decision, "block", "the bare tool name counts");
+  const other = armed();
+  writeFile(other, "transcript.jsonl", `${toolUseLine("mcp__foundry__foundry_run_start")}\n`);
+  eq(JSON.parse(guard(other, { input: { hook_event_name: "Stop", transcript_path: TRANSCRIPT(other) } })).decision, "block", "the mcp__foundry__ prefix counts");
+}
+
+{
+  const repo = armed();
+  writeFile(repo, "transcript.jsonl", `${toolUseLine(RUN_START, {}, { isSidechain: true })}\n`);
+  eq(guard(repo, { input: { hook_event_name: "Stop", transcript_path: TRANSCRIPT(repo) } }), "", "a run_start that only appears in a sidechain entry is the subagent's, not this session's: Stop allows");
+  const j = JSON.parse(guard(repo, { input: { hook_event_name: "SubagentStop", transcript_path: TRANSCRIPT(repo) } }));
+  eq(j.decision, "block", "...but a SubagentStop with no agent_type counts sidechain entries and blocks");
+}
+
+{
+  const repo = armed();
+  writeFile(repo, "transcript.jsonl", `{not json\n${toolUseLine(RUN_START)}\n`);
+  eq(JSON.parse(guard(repo, { input: { hook_event_name: "Stop", transcript_path: TRANSCRIPT(repo) } })).decision, "block", "a garbage line does not stop a real tool_use line from counting");
 }
 
 {

@@ -3,7 +3,7 @@ name: reviewer
 description: Foundry stage 3 — reviews the build branch against SPEC and PLAN, approves or queues R-tasks. Invoked by go-flight; do not delegate to it for ordinary code review.
 model: fable
 effort: high
-tools: Read, Write, Edit, Bash, Grep, Glob, mcp__plugin_foundry_foundry__foundry_status, mcp__plugin_foundry_foundry__foundry_verify, mcp__plugin_foundry_foundry__foundry_review_submit, mcp__plugin_foundry_foundry__foundry_feedback_log
+tools: Read, Write, Edit, Bash, Grep, Glob, mcp__plugin_foundry_foundry__foundry_status, mcp__plugin_foundry_foundry__foundry_verify, mcp__plugin_foundry_foundry__foundry_review_submit, mcp__plugin_foundry_foundry__foundry_mutate, mcp__plugin_foundry_foundry__foundry_feedback_log
 skills:
   - foundry:review-build
 color: red

@@ -57,6 +57,48 @@ await withServer(specRepo(), async ({ call }) => {
   });
 }
 
+// F-02 (0.3.1 flight feedback): the Agent tool's `model` parameter takes only
+// a family alias, so a fallback spawn for a role routed to a full claude-* id
+// must be handed the alias — and told it is an approximation.
+const routedReviewRepo = (model) => {
+  const repo = plannedRepo();
+  const cfgPath = path.join(repo, "docs/foundry.json");
+  const c = JSON.parse(fs.readFileSync(cfgPath, "utf8"));
+  writeFile(repo, "docs/foundry.json", JSON.stringify({ ...c, roles: { reviewer: { model } } }, null, 2) + "\n");
+  markTasks(repo, ALL_DONE);
+  setState(repo, { implemented: true });
+  return repo;
+};
+
+for (const [model, agentModel, exact, label] of [
+  ["claude-opus-5-5", "opus", false, "a full claude-* id maps to its family alias and is flagged inexact"],
+  ["claude-fable-5-1", "fable", false, "a full fable id maps to fable"],
+  ["sonnet", "sonnet", true, "an alias is passed through and exact"],
+  ["inherit", null, true, "inherit means pass no model"],
+]) {
+  await withServer(routedReviewRepo(model), async ({ call }) => {
+    const n = await call("foundry_next");
+    eq(n.stage, "review", `${model}: at the review stage`);
+    eq(n.agentFallback, true, `${model}: nothing generated, so fallback applies`);
+    eq(n.agentModel, agentModel, `${model}: ${label}`);
+    eq(n.agentModelExact, exact, `${model}: agentModelExact`);
+    eq(n.restartRequired, false, `${model}: reachable, so no restart`);
+    eq(n.model, model, `${model}: model is still the routed value, for display`);
+  });
+}
+
+await withServer(routedReviewRepo("claude-mystery-9"), async ({ call }) => {
+  const n = await call("foundry_next");
+  eq(n.restartRequired, true, "a claude-* id of an unknown family is unreachable under fallback, like a non-Anthropic model");
+  eq(n.agent, null, "...and has no agent to spawn");
+});
+
+await withServer(plannedRepo(), async ({ call }) => {
+  await call("foundry_agents_sync");
+  const done = await call("foundry_next");
+  ok("agentModel" in done && "agentModelExact" in done, "every stage result carries agentModel and agentModelExact");
+});
+
 // A half-written plan is not a plan.
 for (const missing of ["docs/PLAN.md", "docs/PROGRESS.md", "docs/foundry.json"]) {
   const repo = plannedRepo();
