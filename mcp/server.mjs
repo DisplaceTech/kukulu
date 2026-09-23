@@ -1034,6 +1034,30 @@ function refuseSerialInParallelWave(pr, task) {
   refuseWhileStreamsPending();
 }
 
+/**
+ * Record, once, that an invalid wave runs serially: `state.serialWaves`, one
+ * feedback entry (a bad partition is a planning defect, so `stage: "plan"`),
+ * one commit. Only on a build branch — a flight owns its build branch's
+ * history, and this must never commit to the base branch before a run has
+ * started — and never when `maxStreams` is 1 (the operator's own choice). An
+ * exclusive `verify` command makes every wave serial; that cause is logged
+ * once per flight, not once per wave. Returns the (possibly updated) state.
+ */
+function recordSerialWave(wave, cc, st) {
+  if (wave.valid || cc.parallel.maxStreams <= 1 || serialWavesOf(st).some((x) => x.wave === wave.index)) return st;
+  const branch = git(["rev-parse", "--abbrev-ref", "HEAD"], { allowFail: true }).out;
+  if (!branch || !branch.startsWith(cc.branchPrefix) || branch.includes("--")) return st;
+  const already = serialWavesOf(st).some((x) => x.category === wave.category);
+  const cur = loadState();
+  cur.serialWaves = [...serialWavesOf(cur), { wave: wave.index, category: wave.category, reason: wave.reason }];
+  saveState(cur);
+  if (cc.policies.feedback && !(wave.category === "stream-exclusive" && already)) {
+    appendFeedback("plan", `Wave ${wave.index} runs serially: ${wave.reason}`, wave.category, "auto");
+  }
+  gitCommitIfChanged([P.state, P.feedback], `chore: wave ${wave.index} runs serially`);
+  return cur;
+}
+
 /** Serial work would run on a main checkout that lacks a finished stream's code until that stream is merged back. */
 function refuseWhileStreamsPending() {
   const pending = streamWorktrees();
@@ -1301,9 +1325,8 @@ function next() {
    * follow in plan order, up to `parallel.maxStreams`.
    *
    * A wave whose partition is invalid runs serially. That decision is
-   * recorded once (state.serialWaves plus one feedback entry, one commit) but
-   * only on a build branch: a flight owns its build branch's history, and
-   * this must never commit to the base branch before a run has started.
+   * recorded once — see recordSerialWave, which is also called when a serial
+   * foundry_task_next first serves a task from such a wave.
    */
   const streamOffer = () => {
     if (!s.progressPresent) return {};
@@ -1313,18 +1336,7 @@ function next() {
     const waves = computeWaves(pr, c);
     const wave = currentWave(pr, waves);
     if (!wave) return {};
-    const onBuildBranch = Boolean(s.git.branch && s.git.branch.startsWith(c.branchPrefix) && !s.git.branch.includes("--"));
-    if (!wave.valid && c.parallel.maxStreams > 1 && onBuildBranch && !serialWavesOf(cur).some((x) => x.wave === wave.index)) {
-      // An exclusive verify command makes every wave serial: say so once per
-      // flight, not once per wave.
-      const already = serialWavesOf(cur).some((x) => x.category === wave.category);
-      cur = loadState();
-      cur.serialWaves = [...serialWavesOf(cur), { wave: wave.index, category: wave.category, reason: wave.reason }];
-      saveState(cur);
-      const logIt = c.policies.feedback && !(wave.category === "stream-exclusive" && already);
-      if (logIt) appendFeedback("plan", `Wave ${wave.index} runs serially: ${wave.reason}`, wave.category, "auto");
-      gitCommitIfChanged([P.state, P.feedback], `chore: wave ${wave.index} runs serially`);
-    }
+    cur = recordSerialWave(wave, c, cur);
     const info = agentInfo("implement");
     const avail = availableStreams(wave, pr, c, cur);
     const inFlight = new Set(streamWorktrees());
@@ -1623,7 +1635,12 @@ function taskNext({ stream } = {}) {
     if (stream !== undefined || !task.stream) return null;
     waveCtx = waveCtx || { cc: cfg(), st: loadState() };
     const wave = computeWaves(pr, waveCtx.cc).find((w) => w.taskIds.includes(task.id));
-    return wave && waveRunsParallel(wave, waveCtx.cc, waveCtx.st) ? wave : null;
+    if (!wave) return null;
+    // The moment a serial implementer is handed an invalid wave's task is
+    // when the wave's degrade to serial takes effect: record it if the
+    // controller has not already (it may never call foundry_next again).
+    waveCtx.st = recordSerialWave(wave, waveCtx.cc, waveCtx.st);
+    return waveRunsParallel(wave, waveCtx.cc, waveCtx.st) ? wave : null;
   };
   const skipped = [];
   for (;;) {
