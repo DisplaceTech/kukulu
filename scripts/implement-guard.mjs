@@ -21,10 +21,15 @@
 //      `foundry:implementer`). Any other named agent is allowed outright.
 //      A missing `agent_type` falls back to rule 3's transcript check.
 //   3. `hook_event_name` is `Stop`: block only when *this session's own
-//      transcript* shows it called `foundry_run_start` itself — i.e. the
+//      transcript* holds a `tool_use` of `foundry_run_start` — i.e. the
 //      implement stage is running directly in the main session
 //      (`/foundry:implement` by hand, or `claude -p`), not a flight this
-//      session is merely waiting on in the background.
+//      session is merely waiting on in the background. The check parses
+//      the transcript and looks for the call itself; the bare text
+//      "foundry_run_start" proves nothing, because a go-flight controller's
+//      transcript always contains it (the implement prompt it relays
+//      says "Call foundry_run_start") and was blocked on every turn end
+//      (0.3.1 flight feedback F-01).
 //   4. Any other event, unreadable or empty input, or an unreadable
 //      transcript: allow. A guard that cannot identify the stopping party
 //      must never guess block.
@@ -59,14 +64,38 @@ function parseInput(raw) {
   }
 }
 
-/** Does the transcript at `transcriptPath` mention a call to foundry_run_start? */
-function transcriptCalledRunStart(transcriptPath) {
+const RUN_START_TOOL = /^(?:mcp__.+__)?foundry_run_start$/;
+
+/**
+ * Does the transcript at `transcriptPath` hold an assistant `tool_use` of
+ * foundry_run_start? The transcript is JSONL; a line that does not parse is
+ * skipped, and an unreadable file means no. `includeSidechain` says whether
+ * entries logged inline for a subagent (`isSidechain: true`) count: they do
+ * for a SubagentStop, where the subagent's calls are the point, and do not
+ * for a Stop, where they belong to someone else.
+ */
+function transcriptCalledRunStart(transcriptPath, { includeSidechain }) {
   if (!transcriptPath) return false;
+  let raw;
   try {
-    return fs.readFileSync(transcriptPath, "utf8").includes("foundry_run_start");
+    raw = fs.readFileSync(transcriptPath, "utf8");
   } catch {
     return false;
   }
+  for (const line of raw.split("\n")) {
+    if (!line.trim()) continue;
+    let entry;
+    try {
+      entry = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (!includeSidechain && entry?.isSidechain === true) continue;
+    const content = entry?.message?.content;
+    if (!Array.isArray(content)) continue;
+    if (content.some((item) => item?.type === "tool_use" && typeof item.name === "string" && RUN_START_TOOL.test(item.name))) return true;
+  }
+  return false;
 }
 
 /** Whether this stop belongs to the implementer, per the decision rule above. */
@@ -75,9 +104,9 @@ function isImplementerStop(input) {
   const event = input.hook_event_name;
   if (event === "SubagentStop") {
     if (input.agent_type) return IMPLEMENTER_AGENT_TYPES.has(input.agent_type);
-    return transcriptCalledRunStart(input.transcript_path);
+    return transcriptCalledRunStart(input.agent_transcript_path || input.transcript_path, { includeSidechain: true });
   }
-  if (event === "Stop") return transcriptCalledRunStart(input.transcript_path);
+  if (event === "Stop") return transcriptCalledRunStart(input.transcript_path, { includeSidechain: false });
   return false;
 }
 
