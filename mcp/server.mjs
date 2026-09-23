@@ -1466,6 +1466,61 @@ function runStart({ stream } = {}) {
   return { ...res, stream, wave: wave.index, cwd: created.cwd, streamBranch: created.streamBranch, created: created.created, setup: created.setup };
 }
 
+/**
+ * Merge a finished stream back into the build branch and remove its worktree
+ * and branch. Refuses while the stream has open tasks or an uncommitted
+ * worktree. A merge conflict — the partition check makes one unlikely, not
+ * impossible — is the one stream failure that halts: Foundry aborts the
+ * merge, keeps the stream branch and worktree, and records why, because it
+ * cannot guess a merge.
+ */
+function streamFinish({ stream } = {}) {
+  const { wave, pr, cc, st } = streamScope(stream);
+  const dir = streamDir(stream);
+  if (!exists(dir)) throw new ToolError(`stream '${stream}' has no worktree; nothing to finish`);
+  const byId = new Map(pr.tasks.map((t) => [t.id, t]));
+  const open = wave.streams[stream].filter((id) => isOpenTask(byId.get(id)));
+  if (open.length) throw new ToolError(`stream '${stream}' still has open tasks: ${open.join(", ")}; finish or block them before foundry_stream_finish`);
+  const dirty = porcelainExcludingPreexisting((st.streams || {})[stream]?.preexistingUntracked || [], dir);
+  if (dirty.length) {
+    throw new ToolError(`stream '${stream}' has uncommitted changes in its worktree:\n${dirty.join("\n")}\nCommit them to the stream's task, or \`git checkout --\`/\`git clean\` them, then call foundry_stream_finish again.`);
+  }
+
+  const g = gitFacts();
+  if (!g.branch || !g.branch.startsWith(cc.branchPrefix) || g.branch.includes("--")) {
+    throw new ToolError(`the main checkout is on '${g.branch}', not the build branch; foundry_stream_finish merges into the build branch`);
+  }
+  const streamBranch = `${g.branch}--${stream}`;
+  if (!git(["rev-parse", "--verify", "--quiet", `refs/heads/${streamBranch}`], { allowFail: true }).ok) {
+    throw new ToolError(`branch ${streamBranch} does not exist; the stream's worktree is not on the expected branch`);
+  }
+  // Every stream call leaves PROGRESS.md/state.json changes for the next
+  // commit; land them first so the merge starts from a clean tracked tree.
+  gitCommitIfChanged([P.progress, P.state, P.feedback], `progress: sync before merging stream ${stream}`);
+  const stray = git(["status", "--porcelain", "--untracked-files=no"]).out;
+  if (stray) throw new ToolError(`the main checkout has uncommitted tracked changes; commit or discard them before merging stream '${stream}':\n${stray}`);
+
+  const before = git(["rev-parse", "HEAD"]).out;
+  const merge = git(["merge", "--no-ff", "--no-edit", "-m", `merge stream ${stream} (wave ${wave.index})`, streamBranch], { allowFail: true });
+  if (!merge.ok) {
+    const conflicts = git(["diff", "--name-only", "--diff-filter=U"], { allowFail: true }).out.split("\n").filter(Boolean);
+    git(["merge", "--abort"], { allowFail: true });
+    const halted = `merging stream '${stream}' (branch ${streamBranch}) into ${g.branch} conflicted${conflicts.length ? ` in ${conflicts.join(", ")}` : ""}; the stream's branch and worktree ${rel(dir)} are kept. A human must resolve it: from the main checkout run \`git merge --no-ff ${streamBranch}\`, fix the conflicts and commit, then \`git worktree remove --force ${rel(dir)}\` and clear 'halted' in .foundry/state.json.`;
+    const cur = loadState();
+    cur.halted = halted;
+    saveState(cur);
+    if (cc.policies.feedback) appendFeedback("implement", halted, "stream-merge", "auto");
+    gitCommitIfChanged([P.state, P.feedback], `chore: run halted (stream ${stream} merge conflict)`);
+    return { stream, merged: false, halted, conflicts };
+  }
+
+  git(["worktree", "remove", "--force", dir]);
+  git(["branch", "-d", streamBranch]);
+  const after = git(["rev-parse", "HEAD"]).out;
+  const remainingStreams = Object.keys(wave.streams).filter((n) => n !== stream && (exists(streamDir(n)) || wave.streams[n].some((id) => isOpenTask(byId.get(id)))));
+  return { stream, merged: true, mergeCommit: after === before ? null : git(["rev-parse", "--short", "HEAD"]).out, remainingStreams };
+}
+
 function taskNext({ stream } = {}) {
   const pr = parseProgress();
   let inScope = () => true;
@@ -1832,6 +1887,10 @@ function pushBranch(branch, pushAllowed) {
 }
 
 function runFinish() {
+  const pending = streamWorktrees();
+  if (pending.length) {
+    throw new ToolError(`stream worktree(s) still exist (${pending.join(", ")}); merge each back with foundry_stream_finish before finishing the run`);
+  }
   const pr = parseProgress();
   const cnt = counts(pr.tasks);
   if (cnt.open > 0) throw new ToolError(`${cnt.open} task(s) still open; keep calling foundry_task_next`);
@@ -2033,6 +2092,7 @@ const TOOLS = [
   { name: "foundry_task_done", description: "Mark a task [x] and append its log entry stamped with HEAD's sha. Requires HEAD's commit subject to start with '<id>:' and a clean tree. Commits PROGRESS.md.", inputSchema: S({ stream: { type: "string", description: "the stream this task belongs to, when working in a parallel wave" }, id: { type: "string" }, log: { type: "string", description: "Log entry body, under 15 lines" } }, ["id", "log"]), fn: taskDone },
   { name: "foundry_task_block", description: "Give up on a task: hard-reset uncommitted changes, mark it [!], log BLOCKED: <reason>, commit PROGRESS.md.", inputSchema: S({ stream: { type: "string", description: "the stream this task belongs to, when working in a parallel wave" }, id: { type: "string" }, reason: { type: "string", description: "what you tried / what fails / what you think the fix is" } }, ["id", "reason"]), fn: taskBlock },
   { name: "foundry_verify", description: "Self-tests and runs every docs/foundry.json constraint against the whole tracked repo, then runs the verify commands plus extraVerify commands for any path prefix the given files fall under. Returns constraint results and per-command exit status and output tails.", inputSchema: S({ files: { type: "array", items: { type: "string" }, description: "Files touched by the task (optional); narrows extraVerify only, never the constraint scan" }, stream: { type: "string", description: "run in this stream's worktree (parallel waves only); refuses if an exclusive command would run" } }), fn: verify },
+  { name: "foundry_stream_finish", description: "Finish one stream of a parallel wave: requires no open tasks in the stream and a clean worktree, merges the stream's branch into the build branch (git merge --no-ff), then removes the worktree and branch. On a merge conflict it aborts, keeps the stream's branch and worktree, and halts the flight with instructions. Returns { stream, merged, mergeCommit, remainingStreams }.", inputSchema: S({ stream: { type: "string", description: "the stream whose tasks are all done or blocked" } }, ["stream"]), fn: streamFinish },
   { name: "foundry_run_finish", description: "End an implementation run: requires zero open tasks and docs/HANDOFF.md; commits it, pushes and opens a draft PR unless policies say otherwise, disarms the lock, records the round as implemented.", inputSchema: S({}), fn: runFinish },
   {
     name: "foundry_run_halt",

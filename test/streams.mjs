@@ -380,4 +380,140 @@ const stateOf = (repo) => JSON.parse(readFile(repo, ".foundry/state.json"));
   });
 }
 
+
+// ---------------------------------------------------------------- V4-03: stream_finish
+
+/** Work one stream's tasks start to finish: run_start, then task_next / commit / task_done per task. */
+async function workStream(call, stream, work) {
+  const started = await call("foundry_run_start", { stream });
+  for (const [id, file, body] of work) {
+    const t = await call("foundry_task_next", { stream });
+    eq(t.id, id, `${stream}: task_next hands out ${id}`);
+    commitTask(started.cwd, id, `Task ${id}`, { [file]: body });
+    await call("foundry_task_done", { stream, id, log: `did ${id}` });
+  }
+  return started;
+}
+const API = [["P1-01", "src/api/a.txt", "a\n"], ["P1-02", "src/api/b.txt", "b\n"]];
+const UI = [["P1-03", "src/ui/a.txt", "u\n"], ["P1-04", "src/ui/b.txt", "v\n"]];
+
+{
+  const repo = waveRepo();
+  await withServer(repo, async ({ call }) => {
+    const a = await workStream(call, "api", API);
+    const u = await workStream(call, "ui", UI);
+    const build = git(repo, ["rev-parse", "--abbrev-ref", "HEAD"]);
+
+    const f1 = await call("foundry_stream_finish", { stream: "api" });
+    eq(f1.merged, true, "the first stream merges");
+    ok(f1.mergeCommit, "and reports its merge commit");
+    eq(f1.remainingStreams.join(","), "ui", "remainingStreams names the other stream");
+    ok(!hasFile(repo, ".foundry/worktrees/api"), "the worktree is removed");
+    eq(git(repo, ["branch", "--list", a.streamBranch]), "", "the stream branch is deleted");
+    eq(subject(repo), "merge stream api (wave 1)", "the merge commit says which stream and wave");
+    eq(readFile(repo, "src/api/a.txt"), "a\n", "the stream's files are in the main checkout");
+    ok(!hasFile(repo, "src/ui/a.txt"), "the other stream's are not, yet");
+
+    const f2 = await call("foundry_stream_finish", { stream: "ui" });
+    eq(f2.merged, true, "the second stream merges");
+    eq(f2.remainingStreams.length, 0, "nothing remains");
+    eq(git(repo, ["log", "--merges", "--format=%s", `${git(repo, ["merge-base", "main", "HEAD"])}..HEAD`]).split("\n").filter((l) => l.startsWith("merge stream")).length, 2, "two merge commits, one per stream");
+    const log = git(repo, ["log", "--format=%s"]);
+    for (const id of ["P1-01", "P1-02", "P1-03", "P1-04"]) like(log, new RegExp(`^${id}: Task ${id}$`, "m"), `${id}'s commit is reachable from the build branch`);
+    eq(git(repo, ["worktree", "list"]).split("\n").length, 1, "no worktrees remain");
+    eq(git(repo, ["status", "--porcelain", "--untracked-files=no"]), "", "the main checkout is clean");
+    eq(git(repo, ["rev-parse", "--abbrev-ref", "HEAD"]), build, "still on the build branch");
+    const t = await call("foundry_task_next");
+    eq(t.id, "P2-01", "serial work resumes once every stream is merged");
+    void u;
+  });
+}
+
+// A stream whose tasks were all blocked still merges (a no-op) and cleans up.
+{
+  const repo = waveRepo();
+  await withServer(repo, async ({ call }) => {
+    await call("foundry_run_start", { stream: "api" });
+    await call("foundry_task_next", { stream: "api" });
+    await call("foundry_task_block", { stream: "api", id: "P1-01", reason: "cannot" });
+    await call("foundry_task_next", { stream: "api" }); // skips P1-02, which depends on the blocked task
+    const f = await call("foundry_stream_finish", { stream: "api" });
+    eq(f.merged, true, "a wholly blocked stream still finishes");
+    eq(f.mergeCommit, null, "with no merge commit, since it had nothing to merge");
+    ok(!hasFile(repo, ".foundry/worktrees/api"), "and its worktree is cleaned up");
+  });
+}
+
+// Refusals.
+{
+  const repo = waveRepo();
+  await withServer(repo, async ({ call }) => {
+    isError(await call("foundry_stream_finish", { stream: "api" }), /legal streams: api, ui|has no worktree/, "a stream that was never started cannot be finished");
+    const a = await call("foundry_run_start", { stream: "api" });
+    await call("foundry_task_next", { stream: "api" });
+    isError(await call("foundry_stream_finish", { stream: "api" }), /stream 'api' still has open tasks: P1-01, P1-02/, "open tasks refuse, naming them");
+    commitTask(a.cwd, "P1-01", "Task P1-01", { "src/api/a.txt": "a\n" });
+    await call("foundry_task_done", { stream: "api", id: "P1-01", log: "ok" });
+    await call("foundry_task_next", { stream: "api" });
+    commitTask(a.cwd, "P1-02", "Task P1-02", { "src/api/b.txt": "b\n" });
+    await call("foundry_task_done", { stream: "api", id: "P1-02", log: "ok" });
+    writeFile(a.cwd, "src/api/stray.txt", "left over\n");
+    isError(await call("foundry_stream_finish", { stream: "api" }), /uncommitted changes in its worktree:\n\?\? src\/api\/stray\.txt/, "a dirty worktree refuses, listing the files");
+    ok(hasFile(a.cwd, "src/api/stray.txt"), "...and leaves it alone");
+    fs.rmSync(path.join(a.cwd, "src/api/stray.txt"));
+    eq((await call("foundry_stream_finish", { stream: "api" })).merged, true, "once clean it merges");
+  });
+}
+
+// run_finish refuses while a stream worktree exists.
+{
+  const repo = waveRepo({ tasks: WAVE_PLAN.slice(0, 6) });
+  await withServer(repo, async ({ call }) => {
+    await workStream(call, "api", API);
+    await workStream(call, "ui", UI);
+    writeFile(repo, "docs/HANDOFF.md", "# handoff\n");
+    isError(await call("foundry_run_finish"), /stream worktree\(s\) still exist \(api, ui\); merge each back with foundry_stream_finish/, "run_finish refuses with unmerged worktrees, naming them");
+    await call("foundry_stream_finish", { stream: "api" });
+    await call("foundry_stream_finish", { stream: "ui" });
+    const r = await call("foundry_run_finish");
+    ok(r.commit || r.branch, "run_finish succeeds once every stream is merged");
+  });
+}
+
+// A merge conflict (the partition said the streams were disjoint; the commits say otherwise) halts, recoverably.
+{
+  const repo = waveRepo();
+  await withServer(repo, async ({ call }) => {
+    const a = await call("foundry_run_start", { stream: "api" });
+    const u = await call("foundry_run_start", { stream: "ui" });
+    for (const [stream, cwd, first, second, marker] of [["api", a.cwd, "P1-01", "P1-02", "from api"], ["ui", u.cwd, "P1-03", "P1-04", "from ui"]]) {
+      await call("foundry_task_next", { stream });
+      commitTask(cwd, first, `Task ${first}`, { "shared.txt": `${marker}\n` });
+      await call("foundry_task_done", { stream, id: first, log: "ok" });
+      await call("foundry_task_next", { stream });
+      commitTask(cwd, second, `Task ${second}`, { [`${stream}-only.txt`]: "x\n" });
+      await call("foundry_task_done", { stream, id: second, log: "ok" });
+    }
+    const first = await call("foundry_stream_finish", { stream: "api" });
+    eq(first.merged, true, "the first stream merges cleanly");
+    const second = await call("foundry_stream_finish", { stream: "ui" });
+    eq(second.merged, false, "the second conflicts");
+    like(second.halted, /merging stream 'ui' .* conflicted in shared\.txt/, "the halt reason names the stream and the conflicting path");
+    like(second.halted, /git merge --no-ff .*--ui.*git worktree remove --force \.foundry\/worktrees\/ui.*clear 'halted'/, "and the manual steps");
+    eq(second.conflicts.join(","), "shared.txt", "the conflicting paths are returned");
+    eq(git(repo, ["status", "--porcelain", "--untracked-files=no"]), "", "the merge is aborted: the main checkout is clean");
+    ok(!hasFile(repo, ".git/MERGE_HEAD"), "no merge is left in progress");
+    ok(hasFile(u.cwd, "shared.txt"), "the stream's worktree is kept");
+    like(git(repo, ["branch", "--list", u.streamBranch]), /--ui/, "and so is its branch");
+    eq(readFile(repo, "shared.txt"), "from api\n", "the build branch still holds the first stream's version");
+    const n = await call("foundry_next");
+    eq(n.stage, "halt", "foundry_next now says halt");
+    like(n.reason, /conflicted/, "with the reason");
+    const fb = readFile(repo, ".foundry/feedback.jsonl").trim().split("\n").map((l) => JSON.parse(l));
+    eq(fb.filter((e) => e.category === "stream-merge").length, 1, "exactly one stream-merge feedback entry");
+    eq(fb[0].source, "auto", "written by the MCP");
+    eq(subject(repo), "chore: run halted (stream ui merge conflict)", "state and feedback are committed together");
+  });
+}
+
 finish();

@@ -210,10 +210,11 @@ on.
 
 **Arguments:** `{ stream? }`. With `stream`, only that stream's tasks in the
 current wave are considered, and the result also carries `stream`; a
-stream with nothing left returns `{ done: true, stream, … }` — the cue that
-the stream is ready to be merged back. Without `stream`, the call refuses while the next
+stream with nothing left returns `{ done: true, stream, … }` — the cue to call
+[`foundry_stream_finish`](#foundry_stream_finish). Without `stream`, the call refuses while the next
 open task belongs to a wave that runs in parallel, and while any stream
-worktree still exists (merge each finished stream back first).
+worktree still exists (merge each finished stream back with
+`foundry_stream_finish` first).
 
 **Does:** picks the first `[~]` task (a resume), else the first `[ ]`. Before
 handing it over, it checks the task's `**Depends on:**` list; if any dependency
@@ -393,6 +394,55 @@ uncommitted changes; `find` is empty, or matches zero or several times, or
 equals `replace`; `commands` names something that is not a configured
 `verify`/`extraVerify` command (the message lists the legal ones); or the
 config has no `verify` commands.
+
+---
+
+## `foundry_stream_finish`
+
+Finish one stream of a parallel wave: merge its branch back into the build
+branch and clean up. Called by a stream's implementer when
+`foundry_task_next({ stream })` reports `done`.
+
+**Arguments:** `{ stream }`.
+
+**Does:**
+
+1. Lands any pending `PROGRESS.md` / `state.json` / feedback changes in the
+   main checkout as `progress: sync before merging stream <s>`, so the merge
+   starts from a clean tracked tree.
+2. Runs `git merge --no-ff -m "merge stream <s> (wave <n>)"` of
+   `<build-branch>--<stream>` in the main checkout. Nobody else works there
+   during a wave, and the server handles one call at a time, so this cannot
+   race another stream.
+3. Removes the worktree (`git worktree remove --force`: `parallel.setup`
+   leaves ignored dependency directories behind, and steps above have
+   already refused on uncommitted tracked work) and deletes the stream
+   branch.
+
+A stream whose tasks were all blocked or skipped still finishes: the merge is
+a no-op (`mergeCommit: null`) and the worktree is cleaned up. Its blocked
+tasks go to review like any others.
+
+**On a merge conflict** — the partition check makes one unlikely, not
+impossible — Foundry runs `git merge --abort`, keeps the stream's branch and
+worktree, sets `halted` in `.foundry/state.json` with a reason naming the
+stream, the conflicting paths and the manual steps, auto-logs a
+`stream-merge` feedback entry, and commits both together as
+`chore: run halted (stream <s> merge conflict)`. This is the one stream
+failure that halts, because Foundry cannot guess a merge. It returns
+`{ stream, merged: false, halted, conflicts }` and `foundry_next` says `halt`.
+
+**Returns:** `{ stream, merged: true, mergeCommit, remainingStreams }` —
+`remainingStreams` names the wave's other streams that still have open tasks
+or an unmerged worktree.
+
+**Refuses when:** `stream` is not one of the current wave's streams (see
+[`foundry_run_start`](#stream-mode)); it has no worktree; it still has open
+tasks (they are named); its worktree has uncommitted changes (they are
+listed); the main checkout is not on the build branch or has uncommitted
+tracked changes; or its branch is missing.
+
+`foundry_run_finish` refuses while any stream worktree exists, naming each.
 
 ---
 

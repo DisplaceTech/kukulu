@@ -262,6 +262,27 @@ did before.
   *runs* does not help because the environment outlives the command. Such a
   command only ever runs from the main checkout, and any task that
   triggers one is kept out of waves.
+- **Worktrees, and where each file lives.** A stream runs in its own git
+  worktree, `.foundry/worktrees/<stream>`, on a branch
+  `<build-branch>--<stream>` cut from the build branch (`foundry_run_start`
+  with `stream`, which also runs `parallel.setup` in the fresh checkout).
+  Task *code* commits happen there. `PROGRESS.md`, `PLAN.md` and
+  `state.json` live only in the main checkout: every stream-scoped call
+  reads and writes them there and commits them on the build branch, and a
+  stream never edits them. Because a stream branch never touches those
+  files, merging it back cannot conflict on bookkeeping.
+- **Merging back.** `foundry_stream_finish` merges each stream when it
+  finishes, not at the end of the wave, and removes its worktree and
+  branch. A merge conflict is the one stream failure that halts: Foundry
+  aborts the merge, keeps the stream, and records why. Serial work is
+  refused while any stream worktree still exists, so nothing ever runs on a
+  main checkout that lacks a finished stream's code.
+- **Why one shared `PROGRESS.md` is safe.** Every tool handler is
+  synchronous (`spawnSync`, never `await`), so the server handles one call at
+  a time whichever stream sent it. Tool calls therefore never interleave,
+  and that is what lets concurrent implementers share a single
+  `PROGRESS.md` and `state.json`. Keep it that way: an `await` in a tool
+  path would end this guarantee.
 
 ## Blocked tasks and skipped dependents
 
@@ -343,6 +364,7 @@ fix task is a task, and it goes through the same test-first loop as any other.
 | `.foundry/state.json` | yes | `round`, `implemented`, `reviewed`, `verdict`, `summarized`, `halted`, `preexistingUntracked`, `policies`, `signing`, `rounds` |
 | `.foundry/feedback.jsonl` | yes | one JSON line per pipeline-friction entry — `at`, `stage`, `round`, `category`, `message`, `source`; see [mcp-tools.md](./mcp-tools.md#foundry_feedback_log) |
 | `.foundry/implement.lock` | no (gitignored) | JSON `{ count, armedAt, round }` — the guard's re-block counter (a legacy bare number still reads back correctly) |
+| `.foundry/worktrees/<stream>/` | no (`.gitignore`) | a parallel stream's git worktree, present from `foundry_run_start({ stream })` until `foundry_stream_finish` merges it back; `state.streams[<s>]` records its branch and the untracked paths `parallel.setup` left behind, and `state.serialWaves` the waves degraded to serial |
 | `.foundry/mutation.json` | no (`.git/info/exclude`) | present only while `foundry_mutate` has a file mutated: `{ file, at, original }`, so a crash can be repaired by the next call |
 | `docs/PROGRESS.md` | yes | task checkboxes and the per-task log |
 | `docs/foundry.json` | yes | `verify`, `extraVerify`, `build`, `baseBranch`, `branchPrefix`, `maxRounds`, `commandTimeoutMs`, `roles`, `permissionMode` |

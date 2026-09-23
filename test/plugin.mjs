@@ -152,7 +152,7 @@ const goFlight = read("skills/go-flight/SKILL.md");
 const fmGo = frontmatter(goFlight);
 const allowed = String(fmGo["allowed-tools"]).split(",").map((s) => s.trim());
 const toolNames = Array.from(serverSrc.matchAll(/name: "(foundry_[a-z_]+)"/g), (m) => m[1]);
-eq(toolNames.length, 15, "the server defines fifteen tools");
+eq(toolNames.length, 16, "the server defines sixteen tools");
 
 // Every stage agent's own tool set is explicit (F-16): no agent is left to
 // discover by trial and error what it is allowed to call.
