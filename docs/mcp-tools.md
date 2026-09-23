@@ -121,7 +121,9 @@ The full decision order is in [architecture.md](./architecture.md#the-stage-mach
 Begin or resume an implementation run. Idempotent: calling it on a run already
 in progress returns `{ alreadyStarted: true }` and changes nothing.
 
-**Arguments:** none.
+**Arguments:** `{ stream? }`. With `stream`, the call additionally sets up
+that stream of the current parallel wave — see
+[Stream mode](#stream-mode) below.
 
 **Does:**
 
@@ -164,6 +166,41 @@ untracked one never blocks a start — see above); or the current branch is
 neither the base branch nor a
 `branchPrefix*` branch.
 
+### Stream mode
+
+`foundry_run_start({ stream })` first does the ordinary start above (a no-op
+when the run is already going), then:
+
+1. Refuses unless `stream` is one of the current wave's streams with open
+   tasks (or already has a worktree). The current wave is the one holding the
+   first open task, when that task is streamed. The refusal lists the legal
+   streams.
+2. Creates `.foundry/worktrees/<stream>` on a new branch
+   `<build-branch>--<stream>` cut from the build branch's HEAD, and runs
+   `parallel.setup` in it — a fresh checkout has none of the installed
+   dependencies `verify` needs. The worktree lives inside the project, so the
+   implementer's ordinary edit permission covers it.
+3. Records, in `state.streams[<stream>]`, the worktree's untracked paths as
+   they stand after setup, so dependency directories setup leaves behind are
+   never mistaken for a task's uncommitted changes.
+4. Returns the ordinary result plus `{ stream, wave, cwd, streamBranch,
+   created, setup }`. `cwd` is the absolute worktree path: all of the
+   stream's reading, editing and committing happens there. `branch` remains
+   the *build* branch. Calling it again returns the same `cwd` with
+   `created: false` and does not re-run setup.
+
+If a setup command fails, the worktree (and a branch this call created) is
+removed, the wave is recorded in `state.serialWaves` with a `stream-setup`
+feedback entry, both committed as `chore: wave <n> runs serially`, and the
+call refuses saying so. A broken setup degrades the wave to serial; it never
+halts the flight.
+
+Every other stream-scoped tool works the same way: `PROGRESS.md`,
+`PLAN.md` and `state.json` are read and written only in the main checkout,
+and the progress commits land on the build branch, never a stream branch.
+Stream implementers never edit `docs/PROGRESS.md`, `docs/HANDOFF.md` or
+anything under `.foundry/`.
+
 ---
 
 ## `foundry_task_next`
@@ -171,7 +208,12 @@ neither the base branch nor a
 Select the next task. This is the only legitimate way to choose what to work
 on.
 
-**Arguments:** none.
+**Arguments:** `{ stream? }`. With `stream`, only that stream's tasks in the
+current wave are considered, and the result also carries `stream`; a
+stream with nothing left returns `{ done: true, stream, … }` — the cue that
+the stream is ready to be merged back. Without `stream`, the call refuses while the next
+open task belongs to a wave that runs in parallel, and while any stream
+worktree still exists (merge each finished stream back first).
 
 **Does:** picks the first `[~]` task (a resume), else the first `[ ]`. Before
 handing it over, it checks the task's `**Depends on:**` list; if any dependency
@@ -205,9 +247,13 @@ task is marked `[~]` on disk before it is returned.
 
 Mark a task complete and write its log entry.
 
-**Arguments:** `{ id, log }` — `log` is the entry body, kept under ~15 lines:
-tests added, interpretation choices, config keys introduced, anything the
-reviewer or a later task must know.
+**Arguments:** `{ id, log, stream? }` — `log` is the entry body, kept under
+~15 lines: tests added, interpretation choices, config keys introduced,
+anything the reviewer or a later task must know. With `stream`, the HEAD
+commit and clean-tree checks run in that stream's worktree, and the task must
+belong to the stream; the progress commit still goes on the build branch.
+A stream implementer has no `HANDOFF.md`, so its interpretation choices
+belong here.
 
 **Does:** marks the task `[x]`, appends `### <ID> — <sha>` plus the log body
 under `## Log`, commits `PROGRESS.md` as `progress: <ID> done`, and resets
@@ -228,8 +274,10 @@ when a model says so.
 
 Give up on a task without ending the run.
 
-**Arguments:** `{ id, reason }` — the reason should read
-`what you tried / what fails / what you think the fix is`.
+**Arguments:** `{ id, reason, stream? }` — the reason should read
+`what you tried / what fails / what you think the fix is`. With `stream`, the
+reset and clean happen in that stream's worktree only, sparing the main
+checkout, which holds every other stream's uncommitted bookkeeping.
 
 **Does:** `git reset --hard HEAD` and `git clean -fd`, excluding every path
 recorded as `preexistingUntracked` (the lock survives too, being
@@ -250,8 +298,12 @@ Run the project's verification commands through the server rather than through
 the model's Bash tool — which is what keeps an unattended run from stopping at
 a permission prompt.
 
-**Arguments:** `{ files?: string[] }` — the task's touched files. A
-whitespace- or comma-delimited string is accepted too.
+**Arguments:** `{ files?: string[], stream? }` — the task's touched files. A
+whitespace- or comma-delimited string is accepted too. With `stream`, every
+command and the constraint scan run in that stream's worktree, and the call
+refuses if the selected commands include an `exclusive` one (a command that
+only ever runs from the main checkout: validation keeps the tasks that
+trigger one out of waves, so reaching this is a bug to report).
 
 **Does:** first, for every rule in `docs/foundry.json`'s `constraints`,
 self-tests it against its own `shouldMatch`/`shouldNotMatch` fixtures and —

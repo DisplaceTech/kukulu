@@ -30,6 +30,7 @@ const P = {
   lock: path.join(ROOT, ".foundry", "implement.lock"),
   feedback: path.join(ROOT, ".foundry", "feedback.jsonl"),
   mutation: path.join(ROOT, ".foundry", "mutation.json"),
+  worktrees: path.join(ROOT, ".foundry", "worktrees"),
   gitignore: path.join(ROOT, ".gitignore"),
   agentsDir: path.join(ROOT, ".claude", "agents"),
   settings: path.join(ROOT, ".claude", "settings.json"),
@@ -80,8 +81,8 @@ function ensureLineInFile(file, line) {
   return true;
 }
 
-function git(args, { allowFail = false } = {}) {
-  const r = spawnSync("git", args, { cwd: ROOT, encoding: "utf8" });
+function git(args, { allowFail = false, cwd = ROOT } = {}) {
+  const r = spawnSync("git", args, { cwd, encoding: "utf8" });
   if (r.status !== 0 && !allowFail) {
     throw new ToolError(`git ${args.join(" ")} failed: ${(r.stderr || r.stdout || "").trim()}`);
   }
@@ -106,8 +107,8 @@ function gitCommitIfChanged(paths, message) {
  * directory), exactly as `git status --porcelain` prints it — the same
  * shape `porcelainExcluding` matches against.
  */
-function untrackedPaths() {
-  return git(["status", "--porcelain", "--untracked-files=all"])
+function untrackedPaths(cwd = ROOT) {
+  return git(["status", "--porcelain", "--untracked-files=all"], { cwd })
     .out.split("\n")
     .filter((l) => l.startsWith("?? "))
     .map((l) => l.slice(3))
@@ -126,9 +127,9 @@ function gitCleanExcludePattern(literalPath) {
  * before it started is invisible to every check that follows: the run had
  * no hand in it and no reason to touch it (F-09).
  */
-function porcelainExcludingPreexisting(ignore) {
+function porcelainExcludingPreexisting(ignore, cwd = ROOT) {
   const set = new Set(ignore || []);
-  return git(["status", "--porcelain", "--untracked-files=all"])
+  return git(["status", "--porcelain", "--untracked-files=all"], { cwd })
     .out.split("\n")
     .filter(Boolean)
     .filter((l) => !(l.startsWith("?? ") && set.has(l.slice(3))));
@@ -947,6 +948,97 @@ function computeWaves(pr, cc) {
   return groups.map((tasks, i) => validateWave(i + 1, tasks, planLines, cc));
 }
 
+// ---------------------------------------------------------------- streams at run time
+//
+// A stream runs in its own git worktree, `.foundry/worktrees/<stream>`, on a
+// branch `<build-branch>--<stream>` cut from the build branch. Task *code*
+// commits happen there. PROGRESS.md, PLAN.md and state.json live only in the
+// main checkout: every stream-scoped call reads and writes them in ROOT and
+// commits them on the build branch, and a stream branch never touches them,
+// so merging a stream back cannot conflict on bookkeeping.
+
+const STREAM_SLUG = /^[a-z][a-z0-9-]{0,23}$/;
+const streamDir = (stream) => path.join(P.worktrees, stream);
+const serialWavesOf = (st) => st.serialWaves || [];
+const isOpenTask = (t) => t.state === " " || t.state === "~";
+
+/** Stream names that currently have a worktree on disk. */
+function streamWorktrees() {
+  return exists(P.worktrees) ? fs.readdirSync(P.worktrees).filter((n) => STREAM_SLUG.test(n) && exists(streamDir(n))).sort() : [];
+}
+
+/**
+ * The wave stream-scoped calls apply to: the wave holding the first open
+ * task, when that task is streamed; otherwise a wave with a stream still in
+ * flight (every task done, worktree not yet merged back), so a stream can
+ * always be finished; otherwise null.
+ */
+function currentWave(pr, waves) {
+  const first = pr.tasks.find(isOpenTask);
+  if (first && first.stream) return waves.find((w) => w.taskIds.includes(first.id)) || null;
+  const inFlight = new Set(streamWorktrees());
+  return waves.find((w) => Object.keys(w.streams).some((n) => inFlight.has(n))) || null;
+}
+
+/** Would this wave be handed out as concurrent streams? Valid, `maxStreams` above 1, and not already degraded to serial. */
+const waveRunsParallel = (wave, cc, st) => wave.valid && cc.parallel.maxStreams > 1 && !serialWavesOf(st).some((x) => x.wave === wave.index);
+
+/**
+ * Streams of `wave` that stream-scoped calls may currently name: those with
+ * open tasks while the wave runs parallel, plus any that already have a
+ * worktree — a stream already in flight can always finish, even if its wave
+ * was degraded to serial underneath it.
+ */
+function availableStreams(wave, pr, cc, st) {
+  const byId = new Map(pr.tasks.map((t) => [t.id, t]));
+  return Object.keys(wave.streams).filter(
+    (name) => (waveRunsParallel(wave, cc, st) && wave.streams[name].some((id) => isOpenTask(byId.get(id)))) || exists(streamDir(name)),
+  );
+}
+
+/** Validate a `stream` argument against the current wave; returns `{ stream, wave, pr, cc, st }` or throws. */
+function streamScope(stream) {
+  if (typeof stream !== "string" || !STREAM_SLUG.test(stream)) {
+    throw new ToolError(`stream must be a lowercase slug (a-z, 0-9 and -, starting with a letter), not ${JSON.stringify(stream)}`);
+  }
+  const pr = parseProgress();
+  if (!pr.tasks.some((t) => t.stream)) throw new ToolError("this plan has no parallel streams; omit the stream argument");
+  const cc = cfg();
+  const st = loadState();
+  const wave = currentWave(pr, computeWaves(pr, cc));
+  if (!wave) {
+    throw new ToolError("no parallel wave is current: the next open task is serial, or nothing is open. Stream-scoped calls only apply while a wave's streams are running; call foundry_next");
+  }
+  const avail = availableStreams(wave, pr, cc, st);
+  if (!avail.includes(stream)) {
+    throw new ToolError(`stream '${stream}' is not available in the current wave (wave ${wave.index}); legal streams: ${avail.join(", ") || "none"}`);
+  }
+  return { stream, wave, pr, cc, st };
+}
+
+/**
+ * A serial (stream-less) call for a task whose wave runs parallel would work
+ * on the main checkout behind the streams' backs. Refuse it and say what to
+ * do instead. A plan with no stream tags never reaches the wave computation.
+ */
+function refuseSerialInParallelWave(pr, task) {
+  if (task && task.stream) {
+    const cc = cfg();
+    const wave = computeWaves(pr, cc).find((w) => w.taskIds.includes(task.id));
+    if (wave && waveRunsParallel(wave, cc, loadState())) {
+      throw new ToolError(
+        `task ${task.id} belongs to parallel wave ${wave.index} (streams: ${Object.keys(wave.streams).join(", ")}); call foundry_next and use the streams it returns — foundry_run_start({ stream }), then foundry_task_next({ stream }) — instead of a serial call`,
+      );
+    }
+  }
+  // Serial work would run on a main checkout that lacks a finished stream's
+  // code until that stream is merged back.
+  const pending = streamWorktrees();
+  if (pending.length) {
+    throw new ToolError(`stream worktree(s) still exist (${pending.join(", ")}); merge each back with foundry_stream_finish before any serial work — call foundry_next`);
+  }
+}
+
 function reviewRoundCount() {
   if (!exists(P.plan)) return 0;
   return (read(P.plan).match(/^## Review fixes \(round \d+\)/gm) || []).length;
@@ -1240,7 +1332,7 @@ function probeSigning(signingPolicy) {
   return `off (probe failed: ${errLine})`;
 }
 
-function runStart() {
+function startRun() {
   for (const [k, p] of Object.entries({ spec: P.spec, plan: P.plan, progress: P.progress, config: P.config })) {
     if (!exists(p)) throw new ToolError(`${rel(p)} is missing (${k}); run the plan stage first`);
   }
@@ -1285,6 +1377,9 @@ function runStart() {
 
   // .gitignore the lock, arm it, stamp PROGRESS, commit.
   ensureLineInFile(P.gitignore, ".foundry/implement.lock");
+  // Only a plan that declares streams ever creates worktrees, so only such a
+  // plan gets the extra line (a plan without streams stays byte-identical).
+  if (pr.tasks.some((t) => t.stream)) ensureLineInFile(P.gitignore, ".foundry/worktrees/");
   fs.mkdirSync(P.stateDir, { recursive: true });
   write(P.lock, `${JSON.stringify({ count: 0, armedAt: new Date().toISOString(), round: st.round, cap: c.guardCap })}\n`);
   if (!pr.branch || pr.branch.startsWith("(")) setHeader(pr, "Branch", branch);
@@ -1308,15 +1403,85 @@ function runStart() {
   return { alreadyStarted: false, branch, commit: sha, counts: counts(pr.tasks), round: st.round, policies: st.policies, signing: st.signing, basePush };
 }
 
-function taskNext() {
+/**
+ * Create `.foundry/worktrees/<stream>` on `<build>--<stream>` and run
+ * `parallel.setup` in it (a fresh checkout has none of the installed
+ * dependencies verify needs). Returns `{ cwd, streamBranch, created, setup }`;
+ * on a setup failure the worktree (and a branch this call created) is removed
+ * again and `{ failed: <runShell result> }` is returned instead.
+ */
+function ensureStreamWorktree(stream, buildBranch, cc) {
+  const dir = streamDir(stream);
+  const streamBranch = `${buildBranch}--${stream}`;
+  if (exists(dir)) return { cwd: dir, streamBranch, created: false, setup: [] };
+  git(["worktree", "prune"], { allowFail: true });
+  fs.mkdirSync(P.worktrees, { recursive: true });
+  const branchExisted = git(["rev-parse", "--verify", "--quiet", `refs/heads/${streamBranch}`], { allowFail: true }).ok;
+  if (branchExisted) git(["worktree", "add", dir, streamBranch]);
+  else git(["worktree", "add", "-b", streamBranch, dir, "HEAD"]);
+  const setup = [];
+  for (const c of cc.parallel.setup) {
+    const r = runShell(c.cmd, c.timeoutMs, dir);
+    setup.push(r);
+    if (!r.ok) {
+      git(["worktree", "remove", "--force", dir], { allowFail: true });
+      if (!branchExisted) git(["branch", "-D", streamBranch], { allowFail: true });
+      return { failed: r, setup };
+    }
+  }
+  return { cwd: dir, streamBranch, created: true, setup };
+}
+
+function runStart({ stream } = {}) {
+  const res = startRun();
+  if (stream === undefined) return res;
+
+  const { wave, cc } = streamScope(stream);
+  const created = ensureStreamWorktree(stream, res.branch, cc);
+  if (created.failed) {
+    // A broken setup degrades the wave to serial — never a halt — and is
+    // recorded once, in the same commit as the state change.
+    const st = loadState();
+    const reason = `setup command ${JSON.stringify(created.failed.command)} failed for stream ${stream}: ${(created.failed.stderrTail || created.failed.stdoutTail || `exit ${created.failed.exitCode}`).split("\n").pop()}`;
+    st.serialWaves = [...serialWavesOf(st), { wave: wave.index, category: "stream-setup", reason }];
+    saveState(st);
+    if (cc.policies.feedback) appendFeedback("implement", `Wave ${wave.index} runs serially: ${reason}`, "stream-setup", "auto");
+    gitCommitIfChanged([P.state, P.feedback], `chore: wave ${wave.index} runs serially`);
+    throw new ToolError(`${reason}. Wave ${wave.index} now runs serially; stop here and the controller's next foundry_next will hand it out that way.`);
+  }
+
+  if (created.created) {
+    // A stream worktree's own untracked files (installed dependencies that
+    // are not gitignored) are not the task's business, exactly like the
+    // files that were already untracked when a serial run started (F-09).
+    const st = loadState();
+    st.streams = { ...(st.streams || {}), [stream]: { branch: created.streamBranch, preexistingUntracked: untrackedPaths(created.cwd) } };
+    saveState(st);
+    gitCommitIfChanged([P.state], `chore: stream ${stream} started (wave ${wave.index})`);
+    // Runs that began before this plan's streams (or before 0.4.0) may lack
+    // the .gitignore line; exclude per clone rather than dirty the tree.
+    const ignored = exists(P.gitignore) && read(P.gitignore).split("\n").includes(".foundry/worktrees/");
+    if (!ignored) ensureLineInFile(gitPath("info/exclude"), ".foundry/worktrees/");
+  }
+  return { ...res, stream, wave: wave.index, cwd: created.cwd, streamBranch: created.streamBranch, created: created.created, setup: created.setup };
+}
+
+function taskNext({ stream } = {}) {
   const pr = parseProgress();
+  let inScope = () => true;
+  if (stream !== undefined) {
+    const scope = streamScope(stream);
+    inScope = (t) => t.stream === stream && scope.wave.taskIds.includes(t.id);
+  } else if (pr.tasks.some((t) => t.stream)) {
+    refuseSerialInParallelWave(pr, pr.tasks.find((t) => t.state === "~") || pr.tasks.find((t) => t.state === " "));
+  }
   const skipped = [];
   for (;;) {
-    const pick = pr.tasks.find((t) => t.state === "~") || pr.tasks.find((t) => t.state === " ");
+    const pick = pr.tasks.find((t) => inScope(t) && t.state === "~") || pr.tasks.find((t) => inScope(t) && t.state === " ");
     if (!pick) {
       writeProgress(pr);
       if (skipped.length) gitCommitIfChanged([P.progress], `progress: skip ${skipped.map((s) => s.id).join(", ")}`);
-      return { done: true, counts: counts(pr.tasks), skipped };
+      return { done: true, counts: counts(pr.tasks), skipped, ...(stream !== undefined ? { stream } : {}) };
     }
     const task = planTask(pick.id);
     const bad = task.depends.find((d) => {
@@ -1345,59 +1510,81 @@ function taskNext() {
       skipped,
       counts: counts(pr.tasks),
       resumed,
+      ...(stream !== undefined ? { stream } : {}),
     };
   }
 }
 
-function taskDone({ id, log }) {
+/**
+ * The worktree a stream-scoped task call works in, plus the untracked files
+ * to ignore there. Refuses a task that is not the stream's own, or a stream
+ * that has no worktree yet.
+ */
+function streamTaskContext(stream, pr, task) {
+  const scope = streamScope(stream);
+  if (task.stream !== stream) throw new ToolError(`task ${task.id} belongs to stream '${task.stream ?? "none"}', not '${stream}'`);
+  const cwd = streamDir(stream);
+  if (!exists(cwd)) throw new ToolError(`stream '${stream}' has no worktree; call foundry_run_start({ stream: "${stream}" }) first`);
+  return { cwd, ignore: (scope.st.streams || {})[stream]?.preexistingUntracked || [] };
+}
+
+function taskDone({ stream, id, log }) {
   if (!id || !log) throw new ToolError("id and log are required");
   const pr = parseProgress();
   const t = pr.tasks.find((x) => x.id === id);
   if (!t) throw new ToolError(`task ${id} not in docs/PROGRESS.md`);
   if (t.state !== "~") throw new ToolError(`task ${id} is '${STATE_NAMES[t.state]}', not in progress; call foundry_task_next first`);
-  const subject = git(["log", "-1", "--format=%s"]).out;
+  let cwd = ROOT;
+  let ignore = loadState().preexistingUntracked;
+  if (stream !== undefined) ({ cwd, ignore } = streamTaskContext(stream, pr, t));
+  else refuseSerialInParallelWave(pr, t);
+  const subject = git(["log", "-1", "--format=%s"], { cwd }).out;
   if (!subject.startsWith(`${id}:`)) {
     throw new ToolError(`HEAD commit '${subject}' is not this task's commit; commit the task as '${id}: <title>' before calling foundry_task_done`);
   }
-  const st = loadState();
-  const dirtyOutsideProgress = porcelainExcludingPreexisting(st.preexistingUntracked).filter((l) => !l.endsWith("docs/PROGRESS.md"));
+  const dirtyOutsideProgress = porcelainExcludingPreexisting(ignore, cwd).filter((l) => !l.endsWith("docs/PROGRESS.md"));
   if (dirtyOutsideProgress.length) {
     throw new ToolError(
       `uncommitted changes remain after the task commit:\n${dirtyOutsideProgress.join("\n")}\nCommit them as part of ${id} or \`git checkout --\`/\`git clean\` them.`,
     );
   }
-  const sha = git(["rev-parse", "--short", "HEAD"]).out;
+  const sha = git(["rev-parse", "--short", "HEAD"], { cwd }).out;
   setTaskState(pr, id, "x");
   appendLog(pr, id, sha, log);
   writeProgress(pr);
   const psha = gitCommitIfChanged([P.progress], `progress: ${id} done`);
   resetLockCounter();
-  return { id, taskCommit: sha, progressCommit: psha, counts: counts(pr.tasks), guardReset: true };
+  return { id, taskCommit: sha, progressCommit: psha, counts: counts(pr.tasks), guardReset: true, ...(stream !== undefined ? { stream } : {}) };
 }
 
-function taskBlock({ id, reason }) {
+function taskBlock({ stream, id, reason }) {
   if (!id || !reason) throw new ToolError("id and reason are required");
   let pr = parseProgress();
   const t = pr.tasks.find((x) => x.id === id);
   if (!t) throw new ToolError(`task ${id} not in docs/PROGRESS.md`);
-  const st = loadState();
+  let cwd = ROOT;
+  let ignore = loadState().preexistingUntracked;
+  if (stream !== undefined) ({ cwd, ignore } = streamTaskContext(stream, pr, t));
+  else refuseSerialInParallelWave(pr, t);
   // Discard whatever the attempt left behind; the lock is gitignored so
   // clean leaves it alone, and -e spares every path that was already
   // untracked before this run started (F-09) — `git clean` would otherwise
   // delete it outright, which is worse than merely being tempted to move it.
-  git(["reset", "-q", "--hard", "HEAD"]);
-  git(["clean", "-qfd", ...(st.preexistingUntracked || []).flatMap((p) => ["-e", gitCleanExcludePattern(p)])]);
+  // For a stream this happens in the stream's worktree only: the main
+  // checkout holds every other stream's uncommitted bookkeeping.
+  git(["reset", "-q", "--hard", "HEAD"], { cwd });
+  git(["clean", "-qfd", ...(ignore || []).flatMap((p) => ["-e", gitCleanExcludePattern(p)])], { cwd });
   pr = parseProgress();
   setTaskState(pr, id, "!");
   appendLog(pr, id, "blocked", `BLOCKED: ${reason}`);
   writeProgress(pr);
   const psha = gitCommitIfChanged([P.progress], `progress: ${id} blocked`);
   resetLockCounter();
-  return { id, progressCommit: psha, counts: counts(pr.tasks) };
+  return { id, progressCommit: psha, counts: counts(pr.tasks), ...(stream !== undefined ? { stream } : {}) };
 }
 
-function runShell(cmd, timeoutMs) {
-  const r = spawnSync(cmd, { cwd: ROOT, shell: true, encoding: "utf8", timeout: timeoutMs, maxBuffer: 64 * 1024 * 1024 });
+function runShell(cmd, timeoutMs, cwd = ROOT) {
+  const r = spawnSync(cmd, { cwd, shell: true, encoding: "utf8", timeout: timeoutMs, maxBuffer: 64 * 1024 * 1024 });
   const tail = (s, n = 60) => (s || "").replace(/\s+$/, "").split("\n").slice(-n).join("\n");
   return {
     command: cmd,
@@ -1421,7 +1608,7 @@ const pathUnder = (file, p) => file === p || file.startsWith(p.endsWith("/") ? p
  * `exclude` (`git ls-files`, so untracked and ignored files are never
  * scanned), line by line. Line-based only; no multi-line patterns.
  */
-function checkConstraints(constraints) {
+function checkConstraints(constraints, cwd = ROOT) {
   const testLine = (c, line) => new RegExp(c.pattern, c.flags || "").test(line);
   const results = constraints.map((c) => {
     for (const line of c.shouldMatch) {
@@ -1430,13 +1617,13 @@ function checkConstraints(constraints) {
     for (const line of c.shouldNotMatch) {
       if (testLine(c, line)) return { id: c.id, ok: false, fixture: `shouldNotMatch ${JSON.stringify(line)} matched`, hits: [] };
     }
-    const listed = git(["ls-files", "--", ...c.paths], { allowFail: true });
+    const listed = git(["ls-files", "--", ...c.paths], { allowFail: true, cwd });
     const files = listed.ok ? listed.out.split("\n").filter(Boolean) : [];
     const excluded = c.exclude || [];
     const hits = [];
     for (const file of files) {
       if (excluded.some((ex) => pathUnder(file, ex))) continue;
-      const full = path.join(ROOT, file);
+      const full = path.join(cwd, file);
       if (!exists(full)) continue; // e.g. a submodule gitlink git ls-files can list but fs cannot read
       read(full)
         .split("\n")
@@ -1463,17 +1650,33 @@ function verifyCommands(cc, touched) {
   return cmds;
 }
 
-function verify({ files = [] } = {}) {
+function verify({ files = [], stream } = {}) {
   const recovered = recoverMutation();
   const c = loadConfig();
   if (!c) throw new ToolError("docs/foundry.json is missing; the plan stage must write it");
   const cc = cfg();
   if (!cc.verify.length) throw new ToolError("docs/foundry.json has no 'verify' commands");
+  let cwd = ROOT;
+  if (stream !== undefined) {
+    streamScope(stream);
+    cwd = streamDir(stream);
+    if (!exists(cwd)) throw new ToolError(`stream '${stream}' has no worktree; call foundry_run_start({ stream: "${stream}" }) first`);
+  }
+  const touched = Array.isArray(files) ? files : String(files).split(/[\s,]+/).filter(Boolean);
+  const cmds = verifyCommands(cc, touched);
+  if (stream !== undefined) {
+    // An exclusive command is keyed to the directory or port it runs from and
+    // only ever runs from the main checkout. Validation keeps its tasks out of
+    // waves, so reaching this is a bug to surface, not to paper over.
+    const exclusive = cmds.find((x) => x.exclusive);
+    if (exclusive) {
+      throw new ToolError(`${JSON.stringify(exclusive.cmd)} is exclusive: it only runs from the main checkout, never a stream worktree. A task that triggers it should not have been in a wave; report this as pipeline friction and call foundry_verify without stream from the main checkout.`);
+    }
+  }
   // Constraints are whole-repo, always — `files` narrows which shell
   // commands' extras run, never what a constraint scans.
-  const constraints = checkConstraints(cc.constraints);
-  const touched = Array.isArray(files) ? files : String(files).split(/[\s,]+/).filter(Boolean);
-  const results = verifyCommands(cc, touched).map((c2) => runShell(c2.cmd, c2.timeoutMs));
+  const constraints = checkConstraints(cc.constraints, cwd);
+  const results = cmds.map((c2) => runShell(c2.cmd, c2.timeoutMs, cwd));
   return { ok: constraints.ok && results.every((r) => r.ok), constraints, results, ...(recovered ? { recoveredMutation: recovered } : {}) };
 }
 
@@ -1825,11 +2028,11 @@ const S = (props, required = []) => ({
 const TOOLS = [
   { name: "foundry_status", description: "Everything the pipeline knows from disk: which docs exist, task counts by state, branch/base/head, lock, round, review verdict. Read-only.", inputSchema: S({}), fn: status },
   { name: "foundry_next", description: "Deterministic stage selection: returns { stage, agent, agentFallback, fallbackAgent, restartRequired, model, agentModel, agentModelExact, round, reason, prompt }. stage is plan | implement | review | summarize | done | halt. agentModel is the value to pass as the Agent tool's model when agentFallback is true (an alias, or null to pass none); agentModelExact is false when a full claude-* id was mapped to its family alias. restartRequired is true only when the routed model cannot be reached without relaunching the session. Read-only.", inputSchema: S({}), fn: next },
-  { name: "foundry_run_start", description: "Begin (or resume) an implementation run: create/reuse the build branch, arm the implement guard lock, stamp Branch/Started in PROGRESS.md, commit. Idempotent.", inputSchema: S({}), fn: runStart },
-  { name: "foundry_task_next", description: "Select the next task (first [~], else first [ ]), auto-skip tasks whose dependencies are blocked, mark it [~], and return its PLAN.md text plus dependency log entries. Returns { done: true } when none remain.", inputSchema: S({}), fn: taskNext },
-  { name: "foundry_task_done", description: "Mark a task [x] and append its log entry stamped with HEAD's sha. Requires HEAD's commit subject to start with '<id>:' and a clean tree. Commits PROGRESS.md.", inputSchema: S({ id: { type: "string" }, log: { type: "string", description: "Log entry body, under 15 lines" } }, ["id", "log"]), fn: taskDone },
-  { name: "foundry_task_block", description: "Give up on a task: hard-reset uncommitted changes, mark it [!], log BLOCKED: <reason>, commit PROGRESS.md.", inputSchema: S({ id: { type: "string" }, reason: { type: "string", description: "what you tried / what fails / what you think the fix is" } }, ["id", "reason"]), fn: taskBlock },
-  { name: "foundry_verify", description: "Self-tests and runs every docs/foundry.json constraint against the whole tracked repo, then runs the verify commands plus extraVerify commands for any path prefix the given files fall under. Returns constraint results and per-command exit status and output tails.", inputSchema: S({ files: { type: "array", items: { type: "string" }, description: "Files touched by the task (optional); narrows extraVerify only, never the constraint scan" } }), fn: verify },
+  { name: "foundry_run_start", description: "Begin (or resume) an implementation run: create/reuse the build branch, arm the implement guard lock, stamp Branch/Started in PROGRESS.md, commit. Idempotent. With stream, also create (or resume) that stream's git worktree for a parallel wave, run parallel.setup in it, and return its cwd: do all of that stream's work inside cwd.", inputSchema: S({ stream: { type: "string", description: "a stream of the current parallel wave, when foundry_next handed you one" } }), fn: runStart },
+  { name: "foundry_task_next", description: "Select the next task (first [~], else first [ ]), auto-skip tasks whose dependencies are blocked, mark it [~], and return its PLAN.md text plus dependency log entries. Returns { done: true } when none remain.", inputSchema: S({ stream: { type: "string", description: "restrict to this stream's tasks (parallel waves only)" } }), fn: taskNext },
+  { name: "foundry_task_done", description: "Mark a task [x] and append its log entry stamped with HEAD's sha. Requires HEAD's commit subject to start with '<id>:' and a clean tree. Commits PROGRESS.md.", inputSchema: S({ stream: { type: "string", description: "the stream this task belongs to, when working in a parallel wave" }, id: { type: "string" }, log: { type: "string", description: "Log entry body, under 15 lines" } }, ["id", "log"]), fn: taskDone },
+  { name: "foundry_task_block", description: "Give up on a task: hard-reset uncommitted changes, mark it [!], log BLOCKED: <reason>, commit PROGRESS.md.", inputSchema: S({ stream: { type: "string", description: "the stream this task belongs to, when working in a parallel wave" }, id: { type: "string" }, reason: { type: "string", description: "what you tried / what fails / what you think the fix is" } }, ["id", "reason"]), fn: taskBlock },
+  { name: "foundry_verify", description: "Self-tests and runs every docs/foundry.json constraint against the whole tracked repo, then runs the verify commands plus extraVerify commands for any path prefix the given files fall under. Returns constraint results and per-command exit status and output tails.", inputSchema: S({ files: { type: "array", items: { type: "string" }, description: "Files touched by the task (optional); narrows extraVerify only, never the constraint scan" }, stream: { type: "string", description: "run in this stream's worktree (parallel waves only); refuses if an exclusive command would run" } }), fn: verify },
   { name: "foundry_run_finish", description: "End an implementation run: requires zero open tasks and docs/HANDOFF.md; commits it, pushes and opens a draft PR unless policies say otherwise, disarms the lock, records the round as implemented.", inputSchema: S({}), fn: runFinish },
   {
     name: "foundry_run_halt",
