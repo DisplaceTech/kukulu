@@ -1333,8 +1333,12 @@ function recoverMutation() {
   const { rel: relPath } = projectFile(m.file);
   git(["checkout", "-q", "HEAD", "--", relPath]);
   fs.rmSync(P.mutation, { force: true });
+  // Commit the entry on its own, like foundry_feedback_log: recovery can run
+  // inside foundry_verify mid-task, where an uncommitted feedback line would
+  // make the implementer's next foundry_task_done refuse on a dirty tree.
   if (feedbackEnabled()) {
     appendFeedback("review", `Restored ${relPath}, left mutated by a foundry_mutate call that never finished.`, "mutation-recovered", "auto");
+    gitCommitIfChanged([P.feedback], "chore: pipeline friction (review)");
   }
   return relPath;
 }

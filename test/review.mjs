@@ -542,7 +542,9 @@ const untouched = (repo, head) => {
     eq(v.ok, true, "and verifies the restored tree, not the mutated one");
     eq(readFile(repo, "src/add.mjs"), ADD_SRC, "the file is back to HEAD");
     ok(!hasFile(repo, ".foundry/mutation.json"), "the sentinel is gone");
-    eq(git(repo, ["rev-parse", "HEAD"]), head, "recovery commits nothing");
+    eq(git(repo, ["status", "--porcelain"]), "", "recovery leaves the tree clean, so a later foundry_task_done is not refused");
+    eq(subject(repo), "chore: pipeline friction (review)", "the only commit is the recovery's own feedback entry");
+    eq(git(repo, ["rev-parse", "HEAD~1"]), head, "...directly on top of the previous HEAD");
   });
 }
 

@@ -96,11 +96,14 @@ handed `opus` — the latest of that family, which may not be the pinned
 version; `foundry_next` reports that as `agentModelExact: false` and the
 controller prints a one-line note. Full ids are fine in routing config, and
 are exact once the generated agent loads: only this first-population
-fallback is approximated. A `claude-*` id of a family Foundry does not know
-is treated like a non-Anthropic model: no fallback, so a restart. `effort` is lost in that case: it lives only in the
-generated agent's own frontmatter, and the `Agent` tool has no `effort`
-parameter to carry it around. This costs at most one stage's worth of
-effort, since the generated file becomes usable from the very next session.
+fallback is approximated. `effort` is lost on the fallback path too: it
+lives only in the generated agent's own frontmatter, and the `Agent` tool
+has no `effort` parameter to carry it around. This costs at most one
+stage's worth of effort, since the generated file becomes usable from the
+very next session.
+
+A `claude-*` id of a family Foundry does not know is treated like a
+non-Anthropic model: no fallback, so a restart.
 
 The generated files are excluded from git per clone, via
 `.git/info/exclude` rather than `.gitignore` — they encode a person's own

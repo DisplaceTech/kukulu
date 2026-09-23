@@ -320,8 +320,9 @@ command to run by hand), leaves the sentinel, and auto-logs a
 **Crash recovery:** if the server died between mutating and restoring, the
 sentinel is still there. `foundry_mutate`, `foundry_verify` and
 `foundry_review_submit` each restore the file from it before doing anything
-else and report the path as `recoveredMutation` (and auto-log a
-`mutation-recovered` feedback entry). An unreadable sentinel is a refusal
+else and report the path as `recoveredMutation`, and log a
+`mutation-recovered` feedback entry, committed on its own as
+`chore: pipeline friction (review)` so the tree is never left dirty. An unreadable sentinel is a refusal
 that tells you how to recover by hand.
 
 **Returns:** `{ file, killed, verdict, results, recoveredMutation }`.
