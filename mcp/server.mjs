@@ -1451,7 +1451,10 @@ function reviewSubmit({ verdict, tasks = [], unblock = [] }) {
   saveState(st);
   const sha = gitCommitIfChanged([P.review, P.plan, P.progress, P.state, P.feedback], `review: round ${N}`);
   const push = pushBranch(gitFacts().branch, st.policies.push);
-  return { verdict, round: N, fixTasks: ids, unblocked, commit: sha, halted: st.halted, counts: counts(pr.tasks), push };
+  // Re-read rather than reuse `pr`: appendTaskLines edits pr.lines but not
+  // pr.tasks, so counts(pr.tasks) would describe the file as it was before
+  // this call queued its own fix tasks (F-03 of the 2026-09-23 flight feedback).
+  return { verdict, round: N, fixTasks: ids, unblocked, commit: sha, halted: st.halted, counts: counts(parseProgress().tasks), push };
 }
 
 function summaryCommit() {

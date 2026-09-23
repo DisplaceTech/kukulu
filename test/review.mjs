@@ -131,6 +131,22 @@ const FIX = {
 
 // ---------------------------------------------------------------- changes requested
 
+// F-03: the returned counts come from PROGRESS.md as the call left it.
+{
+  const repo = reviewableRepo();
+  await withServer(repo, async ({ call }) => {
+    const r = await call("foundry_review_submit", {
+      verdict: "CHANGES REQUESTED",
+      tasks: [FIX, { ...FIX, title: "Second fix" }, { ...FIX, title: "Third fix" }],
+    });
+    eq(r.counts.todo, 3, "three fix tasks against an all-done plan return todo 3, not the pre-append 0");
+    eq(r.counts.open, 3, "...and open 3");
+    eq(r.counts.total, 6, "...and a total that includes them");
+    const s = await call("foundry_status");
+    eq(JSON.stringify(s.counts), JSON.stringify(r.counts), "the submit's counts match what foundry_status reads straight afterwards");
+  });
+}
+
 {
   const repo = reviewableRepo({ states: { "P0-01": "x", "P0-02": "!", "P0-03": "-" } });
   await withServer(repo, async ({ call }) => {
@@ -143,6 +159,12 @@ const FIX = {
     eq(r.fixTasks.join(","), "R1-01,R1-02", "fix tasks are numbered and zero-padded");
     eq(r.unblocked.join(","), "P0-02", "unblocked tasks are reported");
     eq(r.halted, null, "a round inside the cap does not halt the flight");
+    // F-03: the returned counts describe PROGRESS.md as this call left it —
+    // two new fix tasks and one unblocked task — not as it was before.
+    eq(r.counts.todo, 3, "the returned counts include the unblocked task and both new fix tasks");
+    eq(r.counts.open, 3, "...as open");
+    eq(r.counts.blocked, 0, "...and the unblocked task is no longer blocked");
+    eq(r.counts.total, 5, "...and total includes the new tasks");
     eq(subject(repo), "review: round 1", "the round is one commit");
     eq(git(repo, ["status", "--porcelain"]), "", "review_submit leaves a clean tree");
 
