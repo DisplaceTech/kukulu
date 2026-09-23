@@ -1,6 +1,6 @@
 # MCP tool reference
 
-Fourteen tools, served over stdio by `mcp/server.mjs` with no dependencies.
+Fifteen tools, served over stdio by `mcp/server.mjs` with no dependencies.
 The server is launched by Claude Code from [`.mcp.json`](../.mcp.json) with
 `FOUNDRY_PROJECT_DIR` set to the project root; every path below is relative to
 that root.
@@ -11,7 +11,7 @@ are read-only. The flight controller is allowed those plus
 allow rule and a `.git/info/exclude` line, never a task or a verdict; and
 `foundry_run_halt`, which it may call itself if it cannot even spawn a
 stage, so the next flight sees a clean halt instead of retrying blindly.
-Everything else changes project state and belongs to a stage agent.
+Everything else changes project state and belongs to a stage agent. (`foundry_mutate` changes a source file only for the length of one call and always restores it.)
 
 `foundry_next`, `foundry_status`, `foundry_config_show` and
 `foundry_agents_sync` all resolve the merged routing config (see

@@ -1,7 +1,7 @@
 {
   "name": "foundry",
   "displayName": "Foundry",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Spec-driven plan → implement → review → fix → summarize pipeline with per-role, per-machine model routing. Drop docs/SPEC.md in a repo and run /foundry:go-flight.",
   "author": {
     "name": "Eric Mann",
