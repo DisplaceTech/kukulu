@@ -235,10 +235,18 @@ on.
 **Arguments:** `{ stream? }`. With `stream`, only that stream's tasks in the
 current wave are considered, and the result also carries `stream`; a
 stream with nothing left returns `{ done: true, stream, … }` — the cue to call
-[`foundry_stream_finish`](#foundry_stream_finish). Without `stream`, the call refuses while the next
-open task belongs to a wave that runs in parallel, and while any stream
-worktree still exists (merge each finished stream back with
-`foundry_stream_finish` first).
+[`foundry_stream_finish`](#foundry_stream_finish).
+
+Without `stream`, when the next open task belongs to a wave that runs in
+parallel and no stream worktree exists yet, the call returns
+`{ done: true, paused: true, wave, streams, counts, skipped, message }`: a
+serial implementer has done everything it can before the wave, and is told —
+in `message` — to stop without writing a handoff or calling
+`foundry_run_finish`. It also flags `.foundry/implement.lock` with
+`paused: <wave>`, which the guard hook honours (any task state change clears
+it). While stream worktrees exist (streams running, or finished and
+unmerged), a stream-less call refuses instead: merge each back with
+`foundry_stream_finish` first.
 
 **Does:** picks the first `[~]` task (a resume), else the first `[ ]`. Before
 handing it over, it checks the task's `**Depends on:**` list; if any dependency

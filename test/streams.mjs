@@ -7,7 +7,7 @@ import path from "node:path";
 import {
   finish, ok, eq, like, isError,
   plannedRepo, withServer, readFile, writeFile, hasFile,
-  markTasks, setState, git, subject, commitTask,
+  markTasks, setState, git, subject, commitTask, runGuard,
 } from "./harness.mjs";
 
 /** One task with concrete backticked Files touched; `stream` tags both PLAN.md and PROGRESS.md. */
@@ -642,6 +642,74 @@ const feedbackOf = (repo) => (hasFile(repo, ".foundry/feedback.jsonl") ? readFil
     await call("foundry_next");
     eq(stateOf(repo).serialWaves.map((w) => w.wave).join(","), "1,2", "the second wave is recorded serial too");
     eq(feedbackOf(repo).length, 1, "but the flight-wide cause is logged only once");
+  });
+}
+
+
+// ---------------------------------------------------------------- V4-05: pausing at a wave boundary
+
+// A serial implementer that has finished everything before a wave is told to
+// stop — not refused — and the guard hook lets it.
+{
+  const repo = plannedRepo({ tasks: WAVE_PLAN });
+  await withServer(repo, async ({ call }) => {
+    await call("foundry_run_start");
+    const stopInput = { hook_event_name: "SubagentStop", agent_type: "foundry-implementer", cwd: repo };
+    for (const [id, file] of [["P0-01", "package.json"], ["P0-02", "docs/notes.md"]]) {
+      const t = await call("foundry_task_next");
+      eq(t.id, id, `the serial implementer gets ${id}`);
+      commitTask(repo, id, `Task ${id}`, { [file]: "x\n" });
+      await call("foundry_task_done", { id, log: "ok" });
+    }
+    const p = await call("foundry_task_next");
+    eq(p.done, true, "at the boundary task_next reports done");
+    eq(p.paused, true, "...and paused");
+    eq(p.wave, 1, "naming the wave");
+    eq(p.streams.join(","), "api,ui", "and its streams");
+    like(p.message, /P1-01.*wave 1.*Stop now\. Do NOT write docs\/HANDOFF\.md and do NOT call foundry_run_finish/, "with an unmistakable instruction not to finish the run");
+    eq(p.counts.open, 5, "the plan's open tasks are still open");
+    eq(JSON.parse(readFile(repo, ".foundry/implement.lock")).paused, 1, "the lock is flagged paused");
+    eq(runGuard(repo, stopInput), "", "so the guard lets the serial implementer stop with tasks open");
+    isError(await call("foundry_run_finish"), /open task|foundry_task_next|HANDOFF/i, "and run_finish is refused anyway, the safety net if the instruction is ignored");
+
+    const n = await call("foundry_next");
+    eq(n.streams.length, 2, "the controller's next foundry_next hands out the wave");
+    const a = await call("foundry_run_start", { stream: "api" });
+    await call("foundry_task_next", { stream: "api" });
+    commitTask(a.cwd, "P1-01", "Task P1-01", { "src/api/a.txt": "a\n" });
+    await call("foundry_task_done", { stream: "api", id: "P1-01", log: "ok" });
+    ok(!("paused" in JSON.parse(readFile(repo, ".foundry/implement.lock"))), "any task state change clears the flag");
+  });
+}
+
+// A degraded (serial) wave is not a boundary: the serial implementer just carries on.
+{
+  const repo = waveRepo({ config: { parallel: { maxStreams: 1 } } });
+  await withServer(repo, async ({ call }) => {
+    await call("foundry_run_start");
+    const t = await call("foundry_task_next");
+    eq(t.id, "P1-01", "a wave that runs serially is worked by the serial implementer");
+    ok(!("paused" in t), "with no pause");
+    ok(!("paused" in JSON.parse(readFile(repo, ".foundry/implement.lock"))), "and no flag on the lock");
+  });
+}
+
+// Skips at the boundary are still committed.
+{
+  const tasks = [
+    T("P0-01", ["package.json"]),
+    T("P0-02", ["docs/x.md"], { depends: ["P0-01"] }),
+    T("P1-01", ["src/api/a.txt"], { stream: "api" }), T("P1-02", ["src/ui/a.txt"], { stream: "ui" }),
+  ];
+  const repo = plannedRepo({ tasks });
+  await withServer(repo, async ({ call }) => {
+    await call("foundry_run_start");
+    await call("foundry_task_next");
+    await call("foundry_task_block", { id: "P0-01", reason: "cannot" });
+    const p = await call("foundry_task_next");
+    eq(p.paused, true, "after a block and a dependency skip the boundary is still reported");
+    eq(p.skipped.map((x) => x.id).join(","), "P0-02", "with the skip reported");
+    eq(subject(repo), "progress: skip P0-02", "and the skip committed");
   });
 }
 

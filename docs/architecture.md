@@ -182,7 +182,16 @@ mechanisms keep it honest:
   call itself, not for the text: a controller's transcript always
   *mentions* `foundry_run_start`, because the implement prompt it relays
   says "Call foundry_run_start", and matching on the text blocked every one
-  of its turn ends (F-01 of the 0.3.1 flight feedback). For a stop it does consider, it counts `[ ]` and `[~]` lines
+  of its turn ends (F-01 of the 0.3.1 flight feedback). Three refinements
+  serve parallel streams (0.4.0): a lock flagged `paused` — set by
+  `foundry_task_next` when a serial implementer reaches a parallel wave —
+  allows the stop; a `SubagentStop` whose transcript's *last*
+  `foundry_run_start` call passed a `stream` is blocked only while *that
+  stream* still has open tasks (`{stream: <s>}` tags on the `PROGRESS.md`
+  lines), never for a sibling's; and if the stream cannot be determined while
+  stream worktrees exist, a wave is in flight and the stop is allowed — the
+  controller re-hands out anything left unfinished, so the guard is an
+  optimisation there, not the only safety net. For a stop it does consider, it counts `[ ]` and `[~]` lines
   under `## Tasks`; if the lock exists and the count is non-zero it returns
   `{"decision":"block"}` with the next task's id and instructions to call
   `foundry_task_next`. `foundry_task_done`, `foundry_task_block` and

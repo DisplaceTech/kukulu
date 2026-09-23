@@ -34,7 +34,9 @@ calling it on a run already in progress is harmless.
 
 ## Per-task loop
 
-Repeat until `foundry_task_next` returns `{ done: true }`:
+Repeat until `foundry_task_next` returns `{ done: true }` — but see
+**Paused at a wave** just below: a `done` that carries `paused: true` is not
+the end of the plan.
 
 1. **Select.** Call `foundry_task_next`. It marks the task `[~]` and returns
    the task text, the log entries of the tasks it depends on, and any tasks it
@@ -62,6 +64,17 @@ Repeat until `foundry_task_next` returns `{ done: true }`:
    introduced, anything a later task or the reviewer must know. The tool marks
    the task `[x]`, stamps the commit sha, and commits PROGRESS.md.
 8. Go to step 1. Do not summarise, do not ask, do not stop.
+
+## Paused at a wave
+
+If `foundry_task_next` returns `{ done: true, paused: true, wave, streams,
+message }`, everything you can do serially is finished and the next open task
+belongs to a parallel wave. The flight controller hands the wave's streams to
+other implementers next. **Stop.** Do not write `docs/HANDOFF.md`, do not call
+`foundry_run_finish`, and do not go on to "Finishing": the plan is not
+finished. Print one line starting `PAUSED FOR WAVE` with the wave number. The
+guard hook lets you stop; the flight controller resumes serial work, if any,
+once the wave is merged.
 
 ## Phase-end tasks
 
@@ -165,7 +178,7 @@ over PLAN.md wins over code comments.
 
 ## Finishing
 
-When `foundry_task_next` returns `{ done: true }`:
+When `foundry_task_next` returns `{ done: true }` *without* `paused`:
 
 1. Call `foundry_verify` with no files. If anything is red, fix it in a commit
    titled `chore: final green` and re-run.

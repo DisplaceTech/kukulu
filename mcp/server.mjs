@@ -1031,8 +1031,11 @@ function refuseSerialInParallelWave(pr, task) {
       );
     }
   }
-  // Serial work would run on a main checkout that lacks a finished stream's
-  // code until that stream is merged back.
+  refuseWhileStreamsPending();
+}
+
+/** Serial work would run on a main checkout that lacks a finished stream's code until that stream is merged back. */
+function refuseWhileStreamsPending() {
   const pending = streamWorktrees();
   if (pending.length) {
     throw new ToolError(`stream worktree(s) still exist (${pending.join(", ")}); merge each back with foundry_stream_finish before any serial work — call foundry_next`);
@@ -1078,7 +1081,30 @@ function lockCounter() {
 function resetLockCounter() {
   if (!exists(P.lock)) return;
   const lock = parseLock();
-  write(P.lock, `${lock.json ? JSON.stringify({ ...lock.json, count: 0 }) : "0"}\n`);
+  // Any task state change means work moved, so a serial implementer parked at
+  // a wave boundary (`paused`) is no longer parked.
+  const { paused, ...rest } = lock.json || {};
+  void paused;
+  write(P.lock, `${lock.json ? JSON.stringify({ ...rest, count: 0 }) : "0"}\n`);
+}
+
+/**
+ * Mark the lock `paused` (a wave number) when a serial foundry_task_next
+ * hands the flight back to the controller at a parallel-wave boundary, or
+ * clear it. The guard hook honours the flag: a serial implementer that has
+ * done everything it can before a wave must be allowed to stop, though tasks
+ * remain open. A no-op when there is nothing to change, so a plan without
+ * streams never rewrites the lock.
+ */
+function setLockPaused(wave) {
+  if (!exists(P.lock)) return;
+  const lock = parseLock();
+  const has = Boolean(lock.json?.paused);
+  if (!wave && !has) return;
+  const json = { ...(lock.json || { count: lock.count }) };
+  if (wave) json.paused = wave;
+  else delete json.paused;
+  write(P.lock, `${JSON.stringify(json)}\n`);
 }
 
 // ---------------------------------------------------------------- feedback
@@ -1584,12 +1610,39 @@ function taskNext({ stream } = {}) {
   if (stream !== undefined) {
     const scope = streamScope(stream);
     inScope = (t) => t.stream === stream && scope.wave.taskIds.includes(t.id);
-  } else if (pr.tasks.some((t) => t.stream)) {
+  } else if (pr.tasks.some((t) => t.stream) && streamWorktrees().length) {
+    // Streams are running (or finished and unmerged): no serial work, and the
+    // wave-specific message is the useful one when the next task is in it.
     refuseSerialInParallelWave(pr, pr.tasks.find((t) => t.state === "~") || pr.tasks.find((t) => t.state === " "));
   }
+  // A serial implementer that has done everything it can before a parallel
+  // wave is told to stop, not refused: the flight controller hands the wave's
+  // streams out next. Only a plan that declares streams ever computes waves.
+  let waveCtx = null;
+  const parallelWaveOf = (task) => {
+    if (stream !== undefined || !task.stream) return null;
+    waveCtx = waveCtx || { cc: cfg(), st: loadState() };
+    const wave = computeWaves(pr, waveCtx.cc).find((w) => w.taskIds.includes(task.id));
+    return wave && waveRunsParallel(wave, waveCtx.cc, waveCtx.st) ? wave : null;
+  };
   const skipped = [];
   for (;;) {
     const pick = pr.tasks.find((t) => inScope(t) && t.state === "~") || pr.tasks.find((t) => inScope(t) && t.state === " ");
+    const wave = pick ? parallelWaveOf(pick) : null;
+    if (wave) {
+      writeProgress(pr);
+      if (skipped.length) gitCommitIfChanged([P.progress], `progress: skip ${skipped.map((x) => x.id).join(", ")}`);
+      setLockPaused(wave.index);
+      return {
+        done: true,
+        paused: true,
+        wave: wave.index,
+        streams: Object.keys(wave.streams),
+        counts: counts(pr.tasks),
+        skipped,
+        message: `Everything you can do serially is done: the next open task (${pick.id}) belongs to parallel wave ${wave.index}, whose streams the flight controller hands out next. Stop now. Do NOT write docs/HANDOFF.md and do NOT call foundry_run_finish: the plan is not finished.`,
+      };
+    }
     if (!pick) {
       writeProgress(pr);
       if (skipped.length) gitCommitIfChanged([P.progress], `progress: skip ${skipped.map((s) => s.id).join(", ")}`);
@@ -1609,6 +1662,7 @@ function taskNext({ stream } = {}) {
     const resumed = pick.state === "~";
     setTaskState(pr, pick.id, "~");
     writeProgress(pr);
+    setLockPaused(null);
     const dependencyLogs = {};
     for (const d of task.depends) if (pr.logs[d]) dependencyLogs[d] = pr.logs[d];
     return {

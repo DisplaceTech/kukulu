@@ -5,6 +5,7 @@
 // server.
 
 import { execFileSync } from "node:child_process";
+import fs from "node:fs";
 import path from "node:path";
 import {
   finish, ok, eq, like,
@@ -331,6 +332,73 @@ eq(
   const out = guard(repo, { input: implementerStop(repo) });
   eq(out.split("\n").length, 1, "the hook emits exactly one line of JSON");
   ok(typeof JSON.parse(out) === "object", "that line parses as an object");
+}
+
+
+// ---------------------------------------------------------------- parallel streams (0.4.0)
+
+const STREAM_TASKS = [
+  { id: "P1-01", title: "a one", state: " ", stream: "api" },
+  { id: "P1-02", title: "a two", state: " ", stream: "api" },
+  { id: "P1-03", title: "u one", state: " ", stream: "ui" },
+];
+const withStreamTasks = (states = {}) => STREAM_TASKS.map((t) => ({ ...t, state: states[t.id] || t.state }));
+const subagentStop = (repo, calls, extra = {}) => {
+  writeFile(repo, "transcript.jsonl", calls.map((input) => toolUseLine(RUN_START, input)).join("\n") + "\n");
+  return { hook_event_name: "SubagentStop", agent_type: "foundry-implementer", transcript_path: TRANSCRIPT(repo), ...extra };
+};
+
+{
+  const repo = armed(withStreamTasks());
+  const j = JSON.parse(guard(repo, { input: subagentStop(repo, [{ stream: "api" }]) }));
+  eq(j.decision, "block", "a stream's implementer with its own stream open is blocked");
+  like(j.reason, /stream 'api' is not finished — 2 task\(s\) of its still open.*next: P1-01.*stream: "api".*foundry_stream_finish/, "the reason names the stream, its own open count, and the stream-scoped calls");
+  eq(readFile(repo, ".foundry/implement.lock").trim(), "1", "and the block is counted");
+}
+
+{
+  const repo = armed(withStreamTasks({ "P1-01": "x", "P1-02": "x" }));
+  eq(guard(repo, { input: subagentStop(repo, [{ stream: "api" }]) }), "", "a finished stream is allowed to stop while another stream's tasks are open");
+  eq(readFile(repo, ".foundry/implement.lock").trim(), "0", "...and the counter is untouched");
+}
+
+{
+  const repo = armed(withStreamTasks({ "P1-01": "x", "P1-02": "x" }));
+  const j = JSON.parse(guard(repo, { input: subagentStop(repo, [{ stream: "api" }, { stream: "ui" }]) }));
+  eq(j.decision, "block", "the LAST run_start call decides: ui, whose task is open, blocks");
+  like(j.reason, /stream 'ui'/, "...naming ui");
+  const repo2 = armed(withStreamTasks({ "P1-03": "x" }));
+  eq(guard(repo2, { input: subagentStop(repo2, [{ stream: "api" }, { stream: "ui" }]) }), "", "and with ui done the same transcript is allowed");
+}
+
+{
+  const repo = armed(withStreamTasks({ "P1-01": "x", "P1-02": "x" }));
+  const j = JSON.parse(guard(repo, { input: subagentStop(repo, [{}]) }));
+  eq(j.decision, "block", "a run_start with no stream is a serial implementer: the whole plan's open tasks count, unchanged");
+  like(j.reason, /implementation run is not finished/, "with the serial reason");
+}
+
+{
+  // The stream cannot be determined: no run_start call in the transcript.
+  const repo = armed(withStreamTasks());
+  const noCall = { hook_event_name: "SubagentStop", agent_type: "foundry-implementer", transcript_path: TRANSCRIPT(repo) };
+  writeFile(repo, "transcript.jsonl", `${toolUseLine("Bash", { command: "ls" })}\n`);
+  eq(JSON.parse(guard(repo, { input: noCall })).decision, "block", "with no run_start call and no stream worktrees, the serial rule applies unchanged");
+  fs.mkdirSync(path.join(repo, ".foundry", "worktrees", "api"), { recursive: true });
+  eq(guard(repo, { input: noCall }), "", "with a stream worktree on disk a wave is in flight: an undeterminable stream is allowed (the controller re-hands it out)");
+}
+
+{
+  // A serial implementer parked at a wave boundary by foundry_task_next.
+  const repo = armed(withStreamTasks(), JSON.stringify({ count: 0, paused: 1 }) + "\n");
+  eq(guard(repo, { input: implementerStop(repo) }), "", "a lock flagged paused allows the stop");
+  eq(JSON.parse(readFile(repo, ".foundry/implement.lock")).count, 0, "...without counting a re-block");
+}
+
+{
+  const repo = armed(withStreamTasks(), JSON.stringify({ count: 3, cap: 3 }) + "\n");
+  const out = JSON.parse(guard(repo, { input: subagentStop(repo, [{ stream: "api" }]) }));
+  like(out.systemMessage, /guard cap \(3\) reached with 2 open tasks stream 'api'/, "the cap message names the stream and its own count");
 }
 
 finish();
