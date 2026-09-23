@@ -71,7 +71,7 @@ report.
 **Arguments:** none.
 
 **Returns:** `{ stage, agent, agentFallback, fallbackAgent, restartRequired,
-model, round, reviewRound, reason, prompt }`.
+model, agentModel, agentModelExact, round, reviewRound, reason, prompt }`.
 
 - `stage` — `plan` · `implement` · `review` · `summarize` · `done` · `halt`
 - `agent` — the subagent to spawn: the generated `foundry-<role>` name when
@@ -88,10 +88,20 @@ model, round, reviewRound, reason, prompt }`.
   for a stage that has a role, so a controller can retry with it if spawning
   `agent` fails with "not found"
 - `restartRequired` — true only when `agentFallback` is true **and** the
-  resolved model is not one the `Agent` tool can name directly (an
-  Anthropic alias or a `claude-*` id); `false` for `done` and `halt`
+  resolved model is one the `Agent` tool cannot name (a non-Anthropic model,
+  or a `claude-*` id of a family Foundry does not know); `false` for `done`
+  and `halt`
 - `model` — the resolved model string for that role from the routing config
-  (see [routing.md](./routing.md)); `null` for `done` and `halt`
+  (see [routing.md](./routing.md)); `null` for `done` and `halt`. Display
+  only: it may be a full `claude-*` id, which the `Agent` tool's `model`
+  parameter rejects
+- `agentModel` — what to pass as the `Agent` tool's `model` when
+  `agentFallback` is true: a family alias (`opus`, `sonnet`, `haiku`,
+  `fable`), or `null` to pass none (`inherit`, and `done`/`halt`). A full
+  `claude-<family>-…` id maps to its family alias
+- `agentModelExact` — false when `agentModel` was mapped down from a full
+  id: an alias means the latest of that family, which may not be the version
+  pinned in routing. Always true otherwise
 - `reviewRound` — always `round + 1`; the review stage's prompt states it
   explicitly and `foundry_review_submit` refuses a `Round:` line that
   disagrees with it (F-10, F-11) — see

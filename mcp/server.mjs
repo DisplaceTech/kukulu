@@ -273,6 +273,29 @@ const GLOBAL_KEYS = ["roles", "profiles", "profile", "permissionMode"];
 
 const isAnthropicModel = (m) => ANTHROPIC_ALIASES.includes(m) || m.startsWith("claude-");
 
+// The `Agent` tool's own `model` parameter takes only a family alias, never
+// a full `claude-*` id — unlike the `model:` line of an agent file, which
+// takes either. So the fallback spawn (the plugin's own agent, with the
+// routed model handed over as a parameter) needs the alias form (F-02 of the
+// 2026-09-23 flight feedback).
+const AGENT_TOOL_ALIASES = ["fable", "opus", "sonnet", "haiku"];
+const CLAUDE_FAMILY = /^claude-(opus|sonnet|haiku|fable)-/;
+
+/**
+ * The value to pass as the `Agent` tool's `model` for a routed model:
+ * `{ value, exact }`, where `value` is `null` for "pass no model" and `exact`
+ * is false when a full id was mapped down to its family alias (the alias
+ * means "latest of that family", which may not be the pinned version).
+ * `null` when the Agent tool cannot name the model at all — a non-Anthropic
+ * model, or a `claude-*` id of a family this map does not know.
+ */
+function agentToolModel(model) {
+  if (model === "inherit") return { value: null, exact: true };
+  if (AGENT_TOOL_ALIASES.includes(model)) return { value: model, exact: true };
+  const family = typeof model === "string" ? model.match(CLAUDE_FAMILY) : null;
+  return family ? { value: family[1], exact: false } : null;
+}
+
 /** Minimal YAML frontmatter reader: scalars and `- ` lists, which is all an agent file uses. */
 function parseFrontmatter(text) {
   const m = text.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
@@ -587,7 +610,7 @@ function agentsSync() {
   // this process just created the agents directory itself (so Claude Code
   // cannot have hot-loaded it), and one of the roles that changed resolves to
   // a model the Agent tool cannot name directly, so there is no fallback.
-  const restartRequired = agentsDirCreatedThisProcess && changed.some((role) => !isAnthropicModel(r.roles[role].model));
+  const restartRequired = agentsDirCreatedThisProcess && changed.some((role) => agentToolModel(r.roles[role].model) === null);
 
   const permissions = ensureMcpAllowRule();
 
@@ -913,20 +936,22 @@ function next() {
    * did not just create the agents directory itself (the one case Claude
    * Code does not hot-load — the directory's first population needs a
    * restart). When it cannot be trusted and the routed model is not one the
-   * Agent tool can name directly (an Anthropic alias or a claude-* id), there
-   * is no safe fallback and a restart is required.
+   * Agent tool can name directly (see agentToolModel), there is no safe
+   * fallback and a restart is required.
    */
   const agentInfo = (name) => {
     const role = ROLE_OF_STAGE[name];
     const fallbackAgent = role ? AGENT[name] : null;
-    if (!role) return { agent: null, agentFallback: false, fallbackAgent: null, restartRequired: false };
+    if (!role) return { agent: null, agentFallback: false, fallbackAgent: null, agentModel: null, agentModelExact: true, restartRequired: false };
     const onDisk = exists(path.join(P.agentsDir, `foundry-${role}.md`));
     const agentFallback = !onDisk || agentsDirCreatedThisProcess;
-    const model = routing.roles[role].model;
-    if (agentFallback && !isAnthropicModel(model)) {
-      return { agent: null, agentFallback: true, fallbackAgent, restartRequired: true };
+    const mapped = agentToolModel(routing.roles[role].model);
+    const agentModel = mapped ? mapped.value : null;
+    const agentModelExact = mapped ? mapped.exact : true;
+    if (agentFallback && mapped === null) {
+      return { agent: null, agentFallback: true, fallbackAgent, agentModel, agentModelExact, restartRequired: true };
     }
-    return { agent: onDisk ? `foundry-${role}` : fallbackAgent, agentFallback, fallbackAgent, restartRequired: false };
+    return { agent: onDisk ? `foundry-${role}` : fallbackAgent, agentFallback, fallbackAgent, agentModel, agentModelExact, restartRequired: false };
   };
   const modelFor = (name) => {
     const role = ROLE_OF_STAGE[name];
@@ -945,6 +970,8 @@ function next() {
       fallbackAgent: info.fallbackAgent,
       restartRequired: info.restartRequired,
       model: modelFor(name),
+      agentModel: info.agentModel,
+      agentModelExact: info.agentModelExact,
       round: st.round,
       reviewRound: st.round + 1,
       reason,
@@ -1450,7 +1477,7 @@ const S = (props, required = []) => ({
 });
 const TOOLS = [
   { name: "foundry_status", description: "Everything the pipeline knows from disk: which docs exist, task counts by state, branch/base/head, lock, round, review verdict. Read-only.", inputSchema: S({}), fn: status },
-  { name: "foundry_next", description: "Deterministic stage selection: returns { stage, agent, agentFallback, fallbackAgent, restartRequired, model, round, reason, prompt }. stage is plan | implement | review | summarize | done | halt. restartRequired is true only when the routed model cannot be reached without relaunching the session. Read-only.", inputSchema: S({}), fn: next },
+  { name: "foundry_next", description: "Deterministic stage selection: returns { stage, agent, agentFallback, fallbackAgent, restartRequired, model, agentModel, agentModelExact, round, reason, prompt }. stage is plan | implement | review | summarize | done | halt. agentModel is the value to pass as the Agent tool's model when agentFallback is true (an alias, or null to pass none); agentModelExact is false when a full claude-* id was mapped to its family alias. restartRequired is true only when the routed model cannot be reached without relaunching the session. Read-only.", inputSchema: S({}), fn: next },
   { name: "foundry_run_start", description: "Begin (or resume) an implementation run: create/reuse the build branch, arm the implement guard lock, stamp Branch/Started in PROGRESS.md, commit. Idempotent.", inputSchema: S({}), fn: runStart },
   { name: "foundry_task_next", description: "Select the next task (first [~], else first [ ]), auto-skip tasks whose dependencies are blocked, mark it [~], and return its PLAN.md text plus dependency log entries. Returns { done: true } when none remain.", inputSchema: S({}), fn: taskNext },
   { name: "foundry_task_done", description: "Mark a task [x] and append its log entry stamped with HEAD's sha. Requires HEAD's commit subject to start with '<id>:' and a clean tree. Commits PROGRESS.md.", inputSchema: S({ id: { type: "string" }, log: { type: "string", description: "Log entry body, under 15 lines" } }, ["id", "log"]), fn: taskDone },

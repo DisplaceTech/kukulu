@@ -52,7 +52,7 @@ result later as a completion notification. Both are normal. Treat the loop
 as event-driven, not as a blocking call you sit inside:
 
 1. Call `foundry_next`. It returns
-   `{ stage, agent, agentFallback, fallbackAgent, restartRequired, model, round, reason, prompt }`.
+   `{ stage, agent, agentFallback, fallbackAgent, restartRequired, model, agentModel, agentModelExact, round, reason, prompt }`.
 2. If `stage` is `done` or `halt`: print the `reason` and stop.
 3. If `restartRequired` is true: call `foundry_feedback_log` with `stage:
    "controller"`, `category: "restart"`, and "a stage mid-flight routed to a
@@ -65,10 +65,17 @@ as event-driven, not as a blocking call you sit inside:
      `foundry-planner`, `foundry-implementer`, `foundry-reviewer`,
      `foundry-summarizer` once agents are generated, else `foundry:planner`,
      `foundry:implementer`, `foundry:reviewer`, `foundry:summarizer`
-   - `model`: the `model` value, but **only** when `agentFallback` is
-     true. When `agentFallback` is false, pass no `model`, so the generated
-     agent's own model and effort apply.
+   - `model`: the `agentModel` value — never `model`, which may be a full
+     `claude-*` id the `Agent` tool rejects — but **only** when
+     `agentFallback` is true and `agentModel` is not null. When
+     `agentFallback` is false, pass no `model`, so the generated agent's
+     own model and effort apply.
    - `prompt`: the `prompt` value, verbatim, either way
+
+   When `agentFallback` is true and `agentModelExact` is false, print one
+   line before spawning: `note: <role> routed to <model>; the Agent tool
+   only takes aliases, so this stage runs on <agentModel> (latest of that
+   family) until the session loads the generated agent.`
 5. When the stage has finished — the `Agent` call returned, or a completion
    notification for it arrived — do not interpret its report. Go to step 1;
    the MCP decides the next stage from what is on disk, not from the report.
@@ -80,7 +87,7 @@ finish.
 
 If the `Agent` call in step 4 fails with an "agent type ... not found" error
 for a `foundry-<role>` name, retry once with `subagent_type: fallbackAgent`
-and `model: model`. If that also fails, call `foundry_feedback_log` with
+and `model: agentModel` (omitted when null). If that also fails, call `foundry_feedback_log` with
 `stage: "controller"`, `category: "restart"`, and "the fallback agent name
 also failed to spawn", then print the `FOUNDRY: RESTART REQUIRED` line
 above and stop. For any other failure spawning a stage, call

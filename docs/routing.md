@@ -69,8 +69,8 @@ conservative assumption through 0.2.0 and confirmed the actual behaviour for
 
 So the only case `foundry_agents_sync` cannot make immediately usable is a
 project's very first sync, and only when the routed model is not one the
-`Agent` tool can name directly (an Anthropic alias or a `claude-*` id) — for
-any other model, `foundry_next` falls back to the plugin's own
+`Agent` tool can name (a family alias, or a `claude-<family>-…` id that maps
+to one) — for any such model, `foundry_next` falls back to the plugin's own
 `foundry:<role>` agent with the resolved model until this session's next
 launch, and the flight proceeds without stopping. `foundry_next` reports
 this per stage as `agentFallback` and `fallbackAgent`; `foundry_agents_sync`
@@ -89,8 +89,15 @@ never again, and never mid-flight. See
 wrapper that handles the restart itself.
 
 While `agentFallback` is in effect, the controller spawns the plugin's own
-`foundry:<role>` agent with the resolved `model` passed as the `Agent`
-tool's `model` argument. `effort` is lost in that case: it lives only in the
+`foundry:<role>` agent with `agentModel` passed as the `Agent` tool's
+`model` argument. The tool takes only the aliases `sonnet`, `opus`, `haiku`
+and `fable`, so a role routed to a full id such as `claude-opus-5-5` is
+handed `opus` — the latest of that family, which may not be the pinned
+version; `foundry_next` reports that as `agentModelExact: false` and the
+controller prints a one-line note. Full ids are fine in routing config, and
+are exact once the generated agent loads: only this first-population
+fallback is approximated. A `claude-*` id of a family Foundry does not know
+is treated like a non-Anthropic model: no fallback, so a restart. `effort` is lost in that case: it lives only in the
 generated agent's own frontmatter, and the `Agent` tool has no `effort`
 parameter to carry it around. This costs at most one stage's worth of
 effort, since the generated file becomes usable from the very next session.

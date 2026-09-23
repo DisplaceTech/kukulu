@@ -206,6 +206,26 @@ const cfgDir = () => mkDir("foundry-cfg-");
 }
 
 {
+  // F-02: a full claude-* id is reachable through the alias fallback, so it
+  // needs no restart; the generated file still carries the id verbatim. An
+  // unknown claude-* family is unreachable, like a non-Anthropic model.
+  const repo = plannedRepo();
+  const globalPath = writeGlobalConfig(cfgDir(), { roles: { reviewer: { model: "claude-opus-5-5" } } });
+  await withServer(repo, async ({ call }) => {
+    const r = await call("foundry_agents_sync");
+    eq(r.restartRequired, false, "a first-time sync with a role on claude-opus-5-5 needs no restart");
+    like(readFile(repo, ".claude/agents/foundry-reviewer.md"), /^model: claude-opus-5-5$/m, "...and the generated agent still says the full id verbatim");
+  }, { env: { FOUNDRY_CONFIG: globalPath } });
+
+  const repo2 = plannedRepo();
+  const globalPath2 = writeGlobalConfig(cfgDir(), { roles: { reviewer: { model: "claude-mystery-9" } } });
+  await withServer(repo2, async ({ call }) => {
+    const r = await call("foundry_agents_sync");
+    eq(r.restartRequired, true, "a first-time sync with a role on an unknown claude-* family needs a restart");
+  }, { env: { FOUNDRY_CONFIG: globalPath2 } });
+}
+
+{
   // A routing change to an *existing* directory is not a first population,
   // so even a router-routed role needs no restart the second time around.
   const repo = plannedRepo();
