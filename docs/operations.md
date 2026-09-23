@@ -178,8 +178,8 @@ parse. Edit it between stages, not during one.
 
 | Key | Default | Effect |
 |---|---|---|
-| `verify` | `[]` | Commands run after every task. At least one is required. Each entry is a string, or `{ cmd, timeoutMs }` to override `commandTimeoutMs` for that one command. |
-| `extraVerify` | `{}` | Path prefix → extra commands (same string-or-`{ cmd, timeoutMs }` entries), run when a task touches that prefix |
+| `verify` | `[]` | Commands run after every task. At least one is required. Each entry is a string, or `{ cmd, timeoutMs, exclusive }`: `timeoutMs` overrides `commandTimeoutMs` for that one command, and `exclusive: true` marks a command that starts a port-, container- or directory-keyed environment (wp-env, docker compose) so it only ever runs from the main checkout, never a parallel stream's worktree. |
+| `extraVerify` | `{}` | Path prefix → extra commands (same entries as `verify`), run when a task touches that prefix |
 | `build` | `[]` | Recorded for the plan's use; the MCP does not run it |
 | `baseBranch` | `main` | Branch runs start from, and the merge-base reported as `base` |
 | `branchPrefix` | `build/` | Prefix for run branches (`build/2026-09-18`, `-2`, …) |
@@ -191,6 +191,8 @@ parse. Edit it between stages, not during one.
 | `policies.push` | `true` | `false` skips every push `foundry_run_start`, `foundry_run_finish`, `foundry_review_submit` and `foundry_summary_commit` would otherwise make |
 | `policies.pr` | `"draft"` | `"none"` skips draft-PR creation in `foundry_run_finish` even when `gh` is available |
 | `policies.feedback` | `true` | `false` disables `foundry_feedback_log` (it returns `{ logged: false }` without writing) and every internal auto-log point |
+| `parallel.maxStreams` | `3` | The most streams of one wave handed to implementers at once; `1` runs every wave serially, silently |
+| `parallel.setup` | `[]` | Commands (same entries as `verify`) run once in each newly created stream worktree, before its implementer starts — the dependency install a fresh checkout needs (`npm ci`, `composer install`) |
 | `constraints` | `[]` | `CLAUDE.md` rules expressed as data and checked by `foundry_verify` — see [Constraints](#constraints) below |
 
 Environment variables:

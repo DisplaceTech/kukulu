@@ -52,6 +52,7 @@ context.
 | `branch`, `started` | The `Branch:` and `Started:` headers in `PROGRESS.md` |
 | `counts` | `{ todo, inProgress, done, blocked, skipped, total, open }`; `open = todo + inProgress` |
 | `blocked`, `skipped` | Task ids in those states |
+| `waves` | The plan's parallel waves, numbered from 1: `[{ index, streams: [{ stream, tasks, open }], valid, reason }]`. A wave is a maximal run of consecutive tasks that all carry a `{stream: <slug>}` tag on their `PROGRESS.md` line; `valid` is false, with a `reason`, when its partition cannot be proven safe (see [architecture.md](./architecture.md#parallel-workstreams)). `[]` for a plan with no streams |
 | `reviewVerdictInFile` | The verdict parsed out of `REVIEW.md`, if one exists |
 | `agentsGenerated` | Role names whose `.claude/agents/foundry-<role>.md` currently exists |
 | `agentsGeneratedThisSession` | Role names this MCP server process itself wrote — diagnostic only, for understanding why `foundry_next` reported `agentFallback` |

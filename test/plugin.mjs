@@ -331,6 +331,11 @@ ok(read("skills/plan-build/SKILL.md").includes("templates/constraints.example.js
       ok(opsDoc.includes("`policies.feedback`"), "operations.md documents policies.feedback");
       continue;
     }
+    if (key === "parallel") {
+      ok(opsDoc.includes("`parallel.maxStreams`"), "operations.md documents parallel.maxStreams");
+      ok(opsDoc.includes("`parallel.setup`"), "operations.md documents parallel.setup");
+      continue;
+    }
     ok(opsDoc.includes(`\`${key}\``), `operations.md's config table documents '${key}'`);
   }
 }

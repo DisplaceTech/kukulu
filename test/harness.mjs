@@ -142,6 +142,8 @@ export function planTask(t) {
     `**Out of scope:** ${t.outOfScope || "none"}`,
     `**Verification:** ${t.verification || "none"}`,
     `**Depends on:** ${t.depends && t.depends.length ? t.depends.join(", ") : "none"}`,
+    // `planStream` overrides `stream` for PLAN.md only, to build a plan whose two files disagree.
+    ...((t.planStream ?? t.stream) ? [`**Stream:** ${t.planStream ?? t.stream}`] : []),
     "",
   ].join("\n");
 }
@@ -173,7 +175,11 @@ export function progressDoc(tasks) {
     "Started: (set by implement)",
     "",
     "## Tasks",
-    ...tasks.map((t) => `- [${t.state || " "}] ${t.id} ${t.title}`),
+    // `progressStream` overrides `stream` for PROGRESS.md only (`null` drops the tag).
+    ...tasks.map((t) => {
+      const tag = t.progressStream !== undefined ? t.progressStream : t.stream;
+      return `- [${t.state || " "}] ${t.id} ${t.title}${tag ? ` {stream: ${tag}}` : ""}`;
+    }),
     "",
     "## Log",
     "(one entry per task, appended by implement)",

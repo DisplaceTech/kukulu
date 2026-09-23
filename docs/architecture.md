@@ -224,6 +224,45 @@ transcript never *called* `foundry_run_start` (a `tool_use`, not a mention in
 a relayed prompt), the guard allows those without touching the counter (F-07,
 and F-01 of the 0.3.1 flight feedback).
 
+## Parallel workstreams
+
+Added in 0.4.0. A plan may split independent tasks into **streams**; a
+flight then runs each stream on its own implementer, concurrently, instead
+of serializing the whole plan. A plan with no streams behaves exactly as it
+did before.
+
+- **Declaring streams.** A task carries `**Stream:** <slug>` in `PLAN.md`
+  and a matching `{stream: <slug>}` suffix on its `PROGRESS.md` line
+  (`- [ ] P2-03 Title {stream: api}`). The tag is parsed off the title and
+  written back verbatim whenever the line is rewritten.
+- **Waves are derived, not declared.** A wave is a maximal run of
+  consecutive tasks, in `PROGRESS.md` order, that all carry a stream tag. A
+  task without one is serial and acts as a barrier, so "scaffold → parallel
+  pieces → integration" needs no syntax beyond the one field. Waves are
+  recomputed from `PROGRESS.md` on every call and never stored;
+  `foundry_status` reports them as `waves`.
+- **The partition is validated, and an invalid one is never fatal.** A wave
+  is valid only when every one of these holds:
+  - `PLAN.md`'s `Stream:` and `PROGRESS.md`'s tag agree for every task;
+  - every task lists concrete backticked paths under `Files touched`;
+  - no two streams name overlapping paths (a token ending in `/` is a
+    directory and overlaps anything under it);
+  - no task depends on a task of a *different* stream in the same wave
+    (a dependency on anything before the wave is fine);
+  - no task touches an `extraVerify` prefix that holds an `exclusive`
+    command (and no `verify` command is exclusive);
+  - it has at least two streams.
+
+  An invalid wave runs serially, as if it had no stream tags, and a bad
+  partition is recorded as feedback rather than halting an unattended
+  flight.
+- **`exclusive` commands.** A command entry marked `exclusive: true`
+  starts something keyed to the directory or a port it runs from — wp-env
+  is the motivating case — so two of them collide, and serializing their
+  *runs* does not help because the environment outlives the command. Such a
+  command only ever runs from the main checkout, and any task that
+  triggers one is kept out of waves.
+
 ## Blocked tasks and skipped dependents
 
 A task the implementer cannot finish is not a stopped run. `foundry_task_block`

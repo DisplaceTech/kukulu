@@ -53,6 +53,10 @@ const VERSION = "0.3.2";
 
 const TASK_ID = /\b[PR]\d+-\d+\b/g;
 const TASK_LINE = /^- \[( |~|x|!|-)\] ([PR]\d+-\d+)(?: (.*))?$/;
+// A task in a parallel wave carries its stream as a suffix tag on its
+// PROGRESS.md line: `- [ ] P2-03 Title {stream: api}`. The tag is parsed off
+// the title (task.stream) and written back verbatim (task.streamTag).
+const STREAM_TAG = /\s*\{stream:\s*([a-z][a-z0-9-]{0,23})\}\s*$/;
 const STATE_NAMES = { " ": "todo", "~": "inProgress", x: "done", "!": "blocked", "-": "skipped" };
 
 // ---------------------------------------------------------------- utilities
@@ -167,21 +171,44 @@ function validatePolicies(policies) {
 }
 
 /**
- * Normalise a verify/extraVerify/build entry to `{ cmd, timeoutMs }`. A bare
- * string takes `defaultTimeoutMs`; `{ cmd, timeoutMs }` may override it.
- * Throws on anything else, a missing `cmd`, or a non-positive integer
- * `timeoutMs` — a plan can give one slow end-to-end command a longer
- * timeout without lifting the timeout for everything else.
+ * Normalise a verify/extraVerify/build/setup entry to
+ * `{ cmd, timeoutMs, exclusive }`. A bare string takes `defaultTimeoutMs` and
+ * is not exclusive; `{ cmd, timeoutMs, exclusive }` may override either.
+ * Throws on anything else, a missing `cmd`, a non-positive integer
+ * `timeoutMs`, or a non-boolean `exclusive` — a plan can give one slow
+ * end-to-end command a longer timeout without lifting the timeout for
+ * everything else, and mark a port- or directory-bound command `exclusive`
+ * so it only ever runs from the main checkout, never a stream's worktree.
  */
 function normalizeCommand(entry, defaultTimeoutMs, where) {
-  if (typeof entry === "string") return { cmd: entry, timeoutMs: defaultTimeoutMs };
+  if (typeof entry === "string") return { cmd: entry, timeoutMs: defaultTimeoutMs, exclusive: false };
   if (entry && typeof entry === "object" && !Array.isArray(entry)) {
     if (typeof entry.cmd !== "string" || !entry.cmd) throw new ToolError(`${where} is missing 'cmd'`);
     const timeoutMs = entry.timeoutMs === undefined ? defaultTimeoutMs : entry.timeoutMs;
     if (!Number.isInteger(timeoutMs) || timeoutMs <= 0) throw new ToolError(`${where}.timeoutMs must be a positive integer`);
-    return { cmd: entry.cmd, timeoutMs };
+    if (entry.exclusive !== undefined && typeof entry.exclusive !== "boolean") throw new ToolError(`${where}.exclusive must be a boolean`);
+    return { cmd: entry.cmd, timeoutMs, exclusive: entry.exclusive === true };
   }
   throw new ToolError(`${where} must be a command string or { cmd, timeoutMs }`);
+}
+
+const PARALLEL_KEYS = ["maxStreams", "setup"];
+
+/** Validate `docs/foundry.json`'s `parallel` block; throws, never defaults a bad value away. */
+function validateParallel(parallel) {
+  if (parallel === undefined) return;
+  if (typeof parallel !== "object" || parallel === null || Array.isArray(parallel)) {
+    throw new ToolError("docs/foundry.json 'parallel' must be an object");
+  }
+  for (const key of Object.keys(parallel)) {
+    if (!PARALLEL_KEYS.includes(key)) throw new ToolError(`docs/foundry.json parallel has an unknown key '${key}'`);
+  }
+  if (parallel.maxStreams !== undefined && (!Number.isInteger(parallel.maxStreams) || parallel.maxStreams <= 0)) {
+    throw new ToolError("docs/foundry.json parallel.maxStreams must be a positive integer");
+  }
+  if (parallel.setup !== undefined && !Array.isArray(parallel.setup)) {
+    throw new ToolError("docs/foundry.json parallel.setup must be an array of commands");
+  }
 }
 
 const CONSTRAINT_KEYS = ["id", "description", "paths", "exclude", "pattern", "flags", "shouldMatch", "shouldNotMatch"];
@@ -231,6 +258,7 @@ function cfg() {
   const c = loadConfig() || {};
   validatePolicies(c.policies);
   validateConstraints(c.constraints);
+  validateParallel(c.parallel);
   const commandTimeoutMs = c.commandTimeoutMs || 10 * 60 * 1000;
   const norm = (entry, i, where) => normalizeCommand(entry, commandTimeoutMs, `docs/foundry.json ${where}[${i}]`);
   return {
@@ -239,6 +267,10 @@ function cfg() {
       Object.entries(c.extraVerify || {}).map(([prefix, arr]) => [prefix, (arr || []).map((e, i) => norm(e, i, `extraVerify['${prefix}']`))]),
     ),
     build: (c.build || []).map((e, i) => norm(e, i, "build")),
+    parallel: {
+      maxStreams: c.parallel?.maxStreams ?? 3,
+      setup: (c.parallel?.setup || []).map((e, i) => norm(e, i, "parallel.setup")),
+    },
     baseBranch: c.baseBranch || "main",
     branchPrefix: c.branchPrefix || "build/",
     maxRounds: Number.isInteger(c.maxRounds) ? c.maxRounds : 3,
@@ -693,7 +725,18 @@ function parseProgress() {
     }
     if (section === "tasks") {
       const m = line.match(TASK_LINE);
-      if (m) tasks.push({ line: i, state: m[1], id: m[2], title: (m[3] || "").trim() });
+      if (m) {
+        let title = (m[3] || "").trim();
+        let stream = null;
+        let streamTag = null;
+        const tag = title.match(STREAM_TAG);
+        if (tag) {
+          stream = tag[1];
+          streamTag = tag[0].trim();
+          title = title.slice(0, tag.index).trim();
+        }
+        tasks.push({ line: i, state: m[1], id: m[2], title, stream, streamTag });
+      }
     }
   });
   if (tasksStart < 0) throw new ToolError("docs/PROGRESS.md has no '## Tasks' section");
@@ -722,7 +765,7 @@ function counts(tasks) {
 function setTaskState(pr, id, state) {
   const t = pr.tasks.find((x) => x.id === id);
   if (!t) throw new ToolError(`task ${id} not found in docs/PROGRESS.md`);
-  pr.lines[t.line] = `- [${state}] ${t.id}${t.title ? " " + t.title : ""}`;
+  pr.lines[t.line] = `- [${state}] ${t.id}${t.title ? " " + t.title : ""}${t.streamTag ? " " + t.streamTag : ""}`;
   t.state = state;
 }
 
@@ -749,9 +792,8 @@ const writeProgress = (pr) => write(P.progress, pr.lines.join("\n").replace(/\s*
 
 // ---------------------------------------------------------------- PLAN.md
 
-function planTask(id) {
-  if (!exists(P.plan)) throw new ToolError("docs/PLAN.md does not exist");
-  const lines = read(P.plan).split("\n");
+/** One task's block out of PLAN.md's lines. Throws when it has no `### <id>:` heading. */
+function planTaskFrom(lines, id) {
   const start = lines.findIndex((l) => l.startsWith(`### ${id}:`));
   if (start < 0) throw new ToolError(`task ${id} has no '### ${id}: <title>' heading in docs/PLAN.md`);
   let end = lines.length;
@@ -762,7 +804,147 @@ function planTask(id) {
   const dep = text.match(/\*\*Depends on:\*\*\s*(.*)/i);
   const depends = dep && !/^\s*none\b/i.test(dep[1]) ? Array.from(dep[1].matchAll(TASK_ID), (m) => m[0]) : [];
   const files = (text.match(/\*\*Files touched:\*\*\s*([\s\S]*?)(?=\n\*\*|$)/i) || [])[1] || "";
-  return { id, title: lines[start].slice(`### ${id}:`.length).trim(), text, depends, files: files.trim() };
+  // `**Stream:**` is absent, empty or `none` for a serial task; anything else
+  // is kept verbatim (minus backticks) so a malformed slug shows up as a
+  // disagreement with PROGRESS.md's tag rather than being silently dropped.
+  const streamLine = (text.match(/^\*\*Stream:\*\*[ \t]*(.*)$/im) || [])[1];
+  const streamValue = streamLine === undefined ? "" : streamLine.trim().replace(/^`(.*)`$/, "$1").trim();
+  const stream = streamValue === "" || /^none$/i.test(streamValue) ? null : streamValue;
+  const filesList = Array.from(files.matchAll(/`([^`\n]+)`/g), (m) => m[1].trim()).filter(Boolean);
+  return { id, title: lines[start].slice(`### ${id}:`.length).trim(), text, depends, files: files.trim(), filesList, stream };
+}
+
+function planTask(id) {
+  if (!exists(P.plan)) throw new ToolError("docs/PLAN.md does not exist");
+  return planTaskFrom(read(P.plan).split("\n"), id);
+}
+
+// ---------------------------------------------------------------- waves (parallel streams)
+//
+// A wave is a maximal run of consecutive tasks, in PROGRESS.md order, that
+// all carry a `{stream: <slug>}` tag; a task without one is serial and acts
+// as a barrier. Within a wave, tasks sharing a stream run in order on one
+// implementer and different streams run concurrently. Waves are derived from
+// PROGRESS.md on every call, never stored, so they cannot drift from it.
+
+/** Repo-relative path token with any leading `./` dropped, for comparison. */
+const normPathToken = (p) => p.replace(/^\.\//, "");
+
+/** Do two Files-touched tokens name overlapping paths? A token ending in `/` is a directory and overlaps anything under it. */
+function pathsOverlap(a, b) {
+  a = normPathToken(a);
+  b = normPathToken(b);
+  if (a === b) return true;
+  if (a.endsWith("/") && b.startsWith(a)) return true;
+  if (b.endsWith("/") && a.startsWith(b)) return true;
+  return false;
+}
+
+/** Does any file token fall under `prefix`, or (for a directory token) contain it? Mirrors verifyCommands' prefix rule, widened for directories. */
+const touchesPrefix = (files, prefix) => files.some((f) => normPathToken(f).startsWith(prefix) || (f.endsWith("/") && prefix.startsWith(normPathToken(f))));
+
+/**
+ * Judge one wave's partition: `{ index, taskIds, streams, valid, reason,
+ * category }`. `reason` joins every problem found. `category` is
+ * `stream-exclusive` when a `verify` command is exclusive (no wave can run in
+ * a worktree at all) and `stream-partition` for every other problem. Never
+ * throws: a partition that cannot be proven safe is reported invalid, and
+ * the caller degrades the wave to serial.
+ */
+function validateWave(index, tasks, planLines, cc) {
+  const problems = [];
+  const streams = {};
+  for (const t of tasks) (streams[t.stream] = streams[t.stream] || []).push(t.id);
+
+  const info = {};
+  for (const t of tasks) {
+    let p = null;
+    if (planLines) {
+      try {
+        p = planTaskFrom(planLines, t.id);
+      } catch {
+        p = null;
+      }
+    }
+    if (!p) {
+      problems.push(`${t.id} has no entry in docs/PLAN.md`);
+      continue;
+    }
+    info[t.id] = p;
+    if (p.stream !== t.stream) problems.push(`${t.id}: docs/PLAN.md says Stream ${p.stream === null ? "none" : `'${p.stream}'`} but docs/PROGRESS.md tags it '${t.stream}'`);
+    if (!p.filesList.length) problems.push(`${t.id} lists no backticked paths under Files touched, so its stream cannot be proven disjoint`);
+  }
+
+  // A command that starts a port- or directory-bound environment must run
+  // from the main checkout, so a task that triggers one cannot be in a wave.
+  const exclusiveVerify = cc.verify.some((c) => c.exclusive);
+  if (exclusiveVerify) problems.unshift("a verify command is exclusive, so no task can run from a stream worktree");
+  for (const t of tasks) {
+    if (!info[t.id]) continue;
+    for (const [prefix, cmds] of Object.entries(cc.extraVerify)) {
+      if (cmds.some((c) => c.exclusive) && touchesPrefix(info[t.id].filesList, prefix)) {
+        problems.push(`${t.id} touches ${prefix}, whose extraVerify includes an exclusive command`);
+      }
+    }
+  }
+
+  // Disjoint Files touched across streams.
+  const names = Object.keys(streams).sort();
+  for (let i = 0; i < names.length; i++) {
+    for (let j = i + 1; j < names.length; j++) {
+      for (const aId of streams[names[i]]) {
+        for (const bId of streams[names[j]]) {
+          if (!info[aId] || !info[bId]) continue;
+          for (const ta of info[aId].filesList) {
+            for (const tb of info[bId].filesList) {
+              if (!pathsOverlap(ta, tb)) continue;
+              const what = normPathToken(ta) === normPathToken(tb) ? `both touch \`${ta}\`` : `overlap (\`${ta}\` and \`${tb}\`)`;
+              const msg = `${aId} (stream ${names[i]}) and ${bId} (stream ${names[j]}) ${what}`;
+              if (!problems.includes(msg)) problems.push(msg);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // No dependency across streams inside the wave (a dependency on anything
+  // before the wave is fine).
+  for (const t of tasks) {
+    if (!info[t.id]) continue;
+    for (const dep of info[t.id].depends) {
+      const target = tasks.find((x) => x.id === dep);
+      if (target && target.stream !== t.stream) problems.push(`${t.id} (stream ${t.stream}) depends on ${dep} (stream ${target.stream}) in the same wave`);
+    }
+  }
+
+  if (names.length < 2) problems.push("only one stream");
+
+  return {
+    index,
+    taskIds: tasks.map((t) => t.id),
+    streams,
+    valid: problems.length === 0,
+    reason: problems.length ? problems.join("; ") : null,
+    category: problems.length ? (exclusiveVerify ? "stream-exclusive" : "stream-partition") : null,
+  };
+}
+
+/** Every wave in `pr`, in order, numbered from 1, each already judged. `[]` for a plan with no streams. */
+function computeWaves(pr, cc) {
+  const groups = [];
+  let cur = null;
+  for (const t of pr.tasks) {
+    if (t.stream) {
+      if (!cur) { cur = []; groups.push(cur); }
+      cur.push(t);
+    } else {
+      cur = null;
+    }
+  }
+  if (!groups.length) return [];
+  const planLines = exists(P.plan) ? read(P.plan).split("\n") : null;
+  return groups.map((tasks, i) => validateWave(i + 1, tasks, planLines, cc));
 }
 
 function reviewRoundCount() {
@@ -904,6 +1086,7 @@ function status() {
     counts: null,
     blocked: [],
     skipped: [],
+    waves: [],
   };
   if (out.progressPresent) {
     const pr = parseProgress();
@@ -912,6 +1095,16 @@ function status() {
     out.counts = counts(pr.tasks);
     out.blocked = pr.tasks.filter((t) => t.state === "!").map((t) => t.id);
     out.skipped = pr.tasks.filter((t) => t.state === "-").map((t) => t.id);
+    const isOpen = (id) => {
+      const t = pr.tasks.find((x) => x.id === id);
+      return t.state === " " || t.state === "~";
+    };
+    out.waves = computeWaves(pr, cfg()).map((w) => ({
+      index: w.index,
+      streams: Object.entries(w.streams).map(([stream, ids]) => ({ stream, tasks: ids, open: ids.filter(isOpen).length })),
+      valid: w.valid,
+      reason: w.reason,
+    }));
   }
   if (out.reviewPresent) {
     const v = read(P.review).match(/\*\*Verdict\*\*:?\s*`?(APPROVED|CHANGES REQUESTED)`?/i) || read(P.review).match(/Verdict:?\s*`?(APPROVED|CHANGES REQUESTED)`?/i);
