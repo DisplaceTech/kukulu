@@ -80,7 +80,7 @@ session, and a subagent that errored out. It is not the answer to a halt.
 
 ## Halts
 
-Three things halt a flight on purpose.
+Four things halt a flight on purpose.
 
 **Round cap.** `foundry_review_submit` writes a `halted` reason under either
 of two conditions (F-13, F-15): the round count reaches `maxRoundsHard`
@@ -115,6 +115,12 @@ run left it.
 To continue anyway, after fixing the actual problem: set `"halted": null` in
 `.foundry/state.json`, commit it, and re-run the flight.
 
+**A stream merge conflict.** When a parallel stream's branch conflicts on
+merge, `foundry_stream_finish` aborts the merge, keeps the stream's branch
+and worktree, and halts with the conflicting paths in the reason — Foundry
+cannot guess a merge. See [Parallel streams](#parallel-streams) for the
+recovery.
+
 ## When something goes wrong
 
 | Symptom | What it means | What to do |
@@ -135,6 +141,9 @@ To continue anyway, after fixing the actual problem: set `"halted": null` in
 | Flight halts with a reason naming a dead tool or agent | `foundry_run_halt` was called | Read the reason, fix the actual problem, clear `halted` in `.foundry/state.json`, re-run |
 | Flight halts with "non-converging" or "hard cap" in the reason | Review findings stopped shrinking for `maxRounds` rounds, or the round count reached `maxRoundsHard` | Read `foundry_status`'s `state.rounds` for the trail of counts; if the reviewer is genuinely still converging, raise `maxRounds`/`maxRoundsHard`; otherwise a human needs to look at why findings keep recurring |
 | `foundry_review_submit` refuses over the `Round:` line | `docs/REVIEW.md`'s `Round:` line is missing or does not equal `reviewRound` | The error names the expected value; `foundry_status`'s `reviewRound` always has it too |
+| `foundry_next` keeps handing out the same stream | A stream's implementer stops before `foundry_stream_finish` (the guard cap, a crash, a refused call) | Expected: `foundry_run_start({ stream })` resumes its worktree. If it never makes progress, read that stream's task log; see [Parallel streams](#parallel-streams) to abandon it |
+| A stream's tool call times out while another stream is verifying | Tool calls are handled one at a time, so it queued behind the other stream's longest command | Raise Claude Code's `MCP_TOOL_TIMEOUT` above `foundry_status`'s `longestCommandTimeoutMs`; see [Parallel streams](#parallel-streams) |
+| A wave ran serially though the plan declared streams | Its partition was invalid, its `parallel.setup` failed, or `parallel.maxStreams` is `1` | Read `foundry_status`'s `waves[].reason` and `.foundry/feedback.jsonl` for a `stream-partition`, `stream-setup` or `stream-exclusive` entry; it is a planning defect to fix in the next plan, not a stuck flight |
 | A subagent's first `foundry_status` call is denied | The MCP allow rule is missing, or `foundry_agents_sync` reported `permissions: "failed: ..."` | Run `foundry_config_show` and check `permissionRule`; if a sync failed, the message names the broken `settings.local.json` — fix its JSON and re-run |
 
 ## Clearing a wedged run by hand
@@ -327,12 +336,84 @@ esac
 value; run it whenever the resolved model for a role is not what you
 expected.
 
+## Parallel streams
+
+A plan may split independent tasks into streams that run on separate
+implementers at the same time, each in its own git worktree, and merge back
+as they finish — how and why is in
+[architecture.md](./architecture.md#parallel-workstreams). The operator's
+concerns are these.
+
+**Config** (`docs/foundry.json`; see [Configuration](#configuration)).
+`parallel.maxStreams` caps how many streams of one wave run at once (default
+3; `1` turns parallelism off, silently). `parallel.setup` lists commands run
+once in each new worktree before its implementer starts — a fresh checkout
+has none of the installed dependencies `verify` needs, so this is where
+`npm ci` or `composer install` goes. A command entry marked
+`"exclusive": true` starts something keyed to the directory or a port it
+runs from (wp-env, docker compose, a dev server) and only ever runs from the
+main checkout; any task that triggers one is kept out of waves, and an
+exclusive command in `verify` itself makes every wave serial.
+
+**The tool-call timeout.** The server handles one tool call at a time, so
+while one stream's `foundry_verify` runs a long suite, a sibling stream's
+`foundry_task_done` waits behind it — for up to that suite's timeout. Claude
+Code's MCP tool-call timeout (the `MCP_TOOL_TIMEOUT` environment variable)
+must therefore exceed the longest command timeout plus headroom, or the
+waiting call fails on the client side. `foundry_status` reports
+`longestCommandTimeoutMs` (across `verify`, `extraVerify` and
+`parallel.setup`) to compare against. Verification is serialized on purpose:
+suites often share ports, containers or databases, and most of a stream's
+wall clock is model time, not test time.
+
+**A wave that ran serially.** Not a fault. An invalid partition, a failed
+`parallel.setup`, or an exclusive command each degrade the wave to serial and
+log one feedback entry — `stream-partition`, `stream-setup` or
+`stream-exclusive` — in `.foundry/feedback.jsonl`. Pull it back with
+`/foundry:pull-feedback`: it is material for the next plan.
+
+**A stream that stopped early.** The next `foundry_next` hands it out again;
+`foundry_run_start({ stream })` resumes its worktree and `foundry_task_next`
+resumes its in-progress task. Look at what is in flight with:
+
+```bash
+git worktree list
+ls .foundry/worktrees/
+# per-wave, per-stream open counts:
+#   foundry_status -> waves
+```
+
+**Recovering from a `stream-merge` halt.** The halt reason names the stream,
+its branch and the conflicting paths. From the main checkout, on the build
+branch:
+
+```bash
+git merge --no-ff <build-branch>--<stream>     # resolve the conflicts, then commit
+git worktree remove --force .foundry/worktrees/<stream>
+git branch -d <build-branch>--<stream>
+$EDITOR .foundry/state.json                    # set "halted": null
+git commit -am "chore: stream <stream> merged by hand"
+```
+
+Then re-run the flight; the stream's tasks are already done, so it goes on to
+the next wave or the handoff.
+
+**Abandoning a stream** you cannot recover: block its open tasks by hand (see
+[Clearing a wedged run](#clearing-a-wedged-run-by-hand)), then
+`git worktree remove --force .foundry/worktrees/<stream>` and
+`git branch -D <build-branch>--<stream>`. Nothing is lost that was not
+already committed to the stream branch, which you can still inspect until you
+delete it.
+
 ## What the flight leaves behind
 
 A `build/<date>` branch containing:
 
 - one commit per task, titled `<ID>: <title>`
 - interleaved `progress:` commits recording each state change with its sha
+- for a plan with parallel streams, one `merge stream <s> (wave <n>)` commit
+  per stream, and `chore: wave <n> runs serially` for any wave that could not
+  run in parallel
 - `review: round N` commits, one per round, each carrying that round's
   `REVIEW.md` and the fix tasks it queued
 - `docs/HANDOFF.md`, `docs/REVIEW.md` and `docs/SUMMARY.md` at the tip

@@ -30,7 +30,7 @@ it.
 | `templates/SPEC.md` | The spec skeleton users copy |
 | `templates/foundry.config.example.json`, `templates/ccr/` | The global routing config and claude-code-router provider manifests |
 | `templates/constraints.example.json` | Three worked `docs/foundry.json` `constraints` rules, with fixtures |
-| `test/` | Harness plus ten suites |
+| `test/` | Harness plus eleven suites |
 | `docs/` | Architecture, tool reference, routing guide, spec guide, runbook |
 | `docs/plans/` | The task-by-task plan behind each release |
 | `docs/feedback/` | Stumbling blocks a real flight hit, feeding the next release plan |
@@ -52,7 +52,7 @@ plugin that fails on someone else's machine.
 
 ```bash
 npm run lint                    # node --check, bash -n, JSON parse, exec bits
-npm test                        # all ten suites
+npm test                        # all eleven suites
 npm test -- guard protocol      # named suites only
 node test/state.mjs             # one suite, directly
 KEEP_REPO=1 npm test -- drive   # keep the temp repos for inspection
@@ -71,8 +71,9 @@ npm install --no-save mermaid jsdom && node scripts/check-diagrams.mjs
 | `routing` | Config merge and precedence, `foundry_agents_sync`, `foundry_config_show`, every refusal |
 | `constraints` | `docs/foundry.json` constraints, fixture self-tests, the scan, every refusal |
 | `feedback` | `foundry_feedback_log`, `.foundry/feedback.jsonl`, and the `policies.feedback` opt-out |
+| `streams` | Parallel workstreams: stream tags, waves, partition validation, stream-scoped tools, worktrees, `foundry_stream_finish`, `foundry_next`'s `streams`, pausing at a wave |
 | `guard` | The Stop / SubagentStop hook: scoping, blocking, counting, giving up, environment handling |
-| `drive` | One complete flight end to end over real stdio |
+| `drive` | Complete flights end to end over real stdio: one serial, and parallel ones (a wave, `maxStreams: 1`, an overlapping partition) |
 
 Suites are plain Node programs that print TAP-ish lines and exit non-zero on
 failure. `test/harness.mjs` provides temp git repos, an MCP client, fixtures

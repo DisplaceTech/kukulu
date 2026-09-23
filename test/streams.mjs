@@ -713,4 +713,24 @@ const feedbackOf = (repo) => (hasFile(repo, ".foundry/feedback.jsonl") ? readFil
   });
 }
 
+
+// ---------------------------------------------------------------- V4-08: status reports the longest command timeout
+
+{
+  await withServer(plannedRepo({ config: { verify: ["true"] } }), async ({ call }) => {
+    eq((await call("foundry_status")).longestCommandTimeoutMs, 600000, "the default command timeout when nothing overrides it");
+  });
+  const config = {
+    verify: [{ cmd: "true", timeoutMs: 1000 }],
+    extraVerify: { "tests/": [{ cmd: "true", timeoutMs: 900000 }] },
+    parallel: { setup: [{ cmd: "true", timeoutMs: 1200000 }] },
+  };
+  await withServer(plannedRepo({ config }), async ({ call }) => {
+    eq((await call("foundry_status")).longestCommandTimeoutMs, 1200000, "the longest of verify, extraVerify and parallel.setup wins");
+  });
+  await withServer(plannedRepo({ config: { verify: [] } }), async ({ call }) => {
+    eq((await call("foundry_status")).longestCommandTimeoutMs, null, "null with no commands");
+  });
+}
+
 finish();

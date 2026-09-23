@@ -4,6 +4,79 @@ All notable changes to this plugin. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] — 2026-09-23
+
+Parallel workstreams. This changes how a flight flows, which is why it is a
+minor version and not a patch: `go-flight` now spawns more than one stage
+agent at once, `PLAN.md` gains a field, and `foundry_next` gains a shape.
+The motivating flight ran 26 tasks on one implementer for about 68 minutes
+though many had disjoint file sets (F-05 of
+[`docs/feedback/2026-09-23-project-b.md`](./docs/feedback/2026-09-23-project-b.md)).
+A plan with no streams behaves exactly as it did in 0.3.2: every existing
+suite passes unchanged.
+
+### Added
+
+- **Streams and waves.** A task may carry `**Stream:** <slug>` in `PLAN.md`
+  and a `{stream: <slug>}` suffix on its `PROGRESS.md` line. A **wave** is a
+  run of consecutive streamed tasks; any untagged task is a barrier. Within a
+  wave, tasks of one stream run in order on one implementer and different
+  streams run concurrently. `foundry_status` reports `waves`.
+- **Partition validation that never halts.** A wave runs in parallel only if
+  its partition is provably safe: `PLAN.md` and `PROGRESS.md` agree, every
+  task lists concrete backticked `Files touched`, no two streams overlap (a
+  trailing `/` is a directory), no task depends on another stream of the
+  same wave, no task triggers an `exclusive` command, and there are at least
+  two streams. Otherwise the wave runs serially and one `stream-partition`
+  feedback entry says why.
+- **`foundry_stream_finish`** (sixteen tools now): merges a finished
+  stream's branch into the build branch (`--no-ff`) and removes its worktree
+  and branch. A merge conflict is the one stream failure that halts:
+  Foundry aborts the merge, keeps the stream, and records the paths and the
+  manual steps.
+- **Stream-scoped tools.** `foundry_run_start`, `foundry_task_next`,
+  `foundry_task_done`, `foundry_task_block` and `foundry_verify` take
+  `stream`. `foundry_run_start({ stream })` creates
+  `.foundry/worktrees/<stream>` on `<build-branch>--<stream>` and runs
+  `parallel.setup` in it. `PROGRESS.md`, `PLAN.md` and `state.json` live only
+  in the main checkout, so merging a stream can never conflict on
+  bookkeeping.
+- **`foundry_next` hands out waves.** An implement result may carry
+  `streams`, one entry per stream; `go-flight` spawns them all in a single
+  message and waits for all before asking again. A stream that stopped early
+  is simply handed out again.
+- **`parallel.maxStreams`** (default 3; `1` turns parallelism off, silently),
+  **`parallel.setup`** (commands run once in each new worktree — a fresh
+  checkout has no installed dependencies) and **`exclusive: true`** on a
+  command entry (wp-env and anything bound to a port or directory only ever
+  runs from the main checkout, and its tasks stay out of waves).
+- **`paused` at a wave boundary.** A serial implementer that has finished
+  everything before a wave gets `{ done: true, paused: true, … }` from
+  `foundry_task_next` and is told not to write a handoff; the lock is flagged
+  so the guard lets it stop.
+- **`foundry_status`'s `longestCommandTimeoutMs`**, because tool calls are
+  handled one at a time (see below).
+
+### Changed
+
+- **"Exactly one stage at a time" is now "exactly one `foundry_next` result
+  at a time."** A wave's streams count as one result.
+- **The implement guard is stream-aware.** A stream's implementer is blocked
+  only while its own stream has open tasks, and a stream that cannot be
+  identified while a wave is in flight is allowed (the controller re-hands
+  it out).
+- **Verification is serialized, deliberately.** Every tool handler is
+  synchronous, so the server handles one call at a time — which is what makes
+  concurrent implementers safe with one `PROGRESS.md` and one `state.json`.
+  Suites often share ports, containers or databases, and most of a stream's
+  wall clock is model time. The consequence is that a stream's bookkeeping
+  call can wait behind another stream's longest verify, so Claude Code's
+  `MCP_TOOL_TIMEOUT` must exceed the longest command timeout plus headroom
+  (documented in [`docs/operations.md`](./docs/operations.md#parallel-streams)).
+- The `plan-build` skill teaches the planner when streams are safe and when
+  not to use them; the `implement` skill gains a Stream mode section.
+- **Review-fix rounds stay serial.** The reviewer does not assign streams.
+
 ## [0.3.2] — 2026-09-23
 
 Fixes from the first real flight on 0.3.1

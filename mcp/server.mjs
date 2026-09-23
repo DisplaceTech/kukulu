@@ -50,7 +50,7 @@ const MCP_ALLOW_RULE = "mcp__plugin_foundry_foundry";
 const PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 // Keep in sync with .claude-plugin/plugin.json and package.json; test/plugin.mjs checks it.
-const VERSION = "0.3.2";
+const VERSION = "0.4.0";
 
 const TASK_ID = /\b[PR]\d+-\d+\b/g;
 const TASK_LINE = /^- \[( |~|x|!|-)\] ([PR]\d+-\d+)(?: (.*))?$/;
@@ -1199,6 +1199,19 @@ function gitFacts() {
 
 // ---------------------------------------------------------------- tools
 
+/**
+ * The longest timeout any command Foundry runs on the model's behalf can
+ * take (`verify`, `extraVerify`, `parallel.setup`), or null with none. Every
+ * tool handler is synchronous, so a stream's bookkeeping call can wait
+ * behind another stream's longest verify; Claude Code's MCP tool-call
+ * timeout (`MCP_TOOL_TIMEOUT`) has to exceed this plus headroom.
+ */
+function longestCommandTimeoutMs() {
+  const cc = cfg();
+  const all = [...cc.verify, ...Object.values(cc.extraVerify).flat(), ...cc.parallel.setup];
+  return all.length ? Math.max(...all.map((c) => c.timeoutMs)) : null;
+}
+
 function status() {
   resolveRouting(); // validate the merged routing config; a bad one refuses here too
   const st = loadState();
@@ -1222,6 +1235,7 @@ function status() {
     policies: st.policies,
     signing: st.signing,
     feedbackCount: countFeedback(),
+    longestCommandTimeoutMs: longestCommandTimeoutMs(),
     reviewRoundsInPlan: reviewRoundCount(),
     branch: null,
     started: null,

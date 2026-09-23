@@ -1,6 +1,6 @@
 # MCP tool reference
 
-Fifteen tools, served over stdio by `mcp/server.mjs` with no dependencies.
+Sixteen tools, served over stdio by `mcp/server.mjs` with no dependencies.
 The server is launched by Claude Code from [`.mcp.json`](../.mcp.json) with
 `FOUNDRY_PROJECT_DIR` set to the project root; every path below is relative to
 that root.
@@ -11,7 +11,7 @@ are read-only. The flight controller is allowed those plus
 allow rule and a `.git/info/exclude` line, never a task or a verdict; and
 `foundry_run_halt`, which it may call itself if it cannot even spawn a
 stage, so the next flight sees a clean halt instead of retrying blindly.
-Everything else changes project state and belongs to a stage agent. (`foundry_mutate` changes a source file only for the length of one call and always restores it.)
+Everything else changes project state and belongs to a stage agent. (`foundry_mutate` changes a source file only for the length of one call and always restores it, and a stream's tools work in that stream's own worktree.)
 
 `foundry_next`, `foundry_status`, `foundry_config_show` and
 `foundry_agents_sync` all resolve the merged routing config (see
@@ -47,6 +47,7 @@ context.
 | `reviewRound` | Always `round + 1` — the number the *next* review must stamp on `docs/REVIEW.md`'s `Round:` line (F-10, F-11) |
 | `preexistingUntracked` | Paths that were already untracked before the current run started — invisible to every dirty-tree check (F-09) |
 | `policies`, `signing` | The run's resolved policies and signing outcome, from `foundry_run_start` — see [operations.md](./operations.md#configuration) |
+| `longestCommandTimeoutMs` | The longest timeout of any `verify`, `extraVerify` or `parallel.setup` command (`null` with none). Every tool call is handled one at a time, so a parallel stream's bookkeeping call can wait behind another stream's longest verify; Claude Code's MCP tool-call timeout (`MCP_TOOL_TIMEOUT`) must exceed this plus headroom — see [operations.md](./operations.md#parallel-streams) |
 | `feedbackCount` | Number of entries in `.foundry/feedback.jsonl` so far, so a human watching a transcript can see friction accumulate without opening the file |
 | `reviewRoundsInPlan` | How many `## Review fixes (round N)` sections `PLAN.md` carries |
 | `branch`, `started` | The `Branch:` and `Started:` headers in `PROGRESS.md` |
