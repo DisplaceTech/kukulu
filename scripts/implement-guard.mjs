@@ -40,14 +40,17 @@
 //      to a parallel wave was told, by foundry_task_next, to stop and let the
 //      flight controller hand the wave out. The MCP set the flag; the guard
 //      just honours it and allows the stop.
-//   6. A SubagentStop for the implementer whose transcript's *last*
-//      `foundry_run_start` call passed a `stream` is one stream's
+//   6. A SubagentStop for the implementer whose *own* transcript
+//      (`agent_transcript_path` — never the parent's `transcript_path`, where
+//      sibling streams' calls can appear inline) shows a *last*
+//      `foundry_run_start` call that passed a `stream` is one stream's
 //      implementer: block only while *that stream* has open tasks
 //      (`{stream: <s>}` tags on the PROGRESS.md lines), never because another
 //      stream's tasks are open — a finished stream must not be held hostage
 //      by its siblings.
-//   7. If the stream cannot be determined (no `foundry_run_start` call in the
-//      transcript, or an unreadable one) and stream worktrees exist, a wave is
+//   7. If the stream cannot be determined (no agent transcript, no
+//      `foundry_run_start` call in it, or an unreadable one) and stream
+//      worktrees exist, a wave is
 //      in flight: allow. The controller's next foundry_next re-hands out any
 //      stream that stopped early, so this is an optimisation, not the only
 //      safety net. With no worktrees, the rules above apply unchanged.
@@ -227,7 +230,12 @@ function main() {
   // Rules 6 and 7: a stream's implementer answers only for its own stream.
   let stream = null;
   if (input.hook_event_name === "SubagentStop") {
-    const calls = runStartCalls(input.agent_transcript_path || input.transcript_path, { includeSidechain: true });
+    // Only the subagent's *own* transcript can say which stream it runs.
+    // `transcript_path` may be the parent's, where every stream's calls can
+    // appear inline, so its last foundry_run_start may be a sibling's — and
+    // blocking on a sibling's behalf would send a second implementer into the
+    // same stream. Without an agent transcript, no stream is attributed.
+    const calls = input.agent_transcript_path ? runStartCalls(input.agent_transcript_path, { includeSidechain: true }) : [];
     if (calls.length) {
       const last = calls[calls.length - 1];
       stream = typeof last.stream === "string" && last.stream ? last.stream : null;

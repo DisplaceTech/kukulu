@@ -273,6 +273,11 @@ did before.
   `foundry_next`; `foundry_run_start({ stream })` resumes its worktree, so
   the controller never reasons about it. Streams are capped at
   `parallel.maxStreams` (default 3; `1` turns parallelism off).
+- **Review-fix rounds.** The reviewer never assigns streams, so its
+  `R<N>-<nn>` fix tasks are serial. A task it *unblocks* keeps its
+  `{stream}` tag: the fix round re-opens that wave for just the unblocked
+  stream, which runs in a fresh worktree and merges back before the serial
+  fix tasks.
 - **`exclusive` commands.** A command entry marked `exclusive: true`
   starts something keyed to the directory or a port it runs from — wp-env
   is the motivating case — so two of them collide, and serializing their

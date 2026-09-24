@@ -1614,7 +1614,12 @@ function streamFinish({ stream } = {}) {
   if (!merge.ok) {
     const conflicts = git(["diff", "--name-only", "--diff-filter=U"], { allowFail: true }).out.split("\n").filter(Boolean);
     git(["merge", "--abort"], { allowFail: true });
-    const halted = `merging stream '${stream}' (branch ${streamBranch}) into ${g.branch} conflicted${conflicts.length ? ` in ${conflicts.join(", ")}` : ""}; the stream's branch and worktree ${rel(dir)} are kept. A human must resolve it: from the main checkout run \`git merge --no-ff ${streamBranch}\`, fix the conflicts and commit, then \`git worktree remove --force ${rel(dir)}\` and clear 'halted' in .foundry/state.json.`;
+    // A merge can also fail before it starts (an untracked file in the main
+    // checkout that the stream adds would be overwritten); then there are no
+    // conflict paths, and git's own message is the only useful explanation.
+    const gitSays = (merge.err || merge.out || "unknown error").split("\n").filter(Boolean).slice(0, 4).join(" ").replace(/\s+/g, " ");
+    const what = conflicts.length ? `conflicted in ${conflicts.join(", ")}` : `failed: ${gitSays}`;
+    const halted = `merging stream '${stream}' (branch ${streamBranch}) into ${g.branch} ${what}; the stream's branch and worktree ${rel(dir)} are kept. A human must resolve it: from the main checkout run \`git merge --no-ff ${streamBranch}\`, fix what it reports and commit, then \`git worktree remove --force ${rel(dir)}\` and clear 'halted' in .foundry/state.json.`;
     const cur = loadState();
     cur.halted = halted;
     saveState(cur);

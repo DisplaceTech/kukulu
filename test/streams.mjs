@@ -517,6 +517,23 @@ const UI = [["P1-03", "src/ui/a.txt", "u\n"], ["P1-04", "src/ui/b.txt", "v\n"]];
 }
 
 
+// Review of PR #6: a merge that fails before it starts (an untracked file in
+// the main checkout that the stream adds) halts with git's own explanation,
+// not a "conflicted" with nothing to resolve.
+{
+  const repo = waveRepo();
+  await withServer(repo, async ({ call }) => {
+    await workStream(call, "api", API);
+    writeFile(repo, "src/api/a.txt", "an operator's untracked file\n");
+    const f = await call("foundry_stream_finish", { stream: "api" });
+    eq(f.merged, false, "the merge does not happen");
+    eq(f.conflicts.length, 0, "there are no conflict paths");
+    like(f.halted, /failed: .*untracked working tree files would be overwritten by merge.*src\/api\/a\.txt/, "the halt reason carries git's message and the path");
+    eq(readFile(repo, "src/api/a.txt"), "an operator's untracked file\n", "the operator's file is untouched");
+    eq((await call("foundry_next")).stage, "halt", "and the flight halts for a human");
+  });
+}
+
 // ---------------------------------------------------------------- V4-04: foundry_next hands out waves
 
 const feedbackOf = (repo) => (hasFile(repo, ".foundry/feedback.jsonl") ? readFile(repo, ".foundry/feedback.jsonl").trim().split("\n").map((l) => JSON.parse(l)) : []);

@@ -132,7 +132,11 @@ everything above still applies, with these changes:
 
 - **Setup.** Call `foundry_run_start` with `stream: "<s>"`. It returns a
   `cwd`: the absolute path of your own git worktree, already set up. Work
-  only there.
+  only there. If it refuses instead — the stream is no longer available, or
+  its setup failed and the wave now runs serially — do not retry and do not
+  work around it: print its message on one line starting `STREAM NOT
+  STARTED` and stop. The flight controller's next `foundry_next` decides what
+  runs instead.
 - **Absolute paths under `cwd`.** Every Read, Write and Edit uses an
   absolute path under `cwd`. Every Bash command starts with `cd <cwd> &&`,
   because your shell does not stay in it. Never read or edit files in the

@@ -345,7 +345,7 @@ const STREAM_TASKS = [
 const withStreamTasks = (states = {}) => STREAM_TASKS.map((t) => ({ ...t, state: states[t.id] || t.state }));
 const subagentStop = (repo, calls, extra = {}) => {
   writeFile(repo, "transcript.jsonl", calls.map((input) => toolUseLine(RUN_START, input)).join("\n") + "\n");
-  return { hook_event_name: "SubagentStop", agent_type: "foundry-implementer", transcript_path: TRANSCRIPT(repo), ...extra };
+  return { hook_event_name: "SubagentStop", agent_type: "foundry-implementer", agent_transcript_path: TRANSCRIPT(repo), transcript_path: path.join(repo, "parent.jsonl"), ...extra };
 };
 
 {
@@ -399,6 +399,21 @@ const subagentStop = (repo, calls, extra = {}) => {
   const repo = armed(withStreamTasks(), JSON.stringify({ count: 3, cap: 3 }) + "\n");
   const out = JSON.parse(guard(repo, { input: subagentStop(repo, [{ stream: "api" }]) }));
   like(out.systemMessage, /guard cap \(3\) reached with 2 open tasks stream 'api'/, "the cap message names the stream and its own count");
+}
+
+
+{
+  // Review of PR #6: a stream is attributed only from the subagent's own
+  // transcript. The parent's transcript can hold every stream's calls inline,
+  // and its last run_start may be a sibling's; blocking on that sibling's
+  // behalf would send a second implementer into the same stream.
+  const repo = armed(withStreamTasks({ "P1-01": "x", "P1-02": "x" }));
+  fs.mkdirSync(path.join(repo, ".foundry", "worktrees", "api"), { recursive: true });
+  const inline = (stream) => toolUseLine(RUN_START, { stream }, { isSidechain: true });
+  writeFile(repo, "parent.jsonl", `${inline("api")}\n${inline("ui")}\n`);
+  const input = { hook_event_name: "SubagentStop", agent_type: "foundry-implementer", transcript_path: path.join(repo, "parent.jsonl") };
+  eq(guard(repo, { input }), "", "with no agent_transcript_path, a sibling's call in the parent transcript is never attributed: allowed while a wave is in flight");
+  eq(readFile(repo, ".foundry/implement.lock").trim(), "0", "...and nothing is counted");
 }
 
 finish();

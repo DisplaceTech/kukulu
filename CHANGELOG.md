@@ -75,7 +75,10 @@ suite passes unchanged.
   (documented in [`docs/operations.md`](./docs/operations.md#parallel-streams)).
 - The `plan-build` skill teaches the planner when streams are safe and when
   not to use them; the `implement` skill gains a Stream mode section.
-- **Review-fix rounds stay serial.** The reviewer does not assign streams.
+- **Review-fix tasks are serial.** The reviewer does not assign streams, so
+  `R<N>-<nn>` tasks always run serially. A task the reviewer *unblocks* keeps
+  its `{stream}` tag, so a fix round re-runs just that stream in its own
+  worktree before the serial fix tasks.
 
 ## [0.3.2] — 2026-09-23
 

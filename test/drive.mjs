@@ -392,4 +392,37 @@ const ALL_IDS = PARALLEL_PLAN.map((t) => t.id);
   });
 }
 
+// Review of PR #6: a review-fix round that unblocks a task inside a stream.
+// The task keeps its {stream} tag, so the round re-opens that wave for just
+// the unblocked stream; the reviewer's own R-tasks stay serial after it.
+{
+  const repo = flightRepo(PARALLEL_PLAN);
+  await withServer(repo, async ({ call }) => {
+    // Round 0 by hand: serial, then the wave with api's first task blocked (its dependent skipped), then serial.
+    await serialImplementer(call, repo);
+    const a = await call("foundry_run_start", { stream: "api" });
+    await call("foundry_task_next", { stream: "api" });
+    await call("foundry_task_block", { stream: "api", id: "P1-01", reason: "needs an API that looks missing" });
+    eq((await call("foundry_task_next", { stream: "api" })).skipped.map((x) => x.id).join(","), "P1-02", "api's dependent is skipped");
+    await call("foundry_stream_finish", { stream: "api" });
+    await streamImplementers(call, ["ui"]);
+    eq(await serialImplementer(call, repo), "finished", "round 0 finishes");
+    void a;
+
+    writeFile(repo, "docs/REVIEW.md", "# Review\nRound: 1\n**Verdict**: CHANGES REQUESTED\n");
+    await call("foundry_review_submit", {
+      verdict: "CHANGES REQUESTED",
+      tasks: [{ title: "Tidy readme", goal: "tidy", files: ["README.md"], tests: "none", dependsOn: [] }],
+      unblock: [{ id: "P1-01", reason: "the API exists" }, { id: "P1-02", reason: "follows P1-01" }],
+    });
+    like(readFile(repo, "docs/PROGRESS.md"), /- \[ \] P1-01 Task P1-01 \{stream: api\}/, "the unblocked task keeps its stream tag");
+
+    const events = await fly(call, repo);
+    eq(events.join(" → "), "implement[api] → implement → review → summarize → done", "the fix round runs the unblocked stream alone, then the serial R-task, then finishes");
+    const prog = readFile(repo, "docs/PROGRESS.md");
+    for (const id of [...ALL_IDS, "R1-01"]) like(prog, new RegExp(`^- \\[x\\] ${id} `, "m"), `${id} ends done`);
+    eq(git(repo, ["worktree", "list"]).split("\n").length, 1, "no worktree is left behind");
+  });
+}
+
 finish();

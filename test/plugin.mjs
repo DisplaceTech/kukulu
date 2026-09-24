@@ -233,6 +233,7 @@ like(goFlight, /Exactly one `foundry_next` result is in\s+flight at a time/, "go
   const implSkill = read("skills/implement/SKILL.md");
   like(implSkill, /## Stream mode/, "the implement skill has a Stream mode section");
   like(implSkill, /foundry_stream_finish/, "...naming foundry_stream_finish");
+  like(implSkill, /STREAM NOT\s+STARTED/, "...and telling a stream implementer to stop, not retry, when run_start refuses");
   like(implSkill, /never `cd` out of `cwd`|`cd <cwd> &&`/, "...and telling the implementer to work only inside its cwd");
   like(implSkill, /docs\/PROGRESS\.md`,\s+`docs\/PLAN\.md`,\s+`docs\/HANDOFF\.md`/, "...and to leave the shared files to the MCP");
 }
