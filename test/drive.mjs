@@ -126,6 +126,7 @@ await withServer(repo, async ({ call }) => {
   });
   eq(r.fixTasks.join(","), "R1-01", "the finding becomes a task with an id");
   eq(r.unblocked.join(","), "P0-02", "the reviewer reopens the blocked task");
+  eq(r.reopenedDependents.join(","), "P0-03", "...and the task skipped because of it");
   eq(subject(repo), "review: round 1", "the round is one commit");
   like(readFile(repo, "docs/PLAN.md"), /## Review fixes \(round 1\)\n\n### R1-01: Fix hello/, "the fix task is written into the plan");
   like(readFile(repo, "docs/PROGRESS.md"), /- \[ \] R1-01 Fix hello\n\n## Log/, "and onto the end of the task list");
@@ -146,13 +147,18 @@ await withServer(repo, async ({ call }) => {
   await call("foundry_task_done", { id: "P0-02", log: "Turned out to be possible." });
 
   t = await call("foundry_task_next");
+  eq(t.id, "P0-03", "then its reopened dependent");
+  commitTask(repo, "P0-03", "Depends on the impossible one", { "x": "x\n" });
+  await call("foundry_task_done", { id: "P0-03", log: "Ran once its dependency landed." });
+
+  t = await call("foundry_task_next");
   eq(t.id, "R1-01", "then the reviewer's fix task");
   like(t.text, /hello must actually greet/, "which reads back exactly as the reviewer wrote it");
   commitTask(repo, "R1-01", "Fix hello", { "hello.txt": "hello\n" });
   await call("foundry_task_done", { id: "R1-01", log: "hello.txt now greets." });
 
   eq((await call("foundry_task_next")).done, true, "the fix round is complete");
-  writeFile(repo, "docs/HANDOFF.md", "# handoff\n## Round 1\nBoth tasks landed.\n");
+  writeFile(repo, "docs/HANDOFF.md", "# handoff\n## Round 1\nAll three tasks landed.\n");
   r = await call("foundry_run_finish");
   eq(r.round, 1, "the handoff belongs to round 1");
 

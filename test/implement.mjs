@@ -330,6 +330,68 @@ for (const missing of ["docs/SPEC.md", "docs/PLAN.md", "docs/PROGRESS.md", "docs
   });
 }
 
+// ---------------------------------------------------------------- task_reopen (2026-09-30 cleanflate F-03, F-18)
+
+{
+  const tasks = [
+    { id: "P0-01", title: "Base", files: "a.txt" },
+    { id: "P0-02", title: "Needs a download", files: "b.txt", depends: ["P0-01"] },
+    { id: "P0-03", title: "Uses the download", files: "c.txt", depends: ["P0-02"] },
+    { id: "P0-04", title: "Uses that", files: "d.txt", depends: ["P0-03"] },
+    { id: "P0-05", title: "Unrelated blocker", files: "e.txt" },
+    { id: "P0-06", title: "Needs the unrelated one", files: "f.txt", depends: ["P0-05"] },
+  ];
+  const repo = plannedRepo({ tasks });
+  git(repo, ["checkout", "-q", "-b", `build/${TODAY}`]);
+  markTasks(repo, { "P0-01": "x", "P0-02": "!", "P0-03": "-", "P0-04": "-", "P0-05": "!", "P0-06": "-" });
+  setState(repo, { round: 0, implemented: true });
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-qm", "chore: round 0 implemented"]);
+  await withServer(repo, async ({ call }) => {
+    isError(await call("foundry_task_reopen", { id: "P0-02" }), /id and reason are required/, "a reopen without a reason is refused");
+    isError(await call("foundry_task_reopen", { id: "P9-99", reason: "x" }), /not in docs\/PROGRESS\.md/, "an unknown task is refused");
+    isError(await call("foundry_task_reopen", { id: "P0-01", reason: "x" }), /'done'; only a blocked or skipped task/, "a done task cannot be reopened");
+
+    const r = await call("foundry_task_reopen", { id: "P0-02", reason: "the operator supplied the corpus file" });
+    eq(r.reopenedDependents.join(","), "P0-03,P0-04", "the tasks skipped because of it come back too, transitively");
+    eq(r.counts.todo, 3, "three tasks are open again");
+    eq(r.counts.skipped, 1, "a task skipped for an unrelated blocker stays skipped");
+    eq(r.counts.blocked, 1, "...and so does that blocker");
+    eq(subject(repo), "progress: reopen P0-02 (+2 dependents)", "the reopen is one commit");
+    eq(git(repo, ["status", "--porcelain"]), "", "...leaving a clean tree");
+    const prog = readFile(repo, "docs/PROGRESS.md");
+    like(prog, /### P0-02 — reopened\nREOPENED: the operator supplied the corpus file/, "the reason is logged");
+    like(prog, /### P0-04 — reopened\nreopened: it was skipped because of P0-03, which is open again/, "a transitive dependent's log names its cause");
+
+    const n = await call("foundry_next");
+    eq(n.stage, "implement", "a finished round with reopened tasks goes back to implement");
+
+    const skippedOnly = await call("foundry_task_reopen", { id: "P0-06", reason: "try it anyway" });
+    eq(skippedOnly.reopenedDependents.length, 0, "a skipped task can be reopened on its own");
+    eq(subject(repo), "progress: reopen P0-06", "...with a plain commit subject");
+    await call("foundry_run_start");
+    const picked = [];
+    for (;;) {
+      const t = await call("foundry_task_next");
+      for (const sk of t.skipped) picked.push(`skip:${sk.id}`);
+      if (t.done) break;
+      picked.push(t.id);
+      commitTask(repo, t.id, t.title, { [`${t.id}.txt`]: "ok\n" });
+      await call("foundry_task_done", { id: t.id, log: "done" });
+    }
+    eq(picked.join(","), "P0-02,P0-03,P0-04,skip:P0-06", "reopened tasks run in plan order, and one whose blocker is still blocked is skipped again");
+  });
+}
+
+{
+  const repo = plannedRepo();
+  markTasks(repo, { "P0-01": "x", "P0-02": "!", "P0-03": "-" });
+  setState(repo, { summarized: true });
+  await withServer(repo, async ({ call }) => {
+    isError(await call("foundry_task_reopen", { id: "P0-02", reason: "x" }), /flight is complete/, "a summarized flight refuses a reopen");
+  });
+}
+
 // ---------------------------------------------------------------- verify
 
 {

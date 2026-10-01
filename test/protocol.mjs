@@ -11,6 +11,7 @@ const EXPECTED_TOOLS = [
   "foundry_task_next",
   "foundry_task_done",
   "foundry_task_block",
+  "foundry_task_reopen",
   "foundry_verify",
   "foundry_stream_finish",
   "foundry_run_finish",

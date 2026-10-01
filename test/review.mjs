@@ -158,11 +158,14 @@ const FIX = {
     eq(r.round, 1, "changes requested opens the next round");
     eq(r.fixTasks.join(","), "R1-01,R1-02", "fix tasks are numbered and zero-padded");
     eq(r.unblocked.join(","), "P0-02", "unblocked tasks are reported");
+    eq(r.reopenedDependents.join(","), "P0-03", "the task skipped because of it is reopened with it (cleanflate F-05)");
     eq(r.halted, null, "a round inside the cap does not halt the flight");
     // F-03: the returned counts describe PROGRESS.md as this call left it —
-    // two new fix tasks and one unblocked task — not as it was before.
-    eq(r.counts.todo, 3, "the returned counts include the unblocked task and both new fix tasks");
-    eq(r.counts.open, 3, "...as open");
+    // two new fix tasks, one unblocked task and its reopened dependent — not
+    // as it was before.
+    eq(r.counts.todo, 4, "the returned counts include the unblocked task, its dependent and both new fix tasks");
+    eq(r.counts.open, 4, "...as open");
+    eq(r.counts.skipped, 0, "...and nothing is left skipped");
     eq(r.counts.blocked, 0, "...and the unblocked task is no longer blocked");
     eq(r.counts.total, 5, "...and total includes the new tasks");
     eq(subject(repo), "review: round 1", "the round is one commit");
@@ -176,11 +179,12 @@ const FIX = {
     like(plan, /### R1-01[\s\S]*\*\*Depends on:\*\* none/, "a fix task with no dependencies says none");
 
     const prog = readFile(repo, "docs/PROGRESS.md");
-    like(prog, /- \[ \] P0-02 Impossible task\n- \[-\] P0-03[^\n]*\n- \[ \] R1-01 Fix hello\n- \[ \] R1-02 Second fix\n\n## Log/, "fix tasks are appended to Tasks, above the Log");
+    like(prog, /- \[ \] P0-02 Impossible task\n- \[ \] P0-03[^\n]*\n- \[ \] R1-01 Fix hello\n- \[ \] R1-02 Second fix\n\n## Log/, "fix tasks are appended to Tasks, above the Log");
     like(prog, /### P0-02 — unblocked \(round 1\)\nthe API does exist; see SPEC §6/, "the unblock reason is logged");
+    like(prog, /### P0-03 — unblocked \(round 1\)\nreopened: it was skipped because of P0-02, which is open again/, "the dependent's reopening is logged with its cause");
 
     const s = await call("foundry_status");
-    eq(s.counts.open, 3, "the unblocked task and both fixes are open");
+    eq(s.counts.open, 4, "the unblocked task, its dependent and both fixes are open");
     eq(s.reviewRoundsInPlan, 1, "status counts the review sections in PLAN.md");
     eq(s.state.verdict, "CHANGES REQUESTED", "the verdict is persisted");
 
@@ -193,6 +197,7 @@ const FIX = {
     eq(first.id, "P0-02", "the unblocked task is picked up again");
     await call("foundry_task_block", { id: "P0-02", reason: "still blocked / same error / needs a spec change" });
     const fix = await call("foundry_task_next");
+    eq(fix.skipped.map((x) => x.id).join(","), "P0-03", "a reopened dependent whose blocker blocks again is skipped again");
     eq(fix.id, "R1-01", "the fix task is next");
     like(fix.text, /hello must actually greet/, "the fix task's text is readable from PLAN.md");
     eq(fix.files, "hello.txt", "the fix task's files parse back out");

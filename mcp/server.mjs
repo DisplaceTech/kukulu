@@ -1785,6 +1785,68 @@ function taskBlock({ stream, id, reason }) {
   return { id, progressCommit: psha, counts: counts(pr.tasks), ...(stream !== undefined ? { stream } : {}) };
 }
 
+/**
+ * Set every id in `ids` back to todo, logging `body` under `stamp`, then
+ * reopen every skipped task that depends — directly, or through another task
+ * reopened here — on one of them. A reopened dependent that still has a
+ * different blocked dependency is simply skipped again by the next
+ * foundry_task_next, so reopening generously is safe; leaving dependents
+ * skipped is not (F-05, F-18, F-19 of the 2026-09-30 cleanflate feedback: one
+ * cleared blocker left 17 tasks skipped with no sanctioned way back).
+ * Mutates `pr`; returns the dependents reopened, in PROGRESS.md order.
+ */
+function reopenWithDependents(pr, ids, stamp, body) {
+  for (const id of ids) {
+    setTaskState(pr, id, " ");
+    appendLog(pr, id, stamp, body);
+  }
+  const planLines = exists(P.plan) ? read(P.plan).split("\n") : [];
+  const reopened = new Set(ids);
+  const dependents = [];
+  for (let changed = true; changed; ) {
+    changed = false;
+    for (const t of pr.tasks) {
+      if (t.state !== "-") continue;
+      let depends;
+      try {
+        depends = planTaskFrom(planLines, t.id).depends;
+      } catch {
+        continue;
+      }
+      const via = depends.find((d) => reopened.has(d));
+      if (!via) continue;
+      setTaskState(pr, t.id, " ");
+      appendLog(pr, t.id, stamp, `reopened: it was skipped because of ${via}, which is open again`);
+      reopened.add(t.id);
+      dependents.push(t.id);
+      changed = true;
+    }
+  }
+  return dependents;
+}
+
+/**
+ * Reopen one blocked or skipped task once whatever stopped it is resolved
+ * (an operator supplied a missing file, a flaky service came back), together
+ * with every task skipped because of it. The next foundry_task_next picks it
+ * up; after a finished run, foundry_next hands out an implement stage again.
+ */
+function taskReopen({ id, reason } = {}) {
+  if (!id || !reason) throw new ToolError("id and reason are required");
+  refuseWhileStreamsPending();
+  const st = loadState();
+  if (st.summarized) throw new ToolError("the flight is complete (summarized); reopening a task now would reopen an approved build — start a new flight instead");
+  const pr = parseProgress();
+  const t = pr.tasks.find((x) => x.id === id);
+  if (!t) throw new ToolError(`task ${id} not in docs/PROGRESS.md`);
+  if (t.state !== "!" && t.state !== "-") throw new ToolError(`task ${id} is '${STATE_NAMES[t.state]}'; only a blocked or skipped task can be reopened`);
+  const dependents = reopenWithDependents(pr, [id], "reopened", `REOPENED: ${reason}`);
+  writeProgress(pr);
+  const commit = gitCommitIfChanged([P.progress], `progress: reopen ${id}${dependents.length ? ` (+${dependents.length} dependent${dependents.length === 1 ? "" : "s"})` : ""}`);
+  resetLockCounter();
+  return { id, reopenedDependents: dependents, commit, counts: counts(pr.tasks) };
+}
+
 // Every command Foundry runs for the model goes through mcp/run-command.mjs,
 // which runs it in its own process group so a timeout kills the whole tree,
 // and keeps only a bounded tail of its output (F-04, F-09, F-16 of the
@@ -2252,14 +2314,18 @@ function reviewSubmit({ verdict, tasks = [], unblock = [] }) {
     appendTaskLines(pr, tasks.map((t, i) => ({ id: ids[i], title: t.title })));
   }
   const unblocked = [];
+  const reopened = [];
   for (const u of unblock) {
     const id = typeof u === "string" ? u : u.id;
     const reason = typeof u === "string" ? "unblocked by reviewer" : u.reason || "unblocked by reviewer";
     const t = pr.tasks.find((x) => x.id === id);
     if (!t) throw new ToolError(`cannot unblock ${id}: not in PROGRESS.md`);
-    if (t.state !== "!" && t.state !== "-") throw new ToolError(`cannot unblock ${id}: it is '${STATE_NAMES[t.state]}'`);
-    setTaskState(pr, id, " ");
-    appendLog(pr, id, `unblocked (round ${N})`, reason);
+    if (t.state !== "!" && t.state !== "-") {
+      // Already reopened as a dependent of an earlier unblock in this call.
+      if (reopened.includes(id)) continue;
+      throw new ToolError(`cannot unblock ${id}: it is '${STATE_NAMES[t.state]}'`);
+    }
+    reopened.push(...reopenWithDependents(pr, [id], `unblocked (round ${N})`, reason));
     unblocked.push(id);
   }
   writeProgress(pr);
@@ -2290,7 +2356,7 @@ function reviewSubmit({ verdict, tasks = [], unblock = [] }) {
   // Re-read rather than reuse `pr`: appendTaskLines edits pr.lines but not
   // pr.tasks, so counts(pr.tasks) would describe the file as it was before
   // this call queued its own fix tasks (F-03 of the 2026-09-23 flight feedback).
-  return { verdict, round: N, fixTasks: ids, unblocked, commit: sha, halted: st.halted, counts: counts(parseProgress().tasks), push, ...recoveredField };
+  return { verdict, round: N, fixTasks: ids, unblocked, reopenedDependents: reopened, commit: sha, halted: st.halted, counts: counts(parseProgress().tasks), push, ...recoveredField };
 }
 
 function summaryCommit() {
@@ -2321,6 +2387,12 @@ const TOOLS = [
   { name: "foundry_task_next", description: "Select the next task (first [~], else first [ ]), auto-skip tasks whose dependencies are blocked, mark it [~], and return its PLAN.md text plus dependency log entries. Returns { done: true } when none remain.", inputSchema: S({ stream: { type: "string", description: "restrict to this stream's tasks (parallel waves only)" } }), fn: taskNext },
   { name: "foundry_task_done", description: "Mark a task [x] and append its log entry stamped with HEAD's sha. Requires HEAD's commit subject to start with '<id>:' and a clean tree. Commits PROGRESS.md.", inputSchema: S({ stream: { type: "string", description: "the stream this task belongs to, when working in a parallel wave" }, id: { type: "string" }, log: { type: "string", description: "Log entry body, under 15 lines" } }, ["id", "log"]), fn: taskDone },
   { name: "foundry_task_block", description: "Give up on a task: hard-reset uncommitted changes, mark it [!], log BLOCKED: <reason>, commit PROGRESS.md.", inputSchema: S({ stream: { type: "string", description: "the stream this task belongs to, when working in a parallel wave" }, id: { type: "string" }, reason: { type: "string", description: "what you tried / what fails / what you think the fix is" } }, ["id", "reason"]), fn: taskBlock },
+  {
+    name: "foundry_task_reopen",
+    description: "Reopen a blocked [!] or skipped [-] task once whatever stopped it is resolved, together with every task skipped because of it (directly or transitively): sets them back to [ ], logs REOPENED: <reason>, commits PROGRESS.md. The next foundry_task_next picks them up; after a finished run, foundry_next hands out an implement stage again. Refused once the flight is summarized or while stream worktrees exist.",
+    inputSchema: S({ id: { type: "string" }, reason: { type: "string", description: "what changed so the task can now succeed" } }, ["id", "reason"]),
+    fn: taskReopen,
+  },
   { name: "foundry_verify", description: "Self-tests and runs every docs/foundry.json constraint against the whole tracked repo, then runs the verify commands plus extraVerify commands for any path prefix the given files fall under. Returns constraint results and per-command exit status and output tails.", inputSchema: S({ files: { type: "array", items: { type: "string" }, description: "Files touched by the task (optional); narrows extraVerify only, never the constraint scan" }, stream: { type: "string", description: "run in this stream's worktree (parallel waves only); refuses if an exclusive command would run" } }), fn: verify },
   { name: "foundry_stream_finish", description: "Finish one stream of a parallel wave: requires no open tasks in the stream and a clean worktree, merges the stream's branch into the build branch (git merge --no-ff), then removes the worktree and branch. On a merge conflict it aborts, keeps the stream's branch and worktree, and halts the flight with instructions. Returns { stream, merged, mergeCommit, remainingStreams }.", inputSchema: S({ stream: { type: "string", description: "the stream whose tasks are all done or blocked" } }, ["stream"]), fn: streamFinish },
   { name: "foundry_run_finish", description: "End an implementation run: requires zero open tasks and docs/HANDOFF.md; commits it, pushes and opens a draft PR unless policies say otherwise, disarms the lock, records the round as implemented.", inputSchema: S({}), fn: runFinish },
@@ -2360,7 +2432,7 @@ const TOOLS = [
   },
   {
     name: "foundry_review_submit",
-    description: "Record a review verdict. APPROVED commits REVIEW.md. CHANGES REQUESTED assigns R<N>-<nn> ids, appends '## Review fixes (round N)' to PLAN.md, appends checkbox lines to PROGRESS.md, resets unblocked tasks, and commits 'review: round N'.",
+    description: "Record a review verdict. APPROVED commits REVIEW.md. CHANGES REQUESTED assigns R<N>-<nn> ids, appends '## Review fixes (round N)' to PLAN.md, appends checkbox lines to PROGRESS.md, resets unblocked tasks along with every task skipped because of them (reopenedDependents), and commits 'review: round N'.",
     inputSchema: S({
       verdict: { type: "string", enum: ["APPROVED", "CHANGES REQUESTED"] },
       tasks: {
