@@ -335,14 +335,16 @@ async function driveRounds(call, repo, counts) {
 
     const r = await call("foundry_review_submit", { verdict: "APPROVED" });
     eq(r.verdict, "APPROVED", "the approval is recorded");
-    eq(r.round, 0, "approving does not open a new round");
+    eq(r.round, 1, "an approval reports the round it was stamped with, like a change request (cleanflate F-21)");
+    eq(r.fixRounds, 0, "...and separately, that no fix round was opened");
     eq(subject(repo), "review: round 1 approved", "approval is its own commit");
 
     const n = await call("foundry_next");
     eq(n.stage, "summarize", "approval hands off to the summarizer");
 
     const sum = await call("foundry_summary_commit");
-    eq(sum.rounds, 0, "the summary reports how many rounds it took");
+    eq(sum.reviews, 1, "the summary reports how many reviews it took");
+    eq(sum.fixRounds, 0, "...and how many fix rounds");
     eq(subject(repo), "chore: build summary", "the summary is committed");
     like(sum.branch, /^build\//, "the summary reports the branch a human has to merge");
     eq(git(repo, ["status", "--porcelain"]), "", "the flight ends with a clean tree");

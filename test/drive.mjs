@@ -170,7 +170,8 @@ await withServer(repo, async ({ call }) => {
 
   writeFile(repo, "docs/REVIEW.md", "# Review\nRound: 2\n**Verdict**: APPROVED\n");
   isError(await call("foundry_summary_commit"), /docs\/SUMMARY\.md does not exist/, "there is no summary to commit yet");
-  await call("foundry_review_submit", { verdict: "APPROVED" });
+  r = await call("foundry_review_submit", { verdict: "APPROVED" });
+  eq(r.round, 2, "the approval reports round 2, the number REVIEW.md carries");
   eq(subject(repo), "review: round 2 approved", "the approval is committed");
 
   n = await call("foundry_next");
@@ -180,12 +181,14 @@ await withServer(repo, async ({ call }) => {
 
   writeFile(repo, "docs/SUMMARY.md", "# summary\nMerge build/... into main.\n");
   r = await call("foundry_summary_commit");
-  eq(r.rounds, 1, "the flight took one review round");
+  eq(r.reviews, 2, "the flight took two reviews");
+  eq(r.fixRounds, 1, "...and one fix round between them");
 
   n = await call("foundry_next");
   eq(n.stage, "done", "and the flight is done");
   eq(n.agent, null, "done still has no agent to delegate to");
   like(n.reason, /ready for a human to merge/, n.reason);
+  like(n.reason, /after 2 reviews \(1 fix round\)/, "done counts reviews, not fix rounds (cleanflate F-21)");
 
   // ---------------------------------------------------------------- the record
 

@@ -11,8 +11,9 @@ counts, then read `docs/REVIEW.md`, `docs/HANDOFF.md`, `docs/PLAN.md`
 
 Write `docs/SUMMARY.md`, under 200 lines:
 
-1. **Merge line**: branch, base → head, commit count, review rounds, final
-   verdict.
+1. **Merge line**: branch, base → head, commit count, number of reviews
+   (the length of `state.rounds`; review N is the one stamped `Round: N`),
+   final verdict.
 2. **What was built**: one paragraph per phase, in plain language, with the
    task ID range.
 3. **Decisions that shaped it**: the Decisions list from PLAN.md plus every

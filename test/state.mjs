@@ -279,6 +279,10 @@ for (const [body, expected, label] of [
   ["# Review\nVerdict: CHANGES REQUESTED\n", "CHANGES REQUESTED", "plain verdict"],
   ["# Review\n**Verdict**: `APPROVED`\n", "APPROVED", "backticked verdict"],
   ["# Review\n**Verdict**: approved\n", "APPROVED", "lowercase verdict"],
+  ["# Review\nRound: 4\n**Verdict:** APPROVED\n", "APPROVED", "verdict with the colon inside the bold"],
+  ["# Review\n## Verdict\n\n**CHANGES REQUESTED**\n", "CHANGES REQUESTED", "verdict under its own heading"],
+  ["# Review\n- **Verdict:** `approved`\n", "APPROVED", "verdict in a list item"],
+  ["# Review\nThe verdict is pending; nothing is APPROVED yet.\n", null, "verdict word in prose"],
   ["# Review\nno verdict here\n", null, "missing verdict"],
 ]) {
   const repo = plannedRepo();

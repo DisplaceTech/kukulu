@@ -117,6 +117,7 @@ context.
 
 ## When you stop
 
-Print one short block: the final stage reached, the round count, the branch
+Print one short block: the final stage reached, the number of reviews and
+fix rounds (a `done` reason states both), the branch
 from `foundry_status`, and the path of `docs/SUMMARY.md` if it exists. Do not
 merge. The human merges.

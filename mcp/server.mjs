@@ -1066,6 +1066,16 @@ function refuseWhileStreamsPending() {
   }
 }
 
+/**
+ * How many reviews this flight has submitted. Round numbering has one
+ * meaning everywhere (F-21 of the 2026-09-30 cleanflate feedback): review N
+ * is stamped `Round: N` and, if it requests changes, queues fix round N
+ * (`R<N>-*` tasks), which `state.round` then counts. So after an approval,
+ * reviews = fix rounds + 1. `state.rounds` records every submission; the
+ * fallback covers a state file written before it existed.
+ */
+const reviewCount = (st) => (st.rounds.length ? st.rounds.length : st.round + (st.reviewed ? 1 : 0));
+
 function reviewRoundCount() {
   if (!exists(P.plan)) return 0;
   return (read(P.plan).match(/^## Review fixes \(round \d+\)/gm) || []).length;
@@ -1263,7 +1273,10 @@ function status() {
     }));
   }
   if (out.reviewPresent) {
-    const v = read(P.review).match(/\*\*Verdict\*\*:?\s*`?(APPROVED|CHANGES REQUESTED)`?/i) || read(P.review).match(/Verdict:?\s*`?(APPROVED|CHANGES REQUESTED)`?/i);
+    // Any of `**Verdict**: X`, `**Verdict:** X`, `Verdict: X`, `## Verdict`
+    // with X on a following line, and X in backticks or bold (F-21: the
+    // `**Verdict:**` shape used to read as null).
+    const v = read(P.review).match(/\bVerdict\b[\s:*_`#>-]*(APPROVED|CHANGES REQUESTED)\b/i);
     out.reviewVerdictInFile = v ? v[1].toUpperCase() : null;
   }
   out.agentsGenerated = agentsOnDisk();
@@ -1389,7 +1402,10 @@ function next() {
     return stage("halt", "review requested changes but no fix tasks are open; foundry_review_submit should have queued them");
   }
   if (st.verdict === "APPROVED" && !st.summarized) return stage("summarize", "review approved; summary not yet written");
-  if (st.summarized) return stage("done", `flight complete after ${st.round} review round(s); branch ${s.branch} is ready for a human to merge`);
+  if (st.summarized) {
+    const reviews = reviewCount(st);
+    return stage("done", `flight complete after ${reviews} review${reviews === 1 ? "" : "s"} (${st.round} fix round${st.round === 1 ? "" : "s"}); branch ${s.branch} is ready for a human to merge`);
+  }
   return stage("halt", "unrecognised state; run foundry_status");
 }
 
@@ -2291,7 +2307,9 @@ function reviewSubmit({ verdict, tasks = [], unblock = [] }) {
     saveState(st);
     const sha = gitCommitIfChanged([P.review, P.state], `review: round ${N} approved`);
     const push = pushBranch(gitFacts().branch, st.policies.push);
-    return { verdict, round: st.round, commit: sha, push, ...recoveredField };
+    // `round` is the number this review was stamped with, as for CHANGES
+    // REQUESTED — never the count of fix rounds (F-21).
+    return { verdict, round: N, fixRounds: st.round, commit: sha, push, ...recoveredField };
   }
 
   if (!tasks.length && !unblock.length) throw new ToolError("CHANGES REQUESTED requires at least one fix task or unblock");
@@ -2368,7 +2386,7 @@ function summaryCommit() {
   const sha = gitCommitIfChanged([P.summary, P.state], "chore: build summary");
   const g = gitFacts();
   const push = pushBranch(g.branch, st.policies.push);
-  return { commit: sha, branch: g.branch, base: g.base, head: g.head, rounds: st.round, push };
+  return { commit: sha, branch: g.branch, base: g.base, head: g.head, reviews: reviewCount(st), fixRounds: st.round, push };
 }
 
 // ---------------------------------------------------------------- MCP plumbing
@@ -2447,7 +2465,7 @@ const TOOLS = [
     }, ["verdict"]),
     fn: reviewSubmit,
   },
-  { name: "foundry_summary_commit", description: "Commit docs/SUMMARY.md and mark the flight complete. Only valid after an APPROVED review.", inputSchema: S({}), fn: summaryCommit },
+  { name: "foundry_summary_commit", description: "Commit docs/SUMMARY.md and mark the flight complete. Only valid after an APPROVED review. Returns { commit, branch, base, head, reviews, fixRounds, push }.", inputSchema: S({}), fn: summaryCommit },
   {
     name: "foundry_agents_sync",
     description: "Generate .claude/agents/foundry-<role>.md from the merged routing config (plugin defaults < global file < profile < docs/foundry.json roles). Writes only files whose content changed, excludes them from git, and returns the resolved per-role table. `restartRequired` is true only when this is the directory's first population and a changed role's model cannot be named directly by the Agent tool. Also ensures the MCP allow rule in .claude/settings.local.json (`permissions` in the result), without which a subagent's first foundry_status call is denied under any permission mode.",
