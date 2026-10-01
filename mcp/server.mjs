@@ -1993,13 +1993,36 @@ function recoverMutation() {
   return relPath;
 }
 
-function mutate({ file, find, replace, commands } = {}) {
+/** Tracked paths that differ from HEAD (modified, deleted or staged), sorted. */
+const trackedChanges = () => git(["diff", "--name-only", "HEAD"]).out.split("\n").filter(Boolean).sort();
+
+/**
+ * Put back everything a mutation's commands changed besides the mutated file
+ * itself (F-10, F-14, F-17 of the 2026-09-30 cleanflate feedback: a killed
+ * mutant made proptest write a regressions file). Only paths that were clean,
+ * or did not exist, before the mutation are touched; ignored files never are.
+ * Returns `{ restored, removed }`.
+ */
+function undoMutationResidue(before) {
+  const dirtyBefore = new Set(before.tracked);
+  const untrackedBefore = new Set(before.untracked);
+  const restored = trackedChanges().filter((p) => !dirtyBefore.has(p));
+  if (restored.length) git(["checkout", "-q", "HEAD", "--", ...restored]);
+  const removed = untrackedPaths().filter((p) => !untrackedBefore.has(p));
+  for (const p of removed) fs.rmSync(path.join(ROOT, p), { force: true });
+  return { restored, removed };
+}
+
+function mutate({ file, find, replace, commands, timeoutMs } = {}) {
   if (typeof file !== "string" || !file) throw new ToolError("file is required: a repo-relative path to a tracked source file");
   if (typeof find !== "string" || !find) throw new ToolError("find is required and must be a non-empty string: the exact text to replace");
   if (typeof replace !== "string") throw new ToolError('replace is required and must be a string (use "" to delete the matched text)');
   if (find === replace) throw new ToolError("find and replace are identical; that is not a mutation");
   if (commands !== undefined && (!Array.isArray(commands) || !commands.length || !commands.every((x) => typeof x === "string"))) {
     throw new ToolError("commands must be a non-empty array of command strings taken from docs/foundry.json's verify/extraVerify");
+  }
+  if (timeoutMs !== undefined && (!Number.isInteger(timeoutMs) || timeoutMs <= 0)) {
+    throw new ToolError("timeoutMs must be a positive integer (milliseconds)");
   }
   if (!gitFacts().inRepo) throw new ToolError("not a git repository");
   if (!loadConfig()) throw new ToolError("docs/foundry.json is missing; the plan stage must write it");
@@ -2040,6 +2063,11 @@ function mutate({ file, find, replace, commands } = {}) {
   } else {
     cmds = verifyCommands(cc, [relPath]);
   }
+  // A per-call timeout only ever shortens a command's configured one: a
+  // reviewer who suspects a mutant hangs should not wait out a 30-minute
+  // suite timeout to find out (F-06).
+  if (timeoutMs !== undefined) cmds = cmds.map((c2) => ({ ...c2, timeoutMs: Math.min(c2.timeoutMs, timeoutMs) }));
+  const before = { tracked: trackedChanges(), untracked: untrackedPaths() };
 
   // The sentinel is per-clone state, not part of the reviewed branch: exclude
   // it through .git/info/exclude rather than .gitignore, which would dirty
@@ -2059,6 +2087,7 @@ function mutate({ file, find, replace, commands } = {}) {
     throw new ToolError(`foundry_mutate could NOT restore ${relPath}: it still differs from HEAD. Run \`git checkout HEAD -- ${relPath}\` before doing anything else. The sentinel ${rel(P.mutation)} is left in place.`);
   }
   fs.rmSync(P.mutation, { force: true });
+  const residue = undoMutationResidue(before);
 
   const killed = results.some((r) => !r.ok);
   return {
@@ -2066,6 +2095,8 @@ function mutate({ file, find, replace, commands } = {}) {
     killed,
     verdict: killed ? "killed: the tests caught the mutation" : "survived: no command failed — the mechanic is untested",
     results,
+    restored: residue.restored,
+    removed: residue.removed,
     recoveredMutation: recovered,
   };
 }
@@ -2314,13 +2345,14 @@ const TOOLS = [
   },
   {
     name: "foundry_mutate",
-    description: "Mutation-test one file: apply one exact find/replace to a clean tracked file, run the verify commands that file triggers (verify plus matching extraVerify), always restore the file, and commit nothing. Returns { file, killed, verdict, results, recoveredMutation }; killed is true when at least one command failed. For reviewers checking that a test fails without the mechanic it covers — never edit source by hand instead.",
+    description: "Mutation-test one file: apply one exact find/replace to a clean tracked file, run the verify commands that file triggers (verify plus matching extraVerify), always restore the file, undo anything else the commands changed (tracked files that were clean, untracked files that are new), and commit nothing. Returns { file, killed, verdict, results, restored, removed, recoveredMutation }; killed is true when at least one command failed. For reviewers checking that a test fails without the mechanic it covers — never edit source by hand instead.",
     inputSchema: S(
       {
         file: { type: "string", description: "repo-relative path of a tracked, clean text file" },
         find: { type: "string", description: "exact text to replace; must appear exactly once in the file" },
         replace: { type: "string", description: "the mutated text (\"\" deletes the match)" },
         commands: { type: "array", items: { type: "string" }, description: "optional: run only these configured verify/extraVerify commands, each spelled exactly as in docs/foundry.json" },
+        timeoutMs: { type: "integer", minimum: 1, description: "optional: cap every command's timeout for this call (never raises a configured one), for a mutant you suspect hangs" },
       },
       ["file", "find", "replace"],
     ),

@@ -469,6 +469,50 @@ const untouched = (repo, head) => {
   });
 }
 
+// Residue (2026-09-30 cleanflate F-10, F-14): a killed mutant's suite may
+// rewrite a tracked file or leave a new untracked one; mutate undoes both,
+// and never touches what was already dirty or untracked before it ran.
+{
+  const repo = mutationRepo({ config: { verify: ["echo seed >> tests/regressions.txt; echo seed > tests/new.regressions; node test/add.test.mjs"] } });
+  writeFile(repo, "tests/regressions.txt", "# seeds\n");
+  writeFile(repo, "notes.md", "tracked note\n");
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-qm", "regressions file"]);
+  writeFile(repo, "notes.md", "a reviewer's uncommitted edit\n");
+  writeFile(repo, "scratch.txt", "already untracked\n");
+  await withServer(repo, async ({ call }) => {
+    const r = await call("foundry_mutate", { file: "src/add.mjs", find: "a + b", replace: "a - b" });
+    eq(r.killed, true, "the mutant is killed");
+    eq(JSON.stringify(r.restored), JSON.stringify(["tests/regressions.txt"]), "the tracked file the suite rewrote is reported restored");
+    eq(JSON.stringify(r.removed), JSON.stringify(["tests/new.regressions"]), "the untracked file the suite created is reported removed");
+    eq(readFile(repo, "tests/regressions.txt"), "# seeds\n", "the tracked file is back to HEAD");
+    ok(!hasFile(repo, "tests/new.regressions"), "the new untracked file is gone");
+    eq(readFile(repo, "notes.md"), "a reviewer's uncommitted edit\n", "a tracked file that was already dirty is left alone");
+    eq(readFile(repo, "scratch.txt"), "already untracked\n", "a file that was already untracked is left alone");
+  });
+}
+
+// A per-call timeout only ever shortens the configured one (cleanflate F-06).
+{
+  const repo = mutationRepo({ config: { verify: [{ cmd: "sleep 30", timeoutMs: 600000 }] } });
+  await withServer(repo, async ({ call }) => {
+    const t0 = Date.now();
+    const r = await call("foundry_mutate", { file: "src/add.mjs", find: "a + b", replace: "a * b", timeoutMs: 400 });
+    ok(Date.now() - t0 < 15_000, "timeoutMs cuts a hanging mutant short");
+    eq(r.results[0].timedOut, true, "...reported as a timeout");
+    eq(r.results[0].timeoutMs, 400, "...with the shortened timeout");
+    eq(readFile(repo, "src/add.mjs"), ADD_SRC, "...and the file is restored");
+    isError(await call("foundry_mutate", { file: "src/add.mjs", find: "a + b", replace: "a * b", timeoutMs: 0 }), /timeoutMs must be a positive integer/, "a non-positive timeoutMs is refused");
+  });
+}
+{
+  const repo = mutationRepo({ config: { verify: [{ cmd: "node test/add.test.mjs", timeoutMs: 1000 }] } });
+  await withServer(repo, async ({ call }) => {
+    const r = await call("foundry_mutate", { file: "src/add.mjs", find: "a + b", replace: "a - b", timeoutMs: 999999 });
+    eq(r.results[0].timeoutMs, 1000, "timeoutMs never raises a configured timeout");
+  });
+}
+
 // Every refusal leaves the file exactly as it was.
 {
   const repo = mutationRepo();
