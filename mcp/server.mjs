@@ -2226,7 +2226,10 @@ function runFinish() {
       if (existing.status === 0 && existing.stdout.trim()) pr_url = existing.stdout.trim();
       else {
         const title = st.round === 0 ? `Build: ${g.branch}` : `Build: ${g.branch} (review round ${st.round})`;
-        const cr = spawnSync("gh", ["pr", "create", "--draft", "--title", title, "--body-file", P.handoff], { cwd: ROOT, encoding: "utf8" });
+        // --base, always: without it gh targets the repository's default
+        // branch, not the one this flight branched from (F-24 of the
+        // 2026-09-30 cleanflate feedback).
+        const cr = spawnSync("gh", ["pr", "create", "--draft", "--base", c.baseBranch, "--title", title, "--body-file", P.handoff], { cwd: ROOT, encoding: "utf8" });
         pr_url = cr.status === 0 ? cr.stdout.trim() : `pr create failed: ${(cr.stderr || "").trim()}`;
       }
     }
@@ -2377,6 +2380,30 @@ function reviewSubmit({ verdict, tasks = [], unblock = [] }) {
   return { verdict, round: N, fixTasks: ids, unblocked, reopenedDependents: reopened, commit: sha, halted: st.halted, counts: counts(parseProgress().tasks), push, ...recoveredField };
 }
 
+/**
+ * The current branch's pull request as GitHub sees it, for a stage that
+ * needs to say whether one exists (F-25): `{ url, state, draft, base }`
+ * (plus `expectedBase` when it does not target `baseBranch`), or a string —
+ * `"skipped: policy"`, `"none"`, or `"unknown: <why>"`. Never throws.
+ */
+function prState(policies, baseBranch) {
+  if (policies.pr === "none") return "skipped: policy";
+  if (!gitFacts().hasOrigin) return "none";
+  if (spawnSync("gh", ["--version"], { encoding: "utf8" }).status !== 0) return "unknown: gh is not available";
+  const r = spawnSync("gh", ["pr", "view", "--json", "url,state,isDraft,baseRefName"], { cwd: ROOT, encoding: "utf8" });
+  if (r.status !== 0) {
+    const why = (r.stderr || r.stdout || "").trim().split("\n")[0];
+    return /no (open )?pull requests? found/i.test(why) ? "none" : `unknown: ${why || "gh pr view failed"}`;
+  }
+  try {
+    const j = JSON.parse(r.stdout);
+    const pr = { url: j.url, state: j.state, draft: j.isDraft, base: j.baseRefName };
+    return pr.base === baseBranch ? pr : { ...pr, expectedBase: baseBranch };
+  } catch {
+    return "unknown: gh pr view returned unparseable output";
+  }
+}
+
 function summaryCommit() {
   if (!exists(P.summary)) throw new ToolError("docs/SUMMARY.md does not exist");
   const st = loadState();
@@ -2386,7 +2413,7 @@ function summaryCommit() {
   const sha = gitCommitIfChanged([P.summary, P.state], "chore: build summary");
   const g = gitFacts();
   const push = pushBranch(g.branch, st.policies.push);
-  return { commit: sha, branch: g.branch, base: g.base, head: g.head, reviews: reviewCount(st), fixRounds: st.round, push };
+  return { commit: sha, branch: g.branch, base: g.base, head: g.head, reviews: reviewCount(st), fixRounds: st.round, push, pr: prState(st.policies, cfg().baseBranch) };
 }
 
 // ---------------------------------------------------------------- MCP plumbing
@@ -2465,7 +2492,7 @@ const TOOLS = [
     }, ["verdict"]),
     fn: reviewSubmit,
   },
-  { name: "foundry_summary_commit", description: "Commit docs/SUMMARY.md and mark the flight complete. Only valid after an APPROVED review. Returns { commit, branch, base, head, reviews, fixRounds, push }.", inputSchema: S({}), fn: summaryCommit },
+  { name: "foundry_summary_commit", description: "Commit docs/SUMMARY.md and mark the flight complete. Only valid after an APPROVED review. Returns { commit, branch, base, head, reviews, fixRounds, push, pr }; pr is the branch's pull request ({ url, state, draft, base }) or \"none\", \"skipped: policy\" or \"unknown: <why>\".", inputSchema: S({}), fn: summaryCommit },
   {
     name: "foundry_agents_sync",
     description: "Generate .claude/agents/foundry-<role>.md from the merged routing config (plugin defaults < global file < profile < docs/foundry.json roles). Writes only files whose content changed, excludes them from git, and returns the resolved per-role table. `restartRequired` is true only when this is the directory's first population and a changed role's model cannot be named directly by the Agent tool. Also ensures the MCP allow rule in .claude/settings.local.json (`permissions` in the result), without which a subagent's first foundry_status call is denied under any permission mode.",

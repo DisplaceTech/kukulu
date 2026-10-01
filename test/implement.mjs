@@ -8,7 +8,7 @@ import path from "node:path";
 import {
   finish, ok, eq, like, isError,
   mkDir, plannedRepo, withServer, readFile, writeFile, hasFile, subject,
-  commitTask, markTasks, setState, git, mkBareRemote, mkFailingGhBin,
+  commitTask, markTasks, setState, git, mkBareRemote, mkFailingGhBin, mkFakeGhBin,
 } from "./harness.mjs";
 
 const TODAY = new Date().toISOString().slice(0, 10);
@@ -785,6 +785,55 @@ for (const [bad, re] of [
     eq(r.push, "pushed", "push still happens; only the PR is policy-gated");
     eq(r.pr, "skipped: policy", "pr: none skips PR creation, reported explicitly");
   });
+}
+
+// The draft PR targets baseBranch, not the repository's default branch, and
+// the summary reports the PR it finds (2026-09-30 cleanflate F-24, F-25).
+{
+  const repo = plannedRepo({ config: { baseBranch: "feature/perf" } });
+  git(repo, ["checkout", "-q", "-b", "feature/perf"]);
+  git(repo, ["remote", "add", "origin", mkBareRemote()]);
+  const ghDir = mkFakeGhBin();
+  await withServer(repo, async ({ call }) => {
+    await call("foundry_run_start");
+    await call("foundry_task_next");
+    commitTask(repo, "P0-01", "Create hello", { "hello.txt": "hi\n" });
+    await call("foundry_task_done", { id: "P0-01", log: "x" });
+    await call("foundry_task_block", { id: "P0-02", reason: "x / y / z" });
+    await call("foundry_task_next");
+    writeFile(repo, "docs/HANDOFF.md", "# handoff\n");
+    const r = await call("foundry_run_finish");
+    eq(r.pr, "https://github.invalid/pull/1", "run_finish reports the draft PR it opened");
+    like(readFile(ghDir, "calls.log"), /pr create --draft --base feature\/perf /, "...opened against baseBranch, not the default branch");
+
+    setState(repo, { reviewed: true, verdict: "APPROVED", rounds: [{ round: 1, fixTasks: 0, unblocked: 0, verdict: "APPROVED" }] });
+    writeFile(repo, "docs/SUMMARY.md", "# summary\n");
+    const sum = await call("foundry_summary_commit");
+    eq(JSON.stringify(sum.pr), JSON.stringify({ url: "https://github.invalid/pull/1", state: "OPEN", draft: true, base: "feature/perf" }), "summary_commit reports the PR's url, state, draft flag and base");
+  }, { env: { PATH: `${ghDir}:${process.env.PATH}` } });
+}
+
+{
+  const repo = plannedRepo({ config: { baseBranch: "feature/perf" } });
+  git(repo, ["checkout", "-q", "-b", "feature/perf"]);
+  git(repo, ["remote", "add", "origin", mkBareRemote()]);
+  const ghDir = mkFakeGhBin();
+  writeFile(ghDir, "pr.json", '{"url":"https://github.invalid/pull/7","state":"OPEN","isDraft":true,"baseRefName":"main"}\n');
+  setState(repo, { reviewed: true, verdict: "APPROVED", policies: { signing: "auto", push: false, pr: "draft", feedback: true } });
+  writeFile(repo, "docs/SUMMARY.md", "# summary\n");
+  await withServer(repo, async ({ call }) => {
+    const sum = await call("foundry_summary_commit");
+    eq(sum.pr.expectedBase, "feature/perf", "a PR against the wrong base is flagged with the base it should have");
+  }, { env: { PATH: `${ghDir}:${process.env.PATH}` } });
+}
+
+{
+  const repo = plannedRepo();
+  setState(repo, { reviewed: true, verdict: "APPROVED" });
+  writeFile(repo, "docs/SUMMARY.md", "# summary\n");
+  await withServer(repo, async ({ call }) => {
+    eq((await call("foundry_summary_commit")).pr, "none", "with no remote, summary_commit says there is no PR");
+  }, noGh);
 }
 
 // ---------------------------------------------------------------- run_halt

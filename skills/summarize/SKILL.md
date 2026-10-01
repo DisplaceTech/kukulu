@@ -52,7 +52,10 @@ refusal, and do not return the summary as text in your own reply; the file
 on disk is what `foundry_summary_commit` reads (F-16).
 
 Then call `foundry_summary_commit`. It commits SUMMARY.md as
-`chore: build summary` and marks the flight complete.
+`chore: build summary`, marks the flight complete, and returns `pr`: the
+branch's pull request as `{ url, state, draft, base }`, or `"none"`,
+`"skipped: policy"` or `"unknown: <why>"`. A PR object with `expectedBase`
+targets the wrong branch; say so.
 
-Print a final message starting with `FLIGHT COMPLETE` and the merge line. Do
-not merge.
+Print a final message starting with `FLIGHT COMPLETE`, the merge line, and
+the PR (its url and state, or that there is none). Do not merge.
