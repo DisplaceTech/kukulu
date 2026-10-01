@@ -2,7 +2,10 @@
 
 Collected against plugin `foundry@ericmann` 0.3.2, across three flights in
 one repository: phase 1 built the project, phases 2 and 3 tuned its
-performance.
+performance. Triaged in
+[`docs/plans/v0.4.md`](../plans/v0.4.md#addendum-the-cleanflate-flights-032-feedback)
+— every F-item below is fixed in 0.4.0, scheduled for later, or declined
+there, with a reason.
 
 Pulled with `/foundry:pull-feedback` from three logs, because the project
 archived each phase's `.foundry/feedback.jsonl` before starting the next:
