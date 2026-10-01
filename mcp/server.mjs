@@ -1314,7 +1314,11 @@ function next() {
     if (agentFallback && mapped === null) {
       return { agent: null, agentFallback: true, fallbackAgent, agentModel, agentModelExact, restartRequired: true };
     }
-    return { agent: onDisk ? `foundry-${role}` : fallbackAgent, agentFallback, fallbackAgent, agentModel, agentModelExact, restartRequired: false };
+    // Under fallback, name the plugin's own agent outright. Naming the
+    // generated one only produced an "agent type not found" error and a retry
+    // on a project's first flight, since a new agents directory loads only in
+    // the next session (F-22 of the 2026-09-30 cleanflate feedback).
+    return { agent: agentFallback ? fallbackAgent : `foundry-${role}`, agentFallback, fallbackAgent, agentModel, agentModelExact, restartRequired: false };
   };
   const modelFor = (name) => {
     const role = ROLE_OF_STAGE[name];

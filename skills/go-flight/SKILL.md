@@ -73,6 +73,13 @@ as event-driven, not as a blocking call you sit inside:
      own model and effort apply.
    - `prompt`: the `prompt` value, verbatim, either way
 
+   On a project's first flight `agentFallback` is true for every stage and
+   `agent` already names the plugin's own agent: the generated agents
+   directory was created in this session, and Claude Code loads a new
+   agents directory only in the next one. That is expected, not friction:
+   do not log it, and do not try the `foundry-<role>` name first. The next
+   flight, in a new session, uses the generated agents.
+
    When `agentFallback` is true and `agentModelExact` is false, print one
    line before spawning: `note: <role> routed to <model>; the Agent tool
    only takes aliases, so this stage runs on <agentModel> (latest of that

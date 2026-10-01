@@ -40,8 +40,8 @@ await withServer(specRepo(), async ({ call }) => {
 
   await call("foundry_agents_sync");
   n = await call("foundry_next");
-  eq(n.agent, "foundry-planner", "once the file is on disk, next names the generated agent");
-  eq(n.agentFallback, true, "but this process created the agents directory itself, so fallback stays in effect");
+  eq(n.agentFallback, true, "this process created the agents directory itself, so fallback stays in effect");
+  eq(n.agent, "foundry:planner", "...and next names the plugin agent outright, not a generated one that cannot load yet (cleanflate F-22)");
   eq(n.restartRequired, false, "still no restart needed for an Anthropic-routed role");
 });
 
