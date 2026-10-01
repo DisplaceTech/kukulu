@@ -296,9 +296,15 @@ the whole repo regardless of the `files` argument: first it self-tests every
 rule against its own `shouldMatch`/`shouldNotMatch` fixtures — a fixture
 that disagrees fails the rule outright, with `fixture` in the result naming
 which line, and no file is scanned for that rule — then it scans every
-*tracked* file under `paths` minus `exclude` (`git ls-files`, so an
-untracked or gitignored file is never scanned) and reports each hit as
-`{ file, line, text }`. A malformed rule (missing `id`/`paths`/`pattern`,
+file under `paths` minus `exclude` that is tracked, or untracked but not
+ignored (`git ls-files --cached --others --exclude-standard`), and reports
+each hit as `{ file, line, text }`. A new file the implementer has not
+committed yet is scanned, so a regression cannot slip past a verify run
+made before its commit; a gitignored file, or one that was already
+untracked when the run started (`preexistingUntracked`), never is.
+`foundry_run_finish` runs the same scan over the whole tree at handoff and
+reports it as `constraints: { ok, failing }` (and in its ready line),
+without refusing the handoff, so the reviewer starts from it. A malformed rule (missing `id`/`paths`/`pattern`,
 no fixtures, an unparseable `pattern`, a duplicate `id`) refuses the whole
 call, naming the offending rule.
 

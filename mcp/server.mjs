@@ -1936,11 +1936,17 @@ const pathUnder = (file, p) => file === p || file.startsWith(p.endsWith("/") ? p
  * Run every constraint rule: first self-test it against its own fixtures —
  * a `shouldMatch` line that fails to match, or a `shouldNotMatch` line that
  * matches, fails the rule outright and is never trusted to scan anything
- * (F-14) — then scan every *tracked* file under its `paths` minus
- * `exclude` (`git ls-files`, so untracked and ignored files are never
- * scanned), line by line. Line-based only; no multi-line patterns.
+ * (F-14) — then scan every file under its `paths` minus `exclude` that is
+ * tracked or untracked-but-not-ignored (`git ls-files --cached --others
+ * --exclude-standard`), line by line, except the untracked files in
+ * `ignore` — those that were already there when the run started, which are
+ * not the run's business (F-09). A new file an implementer has not yet
+ * committed is scanned, so a regression cannot slip past a verify run made
+ * before its commit (F-26 of the 2026-09-30 cleanflate feedback). Ignored
+ * files never are. Line-based only; no multi-line patterns.
  */
-function checkConstraints(constraints, cwd = ROOT) {
+function checkConstraints(constraints, cwd = ROOT, ignore = []) {
+  const skip = new Set(ignore);
   const testLine = (c, line) => new RegExp(c.pattern, c.flags || "").test(line);
   const results = constraints.map((c) => {
     for (const line of c.shouldMatch) {
@@ -1949,8 +1955,8 @@ function checkConstraints(constraints, cwd = ROOT) {
     for (const line of c.shouldNotMatch) {
       if (testLine(c, line)) return { id: c.id, ok: false, fixture: `shouldNotMatch ${JSON.stringify(line)} matched`, hits: [] };
     }
-    const listed = git(["ls-files", "--", ...c.paths], { allowFail: true, cwd });
-    const files = listed.ok ? listed.out.split("\n").filter(Boolean) : [];
+    const listed = git(["ls-files", "--cached", "--others", "--exclude-standard", "--", ...c.paths], { allowFail: true, cwd });
+    const files = listed.ok ? [...new Set(listed.out.split("\n").filter(Boolean))].filter((f) => !skip.has(f)) : [];
     const excluded = c.exclude || [];
     const hits = [];
     for (const file of files) {
@@ -1989,8 +1995,10 @@ function verify({ files = [], stream } = {}) {
   const cc = cfg();
   if (!cc.verify.length) throw new ToolError("docs/foundry.json has no 'verify' commands");
   let cwd = ROOT;
+  let ignore = loadState().preexistingUntracked || [];
   if (stream !== undefined) {
-    streamScope(stream);
+    const scope = streamScope(stream);
+    ignore = (scope.st.streams || {})[stream]?.preexistingUntracked || [];
     cwd = streamDir(stream);
     if (!exists(cwd)) throw new ToolError(`stream '${stream}' has no worktree; call foundry_run_start({ stream: "${stream}" }) first`);
   }
@@ -2007,7 +2015,7 @@ function verify({ files = [], stream } = {}) {
   }
   // Constraints are whole-repo, always — `files` narrows which shell
   // commands' extras run, never what a constraint scans.
-  const constraints = checkConstraints(cc.constraints, cwd);
+  const constraints = checkConstraints(cc.constraints, cwd, ignore);
   const results = cmds.map((c2) => runShell(c2.cmd, c2.timeoutMs, cwd));
   return { ok: constraints.ok && results.every((r) => r.ok), constraints, results, ...(recovered ? { recoveredMutation: recovered } : {}) };
 }
@@ -2236,9 +2244,15 @@ function runFinish() {
   }
   if (exists(P.lock)) fs.unlinkSync(P.lock);
   const head = git(["rev-parse", "--short", "HEAD"]).out;
+  // A whole-tree constraint scan at handoff, reported rather than refused:
+  // the reviewer sees a regression the task-by-task verify runs missed
+  // (F-26), and a flight is never stalled on it here.
+  const scan = checkConstraints(c.constraints, ROOT, st.preexistingUntracked);
+  const failing = scan.results.filter((r) => !r.ok).map((r) => r.id);
   return {
     branch: g.branch, base: g.base, head, handoffCommit, stateCommit, push, pr: pr_url, counts: cnt, round: st.round,
-    readyLine: `READY FOR REVIEW — branch ${g.branch}, head ${head}, ${cnt.done} done / ${cnt.blocked} blocked / ${cnt.skipped} skipped of ${cnt.total}`,
+    constraints: { ok: scan.ok, failing },
+    readyLine: `READY FOR REVIEW — branch ${g.branch}, head ${head}, ${cnt.done} done / ${cnt.blocked} blocked / ${cnt.skipped} skipped of ${cnt.total}${failing.length ? `; constraints failing: ${failing.join(", ")}` : ""}`,
   };
 }
 
@@ -2438,9 +2452,9 @@ const TOOLS = [
     inputSchema: S({ id: { type: "string" }, reason: { type: "string", description: "what changed so the task can now succeed" } }, ["id", "reason"]),
     fn: taskReopen,
   },
-  { name: "foundry_verify", description: "Self-tests and runs every docs/foundry.json constraint against the whole tracked repo, then runs the verify commands plus extraVerify commands for any path prefix the given files fall under. Returns constraint results and per-command exit status and output tails.", inputSchema: S({ files: { type: "array", items: { type: "string" }, description: "Files touched by the task (optional); narrows extraVerify only, never the constraint scan" }, stream: { type: "string", description: "run in this stream's worktree (parallel waves only); refuses if an exclusive command would run" } }), fn: verify },
+  { name: "foundry_verify", description: "Self-tests and runs every docs/foundry.json constraint against the whole repo (tracked files plus new untracked ones, never ignored files or files untracked before the run started), then runs the verify commands plus extraVerify commands for any path prefix the given files fall under. Returns constraint results and per-command exit status and output tails.", inputSchema: S({ files: { type: "array", items: { type: "string" }, description: "Files touched by the task (optional); narrows extraVerify only, never the constraint scan" }, stream: { type: "string", description: "run in this stream's worktree (parallel waves only); refuses if an exclusive command would run" } }), fn: verify },
   { name: "foundry_stream_finish", description: "Finish one stream of a parallel wave: requires no open tasks in the stream and a clean worktree, merges the stream's branch into the build branch (git merge --no-ff), then removes the worktree and branch. On a merge conflict it aborts, keeps the stream's branch and worktree, and halts the flight with instructions. Returns { stream, merged, mergeCommit, remainingStreams }.", inputSchema: S({ stream: { type: "string", description: "the stream whose tasks are all done or blocked" } }, ["stream"]), fn: streamFinish },
-  { name: "foundry_run_finish", description: "End an implementation run: requires zero open tasks and docs/HANDOFF.md; commits it, pushes and opens a draft PR unless policies say otherwise, disarms the lock, records the round as implemented.", inputSchema: S({}), fn: runFinish },
+  { name: "foundry_run_finish", description: "End an implementation run: requires zero open tasks and docs/HANDOFF.md; commits it, pushes and opens a draft PR against baseBranch unless policies say otherwise, disarms the lock, records the round as implemented, and reports a whole-tree constraint scan (constraints: { ok, failing }) without refusing on it.", inputSchema: S({}), fn: runFinish },
   {
     name: "foundry_run_halt",
     description: "Stop the flight for an operator-level reason the implementer cannot resolve (a dead signing agent, a full disk, a vanished base branch): records the reason, disarms the lock, commits state and PROGRESS.md if they changed. Never resets or cleans the tree.",
