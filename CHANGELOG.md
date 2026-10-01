@@ -4,9 +4,19 @@ All notable changes to this plugin. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.4.0] — 2026-09-23
+## [0.4.0] — 2026-09-30
 
-Parallel workstreams. This changes how a flight flows, which is why it is a
+Parallel workstreams, the fixes from the first real flights on 0.3.2, and a
+new license.
+
+The 0.3.2 flights were three cleanflate flights: a build, then two
+performance phases. Their thirty friction items are in
+[`docs/feedback/2026-09-30-cleanflate.md`](./docs/feedback/2026-09-30-cleanflate.md)
+and triaged in [`docs/plans/v0.4.md`](./docs/plans/v0.4.md#addendum-the-cleanflate-flights-032-feedback).
+They are listed under "From the cleanflate flights" below. **Breaking
+changes** are listed last, after the license.
+
+Parallel workstreams change how a flight flows, which is why this is a
 minor version and not a patch: `go-flight` now spawns more than one stage
 agent at once, `PLAN.md` gains a field, and `foundry_next` gains a shape.
 The motivating flight ran 26 tasks on one implementer for about 68 minutes
@@ -29,7 +39,7 @@ suite passes unchanged.
   same wave, no task triggers an `exclusive` command, and there are at least
   two streams. Otherwise the wave runs serially and one `stream-partition`
   feedback entry says why.
-- **`foundry_stream_finish`** (sixteen tools now): merges a finished
+- **`foundry_stream_finish`**: merges a finished
   stream's branch into the build branch (`--no-ff`) and removes its worktree
   and branch. A merge conflict is the one stream failure that halts:
   Foundry aborts the merge, keeps the stream, and records the paths and the
@@ -80,6 +90,79 @@ suite passes unchanged.
   its `{stream}` tag, so a fix round re-runs just that stream in its own
   worktree before the serial fix tasks.
 
+### From the cleanflate flights
+
+Added:
+
+- **`foundry_task_reopen`** reopens a blocked or skipped task once its
+  blocker is fixed, together with every task skipped because of it
+  (transitively), and commits `PROGRESS.md` (F-03, F-18). Before this, one
+  blocked download left 17 tasks skipped with no sanctioned way back.
+- **`foundry_flight_options`** and go-flight arguments:
+  `/foundry:go-flight max review rounds 6` sets `maxRounds` and
+  `maxRoundsHard` in `docs/foundry.json` and commits them, so the
+  controller never hand-edits the config (F-20). There are eighteen tools
+  now.
+- **`foundry_mutate` takes `timeoutMs`**, which caps every command's timeout
+  for one call and never raises a configured one (F-06).
+- **`foundry_summary_commit` reports the branch's PR** as `pr: { url,
+  state, draft, base }`, with `expectedBase` when the PR targets the wrong
+  branch. Otherwise `pr` is `"none"`, `"skipped: policy"` or
+  `"unknown: <why>"` (F-25).
+- **`foundry_run_finish` reports a whole-tree constraint scan** as
+  `constraints: { ok, failing }` and in its ready line, without refusing the
+  handoff (F-26).
+
+Fixed:
+
+- **A runaway command can no longer hang or crash the MCP server** (F-04,
+  F-09, F-11, F-15, F-16). Every `verify`, `foundry_mutate` and
+  `parallel.setup` command now runs under `mcp/run-command.mjs`, in its own
+  process group:
+  - a timeout kills the whole tree, so a test binary spinning under `make
+    test` no longer survives as an orphan;
+  - more than 64 MiB of output kills the command;
+  - a leftover child still holding the pipes after the shell exits is
+    killed after two seconds;
+  - each tail is capped at 60 lines and 4000 characters.
+
+  Results gain `outputLimitExceeded`, `orphansKilled` and `truncated`.
+- **`foundry_mutate` cleans up after its commands** (F-10, F-14, F-17).
+  Tracked files that were clean before the call are restored, new untracked
+  files (proptest regression seeds, say) are removed, and both are reported
+  as `restored` and `removed`.
+- **A reviewer's `unblock` reopens the skipped dependents too**, reported as
+  `reopenedDependents` (F-05).
+- **Draft PRs target `baseBranch`.** `gh pr create` now always gets
+  `--base`; before, a flight on `feature/perf` opened its PR against `main`
+  (F-24).
+- **Round numbering is consistent** (F-21): an approval returns the round
+  `REVIEW.md` was stamped with, `done` counts reviews and fix rounds
+  separately, and `foundry_status.reviewVerdictInFile` reads `**Verdict:**
+  X`, a verdict under its own heading, and list items.
+- **The constraint scan covers new, uncommitted files**, so a regression
+  cannot slip past a verify run made before its commit (F-26). It still
+  skips ignored files and files untracked before the run started.
+- **No more "agent type not found" on a first flight** (F-22). Under
+  fallback, `foundry_next` names the plugin agent outright.
+
+Changed (skills):
+
+- plan-build keeps `Depends on` narrow (F-19). It puts shared per-task
+  protocols in `CLAUDE.md` under `## Task protocols`, where the implementer
+  reads them (F-08), and routes long verification steps through
+  `foundry_verify` with their own `timeoutMs` (F-28).
+- The implementer commits with `git commit -F <file>`, so a project hook
+  that scans whole Bash commands does not deny a message that merely
+  mentions a forbidden word (F-07, F-29).
+- The reviewer is told about `timeoutMs`, mutate's residue cleanup and the
+  unblock cascade. The summarizer reports the PR.
+
+Deferred, with a scoped plan in the triage: a flight identifier and an
+archive command for multi-phase projects (F-12, F-27), background jobs for
+very long verify steps (F-13, F-28), and spec guidance for provenance
+logging (F-01).
+
 ### License
 
 - Relicensed from MIT to Apache License 2.0. Releases 0.3.x and earlier
@@ -87,6 +170,37 @@ suite passes unchanged.
   `package.json`, `.claude-plugin/plugin.json` and the marketplace entry
   carry `"license": "Apache-2.0"`. Contributions are accepted under Apache
   2.0 (inbound = outbound; see `CONTRIBUTING.md`).
+
+### Breaking changes
+
+These matter to anything that reads tool results or relies on the old
+behavior. The skills shipped with this release are already updated.
+
+- **`foundry_summary_commit` no longer returns `rounds`.** It was the
+  fix-round count, which read as a review count. Use `reviews` and
+  `fixRounds` instead.
+- **`foundry_review_submit` with `APPROVED` returns `round: N`**, the number
+  `REVIEW.md` is stamped with. It used to return the fix-round count, one
+  less. The count is now `fixRounds`.
+- **`foundry_next`'s `done` reason now reads "after K reviews (F fix
+  rounds)"** instead of "after N review round(s)".
+- **Under agent fallback, `foundry_next`'s `agent` is the plugin agent**
+  (`foundry:<role>`) rather than the generated `foundry-<role>`, including
+  on the first flight in a project. A controller that relied on trying the
+  generated name first and retrying on "not found" still works, but no
+  longer needs to.
+- **An unblock reopens skipped dependents.** `foundry_review_submit`'s
+  `counts` and the next fix round include them. Convergence still counts
+  only explicit fix tasks and unblocks.
+- **The constraint scan now covers untracked files that are not ignored.**
+  A verify run can fail on a file that is not committed yet, which is the
+  point. Files untracked before the run started are still exempt.
+- **Commands are supervised.** A verify, mutate or setup command that
+  leaves a background child holding its output open has that child killed
+  two seconds after the shell exits. Previously the call would have hung.
+  A command that writes more than 64 MiB in total is killed and fails, and
+  output tails are capped at 4000 characters as well as 60 lines.
+- **The license changes from MIT to Apache 2.0** (see above).
 
 ## [0.3.2] — 2026-09-23
 
