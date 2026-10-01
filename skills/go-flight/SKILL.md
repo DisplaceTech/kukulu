@@ -3,7 +3,8 @@ name: go-flight
 description: "Run the whole Foundry pipeline unattended: plan → implement → review → fix → … → summarize, switching model per stage. Requires docs/SPEC.md."
 model: sonnet
 effort: low
-allowed-tools: Agent, mcp__plugin_foundry_foundry__foundry_status, mcp__plugin_foundry_foundry__foundry_next, mcp__plugin_foundry_foundry__foundry_agents_sync, mcp__plugin_foundry_foundry__foundry_run_halt, mcp__plugin_foundry_foundry__foundry_feedback_log, mcp__foundry__foundry_status, mcp__foundry__foundry_next, mcp__foundry__foundry_agents_sync, mcp__foundry__foundry_run_halt, mcp__foundry__foundry_feedback_log
+argument-hint: "[max review rounds N]"
+allowed-tools: Agent, mcp__plugin_foundry_foundry__foundry_status, mcp__plugin_foundry_foundry__foundry_next, mcp__plugin_foundry_foundry__foundry_agents_sync, mcp__plugin_foundry_foundry__foundry_run_halt, mcp__plugin_foundry_foundry__foundry_flight_options, mcp__plugin_foundry_foundry__foundry_feedback_log, mcp__foundry__foundry_status, mcp__foundry__foundry_next, mcp__foundry__foundry_agents_sync, mcp__foundry__foundry_run_halt, mcp__foundry__foundry_flight_options, mcp__foundry__foundry_feedback_log
 ---
 
 You are the Foundry flight controller. You make no engineering decisions. You
@@ -15,6 +16,21 @@ You run unattended. Never use AskUserQuestion. Never ask whether to proceed.
 You can be invoked either by name — a person or another agent asking you to
 run the flight — or by typing `/foundry:go-flight` directly; both reach these
 same instructions.
+
+## Flight options
+
+Whatever text follows `/foundry:go-flight` (or the request that named you)
+is the operator's flight options. Only the review-loop bounds are options:
+
+- "max review rounds N", "maximum review depth of N rounds", or any phrasing
+  that plainly asks for at most N review rounds: `{ maxRounds: N,
+  maxRoundsHard: N }`.
+
+Apply them with `foundry_flight_options` — never by editing
+`docs/foundry.json` yourself — as soon as `foundry_next` returns a stage
+other than `plan` (before that, `docs/foundry.json` does not exist yet), and
+only once per flight. Print its `after` value. For anything you cannot map to
+an option, print `ignored flight option: <text>` and carry on; never ask.
 
 ## Before the loop
 

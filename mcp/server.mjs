@@ -2260,6 +2260,33 @@ function runFinish() {
   };
 }
 
+const FLIGHT_OPTION_KEYS = ["maxRounds", "maxRoundsHard"];
+
+/**
+ * Apply the options an operator passed to /foundry:go-flight ("maximum
+ * review depth of 6 rounds") to docs/foundry.json and commit them, so the
+ * controller never hand-edits a config file (F-20 of the 2026-09-30
+ * cleanflate feedback). Only the review-loop bounds are settable; anything
+ * else is the planner's to decide from SPEC. Refused before the plan stage
+ * has written docs/foundry.json.
+ */
+function flightOptions(args = {}) {
+  const given = FLIGHT_OPTION_KEYS.filter((k) => args[k] !== undefined);
+  if (!given.length) throw new ToolError(`pass at least one of ${FLIGHT_OPTION_KEYS.join(", ")}`);
+  for (const k of given) {
+    if (!Number.isInteger(args[k]) || args[k] <= 0) throw new ToolError(`${k} must be a positive integer`);
+  }
+  if (!exists(P.config)) throw new ToolError("docs/foundry.json does not exist yet; set flight options once the plan stage has written it");
+  const raw = loadConfig();
+  const was = cfg();
+  const before = Object.fromEntries(FLIGHT_OPTION_KEYS.map((k) => [k, was[k]]));
+  for (const k of given) raw[k] = args[k];
+  write(P.config, `${JSON.stringify(raw, null, 2)}\n`);
+  const after = Object.fromEntries(FLIGHT_OPTION_KEYS.map((k) => [k, cfg()[k]]));
+  const commit = gitCommitIfChanged([P.config], `chore: flight options (${given.map((k) => `${k}=${args[k]}`).join(", ")})`);
+  return { before, after, commit };
+}
+
 /**
  * Stop a flight cleanly for an operator-level reason the implementer
  * cannot resolve itself (F-05): a signing agent that died mid-run, a disk
@@ -2464,6 +2491,15 @@ const TOOLS = [
     description: "Stop the flight for an operator-level reason the implementer cannot resolve (a dead signing agent, a full disk, a vanished base branch): records the reason, disarms the lock, commits state and PROGRESS.md if they changed. Never resets or cleans the tree.",
     inputSchema: S({ reason: { type: "string", description: "why the flight cannot continue" } }, ["reason"]),
     fn: runHalt,
+  },
+  {
+    name: "foundry_flight_options",
+    description: "Apply an operator's flight options to docs/foundry.json and commit them: maxRounds (non-converging review rounds tolerated) and maxRoundsHard (absolute ceiling on review rounds). For the flight controller, when /foundry:go-flight was given options such as a maximum review depth. Refused before the plan stage has written docs/foundry.json. Returns { before, after, commit }.",
+    inputSchema: S({
+      maxRounds: { type: "integer", minimum: 1, description: "non-converging review rounds tolerated before the flight halts" },
+      maxRoundsHard: { type: "integer", minimum: 1, description: "a review numbered above this halts the flight, converging or not" },
+    }),
+    fn: flightOptions,
   },
   {
     name: "foundry_feedback_log",

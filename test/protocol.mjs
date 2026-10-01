@@ -16,6 +16,7 @@ const EXPECTED_TOOLS = [
   "foundry_stream_finish",
   "foundry_run_finish",
   "foundry_run_halt",
+  "foundry_flight_options",
   "foundry_feedback_log",
   "foundry_mutate",
   "foundry_review_submit",

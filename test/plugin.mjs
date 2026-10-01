@@ -152,7 +152,7 @@ const goFlight = read("skills/go-flight/SKILL.md");
 const fmGo = frontmatter(goFlight);
 const allowed = String(fmGo["allowed-tools"]).split(",").map((s) => s.trim());
 const toolNames = Array.from(serverSrc.matchAll(/name: "(foundry_[a-z_]+)"/g), (m) => m[1]);
-eq(toolNames.length, 17, "the server defines seventeen tools");
+eq(toolNames.length, 18, "the server defines eighteen tools");
 
 // Every stage agent's own tool set is explicit (F-16): no agent is left to
 // discover by trial and error what it is allowed to call.
@@ -190,12 +190,13 @@ for (const t of allowed.filter((a) => a.startsWith("mcp__"))) {
 }
 ok(
   allowed.every((a) => a === "Agent" || MCP_PREFIXES.some((p) => a.startsWith(p))),
-  "the flight controller is allowed nothing beyond Agent, the read-only foundry tools, agents_sync, and run_halt",
+  "the flight controller is allowed nothing beyond Agent, the read-only foundry tools, agents_sync, run_halt and flight_options",
 );
 ok(
-  // run_halt is the one deliberate exception: it records a clean halt reason
-  // when a stage cannot even be spawned, rather than leaving the flight to
-  // silently retry against whatever broke.
+  // run_halt is a deliberate exception: it records a clean halt reason when
+  // a stage cannot even be spawned, rather than leaving the flight to
+  // silently retry against whatever broke. flight_options is the other: it
+  // applies the operator's own go-flight options, never a judgment call.
   !allowed.some((a) => /run_start|task_|run_finish|review_submit|summary_commit/.test(a)),
   "the flight controller cannot touch the tools that change project state",
 );
