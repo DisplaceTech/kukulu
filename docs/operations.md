@@ -18,7 +18,38 @@ entering, delegates, and repeats. Each stage is one `Agent` call that either
 blocks until the stage finishes or returns at once with the result delivered
 later as a completion notification — the controller treats both the same
 way and never polls in between. When it stops it prints the final stage, the
-round count, the branch, and the path to `docs/SUMMARY.md` if one exists.
+number of reviews and fix rounds, the branch, and the path to
+`docs/SUMMARY.md` if one exists.
+
+### Flight options
+
+Text after the command is the flight's options:
+
+```text
+> /foundry:go-flight max review rounds 6
+```
+
+The review-loop bounds are the only options. "max review rounds N" (or
+"maximum review depth of N rounds", or any phrasing that plainly asks for at
+most N reviews) sets both `maxRounds` and `maxRoundsHard` to N. The
+controller applies the options with `foundry_flight_options` as soon as
+`docs/foundry.json` exists, that is, right after the plan stage. The tool
+commits them as `chore: flight options (…)`. Anything the controller cannot
+map, it prints as `ignored flight option: …` and carries on. It never asks.
+
+### First flight in a project
+
+On a project's first flight, every stage runs on the plugin's own
+`foundry:<role>` agent, with the routed model passed as an alias. The
+generated `foundry-<role>` agents land in a `.claude/agents` directory this
+session created, and Claude Code loads a new agents directory only in the
+next session. `foundry_next` names the plugin agent outright, so this is
+quiet. One difference matters: plugin agents ignore `permissionMode`, so the
+first flight's stages run under your session's own permission mode. Start
+the session in `acceptEdits` mode, or a stage may be refused the `Write` tool
+and fall back to writing files with a shell heredoc (cleanflate F-23). From
+the second flight on, the generated agents carry the routed `effort` and
+`permissionMode` themselves.
 
 An implementer that hits a permission prompt sits there until the guard's cap
 trips, hours later, having done nothing. The generated `foundry-<role>`
@@ -78,6 +109,24 @@ detected by its leftover lock and sent back to the implementer to finish.
 Resuming is the answer to a compacted context, a closed laptop, a killed
 session, and a subagent that errored out. It is not the answer to a halt.
 
+## Reopening a blocked task
+
+A task blocks on something outside the flight's control, such as a download
+the sandbox could not reach or a missing credential. When that is fixed, put
+the task back with `foundry_task_reopen` from any session in the project:
+
+```text
+> use foundry_task_reopen with id P0-08 and reason "corpus file supplied at data/cantrbry.tar.gz"
+```
+
+Every task that was skipped because of it comes back too, transitively. A
+dependent that still waits on a different blocked task is just skipped
+again. The next `foundry_task_next` picks the reopened task up. If the run
+had already finished, the next `/foundry:go-flight` hands out an implement
+stage for the same round. Inside a flight, the reviewer does the same thing
+through `foundry_review_submit`'s `unblock`. Do not flip checkboxes in
+`docs/PROGRESS.md` by hand (cleanflate F-03, F-18).
+
 ## Halts
 
 Four things halt a flight on purpose.
@@ -100,8 +149,9 @@ git show <sha>:docs/REVIEW.md
 ```
 
 To continue anyway: raise `maxRounds` (or `maxRoundsHard`, whichever
-tripped) in `docs/foundry.json`, set `"halted": null` in
-`.foundry/state.json`, commit both, and re-run the flight.
+tripped) in `docs/foundry.json` (or with `foundry_flight_options`), set
+`"halted": null` in `.foundry/state.json`, commit both, and re-run the
+flight.
 
 **Missing spec.** No `docs/SPEC.md` means there is nothing to build from. Write
 one; see [writing-specs.md](./writing-specs.md).
@@ -144,6 +194,9 @@ recovery.
 | `foundry_next` keeps handing out the same stream | A stream's implementer stops before `foundry_stream_finish` (the guard cap, a crash, a refused call) | Expected: `foundry_run_start({ stream })` resumes its worktree. If it never makes progress, read that stream's task log; see [Parallel streams](#parallel-streams) to abandon it |
 | A stream's tool call times out while another stream is verifying | Tool calls are handled one at a time, so it queued behind the other stream's longest command | Raise Claude Code's `MCP_TOOL_TIMEOUT` above `foundry_status`'s `longestCommandTimeoutMs`; see [Parallel streams](#parallel-streams) |
 | A wave ran serially though the plan declared streams | Its partition was invalid, its `parallel.setup` failed, or `parallel.maxStreams` is `1` | Read `foundry_status`'s `waves[].reason` and `.foundry/feedback.jsonl` for a `stream-partition`, `stream-setup` or `stream-exclusive` entry; it is a planning defect to fix in the next plan, not a stuck flight |
+| A verify or mutate command ran away (an infinite loop, endless output) | Before 0.4.0 this could hang the reviewer for the whole timeout, leave test processes spinning, or disconnect the MCP server | Nothing, now: the command's whole process group is killed at its timeout or at 64 MiB of output, and the result says `timedOut` or `outputLimitExceeded`. A reviewer who suspects a hanging mutant passes `timeoutMs` to `foundry_mutate` |
+| A step takes longer than the ten-minute limit on a foreground Bash call | Full benchmarks and heavy suites | Make it a `verify`/`extraVerify` command with its own `timeoutMs`, so it runs through `foundry_verify`, and raise `MCP_TOOL_TIMEOUT` above `foundry_status`'s `longestCommandTimeoutMs` |
+| A project hook denies a `git commit` whose message only mentions a forbidden word | The hook scans the whole Bash command line, including the quoted message | The implement skill commits with `git commit -F <file>`; Foundry's own bookkeeping commits never pass through Bash |
 | A subagent's first `foundry_status` call is denied | The MCP allow rule is missing, or `foundry_agents_sync` reported `permissions: "failed: ..."` | Run `foundry_config_show` and check `permissionRule`; if a sync failed, the message names the broken `settings.local.json` — fix its JSON and re-run |
 
 ## Clearing a wedged run by hand
@@ -153,6 +206,9 @@ Nothing here is magic; it is all files.
 ```bash
 # stand the guard down (safe: the next run_start re-arms it)
 rm -f .foundry/implement.lock
+
+# put a blocked task (and what it skipped) back: use foundry_task_reopen,
+# not an editor — see "Reopening a blocked task" above
 
 # mark a task blocked yourself, if a model cannot
 $EDITOR docs/PROGRESS.md      # change [~] to [!], add a log entry under ## Log
@@ -192,9 +248,9 @@ parse. Edit it between stages, not during one.
 | `build` | `[]` | Recorded for the plan's use; the MCP does not run it |
 | `baseBranch` | `main` | Branch runs start from, and the merge-base reported as `base` |
 | `branchPrefix` | `build/` | Prefix for run branches (`build/2026-09-18`, `-2`, …) |
-| `maxRounds` | `3` | Non-converging review rounds allowed before the flight halts; a round whose fix-task count did not shrink from the last one counts against this |
-| `maxRoundsHard` | `6` | Absolute review-round ceiling, regardless of convergence |
-| `commandTimeoutMs` | `600000` | Per-command timeout for `foundry_verify` |
+| `maxRounds` | `3` | Non-converging review rounds allowed before the flight halts; a round whose fix-task count did not shrink from the last one counts against this. Settable per flight with `/foundry:go-flight max review rounds N` |
+| `maxRoundsHard` | `6` | Absolute review-round ceiling, regardless of convergence; a review numbered above it halts |
+| `commandTimeoutMs` | `600000` | Per-command timeout for `foundry_verify`, `foundry_mutate` and `parallel.setup`; a timeout kills the command's whole process group |
 | `guardCap` | `60` | Re-blocks since the last task state change before the implement guard gives up; carried into `.foundry/implement.lock` at `foundry_run_start` and wins over `FOUNDRY_GUARD_CAP` |
 | `policies.signing` | `"auto"` | `"off"` disables commit signing for the run; `"required"` refuses to start unless a real signed commit succeeds; `"auto"` uses signing when it works and falls back to off, recording why, when it does not |
 | `policies.push` | `true` | `false` skips every push `foundry_run_start`, `foundry_run_finish`, `foundry_review_submit` and `foundry_summary_commit` would otherwise make |

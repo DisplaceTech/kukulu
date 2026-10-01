@@ -43,7 +43,8 @@ You need Node ≥ 22, git, and Claude Code. Nothing to `npm install`.
 
    `/foundry:go-flight` is the documented entry point, but the controller is
    model-invocable too — asking Claude to "run the foundry flight" reaches
-   the same instructions.
+   the same instructions. It takes one option, the review depth:
+   `/foundry:go-flight max review rounds 6`.
 
 4. **Read `docs/SUMMARY.md`, then merge the branch yourself.** Foundry never
    merges.
@@ -281,14 +282,16 @@ Checkbox states in `PROGRESS.md`: `[ ]` todo · `[~]` in progress · `[x]` done 
 | `foundry_task_next` | Pick first `[~]` else first `[ ]`, auto-skip dependency-blocked tasks, mark `[~]`, return PLAN text and dependency logs |
 | `foundry_task_done` | Requires `<ID>:` at HEAD and a clean tree; mark `[x]`, log with the sha, commit |
 | `foundry_task_block` | `git reset --hard && git clean -fd`, mark `[!]`, log `BLOCKED:`, commit |
-| `foundry_verify` | Run `verify` plus any `extraVerify` commands matching the touched paths; return exit codes and tails. With `stream`, runs in that stream's worktree |
+| `foundry_task_reopen` | Reopen a blocked or skipped task once its blocker is resolved, with every task skipped because of it; log `REOPENED:`, commit |
+| `foundry_verify` | Check `constraints`, then run `verify` plus any `extraVerify` commands matching the touched paths; return exit codes and bounded tails. Every command runs in its own process group, killed whole at its timeout or at 64 MiB of output. With `stream`, runs in that stream's worktree |
 | `foundry_stream_finish` | Finish one stream of a parallel wave: require no open tasks and a clean worktree, merge its branch into the build branch, remove the worktree and branch. A merge conflict aborts, keeps the stream, and halts |
-| `foundry_run_finish` | Requires zero open tasks and `HANDOFF.md`; commit, push, draft a PR (unless policies say otherwise), disarm the lock |
+| `foundry_run_finish` | Requires zero open tasks and `HANDOFF.md`; commit, push, draft a PR against `baseBranch` (unless policies say otherwise), disarm the lock, report a whole-tree constraint scan |
 | `foundry_run_halt` | Record an operator-level reason the run cannot continue; disarm the lock; commit state; never resets or cleans the tree |
+| `foundry_flight_options` | Apply go-flight's options (`maxRounds`, `maxRoundsHard`) to `docs/foundry.json` and commit |
 | `foundry_feedback_log` | Append one pipeline-friction entry to `.foundry/feedback.jsonl` and commit it immediately, so it survives a flight that never reaches summarize |
-| `foundry_mutate` | Mutation-test one file for the reviewer: apply one exact find/replace, run the verify commands that file triggers, always restore it, commit nothing; reports whether the tests noticed |
-| `foundry_review_submit` | `APPROVED` → commit. `CHANGES REQUESTED` → assign `R<N>-<nn>`, append to PLAN and PROGRESS, unblock, commit `review: round N` |
-| `foundry_summary_commit` | Commit `SUMMARY.md`, mark the flight complete |
+| `foundry_mutate` | Mutation-test one file for the reviewer: apply one exact find/replace, run the verify commands that file triggers (optionally with a shorter `timeoutMs`), always restore it and undo any residue the commands left, commit nothing; reports whether the tests noticed |
+| `foundry_review_submit` | `APPROVED` → commit. `CHANGES REQUESTED` → assign `R<N>-<nn>`, append to PLAN and PROGRESS, unblock (with skipped dependents), commit `review: round N` |
+| `foundry_summary_commit` | Commit `SUMMARY.md`, mark the flight complete, report reviews, fix rounds and the branch's PR |
 | `foundry_agents_sync` | Write `.claude/agents/foundry-<role>.md` from the merged routing config; only changed files are written |
 | `foundry_config_show` | The merged routing config with the source of every value. Read-only |
 
@@ -325,7 +328,8 @@ it cannot resolve itself (F-05), and a parallel stream whose merge conflicts
 (`foundry_stream_finish` aborts it and keeps the stream). All four want a human. Raise `maxRounds` or
 `maxRoundsHard` in `docs/foundry.json` as appropriate, clear `halted`, and
 run `/foundry:go-flight` again. [docs/operations.md](./docs/operations.md)
-has the rest of the runbook, including what each failure looks like and how
+has the rest of the runbook, including how to reopen a task once its blocker
+is fixed (`foundry_task_reopen`), what each failure looks like and how
 to unstick it.
 
 ## Repo layout
@@ -336,6 +340,7 @@ to unstick it.
 ├── .claude-plugin/              plugin.json + marketplace.json
 ├── .mcp.json                    how Claude Code launches the MCP server
 ├── mcp/server.mjs               the deterministic half of the pipeline
+├── mcp/run-command.mjs          runs one command bounded in time and output
 ├── hooks/hooks.json             Stop / SubagentStop wiring
 ├── scripts/
 │   ├── implement-guard.mjs      the guard hook

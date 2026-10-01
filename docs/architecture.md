@@ -40,13 +40,14 @@ flowchart LR
     HOOK -->|"reads"| DOCS
 ```
 
-The flight controller is deliberately the weakest model in the system. It has
-access to four tools — `Agent`, `foundry_status`, `foundry_next` and
-`foundry_agents_sync` — and none of the MCP ones change project state.
+The flight controller is deliberately the weakest model in the system. Besides
+`Agent`, it may call `foundry_status`, `foundry_next`, `foundry_agents_sync`,
+`foundry_feedback_log`, `foundry_run_halt` and `foundry_flight_options`, and
+none of them start a run, mark a task, or record a verdict.
 `foundry_agents_sync` writes only the generated agent files under
-`.claude/agents/` and a `.git/info/exclude` line (see
-[routing.md](./routing.md)); it cannot start a run, mark a task, or record a
-verdict even if it decides it should.
+`.claude/agents/`, the MCP allow rule and a `.git/info/exclude` line (see
+[routing.md](./routing.md)). `foundry_flight_options` writes only the two
+review-loop bounds the operator passed to `/foundry:go-flight`.
 
 ## The stage machine
 
@@ -140,7 +141,8 @@ else to notice later.
 The reviewer is the one role that may cause a *transient* source edit, and
 only through the MCP: `foundry_mutate` applies one find/replace to one clean
 tracked file, runs that file's verify commands, and restores it from `HEAD`
-before returning — a sentinel in `.foundry/mutation.json` lets the next
+before returning, along with anything else those commands changed that was
+clean before (a new untracked file, a rewritten regressions file) — a sentinel in `.foundry/mutation.json` lets the next
 Foundry call repair the file if the server dies in between. The reviewer
 holds no other way to edit source, and never commits one; a surviving
 mutation is a finding, and the fix still goes through the fix-task loop.
@@ -316,7 +318,14 @@ The next `foundry_task_next` call walks forward, and any task whose
 with its cause — transitively, in one pass, in one commit.
 
 The reviewer decides what happens next: unblock the task with a reason, queue a
-fix task that addresses the blocker, or approve around it. An `APPROVED`
+fix task that addresses the blocker, or approve around it. An unblock reopens
+every task skipped because of the unblocked one, transitively; outside a
+review, an operator does the same with `foundry_task_reopen` once the
+blocker is fixed. A reopened dependent that still has another blocked
+dependency is simply skipped again on the next walk, so reopening errs
+generous on purpose. One blocked infrastructure task once skipped 17 others
+that had no sanctioned way back (cleanflate F-18), which is also why the
+planner is told to keep `Depends on` narrow. An `APPROVED`
 verdict with blocked tasks outstanding is possible but the review skill tells
 the reviewer not to give one.
 
@@ -350,16 +359,23 @@ For `CHANGES REQUESTED`, this is the only way findings become work:
 4. Checkbox lines are appended to `PROGRESS.md`, after the last task and before
    `## Log`.
 5. Tasks named in `unblock` are reset to `[ ]` with the reviewer's reason in
-   the log.
+   the log, along with every task skipped because of them.
 6. Round, verdict, a new entry in `state.rounds` and — if a cap is reached —
    the halt reason are written to `.foundry/state.json`.
 7. All of it lands in one commit, `review: round N`, then pushed per
    `policies.push` (F-18).
 
 An `APPROVED` verdict commits `REVIEW.md` as `review: round N approved` and
-pushes the same way; `round` itself does not change, since nothing new was
-queued. It still appends to `state.rounds`, with zero fix tasks, so the
+pushes the same way; `state.round` itself does not change, since nothing new
+was queued. It still appends to `state.rounds`, with zero fix tasks, so the
 history is complete.
+
+Every tool reports a review by the number it was stamped with, and never as a
+fix-round count (cleanflate F-21). `foundry_review_submit` returns `round: N`
+for either verdict, with `fixRounds` for an approval. `foundry_next`'s
+`done` reason and `foundry_summary_commit` count *reviews* (the length of
+`state.rounds`) and *fix rounds* (`state.round`) separately. A flight
+approved on its second review took 2 reviews and 1 fix round.
 
 **Convergence, not just a count (F-13, F-15).** `state.rounds` is
 `[{ round, fixTasks, unblocked, verdict, nonConverging, at }, …]`, one entry

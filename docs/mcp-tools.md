@@ -1,6 +1,6 @@
 # MCP tool reference
 
-Sixteen tools, served over stdio by `mcp/server.mjs` with no dependencies.
+Eighteen tools, served over stdio by `mcp/server.mjs` with no dependencies.
 The server is launched by Claude Code from [`.mcp.json`](../.mcp.json) with
 `FOUNDRY_PROJECT_DIR` set to the project root; every path below is relative to
 that root.
@@ -10,8 +10,9 @@ are read-only. The flight controller is allowed those plus
 `foundry_agents_sync`, which writes only the generated agent files, the MCP
 allow rule and a `.git/info/exclude` line, never a task or a verdict; and
 `foundry_run_halt`, which it may call itself if it cannot even spawn a
-stage, so the next flight sees a clean halt instead of retrying blindly.
-Everything else changes project state and belongs to a stage agent. (`foundry_mutate` changes a source file only for the length of one call and always restores it, and a stream's tools work in that stream's own worktree.)
+stage, so the next flight sees a clean halt instead of retrying blindly;
+and `foundry_flight_options`, which applies the operator's own go-flight
+options to the review-loop bounds. Everything else changes project state and belongs to a stage agent. (`foundry_mutate` changes a source file only for the length of one call and always restores it, and a stream's tools work in that stream's own worktree.)
 
 `foundry_next`, `foundry_status`, `foundry_config_show` and
 `foundry_agents_sync` all resolve the merged routing config (see
@@ -79,10 +80,13 @@ streams? }`.
 
 - `stage` — `plan` · `implement` · `review` · `summarize` · `done` · `halt`
 - `agent` — the subagent to spawn: the generated `foundry-<role>` name when
-  `.claude/agents/foundry-<role>.md` exists on disk, else the plugin's own
-  `foundry:planner` / `foundry:implementer` / `foundry:reviewer` /
+  it can be trusted to spawn (`agentFallback` is false), else the plugin's
+  own `foundry:planner` / `foundry:implementer` / `foundry:reviewer` /
   `foundry:summarizer`; `null` for `done`, `halt`, and whenever
-  `restartRequired` is true
+  `restartRequired` is true. On a project's first flight, when this session
+  created the agents directory, that means the plugin agent outright,
+  rather than a generated name that fails with "not found" and is retried
+  (cleanflate F-22)
 - `agentFallback` — true when the generated agent file cannot yet be trusted
   to spawn in this session: it is absent, or this server process created the
   `.claude/agents` directory itself (see [routing.md](./routing.md) for why
@@ -90,7 +94,7 @@ streams? }`.
   directory does not)
 - `fallbackAgent` — the plugin's own `foundry:<role>` name, always present
   for a stage that has a role, so a controller can retry with it if spawning
-  `agent` fails with "not found"
+  a generated `agent` still fails with "not found"
 - `restartRequired` — true only when `agentFallback` is true **and** the
   resolved model is one the `Agent` tool cannot name (a non-Anthropic model,
   or a `claude-*` id of a family Foundry does not know); `false` for `done`
@@ -110,7 +114,9 @@ streams? }`.
   explicitly and `foundry_review_submit` refuses a `Round:` line that
   disagrees with it (F-10, F-11) — see
   [architecture.md](./architecture.md#review-rounds)
-- `reason` — one sentence, written for a human reading the transcript
+- `reason` — one sentence, written for a human reading the transcript. A
+  `done` reason counts reviews and fix rounds separately: "flight complete
+  after 2 reviews (1 fix round); …" (cleanflate F-21)
 - `prompt` — the text to hand the subagent **verbatim**; the implement,
   review and summarize prompts each end with a sentence stating this run's
   policies (see `foundry_run_start`)
@@ -326,6 +332,36 @@ implement guard's re-block counter to zero (F-08).
 
 ---
 
+## `foundry_task_reopen`
+
+Reopen a blocked or skipped task once whatever stopped it is resolved — an
+operator supplied a file the sandbox could not download, a flaky service
+came back. For an operator, or a session the operator directs; it is not in
+the flight controller's allowed tools, and inside a flight the reviewer's
+`unblock` does the same job (2026-09-30 cleanflate F-03, F-18).
+
+**Arguments:** `{ id, reason }` — `reason` says what changed so the task can
+now succeed.
+
+**Does:** sets the task back to `[ ]` and logs `REOPENED: <reason>` under a
+`### <ID> — reopened` entry. Then it reopens every skipped `[-]` task that
+depends on it, directly or through another task reopened here, each with a
+log entry naming its cause. It commits `PROGRESS.md` as
+`progress: reopen <ID>`, or `progress: reopen <ID> (+N dependents)` when there were any, and
+resets the guard's re-block counter. A reopened dependent that still has a
+*different* blocked dependency is skipped again by the next
+`foundry_task_next`, so reopening generously is safe. After a finished run
+(`implemented: true`), the open tasks make `foundry_next` hand out an
+implement stage for the same round again.
+
+**Returns:** `{ id, reopenedDependents, commit, counts }`.
+
+**Refuses when:** either argument is missing; the id is unknown; the task
+is neither blocked nor skipped; the flight is already summarized; or a
+stream worktree still exists.
+
+---
+
 ## `foundry_verify`
 
 Run the project's verification commands through the server rather than through
@@ -341,8 +377,10 @@ trigger one out of waves, so reaching this is a bug to report).
 
 **Does:** first, for every rule in `docs/foundry.json`'s `constraints`,
 self-tests it against its own `shouldMatch`/`shouldNotMatch` fixtures and —
-only if that passes — scans every tracked file under its `paths` minus
-`exclude` for real hits (F-14; see
+only if that passes — scans every file under its `paths` minus `exclude`
+that is tracked or untracked-but-not-ignored, skipping files that were
+already untracked when the run started, for real hits (F-14; a new file not
+yet committed is scanned, cleanflate F-26; see
 [operations.md](./operations.md#constraints)); this ignores `files`
 entirely and always covers the whole repo. Then runs every command in
 `verify`, and for each `extraVerify` prefix that any touched file starts
@@ -352,12 +390,24 @@ command runs in a shell from the project root with its own timeout:
 `{ cmd, timeoutMs }` in `docs/foundry.json`, which overrides it for that
 command alone.
 
+Every command — here, in `foundry_mutate` and in `parallel.setup` — runs
+under `mcp/run-command.mjs`, in its own process group. A timeout kills the
+whole tree, not just the shell, so a test binary spinning under `make test`
+does not survive it. A command that writes more than 64 MiB of output in
+total is killed. Once the shell has exited, a leftover child still holding
+its output open gets two seconds before its group is killed. None of these
+can hang the server or take it down (cleanflate F-04, F-16).
+
 **Returns:** `{ ok, constraints: { ok, results: [{ id, ok, fixture, hits }] },
 results: [{ command, ok, exitCode, timedOut, timeoutMs, stdoutTail, stderrTail }] }`,
 plus `recoveredMutation` (a path) when it first had to restore a file a
 crashed [`foundry_mutate`](#foundry_mutate) left edited.
-The tails are the last 60 lines of each stream; `timeoutMs` is whichever
-timeout that command actually ran with. For a constraint result: `fixture`
+The tails are the last 60 lines of each stream, and never more than 4000
+characters; `timeoutMs` is whichever timeout that command actually ran with.
+A result may also carry `truncated: true` (a tail was cut),
+`outputLimitExceeded: true` (killed for writing too much; `ok` is false) and
+`orphansKilled: true` (a leftover child was killed after the shell exited;
+`ok` follows the shell's own exit status). For a constraint result: `fixture`
 is `null` when the rule's own self-test passed, else a message naming the
 disagreeing fixture line (and `hits` is then always empty, since a rule
 that fails its own test is never trusted to scan); `hits` is
@@ -381,7 +431,7 @@ with `git checkout` — an in-tree edit the auto-mode classifier refuses for a
 reviewer told not to fix code, and one a scratch copy cannot replace for
 suites bound to the repo root (wp-env).
 
-**Arguments:** `{ file, find, replace, commands? }`.
+**Arguments:** `{ file, find, replace, commands?, timeoutMs? }`.
 
 - `file` — a repo-relative path to a tracked text file with no uncommitted
   changes
@@ -390,6 +440,9 @@ suites bound to the repo root (wp-env).
 - `replace` — the mutated text; `""` deletes the match
 - `commands` — optional: run only these commands, each spelled exactly as
   in `docs/foundry.json`'s `verify` or `extraVerify`
+- `timeoutMs` — optional: cap every command's timeout for this call. It only
+  ever shortens a configured timeout, never raises one; it is for a mutant you
+  suspect makes a test hang (cleanflate F-06)
 
 **Does:** writes `.foundry/mutation.json` (a sentinel naming the file), applies
 the one replacement, runs the commands, and then — whatever happened,
@@ -399,6 +452,14 @@ every `verify` command plus the `extraVerify` commands whose prefix the file
 falls under. Constraints are not run. It commits nothing, and the sentinel is
 excluded through `.git/info/exclude`, never `.gitignore`, so the tree under
 review stays clean.
+
+It also undoes whatever the commands changed besides the mutated file — a
+test framework's regression seeds, say (cleanflate F-10, F-14). Every tracked
+file that was clean before the call and differs from `HEAD` afterwards is
+restored, and every untracked file that is new is removed. A file that was
+already dirty or untracked before the call is never touched, and nor is an
+ignored file. Crash recovery restores only the mutated file: by the time it
+runs, a new untracked file may be the reviewer's own.
 
 If the restore did not take, it says so plainly (naming the file and the
 command to run by hand), leaves the sentinel, and auto-logs a
@@ -412,7 +473,8 @@ else and report the path as `recoveredMutation`, and log a
 `chore: pipeline friction (review)` so the tree is never left dirty. An unreadable sentinel is a refusal
 that tells you how to recover by hand.
 
-**Returns:** `{ file, killed, verdict, results, recoveredMutation }`.
+**Returns:** `{ file, killed, verdict, results, restored, removed, recoveredMutation }`.
+`restored` and `removed` list the residue paths it put back or deleted.
 `killed` is true when at least one command failed — the tests noticed (a
 timeout counts). `verdict` is `"killed: the tests caught the mutation"` or
 `"survived: no command failed — the mechanic is untested"`; a survivor is a
@@ -424,7 +486,7 @@ every mutation looks killed.
 (`.foundry/implement.lock` exists) — this is a review-stage tool; `file` is
 outside the project, missing, a symlink, untracked, binary, or has
 uncommitted changes; `find` is empty, or matches zero or several times, or
-equals `replace`; `commands` names something that is not a configured
+equals `replace`; `timeoutMs` is not a positive integer; `commands` names something that is not a configured
 `verify`/`extraVerify` command (the message lists the legal ones); or the
 config has no `verify` commands.
 
@@ -492,10 +554,15 @@ End an implementation run and hand off to review.
    `chore: round N implemented`.
 3. Pushes to `origin` if `policies.push` is true and there is one, and — if
    `policies.pr` is not `"none"` and `gh` is on `PATH` — opens a draft PR
-   with `HANDOFF.md` as the body, or reports the existing one.
+   against `baseBranch` (`--base`, always; cleanflate F-24) with
+   `HANDOFF.md` as the body, or reports the existing one.
 4. Deletes the lock, standing the guard hook down.
+5. Runs every constraint over the whole tree, as `foundry_verify` does, and
+   reports the result without refusing on it (cleanflate F-26).
 
-**Returns:** `{ branch, base, head, handoffCommit, stateCommit, push, pr, counts, round, readyLine }`.
+**Returns:** `{ branch, base, head, handoffCommit, stateCommit, push, pr, counts, round, constraints, readyLine }`.
+`constraints` is `{ ok, failing: [<rule ids>] }`; when any rule fails, the
+ready line ends with `; constraints failing: <ids>`.
 `push` is `"pushed"`, `"skipped: no origin remote"`, `"skipped: policy"`, or
 `"failed: <git's message>"` — a failed push does not fail the handoff,
 because the branch is still perfectly reviewable locally. `pr` is `null`
@@ -531,6 +598,31 @@ anything is left uncommitted, which after a halt is expected, not an error.
 The next `foundry_next` call returns `{ stage: "halt", reason }` with the
 same reason. Clearing it is the same hand edit as any other halt — see
 [operations.md](./operations.md#halts).
+
+---
+
+## `foundry_flight_options`
+
+Apply the operator's flight options to `docs/foundry.json`. go-flight calls
+it when `/foundry:go-flight` was given options such as "maximum review depth
+of 6 rounds", so the controller never hand-edits the config (cleanflate
+F-20).
+
+**Arguments:** `{ maxRounds?, maxRoundsHard? }` — positive integers, at
+least one. See [operations.md](./operations.md#configuration) for what each
+bounds.
+
+**Does:** sets the given keys in `docs/foundry.json`, leaving every other key
+as it was, and commits the file as
+`chore: flight options (maxRounds=6, maxRoundsHard=6)`. Applying the same
+values twice commits nothing. A flight already halted on a round cap stays
+halted; clearing that is still a hand edit.
+
+**Returns:** `{ before, after, commit }`. `before` and `after` are the
+effective bounds, defaults included.
+
+**Refuses when:** neither key is given; a value is not a positive integer;
+or `docs/foundry.json` does not exist yet (before the plan stage).
 
 ---
 
@@ -613,7 +705,8 @@ pushes the branch per `policies.push` (F-18).
 **Does, for `CHANGES REQUESTED`:** assigns `R<N>-<nn>` ids, appends
 `## Review fixes (round N)` to `PLAN.md` in task format, appends the checkbox
 lines to `PROGRESS.md` above `## Log`, resets unblocked tasks to `[ ]` with
-their reasons logged, bumps the round, appends an entry to `state.rounds`,
+their reasons logged — along with every task skipped because of them,
+transitively, each logged with its cause (cleanflate F-05) — bumps the round, appends an entry to `state.rounds`,
 commits everything as `review: round N`, and pushes the branch per
 `policies.push`. Halts (writes a `halted` reason into `.foundry/state.json`,
 which stops the next flight) when the new round reaches `maxRoundsHard`, or
@@ -621,9 +714,11 @@ when the count of non-converging rounds so far reaches `maxRounds` — see
 [architecture.md](./architecture.md#review-rounds) for exactly what
 "non-converging" means (F-13, F-15).
 
-**Returns:** `{ verdict, round, commit, push }` for an approval;
-`{ verdict, round, fixTasks, unblocked, commit, halted, counts, push }` for
-changes. `push` is the same shape `foundry_run_finish` returns. `counts`
+**Returns:** `{ verdict, round, fixRounds, commit, push }` for an approval;
+`{ verdict, round, fixTasks, unblocked, reopenedDependents, commit, halted, counts, push }` for
+changes. `round` is always the number this review was stamped with (`N`),
+never the count of fix rounds; for an approval, `fixRounds` is that count
+(cleanflate F-21). `push` is the same shape `foundry_run_finish` returns. `counts`
 describes `PROGRESS.md` as this call left it, including the fix tasks it
 just queued. Either shape also carries `recoveredMutation` (a path) when the
 call first had to restore a file a crashed
@@ -647,7 +742,13 @@ task that does not exist or is not blocked or skipped.
 **Does:** marks the flight complete, commits `docs/SUMMARY.md` as
 `chore: build summary`, and pushes the branch per `policies.push` (F-18).
 
-**Returns:** `{ commit, branch, base, head, rounds, push }`.
+**Returns:** `{ commit, branch, base, head, reviews, fixRounds, push, pr }`.
+`reviews` is how many reviews the flight took and `fixRounds` how many fix
+rounds came between them; after an approval, reviews = fixRounds + 1. `pr`
+is the branch's pull request from `gh pr view`, as `{ url, state, draft,
+base }`, with `expectedBase` added when it does not target `baseBranch`.
+Otherwise it is `"none"`, `"skipped: policy"` or `"unknown: <why>"` (`gh`
+missing or failing). This is never a refusal (cleanflate F-25).
 
 **Refuses when:** `SUMMARY.md` does not exist, or the recorded verdict is not
 `APPROVED`.

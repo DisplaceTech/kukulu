@@ -22,6 +22,7 @@ it.
 | Path | What lives there |
 |---|---|
 | `mcp/server.mjs` | Every deterministic operation, and the JSON-RPC transport |
+| `mcp/run-command.mjs` | Runs one verify/mutate/setup command in its own process group, bounded in time and output, for the synchronous server |
 | `scripts/implement-guard.mjs` | The Stop / SubagentStop hook |
 | `scripts/lint.sh` | Dependency-free syntax and manifest lint |
 | `scripts/check-diagrams.mjs` | Parses every Mermaid block; CI-only, needs mermaid + jsdom |
