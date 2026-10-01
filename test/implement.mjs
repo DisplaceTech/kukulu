@@ -429,6 +429,70 @@ for (const [config, re] of [
   });
 }
 
+// ---------------------------------------------------------------- bounded commands (2026-09-30 cleanflate F-04, F-09, F-16)
+//
+// Every command runs in its own process group with a bounded tail of output,
+// so a runaway one can neither hang the server nor take it down.
+
+const alive = (pid) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+{
+  // A timeout kills the whole tree, not just the shell: the grandchild here is
+  // what a spinning test binary under `make test` looks like.
+  const pidFile = path.join(mkDir("foundry-pid-"), "grandchild.pid");
+  const repo = plannedRepo({ config: { verify: [{ cmd: `sleep 60 & echo $! > ${pidFile}; wait`, timeoutMs: 500 }] } });
+  await withServer(repo, async ({ call }) => {
+    const v = await call("foundry_verify");
+    eq(v.results[0].timedOut, true, "a command that outlives its timeout is reported as timed out");
+    const pid = Number(fs.readFileSync(pidFile, "utf8").trim());
+    await new Promise((r) => setTimeout(r, 200));
+    ok(!alive(pid), "...and its grandchild is killed with it, not left orphaned");
+  });
+}
+
+{
+  const repo = plannedRepo({ config: { verify: ["yes"] } });
+  await withServer(repo, async ({ call }) => {
+    const v = await call("foundry_verify");
+    eq(v.ok, false, "a command that never stops writing fails");
+    eq(v.results[0].outputLimitExceeded, true, "...because it exceeded the output limit");
+    eq(v.results[0].truncated, true, "...and its output is marked truncated");
+    ok(v.results[0].stdoutTail.length <= 4000, "the tail stays bounded");
+    const s = await call("foundry_status");
+    ok(!s.error && s.root, "the server is still up and answering afterwards");
+  });
+}
+
+{
+  // A background child that keeps stdout open used to hang the call forever.
+  const repo = plannedRepo({ config: { verify: ["sleep 60 & echo started"] } });
+  await withServer(repo, async ({ call }) => {
+    const t0 = Date.now();
+    const v = await call("foundry_verify");
+    ok(Date.now() - t0 < 15_000, "a leftover child holding stdout does not hang the call");
+    eq(v.ok, true, "the command itself succeeded, so verify passes");
+    eq(v.results[0].orphansKilled, true, "...and the leftover child is reported as killed");
+    eq(v.results[0].stdoutTail, "started", "output written before the shell exited is kept");
+  });
+}
+
+{
+  const repo = plannedRepo({ config: { verify: [`node -e "process.stdout.write('x'.repeat(100000))"`] } });
+  await withServer(repo, async ({ call }) => {
+    const v = await call("foundry_verify");
+    eq(v.ok, true, "a long single line is not a failure");
+    eq(v.results[0].stdoutTail.length, 4000, "...but only its last 4000 characters are returned");
+    eq(v.results[0].truncated, true, "...and the result says it was truncated");
+  });
+}
+
 // ---------------------------------------------------------------- pre-existing untracked files
 
 {

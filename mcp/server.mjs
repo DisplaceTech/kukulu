@@ -1785,17 +1785,69 @@ function taskBlock({ stream, id, reason }) {
   return { id, progressCommit: psha, counts: counts(pr.tasks), ...(stream !== undefined ? { stream } : {}) };
 }
 
+// Every command Foundry runs for the model goes through mcp/run-command.mjs,
+// which runs it in its own process group so a timeout kills the whole tree,
+// and keeps only a bounded tail of its output (F-04, F-09, F-16 of the
+// 2026-09-30 cleanflate feedback: a runaway mutant hung the reviewer, left
+// orphaned test binaries spinning, and took the server down).
+const RUNNER = path.join(path.dirname(fileURLToPath(import.meta.url)), "run-command.mjs");
+// A command that writes more than this in total is killed, not buffered.
+const OUTPUT_LIMIT_BYTES = 64 * 1024 * 1024;
+// What a result carries of each stream: the last 60 lines, and never more
+// than this many characters of them, so one long line cannot overflow the
+// tool result either.
+const TAIL_LINES = 60;
+const TAIL_CHARS = 4000;
+// How long the server waits beyond a command's own timeout before it gives
+// up on the runner itself (which should never need it).
+const RUNNER_BACKSTOP_MS = 30_000;
+
 function runShell(cmd, timeoutMs, cwd = ROOT) {
-  const r = spawnSync(cmd, { cwd, shell: true, encoding: "utf8", timeout: timeoutMs, maxBuffer: 64 * 1024 * 1024 });
-  const tail = (s, n = 60) => (s || "").replace(/\s+$/, "").split("\n").slice(-n).join("\n");
+  const spec = { cmd, cwd, timeoutMs, maxOutputBytes: OUTPUT_LIMIT_BYTES, keepBytes: TAIL_CHARS * 8 };
+  const r = spawnSync(process.execPath, [RUNNER, JSON.stringify(spec)], {
+    encoding: "utf8",
+    timeout: timeoutMs + RUNNER_BACKSTOP_MS,
+    maxBuffer: 4 * 1024 * 1024,
+  });
+  let res;
+  try {
+    res = JSON.parse((r.stdout || "").trim().split("\n").pop());
+  } catch {
+    res = {
+      exitCode: null,
+      signal: null,
+      timedOut: r.error?.code === "ETIMEDOUT",
+      outputLimitExceeded: false,
+      orphansKilled: false,
+      stdout: "",
+      stderr: `foundry could not supervise this command: ${(r.error?.message || r.stderr || "the runner produced no result").trim()}`,
+    };
+  }
+  let truncated = false;
+  const tail = (s) => {
+    const lines = (s || "").replace(/\s+$/, "").split("\n");
+    let t = lines.slice(-TAIL_LINES).join("\n");
+    if (lines.length > TAIL_LINES) truncated = true;
+    if (t.length > TAIL_CHARS) {
+      t = t.slice(-TAIL_CHARS);
+      truncated = true;
+    }
+    return t;
+  };
+  const stdoutTail = tail(res.stdout);
+  const stderrTail = tail(res.stderr);
+  if (res.outputLimitExceeded) truncated = true;
   return {
     command: cmd,
-    ok: r.status === 0 && !r.error,
-    exitCode: r.status,
-    timedOut: r.error?.code === "ETIMEDOUT",
+    ok: res.exitCode === 0 && !res.timedOut && !res.outputLimitExceeded,
+    exitCode: res.exitCode,
+    timedOut: res.timedOut,
     timeoutMs,
-    stdoutTail: tail(r.stdout),
-    stderrTail: tail(r.stderr),
+    ...(res.outputLimitExceeded ? { outputLimitExceeded: true } : {}),
+    ...(res.orphansKilled ? { orphansKilled: true } : {}),
+    ...(truncated ? { truncated: true } : {}),
+    stdoutTail,
+    stderrTail,
   };
 }
 
