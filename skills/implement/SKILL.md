@@ -59,6 +59,10 @@ the end of the plan.
 6. **Commit** with the template in CLAUDE.md: title `<ID>: <title>`, body with
    Goal / Tests / Interpretation / Measurement (if tuning) / Manual check.
    Stage only the files the task touched. Do not stage `docs/PROGRESS.md`.
+   Write the message to a file in your scratch space and commit with `git
+   commit -F <file>`, not `-m`: some projects run a hook that scans the
+   whole Bash command line for forbidden words, and a commit message that
+   only *mentions* one is then denied along with the commit.
 7. **Record.** Call `foundry_task_done` with the task ID and a log entry
    (under 15 lines): tests added, any Interpretation choices, config keys
    introduced, anything a later task or the reviewer must know. The tool marks

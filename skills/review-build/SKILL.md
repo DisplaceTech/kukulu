@@ -60,6 +60,11 @@ The tool runs the verify commands that file triggers (including any
 `extraVerify` suite bound to the repo root), restores the file itself, and
 commits nothing. Expect `killed: true`: the tests noticed. A `survived`
 result means no test covers that mechanic, which is a category-3 finding.
+If you suspect a mutant makes a test hang, pass `timeoutMs` (it only ever
+shortens the configured timeout). The tool also undoes whatever the
+commands changed besides the mutated file — a test framework's regression
+seeds, say — and lists those paths as `restored` and `removed`; you never
+clean up after it by hand.
 Never edit source in the working tree yourself, not even temporarily — you
 are not to fix code, and the tool restores the file where you cannot
 guarantee you would.
@@ -99,7 +104,9 @@ Then call `foundry_review_submit` exactly once:
   submission; anything else is refused). Group small findings in the same
   file into one task. Every fix task must name a test that would have
   caught the original finding. Pass `unblock: [<ids>]` for blocked tasks you
-  have unblocked, with a `reason` per ID. The tool assigns the
+  have unblocked, with a `reason` per ID; every task that was skipped
+  because of one comes back with it (`reopenedDependents`), so do not list
+  those separately. The tool assigns the
   `R<reviewRound>-<nn>` IDs itself, appends `## Review fixes (round N)` to
   PLAN.md, appends the checkbox lines to PROGRESS.md, resets unblocked
   tasks, and commits everything as `review: round N`.

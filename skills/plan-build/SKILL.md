@@ -45,6 +45,12 @@ or any source files; the first task of the first phase does that.
   test files and test names that must exist and pass), **Out of scope** (what
   the implementer must NOT do in this task), **Verification** (commands to
   run; for UI tasks, what to check), **Depends on** (task IDs, or `none`).
+- Keep **Depends on** narrow: list a task only when this one cannot be built
+  or cannot pass its own tests without that task's output. A blocked task
+  auto-skips every task that depends on it, directly or transitively, so a
+  shared infrastructure task named "just in case" can turn one blocker into
+  a skipped phase. Ordering alone is not a dependency: tasks already run in
+  plan order.
 - Tests are written in the same task as the code they cover. Invariant, soak
   or property tests are introduced as early as the mechanics they check exist,
   never deferred to a "testing phase".
@@ -63,6 +69,17 @@ or any source files; the first task of the first phase does that.
   task, and the SPEC sections it cites, nothing else. If a task needs a
   decision from an earlier task (a module name, a config key, a message type),
   restate it.
+- A protocol that many tasks share (measure before and after, the rule for a
+  gated task, how to record a reproduction) belongs in `CLAUDE.md` under
+  `## Task protocols`, because that is the file the implementer reads; each
+  task that follows one names it ("follow the bench protocol in
+  CLAUDE.md"). PLAN.md's `## Conventions` is for the plan's own reader, and
+  the implementer never sees it.
+- A verification step that takes longer than about ten minutes (a full
+  benchmark, a heavy suite) belongs in `docs/foundry.json` as a `verify` or
+  `extraVerify` command with its own `timeoutMs`, so it runs through
+  `foundry_verify` instead of a foreground shell call that the harness cuts
+  off. Say so in the task's Verification section.
 - Because there is no human between tasks, be explicit about interpretation
   points: where SPEC allows two readings, pick one in the task text.
 
@@ -240,6 +257,7 @@ Under fixed headings so the implementer and reviewer can find them:
   constraint that genuinely cannot be a line pattern (a structural rule, a
   cross-file invariant) says so here explicitly: "reviewer checks by
   reading" — never silently omit it from `constraints` without saying why.
+- `## Task protocols` — only if tasks share one (see above).
 - `## Commit template` — title `<ID>: <title>`; body with Goal / Tests /
   Interpretation / Measurement (if tuning) / Manual check.
 - A closing note that SPEC.md wins over PLAN.md wins over code comments.
