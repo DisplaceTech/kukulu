@@ -12,8 +12,13 @@ archived each phase's `.foundry/feedback.jsonl` before starting the next:
 | 1 (build) | `docs/phase-1/foundry-feedback.jsonl` | F-01–F-07 |
 | 2 (performance) | `docs/phase-2/foundry-feedback.jsonl` | F-08–F-11 |
 | 3 (performance) | `.foundry/feedback.jsonl` | F-12–F-15 |
+| all | the flight controller's own notes | F-16–F-30 |
 
-Newest entries at the bottom.
+F-16 onward were never logged to a `feedback.jsonl`. The flight controller
+(the operator's own session) observed them while running the three flights,
+and they are recorded here so the release plan sees them too. They have no
+`at` timestamp, so a later `/foundry:pull-feedback` cannot dedupe against
+them; none of them came from a log. Newest entries at the bottom.
 
 ## F-01 — no guidance for a spec that must log or tag Foundry's own activity
 
@@ -201,3 +206,122 @@ Phase 3. Logged by the reviewer (`stage: review`, `category: stall`, round
 > working tree was clean afterwards, but the verdict was lost and the
 > mutant had to be abandoned. Possibly a runaway mutant (distance-0 copy)
 > exceeding a transport limit rather than the command timeout.
+
+## Controller-observed
+
+## F-16 — the MCP server crashed during mutation testing
+
+Phases 2 and 3 (phase-2 review round 1, phase-3 review round 2). The
+`foundry` MCP server disconnected right after `foundry_mutate` ran a
+mutant that most likely looped until it hit a 1 GiB output limit. The
+flight stalled until the operator ran `/mcp`. `foundry_mutate` needs a
+per-mutant timeout, a process-group kill and a bounded output size, and
+must never take the server down. See also F-04, F-09, F-11 and F-15.
+
+## F-17 — `foundry_mutate` leaves residue and overflows the tool result
+
+Phases 2 and 3. After killed mutants it left modified and untracked
+`*.proptest-regressions` files, and its output overflowed the tool-result
+limit twice. It should restore the full tree state, including untracked
+files it caused, and truncate its output. See also F-09, F-10 and F-14.
+
+## F-18 — no way to reopen blocked or skipped tasks
+
+Phase 1. P0-08 was blocked by an external download failure (F-02) and 17
+dependent tasks were auto-skipped. After the operator supplied the file,
+nothing in the toolset could reopen them; the controller flipped `[-]` to
+`[ ]` in `PROGRESS.md` by hand. A tool such as `foundry_task_reopen`, or a
+reviewer unblock that also reopens the task's skipped dependents, would
+close this. See also F-03 and F-05.
+
+## F-19 — over-eager cascade skipping
+
+Phase 1. One blocked infrastructure task skipped 17 tasks, most of which
+did not really need it. The planner should be told to keep `Depends on`
+narrow, and skipping should be re-evaluated when the blocker clears.
+
+## F-20 — no way to pass flight options to go-flight
+
+Phase 2. The operator invoked `/foundry:go-flight` with "maximum review
+depth of 6 rounds", but the skill has no argument handling, so the
+controller edited `maxRounds` in `docs/foundry.json` by hand.
+
+## F-21 — round numbers disagree across tools and messages
+
+Phases 1–3.
+
+- `foundry_review_submit` reported `"round": 3` when `REVIEW.md` was round
+  4 (an `APPROVED` submission).
+- `foundry_next`'s `done` reason says "after N review round(s)" but counts
+  fix rounds rather than reviews (phase 3: "1 round" after 2 reviews).
+- `foundry_status.reviewVerdictInFile` was `null` after an `APPROVED`
+  review.
+
+## F-22 — generated agents are not loadable in the first session
+
+Phase 1. On the project's very first flight, `foundry-planner` and the
+other generated agents were "not found", so the fallback path ran. That
+works as designed, but the not-found error followed by the fallback retry
+is noisy.
+
+## F-23 — the Write tool is refused for some subagents
+
+Phases 1–3. The summarizer and implementer were sometimes refused the
+`Write` tool and wrote their documents with shell heredocs instead (the
+documented fallback). Worth checking the generated agents' tool lists and
+permission rules.
+
+## F-24 — the draft PR ignored `baseBranch`
+
+Phase 2. `docs/foundry.json` had `"baseBranch": "feature/perf"`, but the
+draft PR was opened against `main`.
+
+## F-25 — PR state is not reported
+
+Phases 1–3. The summarizer could not tell whether a draft PR existed:
+`foundry_summary_commit` reports only the push.
+
+## F-26 — `foundry_verify` did not catch a constraint regression early
+
+Phase 1. The constraint scan missed a forbidden-word regression that a
+later full run caught. A full-tree constraint scan at `run_finish` or
+review would catch it before the reviewer has to.
+
+## F-27 — multi-phase projects need manual bookkeeping
+
+Phases 2 and 3.
+
+- Task ids (`P<phase>-<nn>`) collide across flights in the same repository,
+  which collides artifacts named by task id and makes `[task:..]` tags in
+  history ambiguous (F-12).
+- Each new phase needed manual archiving of SPEC, PLAN, PROGRESS, REVIEW,
+  SUMMARY, HANDOFF and `foundry.json`, plus `.foundry/state.json` and
+  `feedback.jsonl`.
+- The project needed its own `PHASE_BASE` scoping for reports.
+
+A flight identifier (an id prefix or a flight number) and an
+archive/new-phase command would cover all three.
+
+## F-28 — long verify commands exceed the foreground tool limit
+
+Phases 2 and 3. Full benches and heavy suites exceeded the 10-minute
+foreground tool limit; agents had to run them in the background and poll
+(F-13).
+
+## F-29 — project guards that scan whole Bash commands deny commit messages
+
+Phases 1 and 3. A project PreToolUse guard that scans whole Bash command
+strings denied commit messages containing forbidden words (F-07, F-13).
+Committing with the message in a file (`git commit -F`) keeps it out of the
+command string.
+
+## F-30 — what worked, and should stay
+
+Phases 1–3.
+
+- Per-role model routing.
+- Mechanical constraint rules with fixtures.
+- Gated "measure first or record a negative result" tasks.
+- Reviewer mutation sampling, which caught real test gaps every round.
+- The narrow fix-task loop: the three phases converged in 4, 3 and 2
+  reviews.
