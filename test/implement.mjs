@@ -8,7 +8,7 @@ import path from "node:path";
 import {
   finish, ok, eq, like, isError,
   mkDir, plannedRepo, withServer, readFile, writeFile, hasFile, subject,
-  commitTask, markTasks, setState, git, mkBareRemote, mkFailingGhBin,
+  commitTask, markTasks, setState, git, mkBareRemote, mkFailingGhBin, mkFakeGhBin,
 } from "./harness.mjs";
 
 const TODAY = new Date().toISOString().slice(0, 10);
@@ -330,6 +330,68 @@ for (const missing of ["docs/SPEC.md", "docs/PLAN.md", "docs/PROGRESS.md", "docs
   });
 }
 
+// ---------------------------------------------------------------- task_reopen (2026-09-30 cleanflate F-03, F-18)
+
+{
+  const tasks = [
+    { id: "P0-01", title: "Base", files: "a.txt" },
+    { id: "P0-02", title: "Needs a download", files: "b.txt", depends: ["P0-01"] },
+    { id: "P0-03", title: "Uses the download", files: "c.txt", depends: ["P0-02"] },
+    { id: "P0-04", title: "Uses that", files: "d.txt", depends: ["P0-03"] },
+    { id: "P0-05", title: "Unrelated blocker", files: "e.txt" },
+    { id: "P0-06", title: "Needs the unrelated one", files: "f.txt", depends: ["P0-05"] },
+  ];
+  const repo = plannedRepo({ tasks });
+  git(repo, ["checkout", "-q", "-b", `build/${TODAY}`]);
+  markTasks(repo, { "P0-01": "x", "P0-02": "!", "P0-03": "-", "P0-04": "-", "P0-05": "!", "P0-06": "-" });
+  setState(repo, { round: 0, implemented: true });
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-qm", "chore: round 0 implemented"]);
+  await withServer(repo, async ({ call }) => {
+    isError(await call("foundry_task_reopen", { id: "P0-02" }), /id and reason are required/, "a reopen without a reason is refused");
+    isError(await call("foundry_task_reopen", { id: "P9-99", reason: "x" }), /not in docs\/PROGRESS\.md/, "an unknown task is refused");
+    isError(await call("foundry_task_reopen", { id: "P0-01", reason: "x" }), /'done'; only a blocked or skipped task/, "a done task cannot be reopened");
+
+    const r = await call("foundry_task_reopen", { id: "P0-02", reason: "the operator supplied the corpus file" });
+    eq(r.reopenedDependents.join(","), "P0-03,P0-04", "the tasks skipped because of it come back too, transitively");
+    eq(r.counts.todo, 3, "three tasks are open again");
+    eq(r.counts.skipped, 1, "a task skipped for an unrelated blocker stays skipped");
+    eq(r.counts.blocked, 1, "...and so does that blocker");
+    eq(subject(repo), "progress: reopen P0-02 (+2 dependents)", "the reopen is one commit");
+    eq(git(repo, ["status", "--porcelain"]), "", "...leaving a clean tree");
+    const prog = readFile(repo, "docs/PROGRESS.md");
+    like(prog, /### P0-02 — reopened\nREOPENED: the operator supplied the corpus file/, "the reason is logged");
+    like(prog, /### P0-04 — reopened\nreopened: it was skipped because of P0-03, which is open again/, "a transitive dependent's log names its cause");
+
+    const n = await call("foundry_next");
+    eq(n.stage, "implement", "a finished round with reopened tasks goes back to implement");
+
+    const skippedOnly = await call("foundry_task_reopen", { id: "P0-06", reason: "try it anyway" });
+    eq(skippedOnly.reopenedDependents.length, 0, "a skipped task can be reopened on its own");
+    eq(subject(repo), "progress: reopen P0-06", "...with a plain commit subject");
+    await call("foundry_run_start");
+    const picked = [];
+    for (;;) {
+      const t = await call("foundry_task_next");
+      for (const sk of t.skipped) picked.push(`skip:${sk.id}`);
+      if (t.done) break;
+      picked.push(t.id);
+      commitTask(repo, t.id, t.title, { [`${t.id}.txt`]: "ok\n" });
+      await call("foundry_task_done", { id: t.id, log: "done" });
+    }
+    eq(picked.join(","), "P0-02,P0-03,P0-04,skip:P0-06", "reopened tasks run in plan order, and one whose blocker is still blocked is skipped again");
+  });
+}
+
+{
+  const repo = plannedRepo();
+  markTasks(repo, { "P0-01": "x", "P0-02": "!", "P0-03": "-" });
+  setState(repo, { summarized: true });
+  await withServer(repo, async ({ call }) => {
+    isError(await call("foundry_task_reopen", { id: "P0-02", reason: "x" }), /flight is complete/, "a summarized flight refuses a reopen");
+  });
+}
+
 // ---------------------------------------------------------------- verify
 
 {
@@ -426,6 +488,70 @@ for (const [config, re] of [
     const v = await call("foundry_verify");
     eq(v.ok, false, "a hung command fails rather than hanging the flight");
     eq(v.results[0].timedOut, true, "the timeout is reported as such");
+  });
+}
+
+// ---------------------------------------------------------------- bounded commands (2026-09-30 cleanflate F-04, F-09, F-16)
+//
+// Every command runs in its own process group with a bounded tail of output,
+// so a runaway one can neither hang the server nor take it down.
+
+const alive = (pid) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+{
+  // A timeout kills the whole tree, not just the shell: the grandchild here is
+  // what a spinning test binary under `make test` looks like.
+  const pidFile = path.join(mkDir("foundry-pid-"), "grandchild.pid");
+  const repo = plannedRepo({ config: { verify: [{ cmd: `sleep 60 & echo $! > ${pidFile}; wait`, timeoutMs: 500 }] } });
+  await withServer(repo, async ({ call }) => {
+    const v = await call("foundry_verify");
+    eq(v.results[0].timedOut, true, "a command that outlives its timeout is reported as timed out");
+    const pid = Number(fs.readFileSync(pidFile, "utf8").trim());
+    await new Promise((r) => setTimeout(r, 200));
+    ok(!alive(pid), "...and its grandchild is killed with it, not left orphaned");
+  });
+}
+
+{
+  const repo = plannedRepo({ config: { verify: ["yes"] } });
+  await withServer(repo, async ({ call }) => {
+    const v = await call("foundry_verify");
+    eq(v.ok, false, "a command that never stops writing fails");
+    eq(v.results[0].outputLimitExceeded, true, "...because it exceeded the output limit");
+    eq(v.results[0].truncated, true, "...and its output is marked truncated");
+    ok(v.results[0].stdoutTail.length <= 4000, "the tail stays bounded");
+    const s = await call("foundry_status");
+    ok(!s.error && s.root, "the server is still up and answering afterwards");
+  });
+}
+
+{
+  // A background child that keeps stdout open used to hang the call forever.
+  const repo = plannedRepo({ config: { verify: ["sleep 60 & echo started"] } });
+  await withServer(repo, async ({ call }) => {
+    const t0 = Date.now();
+    const v = await call("foundry_verify");
+    ok(Date.now() - t0 < 15_000, "a leftover child holding stdout does not hang the call");
+    eq(v.ok, true, "the command itself succeeded, so verify passes");
+    eq(v.results[0].orphansKilled, true, "...and the leftover child is reported as killed");
+    eq(v.results[0].stdoutTail, "started", "output written before the shell exited is kept");
+  });
+}
+
+{
+  const repo = plannedRepo({ config: { verify: [`node -e "process.stdout.write('x'.repeat(100000))"`] } });
+  await withServer(repo, async ({ call }) => {
+    const v = await call("foundry_verify");
+    eq(v.ok, true, "a long single line is not a failure");
+    eq(v.results[0].stdoutTail.length, 4000, "...but only its last 4000 characters are returned");
+    eq(v.results[0].truncated, true, "...and the result says it was truncated");
   });
 }
 
@@ -659,6 +785,55 @@ for (const [bad, re] of [
     eq(r.push, "pushed", "push still happens; only the PR is policy-gated");
     eq(r.pr, "skipped: policy", "pr: none skips PR creation, reported explicitly");
   });
+}
+
+// The draft PR targets baseBranch, not the repository's default branch, and
+// the summary reports the PR it finds (2026-09-30 cleanflate F-24, F-25).
+{
+  const repo = plannedRepo({ config: { baseBranch: "feature/perf" } });
+  git(repo, ["checkout", "-q", "-b", "feature/perf"]);
+  git(repo, ["remote", "add", "origin", mkBareRemote()]);
+  const ghDir = mkFakeGhBin();
+  await withServer(repo, async ({ call }) => {
+    await call("foundry_run_start");
+    await call("foundry_task_next");
+    commitTask(repo, "P0-01", "Create hello", { "hello.txt": "hi\n" });
+    await call("foundry_task_done", { id: "P0-01", log: "x" });
+    await call("foundry_task_block", { id: "P0-02", reason: "x / y / z" });
+    await call("foundry_task_next");
+    writeFile(repo, "docs/HANDOFF.md", "# handoff\n");
+    const r = await call("foundry_run_finish");
+    eq(r.pr, "https://github.invalid/pull/1", "run_finish reports the draft PR it opened");
+    like(readFile(ghDir, "calls.log"), /pr create --draft --base feature\/perf /, "...opened against baseBranch, not the default branch");
+
+    setState(repo, { reviewed: true, verdict: "APPROVED", rounds: [{ round: 1, fixTasks: 0, unblocked: 0, verdict: "APPROVED" }] });
+    writeFile(repo, "docs/SUMMARY.md", "# summary\n");
+    const sum = await call("foundry_summary_commit");
+    eq(JSON.stringify(sum.pr), JSON.stringify({ url: "https://github.invalid/pull/1", state: "OPEN", draft: true, base: "feature/perf" }), "summary_commit reports the PR's url, state, draft flag and base");
+  }, { env: { PATH: `${ghDir}:${process.env.PATH}` } });
+}
+
+{
+  const repo = plannedRepo({ config: { baseBranch: "feature/perf" } });
+  git(repo, ["checkout", "-q", "-b", "feature/perf"]);
+  git(repo, ["remote", "add", "origin", mkBareRemote()]);
+  const ghDir = mkFakeGhBin();
+  writeFile(ghDir, "pr.json", '{"url":"https://github.invalid/pull/7","state":"OPEN","isDraft":true,"baseRefName":"main"}\n');
+  setState(repo, { reviewed: true, verdict: "APPROVED", policies: { signing: "auto", push: false, pr: "draft", feedback: true } });
+  writeFile(repo, "docs/SUMMARY.md", "# summary\n");
+  await withServer(repo, async ({ call }) => {
+    const sum = await call("foundry_summary_commit");
+    eq(sum.pr.expectedBase, "feature/perf", "a PR against the wrong base is flagged with the base it should have");
+  }, { env: { PATH: `${ghDir}:${process.env.PATH}` } });
+}
+
+{
+  const repo = plannedRepo();
+  setState(repo, { reviewed: true, verdict: "APPROVED" });
+  writeFile(repo, "docs/SUMMARY.md", "# summary\n");
+  await withServer(repo, async ({ call }) => {
+    eq((await call("foundry_summary_commit")).pr, "none", "with no remote, summary_commit says there is no PR");
+  }, noGh);
 }
 
 // ---------------------------------------------------------------- run_halt

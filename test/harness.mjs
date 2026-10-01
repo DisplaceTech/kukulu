@@ -117,6 +117,46 @@ export function mkFailingGhBin() {
   return dir;
 }
 
+/**
+ * A directory holding a `gh` stub that behaves like a GitHub with no pull
+ * request until `gh pr create` makes one: `pr view` then reports it, with
+ * the `--base` it was created against. Every invocation is appended to
+ * `<dir>/calls.log`. Prepend the directory to PATH.
+ */
+export function mkFakeGhBin() {
+  const dir = mkDir("foundry-gh-");
+  const gh = path.join(dir, "gh");
+  fs.writeFileSync(
+    gh,
+    `#!/bin/sh
+dir=$(dirname "$0")
+printf '%s\\n' "$*" >> "$dir/calls.log"
+case "$1" in --version) exit 0 ;; esac
+if [ "$1 $2" = "pr view" ]; then
+  if [ ! -f "$dir/pr.json" ]; then echo "no pull requests found for branch" >&2; exit 1; fi
+  case " $* " in
+    *" -q "*) sed -n 's/.*"url":"\\([^"]*\\)".*/\\1/p' "$dir/pr.json" ;;
+    *) cat "$dir/pr.json" ;;
+  esac
+  exit 0
+fi
+if [ "$1 $2" = "pr create" ]; then
+  base=main
+  while [ $# -gt 0 ]; do
+    if [ "$1" = "--base" ]; then base=$2; fi
+    shift
+  done
+  printf '{"url":"https://github.invalid/pull/1","state":"OPEN","isDraft":true,"baseRefName":"%s"}\\n' "$base" > "$dir/pr.json"
+  echo https://github.invalid/pull/1
+  exit 0
+fi
+exit 1
+`,
+  );
+  fs.chmodSync(gh, 0o755);
+  return dir;
+}
+
 export const sh = (dir, cmd) => execFileSync("/bin/sh", ["-c", cmd], { cwd: dir, encoding: "utf8" }).trim();
 export const git = gitIn;
 export const readFile = (dir, rel) => fs.readFileSync(path.join(dir, rel), "utf8");
@@ -142,6 +182,8 @@ export function planTask(t) {
     `**Out of scope:** ${t.outOfScope || "none"}`,
     `**Verification:** ${t.verification || "none"}`,
     `**Depends on:** ${t.depends && t.depends.length ? t.depends.join(", ") : "none"}`,
+    // `planStream` overrides `stream` for PLAN.md only, to build a plan whose two files disagree.
+    ...((t.planStream ?? t.stream) ? [`**Stream:** ${t.planStream ?? t.stream}`] : []),
     "",
   ].join("\n");
 }
@@ -173,7 +215,11 @@ export function progressDoc(tasks) {
     "Started: (set by implement)",
     "",
     "## Tasks",
-    ...tasks.map((t) => `- [${t.state || " "}] ${t.id} ${t.title}`),
+    // `progressStream` overrides `stream` for PROGRESS.md only (`null` drops the tag).
+    ...tasks.map((t) => {
+      const tag = t.progressStream !== undefined ? t.progressStream : t.stream;
+      return `- [${t.state || " "}] ${t.id} ${t.title}${tag ? ` {stream: ${tag}}` : ""}`;
+    }),
     "",
     "## Log",
     "(one entry per task, appended by implement)",

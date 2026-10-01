@@ -43,7 +43,8 @@ You need Node ≥ 22, git, and Claude Code. Nothing to `npm install`.
 
    `/foundry:go-flight` is the documented entry point, but the controller is
    model-invocable too — asking Claude to "run the foundry flight" reaches
-   the same instructions.
+   the same instructions. It takes one option, the review depth:
+   `/foundry:go-flight max review rounds 6`.
 
 4. **Read `docs/SUMMARY.md`, then merge the branch yourself.** Foundry never
    merges.
@@ -143,6 +144,39 @@ sequenceDiagram
 The implementer never edits `docs/PROGRESS.md`, never chooses its own next
 task, and cannot mark work done that it did not commit.
 
+## Parallel workstreams
+
+A plan may split independent tasks into **streams**. Tag a task with
+`**Stream:** <slug>` in `PLAN.md` and `{stream: <slug>}` on its `PROGRESS.md`
+line; a run of consecutive streamed tasks is a **wave**, and any untagged task
+is a barrier between waves. The flight controller then runs a wave's streams
+at the same time, each on its own implementer in its own git worktree
+(`.foundry/worktrees/<stream>`, on a branch `<build-branch>--<stream>`), and
+merges each stream back into the build branch the moment it finishes.
+
+```mermaid
+flowchart LR
+    S1["serial tasks"] --> W{"wave"}
+    W --> A["stream api<br/>own worktree"]
+    W --> B["stream ui<br/>own worktree"]
+    A -->|"foundry_stream_finish<br/>merge"| S2["serial tasks<br/>+ handoff"]
+    B -->|"foundry_stream_finish<br/>merge"| S2
+```
+
+Foundry checks the partition and never trusts it: each streamed task must list
+concrete backticked `Files touched`, disjoint across a wave's streams, with
+no dependency between streams of a wave. A wave that fails the check, or
+whose `parallel.setup` fails, simply runs serially and logs one feedback entry
+— a bad partition is a planning defect, never a halt. A command marked
+`exclusive` (wp-env, anything bound to a port or a directory) only ever runs
+from the main checkout, and the tasks that trigger it stay out of waves.
+`docs/foundry.json`'s `parallel.maxStreams` (default 3; `1` turns it off) and
+`parallel.setup` (the install a fresh worktree needs) configure it. A plan with
+no streams behaves exactly as it always did. See
+[docs/architecture.md](./docs/architecture.md#parallel-workstreams) for how,
+and [docs/operations.md](./docs/operations.md#parallel-streams) for what to
+set and how to recover.
+
 ## Install
 
 The [Quickstart](#quickstart) installs from the marketplace. To try a
@@ -231,6 +265,7 @@ claude-code-router walkthrough: [docs/routing.md](./docs/routing.md).
 | `docs/SUMMARY.md` | summarizer | you |
 | `.foundry/state.json` | MCP (committed) | `foundry_next` |
 | `.foundry/implement.lock` | MCP (gitignored) | guard hook |
+| `.foundry/worktrees/<stream>/` | MCP (gitignored) — a parallel stream's worktree, until it is merged back | that stream's implementer |
 | `.claude/agents/foundry-*.md` | MCP (`foundry_agents_sync`, git-excluded) | Claude Code |
 | `~/.config/foundry/config.json` | you | MCP (`foundry_agents_sync`, `foundry_config_show`) |
 
@@ -242,18 +277,21 @@ Checkbox states in `PROGRESS.md`: `[ ]` todo · `[~]` in progress · `[x]` done 
 | Tool | Does |
 |---|---|
 | `foundry_status` | Everything on disk: docs present, counts, branch/base/head, lock, round, verdict, generated agents |
-| `foundry_next` | The state machine. Returns `{stage, agent, agentFallback, fallbackAgent, restartRequired, model, agentModel, agentModelExact, round, reason, prompt}` |
-| `foundry_run_start` | Create or reuse `build/<date>`, record pre-existing untracked files and run policies, probe signing, arm the lock, stamp PROGRESS, commit. Idempotent |
+| `foundry_next` | The state machine. Returns `{stage, agent, agentFallback, fallbackAgent, restartRequired, model, agentModel, agentModelExact, round, reason, prompt, streams?}` |
+| `foundry_run_start` | Create or reuse `build/<date>`, record pre-existing untracked files and run policies, probe signing, arm the lock, stamp PROGRESS, commit. Idempotent. With `stream`, also create (or resume) that stream's worktree and run `parallel.setup` in it |
 | `foundry_task_next` | Pick first `[~]` else first `[ ]`, auto-skip dependency-blocked tasks, mark `[~]`, return PLAN text and dependency logs |
 | `foundry_task_done` | Requires `<ID>:` at HEAD and a clean tree; mark `[x]`, log with the sha, commit |
 | `foundry_task_block` | `git reset --hard && git clean -fd`, mark `[!]`, log `BLOCKED:`, commit |
-| `foundry_verify` | Run `verify` plus any `extraVerify` commands matching the touched paths; return exit codes and tails |
-| `foundry_run_finish` | Requires zero open tasks and `HANDOFF.md`; commit, push, draft a PR (unless policies say otherwise), disarm the lock |
+| `foundry_task_reopen` | Reopen a blocked or skipped task once its blocker is resolved, with every task skipped because of it; log `REOPENED:`, commit |
+| `foundry_verify` | Check `constraints`, then run `verify` plus any `extraVerify` commands matching the touched paths; return exit codes and bounded tails. Every command runs in its own process group, killed whole at its timeout or at 64 MiB of output. With `stream`, runs in that stream's worktree |
+| `foundry_stream_finish` | Finish one stream of a parallel wave: require no open tasks and a clean worktree, merge its branch into the build branch, remove the worktree and branch. A merge conflict aborts, keeps the stream, and halts |
+| `foundry_run_finish` | Requires zero open tasks and `HANDOFF.md`; commit, push, draft a PR against `baseBranch` (unless policies say otherwise), disarm the lock, report a whole-tree constraint scan |
 | `foundry_run_halt` | Record an operator-level reason the run cannot continue; disarm the lock; commit state; never resets or cleans the tree |
+| `foundry_flight_options` | Apply go-flight's options (`maxRounds`, `maxRoundsHard`) to `docs/foundry.json` and commit |
 | `foundry_feedback_log` | Append one pipeline-friction entry to `.foundry/feedback.jsonl` and commit it immediately, so it survives a flight that never reaches summarize |
-| `foundry_mutate` | Mutation-test one file for the reviewer: apply one exact find/replace, run the verify commands that file triggers, always restore it, commit nothing; reports whether the tests noticed |
-| `foundry_review_submit` | `APPROVED` → commit. `CHANGES REQUESTED` → assign `R<N>-<nn>`, append to PLAN and PROGRESS, unblock, commit `review: round N` |
-| `foundry_summary_commit` | Commit `SUMMARY.md`, mark the flight complete |
+| `foundry_mutate` | Mutation-test one file for the reviewer: apply one exact find/replace, run the verify commands that file triggers (optionally with a shorter `timeoutMs`), always restore it and undo any residue the commands left, commit nothing; reports whether the tests noticed |
+| `foundry_review_submit` | `APPROVED` → commit. `CHANGES REQUESTED` → assign `R<N>-<nn>`, append to PLAN and PROGRESS, unblock (with skipped dependents), commit `review: round N` |
+| `foundry_summary_commit` | Commit `SUMMARY.md`, mark the flight complete, report reviews, fix rounds and the branch's PR |
 | `foundry_agents_sync` | Write `.claude/agents/foundry-<role>.md` from the merged routing config; only changed files are written |
 | `foundry_config_show` | The merged routing config with the source of every value. Read-only |
 
@@ -286,10 +324,12 @@ how well it's going, review findings that stop shrinking for `maxRounds`
 rounds running (F-13, F-15 — a flight whose findings go 15 → 3 → 2 → 1 is
 never penalised for taking rounds, only one that stops improving is), and
 `foundry_run_halt`, which an implementer calls for an operator-level problem
-it cannot resolve itself (F-05). All three want a human. Raise `maxRounds` or
+it cannot resolve itself (F-05), and a parallel stream whose merge conflicts
+(`foundry_stream_finish` aborts it and keeps the stream). All four want a human. Raise `maxRounds` or
 `maxRoundsHard` in `docs/foundry.json` as appropriate, clear `halted`, and
 run `/foundry:go-flight` again. [docs/operations.md](./docs/operations.md)
-has the rest of the runbook, including what each failure looks like and how
+has the rest of the runbook, including how to reopen a task once its blocker
+is fixed (`foundry_task_reopen`), what each failure looks like and how
 to unstick it.
 
 ## Repo layout
@@ -300,6 +340,7 @@ to unstick it.
 ├── .claude-plugin/              plugin.json + marketplace.json
 ├── .mcp.json                    how Claude Code launches the MCP server
 ├── mcp/server.mjs               the deterministic half of the pipeline
+├── mcp/run-command.mjs          runs one command bounded in time and output
 ├── hooks/hooks.json             Stop / SubagentStop wiring
 ├── scripts/
 │   ├── implement-guard.mjs      the guard hook
@@ -312,7 +353,7 @@ to unstick it.
 │   ├── foundry.config.example.json   the global routing config, explained in docs/routing.md
 │   └── ccr/                     claude-code-router provider manifests
 ├── docs/                        architecture · MCP reference · routing · spec guide · runbook
-└── test/                        harness + nine suites, run by test/run.mjs
+└── test/                        harness + eleven suites, run by test/run.mjs
 ```
 
 ## Documentation map
@@ -356,13 +397,15 @@ npm test -- guard protocol     # one or more suites by name
 KEEP_REPO=1 npm test -- drive  # keep the temp repos to poke at afterwards
 ```
 
-Ten suites, about 1130 assertions: the plugin manifests and documentation
+Eleven suites, about 1600 assertions: the plugin manifests and documentation
 links, the JSON-RPC transport, the `foundry_next` decision table, the
 implement-stage tools, the review and summary tools, per-role routing
 (config merge, `foundry_agents_sync`, `foundry_config_show`),
 `docs/foundry.json` constraints and their fixture self-tests,
-`foundry_feedback_log` and the feedback policy, the guard hook, and one
-end-to-end flight driven over real stdio against a real git repo. CI runs
+`foundry_feedback_log` and the feedback policy, parallel streams (waves,
+partition validation, worktrees, merge-back), the guard hook, and end-to-end
+flights — serial and parallel — driven over real stdio against a real git
+repo. CI runs
 all of it on every supported Node line — 22, 24 and 26 — again on macOS,
 and again on a machine with no GitHub CLI installed.
 
@@ -385,4 +428,5 @@ in it maps to a task in [`docs/plans/v0.3.md`](./docs/plans/v0.3.md).
 
 ## License
 
-[MIT](./LICENSE).
+[Apache License 2.0](./LICENSE), from 0.4.0 on; see also [NOTICE](./NOTICE).
+Releases 0.3.x and earlier remain available under the MIT License.

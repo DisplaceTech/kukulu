@@ -113,6 +113,18 @@ Concretely, prefer:
 - "The cache is per-process and not shared between workers" over "cache
   results"
 
+## Independent components parallelize
+
+A flight can run independent tasks at the same time (see
+[architecture.md](./architecture.md#parallel-workstreams)), but only where
+the planner can prove they do not touch the same files. A spec helps by
+describing its components as separable units, each with a named module or
+directory and an interface to the others, rather than as one intertwined
+feature. Say where the shared wiring lives (the registry, the routes table,
+the manifest): that is the part the planner will keep serial. And name any
+command that starts a port- or container-bound environment, so the plan can
+mark it exclusive and keep its tasks out of the parallel part.
+
 ## A worked fragment
 
 ```markdown

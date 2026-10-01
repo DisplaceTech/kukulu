@@ -5,6 +5,7 @@
     {
       "name": "foundry",
       "source": "./",
+      "license": "Apache-2.0",
       "description": "Spec-driven plan → implement → review → fix → summarize pipeline with per-stage model/effort switching."
     }
   ]

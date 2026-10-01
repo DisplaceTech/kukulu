@@ -4,6 +4,204 @@ All notable changes to this plugin. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] — 2026-09-30
+
+Parallel workstreams, the fixes from the first real flights on 0.3.2, and a
+new license.
+
+The 0.3.2 flights were three cleanflate flights: a build, then two
+performance phases. Their thirty friction items are in
+[`docs/feedback/2026-09-30-cleanflate.md`](./docs/feedback/2026-09-30-cleanflate.md)
+and triaged in [`docs/plans/v0.4.md`](./docs/plans/v0.4.md#addendum-the-cleanflate-flights-032-feedback).
+They are listed under "From the cleanflate flights" below. **Breaking
+changes** are listed last, after the license.
+
+Parallel workstreams change how a flight flows, which is why this is a
+minor version and not a patch: `go-flight` now spawns more than one stage
+agent at once, `PLAN.md` gains a field, and `foundry_next` gains a shape.
+The motivating flight ran 26 tasks on one implementer for about 68 minutes
+though many had disjoint file sets (F-05 of
+[`docs/feedback/2026-09-23-project-b.md`](./docs/feedback/2026-09-23-project-b.md)).
+A plan with no streams behaves exactly as it did in 0.3.2: every existing
+suite passes unchanged.
+
+### Added
+
+- **Streams and waves.** A task may carry `**Stream:** <slug>` in `PLAN.md`
+  and a `{stream: <slug>}` suffix on its `PROGRESS.md` line. A **wave** is a
+  run of consecutive streamed tasks; any untagged task is a barrier. Within a
+  wave, tasks of one stream run in order on one implementer and different
+  streams run concurrently. `foundry_status` reports `waves`.
+- **Partition validation that never halts.** A wave runs in parallel only if
+  its partition is provably safe: `PLAN.md` and `PROGRESS.md` agree, every
+  task lists concrete backticked `Files touched`, no two streams overlap (a
+  trailing `/` is a directory), no task depends on another stream of the
+  same wave, no task triggers an `exclusive` command, and there are at least
+  two streams. Otherwise the wave runs serially and one `stream-partition`
+  feedback entry says why.
+- **`foundry_stream_finish`**: merges a finished
+  stream's branch into the build branch (`--no-ff`) and removes its worktree
+  and branch. A merge conflict is the one stream failure that halts:
+  Foundry aborts the merge, keeps the stream, and records the paths and the
+  manual steps.
+- **Stream-scoped tools.** `foundry_run_start`, `foundry_task_next`,
+  `foundry_task_done`, `foundry_task_block` and `foundry_verify` take
+  `stream`. `foundry_run_start({ stream })` creates
+  `.foundry/worktrees/<stream>` on `<build-branch>--<stream>` and runs
+  `parallel.setup` in it. `PROGRESS.md`, `PLAN.md` and `state.json` live only
+  in the main checkout, so merging a stream can never conflict on
+  bookkeeping.
+- **`foundry_next` hands out waves.** An implement result may carry
+  `streams`, one entry per stream; `go-flight` spawns them all in a single
+  message and waits for all before asking again. A stream that stopped early
+  is simply handed out again.
+- **`parallel.maxStreams`** (default 3; `1` turns parallelism off, silently),
+  **`parallel.setup`** (commands run once in each new worktree — a fresh
+  checkout has no installed dependencies) and **`exclusive: true`** on a
+  command entry (wp-env and anything bound to a port or directory only ever
+  runs from the main checkout, and its tasks stay out of waves).
+- **`paused` at a wave boundary.** A serial implementer that has finished
+  everything before a wave gets `{ done: true, paused: true, … }` from
+  `foundry_task_next` and is told not to write a handoff; the lock is flagged
+  so the guard lets it stop.
+- **`foundry_status`'s `longestCommandTimeoutMs`**, because tool calls are
+  handled one at a time (see below).
+
+### Changed
+
+- **"Exactly one stage at a time" is now "exactly one `foundry_next` result
+  at a time."** A wave's streams count as one result.
+- **The implement guard is stream-aware.** A stream's implementer is blocked
+  only while its own stream has open tasks, and a stream that cannot be
+  identified while a wave is in flight is allowed (the controller re-hands
+  it out).
+- **Verification is serialized, deliberately.** Every tool handler is
+  synchronous, so the server handles one call at a time — which is what makes
+  concurrent implementers safe with one `PROGRESS.md` and one `state.json`.
+  Suites often share ports, containers or databases, and most of a stream's
+  wall clock is model time. The consequence is that a stream's bookkeeping
+  call can wait behind another stream's longest verify, so Claude Code's
+  `MCP_TOOL_TIMEOUT` must exceed the longest command timeout plus headroom
+  (documented in [`docs/operations.md`](./docs/operations.md#parallel-streams)).
+- The `plan-build` skill teaches the planner when streams are safe and when
+  not to use them; the `implement` skill gains a Stream mode section.
+- **Review-fix tasks are serial.** The reviewer does not assign streams, so
+  `R<N>-<nn>` tasks always run serially. A task the reviewer *unblocks* keeps
+  its `{stream}` tag, so a fix round re-runs just that stream in its own
+  worktree before the serial fix tasks.
+
+### From the cleanflate flights
+
+Added:
+
+- **`foundry_task_reopen`** reopens a blocked or skipped task once its
+  blocker is fixed, together with every task skipped because of it
+  (transitively), and commits `PROGRESS.md` (F-03, F-18). Before this, one
+  blocked download left 17 tasks skipped with no sanctioned way back.
+- **`foundry_flight_options`** and go-flight arguments:
+  `/foundry:go-flight max review rounds 6` sets `maxRounds` and
+  `maxRoundsHard` in `docs/foundry.json` and commits them, so the
+  controller never hand-edits the config (F-20). There are eighteen tools
+  now.
+- **`foundry_mutate` takes `timeoutMs`**, which caps every command's timeout
+  for one call and never raises a configured one (F-06).
+- **`foundry_summary_commit` reports the branch's PR** as `pr: { url,
+  state, draft, base }`, with `expectedBase` when the PR targets the wrong
+  branch. Otherwise `pr` is `"none"`, `"skipped: policy"` or
+  `"unknown: <why>"` (F-25).
+- **`foundry_run_finish` reports a whole-tree constraint scan** as
+  `constraints: { ok, failing }` and in its ready line, without refusing the
+  handoff (F-26).
+
+Fixed:
+
+- **A runaway command can no longer hang or crash the MCP server** (F-04,
+  F-09, F-11, F-15, F-16). Every `verify`, `foundry_mutate` and
+  `parallel.setup` command now runs under `mcp/run-command.mjs`, in its own
+  process group:
+  - a timeout kills the whole tree, so a test binary spinning under `make
+    test` no longer survives as an orphan;
+  - more than 64 MiB of output kills the command;
+  - a leftover child still holding the pipes after the shell exits is
+    killed after two seconds;
+  - each tail is capped at 60 lines and 4000 characters.
+
+  Results gain `outputLimitExceeded`, `orphansKilled` and `truncated`.
+- **`foundry_mutate` cleans up after its commands** (F-10, F-14, F-17).
+  Tracked files that were clean before the call are restored, new untracked
+  files (proptest regression seeds, say) are removed, and both are reported
+  as `restored` and `removed`.
+- **A reviewer's `unblock` reopens the skipped dependents too**, reported as
+  `reopenedDependents` (F-05).
+- **Draft PRs target `baseBranch`.** `gh pr create` now always gets
+  `--base`; before, a flight on `feature/perf` opened its PR against `main`
+  (F-24).
+- **Round numbering is consistent** (F-21): an approval returns the round
+  `REVIEW.md` was stamped with, `done` counts reviews and fix rounds
+  separately, and `foundry_status.reviewVerdictInFile` reads `**Verdict:**
+  X`, a verdict under its own heading, and list items.
+- **The constraint scan covers new, uncommitted files**, so a regression
+  cannot slip past a verify run made before its commit (F-26). It still
+  skips ignored files and files untracked before the run started.
+- **No more "agent type not found" on a first flight** (F-22). Under
+  fallback, `foundry_next` names the plugin agent outright.
+
+Changed (skills):
+
+- plan-build keeps `Depends on` narrow (F-19). It puts shared per-task
+  protocols in `CLAUDE.md` under `## Task protocols`, where the implementer
+  reads them (F-08), and routes long verification steps through
+  `foundry_verify` with their own `timeoutMs` (F-28).
+- The implementer commits with `git commit -F <file>`, so a project hook
+  that scans whole Bash commands does not deny a message that merely
+  mentions a forbidden word (F-07, F-29).
+- The reviewer is told about `timeoutMs`, mutate's residue cleanup and the
+  unblock cascade. The summarizer reports the PR.
+
+Deferred, with a scoped plan in the triage: a flight identifier and an
+archive command for multi-phase projects (F-12, F-27), background jobs for
+very long verify steps (F-13, F-28), and spec guidance for provenance
+logging (F-01).
+
+### License
+
+- Relicensed from MIT to Apache License 2.0. Releases 0.3.x and earlier
+  remain available under MIT. A `NOTICE` file is added, and
+  `package.json`, `.claude-plugin/plugin.json` and the marketplace entry
+  carry `"license": "Apache-2.0"`. Contributions are accepted under Apache
+  2.0 (inbound = outbound; see `CONTRIBUTING.md`).
+
+### Breaking changes
+
+These matter to anything that reads tool results or relies on the old
+behavior. The skills shipped with this release are already updated.
+
+- **`foundry_summary_commit` no longer returns `rounds`.** It was the
+  fix-round count, which read as a review count. Use `reviews` and
+  `fixRounds` instead.
+- **`foundry_review_submit` with `APPROVED` returns `round: N`**, the number
+  `REVIEW.md` is stamped with. It used to return the fix-round count, one
+  less. The count is now `fixRounds`.
+- **`foundry_next`'s `done` reason now reads "after K reviews (F fix
+  rounds)"** instead of "after N review round(s)".
+- **Under agent fallback, `foundry_next`'s `agent` is the plugin agent**
+  (`foundry:<role>`) rather than the generated `foundry-<role>`, including
+  on the first flight in a project. A controller that relied on trying the
+  generated name first and retrying on "not found" still works, but no
+  longer needs to.
+- **An unblock reopens skipped dependents.** `foundry_review_submit`'s
+  `counts` and the next fix round include them. Convergence still counts
+  only explicit fix tasks and unblocks.
+- **The constraint scan now covers untracked files that are not ignored.**
+  A verify run can fail on a file that is not committed yet, which is the
+  point. Files untracked before the run started are still exempt.
+- **Commands are supervised.** A verify, mutate or setup command that
+  leaves a background child holding its output open has that child killed
+  two seconds after the shell exits. Previously the call would have hung.
+  A command that writes more than 64 MiB in total is killed and fails, and
+  output tails are capped at 4000 characters as well as 60 lines.
+- **The license changes from MIT to Apache 2.0** (see above).
+
 ## [0.3.2] — 2026-09-23
 
 Fixes from the first real flight on 0.3.1

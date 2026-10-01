@@ -6,7 +6,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { finish, ok, eq, like, isError, ROOT, plannedRepo, withServer, writeFile, git } from "./harness.mjs";
+import { finish, ok, eq, like, isError, ROOT, plannedRepo, withServer, writeFile, git, setState, markTasks, mkFailingGhBin } from "./harness.mjs";
 
 const RULE = {
   id: "no-console-log",
@@ -131,11 +131,22 @@ for (const [bad, re, label] of [
 }
 
 {
+  // A new file not yet committed is scanned (2026-09-30 cleanflate F-26); a
+  // file already untracked when the run started, or an ignored one, is not.
   const repo = constraintRepo([RULE]);
-  writeFile(repo, "src/untracked.js", "console.log('never committed');\n");
+  writeFile(repo, "src/operator.js", "console.log('was here before the run');\n");
+  writeFile(repo, ".gitignore", "src/generated/\n");
+  git(repo, ["add", ".gitignore"]);
+  git(repo, ["commit", "-qm", "ignore generated"]);
+  setState(repo, { preexistingUntracked: ["src/operator.js"] });
+  writeFile(repo, "src/generated/out.js", "console.log('ignored');\n");
   await withServer(repo, async ({ call }) => {
+    const clean = await call("foundry_verify");
+    eq(clean.constraints.ok, true, "a pre-existing untracked file and an ignored file are never scanned");
+    writeFile(repo, "src/new.js", "console.log('not committed yet');\n");
     const v = await call("foundry_verify");
-    eq(v.constraints.ok, true, "an untracked file is never scanned, even though it sits under paths");
+    eq(v.constraints.ok, false, "a new, uncommitted file under paths is scanned");
+    eq(v.constraints.results[0].hits.map((h) => h.file).join(","), "src/new.js", "...and only it is reported");
   });
 }
 
@@ -149,6 +160,24 @@ for (const [bad, re, label] of [
     const v = await call("foundry_verify", { files: ["docs/unrelated.md"] });
     eq(v.constraints.ok, false, "the constraint scan runs whole-repo regardless of which files the call names");
   });
+}
+
+// run_finish reports a whole-tree scan at handoff, without refusing on it.
+{
+  const repo = constraintRepo([RULE]);
+  writeFile(repo, "src/a.js", "console.log('slipped through');\n");
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-qm", "a regression"]);
+  await withServer(repo, async ({ call }) => {
+    await call("foundry_run_start");
+    markTasks(repo, { "P0-01": "x", "P0-02": "x", "P0-03": "x" });
+    git(repo, ["commit", "-qam", "progress: by hand"]);
+    writeFile(repo, "docs/HANDOFF.md", "# handoff\n");
+    const r = await call("foundry_run_finish");
+    eq(JSON.stringify(r.constraints), JSON.stringify({ ok: false, failing: ["no-console-log"] }), "run_finish reports the failing constraint");
+    like(r.readyLine, /; constraints failing: no-console-log$/, "...in the ready line too");
+    ok(r.head, "...but still hands off");
+  }, { env: { PATH: `${mkFailingGhBin()}:${process.env.PATH}` } });
 }
 
 // ---------------------------------------------------------------- the shipped template

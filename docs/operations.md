@@ -18,7 +18,38 @@ entering, delegates, and repeats. Each stage is one `Agent` call that either
 blocks until the stage finishes or returns at once with the result delivered
 later as a completion notification — the controller treats both the same
 way and never polls in between. When it stops it prints the final stage, the
-round count, the branch, and the path to `docs/SUMMARY.md` if one exists.
+number of reviews and fix rounds, the branch, and the path to
+`docs/SUMMARY.md` if one exists.
+
+### Flight options
+
+Text after the command is the flight's options:
+
+```text
+> /foundry:go-flight max review rounds 6
+```
+
+The review-loop bounds are the only options. "max review rounds N" (or
+"maximum review depth of N rounds", or any phrasing that plainly asks for at
+most N reviews) sets both `maxRounds` and `maxRoundsHard` to N. The
+controller applies the options with `foundry_flight_options` as soon as
+`docs/foundry.json` exists, that is, right after the plan stage. The tool
+commits them as `chore: flight options (…)`. Anything the controller cannot
+map, it prints as `ignored flight option: …` and carries on. It never asks.
+
+### First flight in a project
+
+On a project's first flight, every stage runs on the plugin's own
+`foundry:<role>` agent, with the routed model passed as an alias. The
+generated `foundry-<role>` agents land in a `.claude/agents` directory this
+session created, and Claude Code loads a new agents directory only in the
+next session. `foundry_next` names the plugin agent outright, so this is
+quiet. One difference matters: plugin agents ignore `permissionMode`, so the
+first flight's stages run under your session's own permission mode. Start
+the session in `acceptEdits` mode, or a stage may be refused the `Write` tool
+and fall back to writing files with a shell heredoc (cleanflate F-23). From
+the second flight on, the generated agents carry the routed `effort` and
+`permissionMode` themselves.
 
 An implementer that hits a permission prompt sits there until the guard's cap
 trips, hours later, having done nothing. The generated `foundry-<role>`
@@ -78,9 +109,27 @@ detected by its leftover lock and sent back to the implementer to finish.
 Resuming is the answer to a compacted context, a closed laptop, a killed
 session, and a subagent that errored out. It is not the answer to a halt.
 
+## Reopening a blocked task
+
+A task blocks on something outside the flight's control, such as a download
+the sandbox could not reach or a missing credential. When that is fixed, put
+the task back with `foundry_task_reopen` from any session in the project:
+
+```text
+> use foundry_task_reopen with id P0-08 and reason "corpus file supplied at data/cantrbry.tar.gz"
+```
+
+Every task that was skipped because of it comes back too, transitively. A
+dependent that still waits on a different blocked task is just skipped
+again. The next `foundry_task_next` picks the reopened task up. If the run
+had already finished, the next `/foundry:go-flight` hands out an implement
+stage for the same round. Inside a flight, the reviewer does the same thing
+through `foundry_review_submit`'s `unblock`. Do not flip checkboxes in
+`docs/PROGRESS.md` by hand (cleanflate F-03, F-18).
+
 ## Halts
 
-Three things halt a flight on purpose.
+Four things halt a flight on purpose.
 
 **Round cap.** `foundry_review_submit` writes a `halted` reason under either
 of two conditions (F-13, F-15): the round count reaches `maxRoundsHard`
@@ -100,8 +149,9 @@ git show <sha>:docs/REVIEW.md
 ```
 
 To continue anyway: raise `maxRounds` (or `maxRoundsHard`, whichever
-tripped) in `docs/foundry.json`, set `"halted": null` in
-`.foundry/state.json`, commit both, and re-run the flight.
+tripped) in `docs/foundry.json` (or with `foundry_flight_options`), set
+`"halted": null` in `.foundry/state.json`, commit both, and re-run the
+flight.
 
 **Missing spec.** No `docs/SPEC.md` means there is nothing to build from. Write
 one; see [writing-specs.md](./writing-specs.md).
@@ -114,6 +164,12 @@ run left it.
 
 To continue anyway, after fixing the actual problem: set `"halted": null` in
 `.foundry/state.json`, commit it, and re-run the flight.
+
+**A stream merge conflict.** When a parallel stream's branch conflicts on
+merge, `foundry_stream_finish` aborts the merge, keeps the stream's branch
+and worktree, and halts with the conflicting paths in the reason — Foundry
+cannot guess a merge. See [Parallel streams](#parallel-streams) for the
+recovery.
 
 ## When something goes wrong
 
@@ -135,6 +191,12 @@ To continue anyway, after fixing the actual problem: set `"halted": null` in
 | Flight halts with a reason naming a dead tool or agent | `foundry_run_halt` was called | Read the reason, fix the actual problem, clear `halted` in `.foundry/state.json`, re-run |
 | Flight halts with "non-converging" or "hard cap" in the reason | Review findings stopped shrinking for `maxRounds` rounds, or the round count reached `maxRoundsHard` | Read `foundry_status`'s `state.rounds` for the trail of counts; if the reviewer is genuinely still converging, raise `maxRounds`/`maxRoundsHard`; otherwise a human needs to look at why findings keep recurring |
 | `foundry_review_submit` refuses over the `Round:` line | `docs/REVIEW.md`'s `Round:` line is missing or does not equal `reviewRound` | The error names the expected value; `foundry_status`'s `reviewRound` always has it too |
+| `foundry_next` keeps handing out the same stream | A stream's implementer stops before `foundry_stream_finish` (the guard cap, a crash, a refused call) | Expected: `foundry_run_start({ stream })` resumes its worktree. If it never makes progress, read that stream's task log; see [Parallel streams](#parallel-streams) to abandon it |
+| A stream's tool call times out while another stream is verifying | Tool calls are handled one at a time, so it queued behind the other stream's longest command | Raise Claude Code's `MCP_TOOL_TIMEOUT` above `foundry_status`'s `longestCommandTimeoutMs`; see [Parallel streams](#parallel-streams) |
+| A wave ran serially though the plan declared streams | Its partition was invalid, its `parallel.setup` failed, or `parallel.maxStreams` is `1` | Read `foundry_status`'s `waves[].reason` and `.foundry/feedback.jsonl` for a `stream-partition`, `stream-setup` or `stream-exclusive` entry; it is a planning defect to fix in the next plan, not a stuck flight |
+| A verify or mutate command ran away (an infinite loop, endless output) | Before 0.4.0 this could hang the reviewer for the whole timeout, leave test processes spinning, or disconnect the MCP server | Nothing, now: the command's whole process group is killed at its timeout or at 64 MiB of output, and the result says `timedOut` or `outputLimitExceeded`. A reviewer who suspects a hanging mutant passes `timeoutMs` to `foundry_mutate` |
+| A step takes longer than the ten-minute limit on a foreground Bash call | Full benchmarks and heavy suites | Make it a `verify`/`extraVerify` command with its own `timeoutMs`, so it runs through `foundry_verify`, and raise `MCP_TOOL_TIMEOUT` above `foundry_status`'s `longestCommandTimeoutMs` |
+| A project hook denies a `git commit` whose message only mentions a forbidden word | The hook scans the whole Bash command line, including the quoted message | The implement skill commits with `git commit -F <file>`; Foundry's own bookkeeping commits never pass through Bash |
 | A subagent's first `foundry_status` call is denied | The MCP allow rule is missing, or `foundry_agents_sync` reported `permissions: "failed: ..."` | Run `foundry_config_show` and check `permissionRule`; if a sync failed, the message names the broken `settings.local.json` — fix its JSON and re-run |
 
 ## Clearing a wedged run by hand
@@ -144,6 +206,9 @@ Nothing here is magic; it is all files.
 ```bash
 # stand the guard down (safe: the next run_start re-arms it)
 rm -f .foundry/implement.lock
+
+# put a blocked task (and what it skipped) back: use foundry_task_reopen,
+# not an editor — see "Reopening a blocked task" above
 
 # mark a task blocked yourself, if a model cannot
 $EDITOR docs/PROGRESS.md      # change [~] to [!], add a log entry under ## Log
@@ -178,19 +243,21 @@ parse. Edit it between stages, not during one.
 
 | Key | Default | Effect |
 |---|---|---|
-| `verify` | `[]` | Commands run after every task. At least one is required. Each entry is a string, or `{ cmd, timeoutMs }` to override `commandTimeoutMs` for that one command. |
-| `extraVerify` | `{}` | Path prefix → extra commands (same string-or-`{ cmd, timeoutMs }` entries), run when a task touches that prefix |
+| `verify` | `[]` | Commands run after every task. At least one is required. Each entry is a string, or `{ cmd, timeoutMs, exclusive }`: `timeoutMs` overrides `commandTimeoutMs` for that one command, and `exclusive: true` marks a command that starts a port-, container- or directory-keyed environment (wp-env, docker compose) so it only ever runs from the main checkout, never a parallel stream's worktree. |
+| `extraVerify` | `{}` | Path prefix → extra commands (same entries as `verify`), run when a task touches that prefix |
 | `build` | `[]` | Recorded for the plan's use; the MCP does not run it |
 | `baseBranch` | `main` | Branch runs start from, and the merge-base reported as `base` |
 | `branchPrefix` | `build/` | Prefix for run branches (`build/2026-09-18`, `-2`, …) |
-| `maxRounds` | `3` | Non-converging review rounds allowed before the flight halts; a round whose fix-task count did not shrink from the last one counts against this |
-| `maxRoundsHard` | `6` | Absolute review-round ceiling, regardless of convergence |
-| `commandTimeoutMs` | `600000` | Per-command timeout for `foundry_verify` |
+| `maxRounds` | `3` | Non-converging review rounds allowed before the flight halts; a round whose fix-task count did not shrink from the last one counts against this. Settable per flight with `/foundry:go-flight max review rounds N` |
+| `maxRoundsHard` | `6` | Absolute review-round ceiling, regardless of convergence; a review numbered above it halts |
+| `commandTimeoutMs` | `600000` | Per-command timeout for `foundry_verify`, `foundry_mutate` and `parallel.setup`; a timeout kills the command's whole process group |
 | `guardCap` | `60` | Re-blocks since the last task state change before the implement guard gives up; carried into `.foundry/implement.lock` at `foundry_run_start` and wins over `FOUNDRY_GUARD_CAP` |
 | `policies.signing` | `"auto"` | `"off"` disables commit signing for the run; `"required"` refuses to start unless a real signed commit succeeds; `"auto"` uses signing when it works and falls back to off, recording why, when it does not |
 | `policies.push` | `true` | `false` skips every push `foundry_run_start`, `foundry_run_finish`, `foundry_review_submit` and `foundry_summary_commit` would otherwise make |
 | `policies.pr` | `"draft"` | `"none"` skips draft-PR creation in `foundry_run_finish` even when `gh` is available |
 | `policies.feedback` | `true` | `false` disables `foundry_feedback_log` (it returns `{ logged: false }` without writing) and every internal auto-log point |
+| `parallel.maxStreams` | `3` | The most streams of one wave handed to implementers at once; `1` runs every wave serially, silently |
+| `parallel.setup` | `[]` | Commands (same entries as `verify`) run once in each newly created stream worktree, before its implementer starts — the dependency install a fresh checkout needs (`npm ci`, `composer install`) |
 | `constraints` | `[]` | `CLAUDE.md` rules expressed as data and checked by `foundry_verify` — see [Constraints](#constraints) below |
 
 Environment variables:
@@ -285,9 +352,15 @@ the whole repo regardless of the `files` argument: first it self-tests every
 rule against its own `shouldMatch`/`shouldNotMatch` fixtures — a fixture
 that disagrees fails the rule outright, with `fixture` in the result naming
 which line, and no file is scanned for that rule — then it scans every
-*tracked* file under `paths` minus `exclude` (`git ls-files`, so an
-untracked or gitignored file is never scanned) and reports each hit as
-`{ file, line, text }`. A malformed rule (missing `id`/`paths`/`pattern`,
+file under `paths` minus `exclude` that is tracked, or untracked but not
+ignored (`git ls-files --cached --others --exclude-standard`), and reports
+each hit as `{ file, line, text }`. A new file the implementer has not
+committed yet is scanned, so a regression cannot slip past a verify run
+made before its commit; a gitignored file, or one that was already
+untracked when the run started (`preexistingUntracked`), never is.
+`foundry_run_finish` runs the same scan over the whole tree at handoff and
+reports it as `constraints: { ok, failing }` (and in its ready line),
+without refusing the handoff, so the reviewer starts from it. A malformed rule (missing `id`/`paths`/`pattern`,
 no fixtures, an unparseable `pattern`, a duplicate `id`) refuses the whole
 call, naming the offending rule.
 
@@ -325,12 +398,84 @@ esac
 value; run it whenever the resolved model for a role is not what you
 expected.
 
+## Parallel streams
+
+A plan may split independent tasks into streams that run on separate
+implementers at the same time, each in its own git worktree, and merge back
+as they finish — how and why is in
+[architecture.md](./architecture.md#parallel-workstreams). The operator's
+concerns are these.
+
+**Config** (`docs/foundry.json`; see [Configuration](#configuration)).
+`parallel.maxStreams` caps how many streams of one wave run at once (default
+3; `1` turns parallelism off, silently). `parallel.setup` lists commands run
+once in each new worktree before its implementer starts — a fresh checkout
+has none of the installed dependencies `verify` needs, so this is where
+`npm ci` or `composer install` goes. A command entry marked
+`"exclusive": true` starts something keyed to the directory or a port it
+runs from (wp-env, docker compose, a dev server) and only ever runs from the
+main checkout; any task that triggers one is kept out of waves, and an
+exclusive command in `verify` itself makes every wave serial.
+
+**The tool-call timeout.** The server handles one tool call at a time, so
+while one stream's `foundry_verify` runs a long suite, a sibling stream's
+`foundry_task_done` waits behind it — for up to that suite's timeout. Claude
+Code's MCP tool-call timeout (the `MCP_TOOL_TIMEOUT` environment variable)
+must therefore exceed the longest command timeout plus headroom, or the
+waiting call fails on the client side. `foundry_status` reports
+`longestCommandTimeoutMs` (across `verify`, `extraVerify` and
+`parallel.setup`) to compare against. Verification is serialized on purpose:
+suites often share ports, containers or databases, and most of a stream's
+wall clock is model time, not test time.
+
+**A wave that ran serially.** Not a fault. An invalid partition, a failed
+`parallel.setup`, or an exclusive command each degrade the wave to serial and
+log one feedback entry — `stream-partition`, `stream-setup` or
+`stream-exclusive` — in `.foundry/feedback.jsonl`. Pull it back with
+`/foundry:pull-feedback`: it is material for the next plan.
+
+**A stream that stopped early.** The next `foundry_next` hands it out again;
+`foundry_run_start({ stream })` resumes its worktree and `foundry_task_next`
+resumes its in-progress task. Look at what is in flight with:
+
+```bash
+git worktree list
+ls .foundry/worktrees/
+# per-wave, per-stream open counts:
+#   foundry_status -> waves
+```
+
+**Recovering from a `stream-merge` halt.** The halt reason names the stream,
+its branch and the conflicting paths. From the main checkout, on the build
+branch:
+
+```bash
+git merge --no-ff <build-branch>--<stream>     # resolve the conflicts, then commit
+git worktree remove --force .foundry/worktrees/<stream>
+git branch -d <build-branch>--<stream>
+$EDITOR .foundry/state.json                    # set "halted": null
+git commit -am "chore: stream <stream> merged by hand"
+```
+
+Then re-run the flight; the stream's tasks are already done, so it goes on to
+the next wave or the handoff.
+
+**Abandoning a stream** you cannot recover: block its open tasks by hand (see
+[Clearing a wedged run](#clearing-a-wedged-run-by-hand)), then
+`git worktree remove --force .foundry/worktrees/<stream>` and
+`git branch -D <build-branch>--<stream>`. Nothing is lost that was not
+already committed to the stream branch, which you can still inspect until you
+delete it.
+
 ## What the flight leaves behind
 
 A `build/<date>` branch containing:
 
 - one commit per task, titled `<ID>: <title>`
 - interleaved `progress:` commits recording each state change with its sha
+- for a plan with parallel streams, one `merge stream <s> (wave <n>)` commit
+  per stream, and `chore: wave <n> runs serially` for any wave that could not
+  run in parallel
 - `review: round N` commits, one per round, each carrying that round's
   `REVIEW.md` and the fix tasks it queued
 - `docs/HANDOFF.md`, `docs/REVIEW.md` and `docs/SUMMARY.md` at the tip

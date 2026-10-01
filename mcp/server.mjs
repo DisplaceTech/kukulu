@@ -30,6 +30,7 @@ const P = {
   lock: path.join(ROOT, ".foundry", "implement.lock"),
   feedback: path.join(ROOT, ".foundry", "feedback.jsonl"),
   mutation: path.join(ROOT, ".foundry", "mutation.json"),
+  worktrees: path.join(ROOT, ".foundry", "worktrees"),
   gitignore: path.join(ROOT, ".gitignore"),
   agentsDir: path.join(ROOT, ".claude", "agents"),
   settings: path.join(ROOT, ".claude", "settings.json"),
@@ -49,10 +50,14 @@ const MCP_ALLOW_RULE = "mcp__plugin_foundry_foundry";
 const PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 // Keep in sync with .claude-plugin/plugin.json and package.json; test/plugin.mjs checks it.
-const VERSION = "0.3.2";
+const VERSION = "0.4.0";
 
 const TASK_ID = /\b[PR]\d+-\d+\b/g;
 const TASK_LINE = /^- \[( |~|x|!|-)\] ([PR]\d+-\d+)(?: (.*))?$/;
+// A task in a parallel wave carries its stream as a suffix tag on its
+// PROGRESS.md line: `- [ ] P2-03 Title {stream: api}`. The tag is parsed off
+// the title (task.stream) and written back verbatim (task.streamTag).
+const STREAM_TAG = /\s*\{stream:\s*([a-z][a-z0-9-]{0,23})\}\s*$/;
 const STATE_NAMES = { " ": "todo", "~": "inProgress", x: "done", "!": "blocked", "-": "skipped" };
 
 // ---------------------------------------------------------------- utilities
@@ -76,8 +81,8 @@ function ensureLineInFile(file, line) {
   return true;
 }
 
-function git(args, { allowFail = false } = {}) {
-  const r = spawnSync("git", args, { cwd: ROOT, encoding: "utf8" });
+function git(args, { allowFail = false, cwd = ROOT } = {}) {
+  const r = spawnSync("git", args, { cwd, encoding: "utf8" });
   if (r.status !== 0 && !allowFail) {
     throw new ToolError(`git ${args.join(" ")} failed: ${(r.stderr || r.stdout || "").trim()}`);
   }
@@ -102,8 +107,8 @@ function gitCommitIfChanged(paths, message) {
  * directory), exactly as `git status --porcelain` prints it — the same
  * shape `porcelainExcluding` matches against.
  */
-function untrackedPaths() {
-  return git(["status", "--porcelain", "--untracked-files=all"])
+function untrackedPaths(cwd = ROOT) {
+  return git(["status", "--porcelain", "--untracked-files=all"], { cwd })
     .out.split("\n")
     .filter((l) => l.startsWith("?? "))
     .map((l) => l.slice(3))
@@ -122,9 +127,9 @@ function gitCleanExcludePattern(literalPath) {
  * before it started is invisible to every check that follows: the run had
  * no hand in it and no reason to touch it (F-09).
  */
-function porcelainExcludingPreexisting(ignore) {
+function porcelainExcludingPreexisting(ignore, cwd = ROOT) {
   const set = new Set(ignore || []);
-  return git(["status", "--porcelain", "--untracked-files=all"])
+  return git(["status", "--porcelain", "--untracked-files=all"], { cwd })
     .out.split("\n")
     .filter(Boolean)
     .filter((l) => !(l.startsWith("?? ") && set.has(l.slice(3))));
@@ -167,21 +172,44 @@ function validatePolicies(policies) {
 }
 
 /**
- * Normalise a verify/extraVerify/build entry to `{ cmd, timeoutMs }`. A bare
- * string takes `defaultTimeoutMs`; `{ cmd, timeoutMs }` may override it.
- * Throws on anything else, a missing `cmd`, or a non-positive integer
- * `timeoutMs` — a plan can give one slow end-to-end command a longer
- * timeout without lifting the timeout for everything else.
+ * Normalise a verify/extraVerify/build/setup entry to
+ * `{ cmd, timeoutMs, exclusive }`. A bare string takes `defaultTimeoutMs` and
+ * is not exclusive; `{ cmd, timeoutMs, exclusive }` may override either.
+ * Throws on anything else, a missing `cmd`, a non-positive integer
+ * `timeoutMs`, or a non-boolean `exclusive` — a plan can give one slow
+ * end-to-end command a longer timeout without lifting the timeout for
+ * everything else, and mark a port- or directory-bound command `exclusive`
+ * so it only ever runs from the main checkout, never a stream's worktree.
  */
 function normalizeCommand(entry, defaultTimeoutMs, where) {
-  if (typeof entry === "string") return { cmd: entry, timeoutMs: defaultTimeoutMs };
+  if (typeof entry === "string") return { cmd: entry, timeoutMs: defaultTimeoutMs, exclusive: false };
   if (entry && typeof entry === "object" && !Array.isArray(entry)) {
     if (typeof entry.cmd !== "string" || !entry.cmd) throw new ToolError(`${where} is missing 'cmd'`);
     const timeoutMs = entry.timeoutMs === undefined ? defaultTimeoutMs : entry.timeoutMs;
     if (!Number.isInteger(timeoutMs) || timeoutMs <= 0) throw new ToolError(`${where}.timeoutMs must be a positive integer`);
-    return { cmd: entry.cmd, timeoutMs };
+    if (entry.exclusive !== undefined && typeof entry.exclusive !== "boolean") throw new ToolError(`${where}.exclusive must be a boolean`);
+    return { cmd: entry.cmd, timeoutMs, exclusive: entry.exclusive === true };
   }
   throw new ToolError(`${where} must be a command string or { cmd, timeoutMs }`);
+}
+
+const PARALLEL_KEYS = ["maxStreams", "setup"];
+
+/** Validate `docs/foundry.json`'s `parallel` block; throws, never defaults a bad value away. */
+function validateParallel(parallel) {
+  if (parallel === undefined) return;
+  if (typeof parallel !== "object" || parallel === null || Array.isArray(parallel)) {
+    throw new ToolError("docs/foundry.json 'parallel' must be an object");
+  }
+  for (const key of Object.keys(parallel)) {
+    if (!PARALLEL_KEYS.includes(key)) throw new ToolError(`docs/foundry.json parallel has an unknown key '${key}'`);
+  }
+  if (parallel.maxStreams !== undefined && (!Number.isInteger(parallel.maxStreams) || parallel.maxStreams <= 0)) {
+    throw new ToolError("docs/foundry.json parallel.maxStreams must be a positive integer");
+  }
+  if (parallel.setup !== undefined && !Array.isArray(parallel.setup)) {
+    throw new ToolError("docs/foundry.json parallel.setup must be an array of commands");
+  }
 }
 
 const CONSTRAINT_KEYS = ["id", "description", "paths", "exclude", "pattern", "flags", "shouldMatch", "shouldNotMatch"];
@@ -231,6 +259,7 @@ function cfg() {
   const c = loadConfig() || {};
   validatePolicies(c.policies);
   validateConstraints(c.constraints);
+  validateParallel(c.parallel);
   const commandTimeoutMs = c.commandTimeoutMs || 10 * 60 * 1000;
   const norm = (entry, i, where) => normalizeCommand(entry, commandTimeoutMs, `docs/foundry.json ${where}[${i}]`);
   return {
@@ -239,6 +268,10 @@ function cfg() {
       Object.entries(c.extraVerify || {}).map(([prefix, arr]) => [prefix, (arr || []).map((e, i) => norm(e, i, `extraVerify['${prefix}']`))]),
     ),
     build: (c.build || []).map((e, i) => norm(e, i, "build")),
+    parallel: {
+      maxStreams: c.parallel?.maxStreams ?? 3,
+      setup: (c.parallel?.setup || []).map((e, i) => norm(e, i, "parallel.setup")),
+    },
     baseBranch: c.baseBranch || "main",
     branchPrefix: c.branchPrefix || "build/",
     maxRounds: Number.isInteger(c.maxRounds) ? c.maxRounds : 3,
@@ -693,7 +726,18 @@ function parseProgress() {
     }
     if (section === "tasks") {
       const m = line.match(TASK_LINE);
-      if (m) tasks.push({ line: i, state: m[1], id: m[2], title: (m[3] || "").trim() });
+      if (m) {
+        let title = (m[3] || "").trim();
+        let stream = null;
+        let streamTag = null;
+        const tag = title.match(STREAM_TAG);
+        if (tag) {
+          stream = tag[1];
+          streamTag = tag[0].trim();
+          title = title.slice(0, tag.index).trim();
+        }
+        tasks.push({ line: i, state: m[1], id: m[2], title, stream, streamTag });
+      }
     }
   });
   if (tasksStart < 0) throw new ToolError("docs/PROGRESS.md has no '## Tasks' section");
@@ -722,7 +766,7 @@ function counts(tasks) {
 function setTaskState(pr, id, state) {
   const t = pr.tasks.find((x) => x.id === id);
   if (!t) throw new ToolError(`task ${id} not found in docs/PROGRESS.md`);
-  pr.lines[t.line] = `- [${state}] ${t.id}${t.title ? " " + t.title : ""}`;
+  pr.lines[t.line] = `- [${state}] ${t.id}${t.title ? " " + t.title : ""}${t.streamTag ? " " + t.streamTag : ""}`;
   t.state = state;
 }
 
@@ -749,9 +793,8 @@ const writeProgress = (pr) => write(P.progress, pr.lines.join("\n").replace(/\s*
 
 // ---------------------------------------------------------------- PLAN.md
 
-function planTask(id) {
-  if (!exists(P.plan)) throw new ToolError("docs/PLAN.md does not exist");
-  const lines = read(P.plan).split("\n");
+/** One task's block out of PLAN.md's lines. Throws when it has no `### <id>:` heading. */
+function planTaskFrom(lines, id) {
   const start = lines.findIndex((l) => l.startsWith(`### ${id}:`));
   if (start < 0) throw new ToolError(`task ${id} has no '### ${id}: <title>' heading in docs/PLAN.md`);
   let end = lines.length;
@@ -762,8 +805,276 @@ function planTask(id) {
   const dep = text.match(/\*\*Depends on:\*\*\s*(.*)/i);
   const depends = dep && !/^\s*none\b/i.test(dep[1]) ? Array.from(dep[1].matchAll(TASK_ID), (m) => m[0]) : [];
   const files = (text.match(/\*\*Files touched:\*\*\s*([\s\S]*?)(?=\n\*\*|$)/i) || [])[1] || "";
-  return { id, title: lines[start].slice(`### ${id}:`.length).trim(), text, depends, files: files.trim() };
+  // `**Stream:**` is absent, empty or `none` for a serial task; anything else
+  // is kept verbatim (minus backticks) so a malformed slug shows up as a
+  // disagreement with PROGRESS.md's tag rather than being silently dropped.
+  const streamLine = (text.match(/^\*\*Stream:\*\*[ \t]*(.*)$/im) || [])[1];
+  const streamValue = streamLine === undefined ? "" : streamLine.trim().replace(/^`(.*)`$/, "$1").trim();
+  const stream = streamValue === "" || /^none$/i.test(streamValue) ? null : streamValue;
+  const filesList = Array.from(files.matchAll(/`([^`\n]+)`/g), (m) => m[1].trim()).filter(Boolean);
+  return { id, title: lines[start].slice(`### ${id}:`.length).trim(), text, depends, files: files.trim(), filesList, stream };
 }
+
+function planTask(id) {
+  if (!exists(P.plan)) throw new ToolError("docs/PLAN.md does not exist");
+  return planTaskFrom(read(P.plan).split("\n"), id);
+}
+
+// ---------------------------------------------------------------- waves (parallel streams)
+//
+// A wave is a maximal run of consecutive tasks, in PROGRESS.md order, that
+// all carry a `{stream: <slug>}` tag; a task without one is serial and acts
+// as a barrier. Within a wave, tasks sharing a stream run in order on one
+// implementer and different streams run concurrently. Waves are derived from
+// PROGRESS.md on every call, never stored, so they cannot drift from it.
+
+/** Repo-relative path token with any leading `./` dropped, for comparison. */
+const normPathToken = (p) => p.replace(/^\.\//, "");
+
+/** Do two Files-touched tokens name overlapping paths? A token ending in `/` is a directory and overlaps anything under it. */
+function pathsOverlap(a, b) {
+  a = normPathToken(a);
+  b = normPathToken(b);
+  if (a === b) return true;
+  if (a.endsWith("/") && b.startsWith(a)) return true;
+  if (b.endsWith("/") && a.startsWith(b)) return true;
+  return false;
+}
+
+/** Does any file token fall under `prefix`, or (for a directory token) contain it? Mirrors verifyCommands' prefix rule, widened for directories. */
+const touchesPrefix = (files, prefix) => files.some((f) => normPathToken(f).startsWith(prefix) || (f.endsWith("/") && prefix.startsWith(normPathToken(f))));
+
+/**
+ * Judge one wave's partition: `{ index, taskIds, streams, valid, reason,
+ * category }`. `reason` joins every problem found. `category` is
+ * `stream-exclusive` when a `verify` command is exclusive (no wave can run in
+ * a worktree at all) and `stream-partition` for every other problem. Never
+ * throws: a partition that cannot be proven safe is reported invalid, and
+ * the caller degrades the wave to serial.
+ */
+function validateWave(index, tasks, planLines, cc) {
+  const problems = [];
+  const streams = {};
+  for (const t of tasks) (streams[t.stream] = streams[t.stream] || []).push(t.id);
+
+  const info = {};
+  for (const t of tasks) {
+    let p = null;
+    if (planLines) {
+      try {
+        p = planTaskFrom(planLines, t.id);
+      } catch {
+        p = null;
+      }
+    }
+    if (!p) {
+      problems.push(`${t.id} has no entry in docs/PLAN.md`);
+      continue;
+    }
+    info[t.id] = p;
+    if (p.stream !== t.stream) problems.push(`${t.id}: docs/PLAN.md says Stream ${p.stream === null ? "none" : `'${p.stream}'`} but docs/PROGRESS.md tags it '${t.stream}'`);
+    if (!p.filesList.length) problems.push(`${t.id} lists no backticked paths under Files touched, so its stream cannot be proven disjoint`);
+  }
+
+  // A command that starts a port- or directory-bound environment must run
+  // from the main checkout, so a task that triggers one cannot be in a wave.
+  const exclusiveVerify = cc.verify.some((c) => c.exclusive);
+  if (exclusiveVerify) problems.unshift("a verify command is exclusive, so no task can run from a stream worktree");
+  for (const t of tasks) {
+    if (!info[t.id]) continue;
+    for (const [prefix, cmds] of Object.entries(cc.extraVerify)) {
+      if (cmds.some((c) => c.exclusive) && touchesPrefix(info[t.id].filesList, prefix)) {
+        problems.push(`${t.id} touches ${prefix}, whose extraVerify includes an exclusive command`);
+      }
+    }
+  }
+
+  // Disjoint Files touched across streams.
+  const names = Object.keys(streams).sort();
+  for (let i = 0; i < names.length; i++) {
+    for (let j = i + 1; j < names.length; j++) {
+      for (const aId of streams[names[i]]) {
+        for (const bId of streams[names[j]]) {
+          if (!info[aId] || !info[bId]) continue;
+          for (const ta of info[aId].filesList) {
+            for (const tb of info[bId].filesList) {
+              if (!pathsOverlap(ta, tb)) continue;
+              const what = normPathToken(ta) === normPathToken(tb) ? `both touch \`${ta}\`` : `overlap (\`${ta}\` and \`${tb}\`)`;
+              const msg = `${aId} (stream ${names[i]}) and ${bId} (stream ${names[j]}) ${what}`;
+              if (!problems.includes(msg)) problems.push(msg);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // No dependency across streams inside the wave (a dependency on anything
+  // before the wave is fine).
+  for (const t of tasks) {
+    if (!info[t.id]) continue;
+    for (const dep of info[t.id].depends) {
+      const target = tasks.find((x) => x.id === dep);
+      if (target && target.stream !== t.stream) problems.push(`${t.id} (stream ${t.stream}) depends on ${dep} (stream ${target.stream}) in the same wave`);
+    }
+  }
+
+  if (names.length < 2) problems.push("only one stream");
+
+  return {
+    index,
+    taskIds: tasks.map((t) => t.id),
+    streams,
+    valid: problems.length === 0,
+    reason: problems.length ? problems.join("; ") : null,
+    category: problems.length ? (exclusiveVerify ? "stream-exclusive" : "stream-partition") : null,
+  };
+}
+
+/** Every wave in `pr`, in order, numbered from 1, each already judged. `[]` for a plan with no streams. */
+function computeWaves(pr, cc) {
+  const groups = [];
+  let cur = null;
+  for (const t of pr.tasks) {
+    if (t.stream) {
+      if (!cur) { cur = []; groups.push(cur); }
+      cur.push(t);
+    } else {
+      cur = null;
+    }
+  }
+  if (!groups.length) return [];
+  const planLines = exists(P.plan) ? read(P.plan).split("\n") : null;
+  return groups.map((tasks, i) => validateWave(i + 1, tasks, planLines, cc));
+}
+
+// ---------------------------------------------------------------- streams at run time
+//
+// A stream runs in its own git worktree, `.foundry/worktrees/<stream>`, on a
+// branch `<build-branch>--<stream>` cut from the build branch. Task *code*
+// commits happen there. PROGRESS.md, PLAN.md and state.json live only in the
+// main checkout: every stream-scoped call reads and writes them in ROOT and
+// commits them on the build branch, and a stream branch never touches them,
+// so merging a stream back cannot conflict on bookkeeping.
+
+const STREAM_SLUG = /^[a-z][a-z0-9-]{0,23}$/;
+const streamDir = (stream) => path.join(P.worktrees, stream);
+const serialWavesOf = (st) => st.serialWaves || [];
+const isOpenTask = (t) => t.state === " " || t.state === "~";
+
+/** Stream names that currently have a worktree on disk. */
+function streamWorktrees() {
+  return exists(P.worktrees) ? fs.readdirSync(P.worktrees).filter((n) => STREAM_SLUG.test(n) && exists(streamDir(n))).sort() : [];
+}
+
+/**
+ * The wave stream-scoped calls apply to: the wave holding the first open
+ * task, when that task is streamed; otherwise a wave with a stream still in
+ * flight (every task done, worktree not yet merged back), so a stream can
+ * always be finished; otherwise null.
+ */
+function currentWave(pr, waves) {
+  const first = pr.tasks.find(isOpenTask);
+  if (first && first.stream) return waves.find((w) => w.taskIds.includes(first.id)) || null;
+  const inFlight = new Set(streamWorktrees());
+  return waves.find((w) => Object.keys(w.streams).some((n) => inFlight.has(n))) || null;
+}
+
+/** Would this wave be handed out as concurrent streams? Valid, `maxStreams` above 1, and not already degraded to serial. */
+const waveRunsParallel = (wave, cc, st) => wave.valid && cc.parallel.maxStreams > 1 && !serialWavesOf(st).some((x) => x.wave === wave.index);
+
+/**
+ * Streams of `wave` that stream-scoped calls may currently name: those with
+ * open tasks while the wave runs parallel, plus any that already have a
+ * worktree — a stream already in flight can always finish, even if its wave
+ * was degraded to serial underneath it.
+ */
+function availableStreams(wave, pr, cc, st) {
+  const byId = new Map(pr.tasks.map((t) => [t.id, t]));
+  return Object.keys(wave.streams).filter(
+    (name) => (waveRunsParallel(wave, cc, st) && wave.streams[name].some((id) => isOpenTask(byId.get(id)))) || exists(streamDir(name)),
+  );
+}
+
+/** Validate a `stream` argument against the current wave; returns `{ stream, wave, pr, cc, st }` or throws. */
+function streamScope(stream) {
+  if (typeof stream !== "string" || !STREAM_SLUG.test(stream)) {
+    throw new ToolError(`stream must be a lowercase slug (a-z, 0-9 and -, starting with a letter), not ${JSON.stringify(stream)}`);
+  }
+  const pr = parseProgress();
+  if (!pr.tasks.some((t) => t.stream)) throw new ToolError("this plan has no parallel streams; omit the stream argument");
+  const cc = cfg();
+  const st = loadState();
+  const wave = currentWave(pr, computeWaves(pr, cc));
+  if (!wave) {
+    throw new ToolError("no parallel wave is current: the next open task is serial, or nothing is open. Stream-scoped calls only apply while a wave's streams are running; call foundry_next");
+  }
+  const avail = availableStreams(wave, pr, cc, st);
+  if (!avail.includes(stream)) {
+    throw new ToolError(`stream '${stream}' is not available in the current wave (wave ${wave.index}); legal streams: ${avail.join(", ") || "none"}`);
+  }
+  return { stream, wave, pr, cc, st };
+}
+
+/**
+ * A serial (stream-less) call for a task whose wave runs parallel would work
+ * on the main checkout behind the streams' backs. Refuse it and say what to
+ * do instead. A plan with no stream tags never reaches the wave computation.
+ */
+function refuseSerialInParallelWave(pr, task) {
+  if (task && task.stream) {
+    const cc = cfg();
+    const wave = computeWaves(pr, cc).find((w) => w.taskIds.includes(task.id));
+    if (wave && waveRunsParallel(wave, cc, loadState())) {
+      throw new ToolError(
+        `task ${task.id} belongs to parallel wave ${wave.index} (streams: ${Object.keys(wave.streams).join(", ")}); call foundry_next and use the streams it returns — foundry_run_start({ stream }), then foundry_task_next({ stream }) — instead of a serial call`,
+      );
+    }
+  }
+  refuseWhileStreamsPending();
+}
+
+/**
+ * Record, once, that an invalid wave runs serially: `state.serialWaves`, one
+ * feedback entry (a bad partition is a planning defect, so `stage: "plan"`),
+ * one commit. Only on a build branch — a flight owns its build branch's
+ * history, and this must never commit to the base branch before a run has
+ * started — and never when `maxStreams` is 1 (the operator's own choice). An
+ * exclusive `verify` command makes every wave serial; that cause is logged
+ * once per flight, not once per wave. Returns the (possibly updated) state.
+ */
+function recordSerialWave(wave, cc, st) {
+  if (wave.valid || cc.parallel.maxStreams <= 1 || serialWavesOf(st).some((x) => x.wave === wave.index)) return st;
+  const branch = git(["rev-parse", "--abbrev-ref", "HEAD"], { allowFail: true }).out;
+  if (!branch || !branch.startsWith(cc.branchPrefix) || branch.includes("--")) return st;
+  const already = serialWavesOf(st).some((x) => x.category === wave.category);
+  const cur = loadState();
+  cur.serialWaves = [...serialWavesOf(cur), { wave: wave.index, category: wave.category, reason: wave.reason }];
+  saveState(cur);
+  if (cc.policies.feedback && !(wave.category === "stream-exclusive" && already)) {
+    appendFeedback("plan", `Wave ${wave.index} runs serially: ${wave.reason}`, wave.category, "auto");
+  }
+  gitCommitIfChanged([P.state, P.feedback], `chore: wave ${wave.index} runs serially`);
+  return cur;
+}
+
+/** Serial work would run on a main checkout that lacks a finished stream's code until that stream is merged back. */
+function refuseWhileStreamsPending() {
+  const pending = streamWorktrees();
+  if (pending.length) {
+    throw new ToolError(`stream worktree(s) still exist (${pending.join(", ")}); merge each back with foundry_stream_finish before any serial work — call foundry_next`);
+  }
+}
+
+/**
+ * How many reviews this flight has submitted. Round numbering has one
+ * meaning everywhere (F-21 of the 2026-09-30 cleanflate feedback): review N
+ * is stamped `Round: N` and, if it requests changes, queues fix round N
+ * (`R<N>-*` tasks), which `state.round` then counts. So after an approval,
+ * reviews = fix rounds + 1. `state.rounds` records every submission; the
+ * fallback covers a state file written before it existed.
+ */
+const reviewCount = (st) => (st.rounds.length ? st.rounds.length : st.round + (st.reviewed ? 1 : 0));
 
 function reviewRoundCount() {
   if (!exists(P.plan)) return 0;
@@ -804,7 +1115,30 @@ function lockCounter() {
 function resetLockCounter() {
   if (!exists(P.lock)) return;
   const lock = parseLock();
-  write(P.lock, `${lock.json ? JSON.stringify({ ...lock.json, count: 0 }) : "0"}\n`);
+  // Any task state change means work moved, so a serial implementer parked at
+  // a wave boundary (`paused`) is no longer parked.
+  const { paused, ...rest } = lock.json || {};
+  void paused;
+  write(P.lock, `${lock.json ? JSON.stringify({ ...rest, count: 0 }) : "0"}\n`);
+}
+
+/**
+ * Mark the lock `paused` (a wave number) when a serial foundry_task_next
+ * hands the flight back to the controller at a parallel-wave boundary, or
+ * clear it. The guard hook honours the flag: a serial implementer that has
+ * done everything it can before a wave must be allowed to stop, though tasks
+ * remain open. A no-op when there is nothing to change, so a plan without
+ * streams never rewrites the lock.
+ */
+function setLockPaused(wave) {
+  if (!exists(P.lock)) return;
+  const lock = parseLock();
+  const has = Boolean(lock.json?.paused);
+  if (!wave && !has) return;
+  const json = { ...(lock.json || { count: lock.count }) };
+  if (wave) json.paused = wave;
+  else delete json.paused;
+  write(P.lock, `${JSON.stringify(json)}\n`);
 }
 
 // ---------------------------------------------------------------- feedback
@@ -875,6 +1209,19 @@ function gitFacts() {
 
 // ---------------------------------------------------------------- tools
 
+/**
+ * The longest timeout any command Foundry runs on the model's behalf can
+ * take (`verify`, `extraVerify`, `parallel.setup`), or null with none. Every
+ * tool handler is synchronous, so a stream's bookkeeping call can wait
+ * behind another stream's longest verify; Claude Code's MCP tool-call
+ * timeout (`MCP_TOOL_TIMEOUT`) has to exceed this plus headroom.
+ */
+function longestCommandTimeoutMs() {
+  const cc = cfg();
+  const all = [...cc.verify, ...Object.values(cc.extraVerify).flat(), ...cc.parallel.setup];
+  return all.length ? Math.max(...all.map((c) => c.timeoutMs)) : null;
+}
+
 function status() {
   resolveRouting(); // validate the merged routing config; a bad one refuses here too
   const st = loadState();
@@ -898,12 +1245,14 @@ function status() {
     policies: st.policies,
     signing: st.signing,
     feedbackCount: countFeedback(),
+    longestCommandTimeoutMs: longestCommandTimeoutMs(),
     reviewRoundsInPlan: reviewRoundCount(),
     branch: null,
     started: null,
     counts: null,
     blocked: [],
     skipped: [],
+    waves: [],
   };
   if (out.progressPresent) {
     const pr = parseProgress();
@@ -912,9 +1261,22 @@ function status() {
     out.counts = counts(pr.tasks);
     out.blocked = pr.tasks.filter((t) => t.state === "!").map((t) => t.id);
     out.skipped = pr.tasks.filter((t) => t.state === "-").map((t) => t.id);
+    const isOpen = (id) => {
+      const t = pr.tasks.find((x) => x.id === id);
+      return t.state === " " || t.state === "~";
+    };
+    out.waves = computeWaves(pr, cfg()).map((w) => ({
+      index: w.index,
+      streams: Object.entries(w.streams).map(([stream, ids]) => ({ stream, tasks: ids, open: ids.filter(isOpen).length })),
+      valid: w.valid,
+      reason: w.reason,
+    }));
   }
   if (out.reviewPresent) {
-    const v = read(P.review).match(/\*\*Verdict\*\*:?\s*`?(APPROVED|CHANGES REQUESTED)`?/i) || read(P.review).match(/Verdict:?\s*`?(APPROVED|CHANGES REQUESTED)`?/i);
+    // Any of `**Verdict**: X`, `**Verdict:** X`, `Verdict: X`, `## Verdict`
+    // with X on a following line, and X in backticks or bold (F-21: the
+    // `**Verdict:**` shape used to read as null).
+    const v = read(P.review).match(/\bVerdict\b[\s:*_`#>-]*(APPROVED|CHANGES REQUESTED)\b/i);
     out.reviewVerdictInFile = v ? v[1].toUpperCase() : null;
   }
   out.agentsGenerated = agentsOnDisk();
@@ -952,7 +1314,11 @@ function next() {
     if (agentFallback && mapped === null) {
       return { agent: null, agentFallback: true, fallbackAgent, agentModel, agentModelExact, restartRequired: true };
     }
-    return { agent: onDisk ? `foundry-${role}` : fallbackAgent, agentFallback, fallbackAgent, agentModel, agentModelExact, restartRequired: false };
+    // Under fallback, name the plugin's own agent outright. Naming the
+    // generated one only produced an "agent type not found" error and a retry
+    // on a project's first flight, since a new agents directory loads only in
+    // the next session (F-22 of the 2026-09-30 cleanflate feedback).
+    return { agent: agentFallback ? fallbackAgent : `foundry-${role}`, agentFallback, fallbackAgent, agentModel, agentModelExact, restartRequired: false };
   };
   const modelFor = (name) => {
     const role = ROLE_OF_STAGE[name];
@@ -981,11 +1347,53 @@ function next() {
     };
   };
 
+  /**
+   * The parallel-wave half of the implement stage. `{}` when the flight is
+   * serial here; otherwise `{ streams, reason }`, one entry per stream to
+   * spawn concurrently. Streams already in flight (a worktree exists) come
+   * first and are always offered — an unfinished one is re-handed out, and a
+   * finished-but-unmerged one is offered so it can be merged — and the rest
+   * follow in plan order, up to `parallel.maxStreams`.
+   *
+   * A wave whose partition is invalid runs serially. That decision is
+   * recorded once — see recordSerialWave, which is also called when a serial
+   * foundry_task_next first serves a task from such a wave.
+   */
+  const streamOffer = () => {
+    if (!s.progressPresent) return {};
+    const pr = parseProgress();
+    if (!pr.tasks.some((t) => t.stream)) return {};
+    let cur = st;
+    const waves = computeWaves(pr, c);
+    const wave = currentWave(pr, waves);
+    if (!wave) return {};
+    cur = recordSerialWave(wave, c, cur);
+    const info = agentInfo("implement");
+    const avail = availableStreams(wave, pr, c, cur);
+    const inFlight = new Set(streamWorktrees());
+    const ordered = [...avail.filter((n) => inFlight.has(n)), ...avail.filter((n) => !inFlight.has(n))].slice(0, c.parallel.maxStreams);
+    if (!ordered.length) return {};
+    return {
+      reason: `wave ${wave.index}: ${ordered.length} stream(s) to run in parallel (${ordered.join(", ")})`,
+      streams: ordered.map((name) => ({
+        stream: name,
+        agent: info.agent,
+        agentFallback: info.agentFallback,
+        fallbackAgent: info.fallbackAgent,
+        agentModel: info.agentModel,
+        agentModelExact: info.agentModelExact,
+        prompt: PROMPTS.implementStream(name, wave.index, policySentence),
+      })),
+    };
+  };
+
   if (!s.specPresent) return stage("halt", "docs/SPEC.md is missing; nothing to build from");
   if (st.halted) return stage("halt", st.halted);
   if (!s.planPresent || !s.progressPresent || !s.configPresent) {
     return stage("plan", "no plan on disk (docs/PLAN.md, docs/PROGRESS.md and docs/foundry.json are all required)");
   }
+  const offer = streamOffer();
+  if (offer.streams) return stage("implement", offer.reason, { streams: offer.streams });
   const open = s.counts.open;
   // The round cap decision is made once, by foundry_review_submit, and
   // recorded as state.halted (checked above) — next() never re-derives it,
@@ -998,7 +1406,10 @@ function next() {
     return stage("halt", "review requested changes but no fix tasks are open; foundry_review_submit should have queued them");
   }
   if (st.verdict === "APPROVED" && !st.summarized) return stage("summarize", "review approved; summary not yet written");
-  if (st.summarized) return stage("done", `flight complete after ${st.round} review round(s); branch ${s.branch} is ready for a human to merge`);
+  if (st.summarized) {
+    const reviews = reviewCount(st);
+    return stage("done", `flight complete after ${reviews} review${reviews === 1 ? "" : "s"} (${st.round} fix round${st.round === 1 ? "" : "s"}); branch ${s.branch} is ready for a human to merge`);
+  }
   return stage("halt", "unrecognised state; run foundry_status");
 }
 
@@ -1007,6 +1418,9 @@ const PROMPTS = {
     "Run the Foundry plan stage for this repository. Read docs/SPEC.md and everything else in docs/ in full, then produce docs/PLAN.md, docs/PROGRESS.md, docs/foundry.json and CLAUDE.md exactly as your plan-build instructions specify, commit them, and report. Do not write implementation code.",
   implement: (round, s, policies) =>
     `Run the Foundry implement stage. ${round === 0 ? "This is the initial build." : `This is review-fix round ${round}; the open tasks are R${round}-* fix tasks queued by the reviewer.`} Call foundry_run_start, then loop on foundry_task_next until it reports done, then write docs/HANDOFF.md and call foundry_run_finish. You are unattended; never ask a question and never stop with open tasks. ${s.counts ? `${s.counts.open} task(s) are open.` : ""} ${policies}`,
+  // Not a stage of its own: one entry of `streams` in an implement result.
+  implementStream: (stream, wave, policies) =>
+    `Run the Foundry implement stage for stream \`${stream}\` of wave ${wave}. Call foundry_run_start with stream: "${stream}", and work only inside the cwd it returns: every file you read, edit or commit is under it. Pass stream: "${stream}" to every foundry_task_next, foundry_task_done, foundry_task_block and foundry_verify call. Loop on foundry_task_next until it reports done, then call foundry_stream_finish with stream: "${stream}". Do not write docs/HANDOFF.md and do not call foundry_run_finish: another stage does. You are unattended; never ask a question and never stop with open tasks in your stream. ${policies}`,
   review: (round, s, policies, reviewRound) =>
     `Run the Foundry review stage. This review is round ${reviewRound}; write \`Round: ${reviewRound}\` on the second line of docs/REVIEW.md, and use \`R${reviewRound}-<nn>\` when a fix task's dependsOn must reference another fix task in the same submission. Review the whole build branch against docs/SPEC.md and docs/PLAN.md as your review-build instructions specify, write docs/REVIEW.md, and call foundry_review_submit exactly once with your verdict. Do not fix code yourself. ${policies}`,
   summarize: (round, s, policies) =>
@@ -1047,7 +1461,7 @@ function probeSigning(signingPolicy) {
   return `off (probe failed: ${errLine})`;
 }
 
-function runStart() {
+function startRun() {
   for (const [k, p] of Object.entries({ spec: P.spec, plan: P.plan, progress: P.progress, config: P.config })) {
     if (!exists(p)) throw new ToolError(`${rel(p)} is missing (${k}); run the plan stage first`);
   }
@@ -1092,6 +1506,9 @@ function runStart() {
 
   // .gitignore the lock, arm it, stamp PROGRESS, commit.
   ensureLineInFile(P.gitignore, ".foundry/implement.lock");
+  // Only a plan that declares streams ever creates worktrees, so only such a
+  // plan gets the extra line (a plan without streams stays byte-identical).
+  if (pr.tasks.some((t) => t.stream)) ensureLineInFile(P.gitignore, ".foundry/worktrees/");
   fs.mkdirSync(P.stateDir, { recursive: true });
   write(P.lock, `${JSON.stringify({ count: 0, armedAt: new Date().toISOString(), round: st.round, cap: c.guardCap })}\n`);
   if (!pr.branch || pr.branch.startsWith("(")) setHeader(pr, "Branch", branch);
@@ -1115,15 +1532,177 @@ function runStart() {
   return { alreadyStarted: false, branch, commit: sha, counts: counts(pr.tasks), round: st.round, policies: st.policies, signing: st.signing, basePush };
 }
 
-function taskNext() {
+/**
+ * Create `.foundry/worktrees/<stream>` on `<build>--<stream>` and run
+ * `parallel.setup` in it (a fresh checkout has none of the installed
+ * dependencies verify needs). Returns `{ cwd, streamBranch, created, setup }`;
+ * on a setup failure the worktree (and a branch this call created) is removed
+ * again and `{ failed: <runShell result> }` is returned instead.
+ */
+function ensureStreamWorktree(stream, buildBranch, cc) {
+  const dir = streamDir(stream);
+  const streamBranch = `${buildBranch}--${stream}`;
+  if (exists(dir)) return { cwd: dir, streamBranch, created: false, setup: [] };
+  git(["worktree", "prune"], { allowFail: true });
+  fs.mkdirSync(P.worktrees, { recursive: true });
+  const branchExisted = git(["rev-parse", "--verify", "--quiet", `refs/heads/${streamBranch}`], { allowFail: true }).ok;
+  if (branchExisted) git(["worktree", "add", dir, streamBranch]);
+  else git(["worktree", "add", "-b", streamBranch, dir, "HEAD"]);
+  const setup = [];
+  for (const c of cc.parallel.setup) {
+    const r = runShell(c.cmd, c.timeoutMs, dir);
+    setup.push(r);
+    if (!r.ok) {
+      git(["worktree", "remove", "--force", dir], { allowFail: true });
+      if (!branchExisted) git(["branch", "-D", streamBranch], { allowFail: true });
+      return { failed: r, setup };
+    }
+  }
+  return { cwd: dir, streamBranch, created: true, setup };
+}
+
+function runStart({ stream } = {}) {
+  const res = startRun();
+  if (stream === undefined) return res;
+
+  const { wave, cc } = streamScope(stream);
+  const created = ensureStreamWorktree(stream, res.branch, cc);
+  if (created.failed) {
+    // A broken setup degrades the wave to serial — never a halt — and is
+    // recorded once, in the same commit as the state change.
+    const st = loadState();
+    const reason = `setup command ${JSON.stringify(created.failed.command)} failed for stream ${stream}: ${(created.failed.stderrTail || created.failed.stdoutTail || `exit ${created.failed.exitCode}`).split("\n").pop()}`;
+    st.serialWaves = [...serialWavesOf(st), { wave: wave.index, category: "stream-setup", reason }];
+    saveState(st);
+    if (cc.policies.feedback) appendFeedback("implement", `Wave ${wave.index} runs serially: ${reason}`, "stream-setup", "auto");
+    gitCommitIfChanged([P.state, P.feedback], `chore: wave ${wave.index} runs serially`);
+    throw new ToolError(`${reason}. Wave ${wave.index} now runs serially; stop here and the controller's next foundry_next will hand it out that way.`);
+  }
+
+  if (created.created) {
+    // A stream worktree's own untracked files (installed dependencies that
+    // are not gitignored) are not the task's business, exactly like the
+    // files that were already untracked when a serial run started (F-09).
+    const st = loadState();
+    st.streams = { ...(st.streams || {}), [stream]: { branch: created.streamBranch, preexistingUntracked: untrackedPaths(created.cwd) } };
+    saveState(st);
+    gitCommitIfChanged([P.state], `chore: stream ${stream} started (wave ${wave.index})`);
+    // Runs that began before this plan's streams (or before 0.4.0) may lack
+    // the .gitignore line; exclude per clone rather than dirty the tree.
+    const ignored = exists(P.gitignore) && read(P.gitignore).split("\n").includes(".foundry/worktrees/");
+    if (!ignored) ensureLineInFile(gitPath("info/exclude"), ".foundry/worktrees/");
+  }
+  return { ...res, stream, wave: wave.index, cwd: created.cwd, streamBranch: created.streamBranch, created: created.created, setup: created.setup };
+}
+
+/**
+ * Merge a finished stream back into the build branch and remove its worktree
+ * and branch. Refuses while the stream has open tasks or an uncommitted
+ * worktree. A merge conflict — the partition check makes one unlikely, not
+ * impossible — is the one stream failure that halts: Foundry aborts the
+ * merge, keeps the stream branch and worktree, and records why, because it
+ * cannot guess a merge.
+ */
+function streamFinish({ stream } = {}) {
+  const { wave, pr, cc, st } = streamScope(stream);
+  const dir = streamDir(stream);
+  if (!exists(dir)) throw new ToolError(`stream '${stream}' has no worktree; nothing to finish`);
+  const byId = new Map(pr.tasks.map((t) => [t.id, t]));
+  const open = wave.streams[stream].filter((id) => isOpenTask(byId.get(id)));
+  if (open.length) throw new ToolError(`stream '${stream}' still has open tasks: ${open.join(", ")}; finish or block them before foundry_stream_finish`);
+  const dirty = porcelainExcludingPreexisting((st.streams || {})[stream]?.preexistingUntracked || [], dir);
+  if (dirty.length) {
+    throw new ToolError(`stream '${stream}' has uncommitted changes in its worktree:\n${dirty.join("\n")}\nCommit them to the stream's task, or \`git checkout --\`/\`git clean\` them, then call foundry_stream_finish again.`);
+  }
+
+  const g = gitFacts();
+  if (!g.branch || !g.branch.startsWith(cc.branchPrefix) || g.branch.includes("--")) {
+    throw new ToolError(`the main checkout is on '${g.branch}', not the build branch; foundry_stream_finish merges into the build branch`);
+  }
+  const streamBranch = `${g.branch}--${stream}`;
+  if (!git(["rev-parse", "--verify", "--quiet", `refs/heads/${streamBranch}`], { allowFail: true }).ok) {
+    throw new ToolError(`branch ${streamBranch} does not exist; the stream's worktree is not on the expected branch`);
+  }
+  // Every stream call leaves PROGRESS.md/state.json changes for the next
+  // commit; land them first so the merge starts from a clean tracked tree.
+  gitCommitIfChanged([P.progress, P.state, P.feedback], `progress: sync before merging stream ${stream}`);
+  const stray = git(["status", "--porcelain", "--untracked-files=no"]).out;
+  if (stray) throw new ToolError(`the main checkout has uncommitted tracked changes; commit or discard them before merging stream '${stream}':\n${stray}`);
+
+  const before = git(["rev-parse", "HEAD"]).out;
+  const merge = git(["merge", "--no-ff", "--no-edit", "-m", `merge stream ${stream} (wave ${wave.index})`, streamBranch], { allowFail: true });
+  if (!merge.ok) {
+    const conflicts = git(["diff", "--name-only", "--diff-filter=U"], { allowFail: true }).out.split("\n").filter(Boolean);
+    git(["merge", "--abort"], { allowFail: true });
+    // A merge can also fail before it starts (an untracked file in the main
+    // checkout that the stream adds would be overwritten); then there are no
+    // conflict paths, and git's own message is the only useful explanation.
+    const gitSays = (merge.err || merge.out || "unknown error").split("\n").filter(Boolean).slice(0, 4).join(" ").replace(/\s+/g, " ");
+    const what = conflicts.length ? `conflicted in ${conflicts.join(", ")}` : `failed: ${gitSays}`;
+    const halted = `merging stream '${stream}' (branch ${streamBranch}) into ${g.branch} ${what}; the stream's branch and worktree ${rel(dir)} are kept. A human must resolve it: from the main checkout run \`git merge --no-ff ${streamBranch}\`, fix what it reports and commit, then \`git worktree remove --force ${rel(dir)}\` and clear 'halted' in .foundry/state.json.`;
+    const cur = loadState();
+    cur.halted = halted;
+    saveState(cur);
+    if (cc.policies.feedback) appendFeedback("implement", halted, "stream-merge", "auto");
+    gitCommitIfChanged([P.state, P.feedback], `chore: run halted (stream ${stream} merge conflict)`);
+    return { stream, merged: false, halted, conflicts };
+  }
+
+  git(["worktree", "remove", "--force", dir]);
+  git(["branch", "-d", streamBranch]);
+  const after = git(["rev-parse", "HEAD"]).out;
+  const remainingStreams = Object.keys(wave.streams).filter((n) => n !== stream && (exists(streamDir(n)) || wave.streams[n].some((id) => isOpenTask(byId.get(id)))));
+  return { stream, merged: true, mergeCommit: after === before ? null : git(["rev-parse", "--short", "HEAD"]).out, remainingStreams };
+}
+
+function taskNext({ stream } = {}) {
   const pr = parseProgress();
+  let inScope = () => true;
+  if (stream !== undefined) {
+    const scope = streamScope(stream);
+    inScope = (t) => t.stream === stream && scope.wave.taskIds.includes(t.id);
+  } else if (pr.tasks.some((t) => t.stream) && streamWorktrees().length) {
+    // Streams are running (or finished and unmerged): no serial work, and the
+    // wave-specific message is the useful one when the next task is in it.
+    refuseSerialInParallelWave(pr, pr.tasks.find((t) => t.state === "~") || pr.tasks.find((t) => t.state === " "));
+  }
+  // A serial implementer that has done everything it can before a parallel
+  // wave is told to stop, not refused: the flight controller hands the wave's
+  // streams out next. Only a plan that declares streams ever computes waves.
+  let waveCtx = null;
+  const parallelWaveOf = (task) => {
+    if (stream !== undefined || !task.stream) return null;
+    waveCtx = waveCtx || { cc: cfg(), st: loadState() };
+    const wave = computeWaves(pr, waveCtx.cc).find((w) => w.taskIds.includes(task.id));
+    if (!wave) return null;
+    // The moment a serial implementer is handed an invalid wave's task is
+    // when the wave's degrade to serial takes effect: record it if the
+    // controller has not already (it may never call foundry_next again).
+    waveCtx.st = recordSerialWave(wave, waveCtx.cc, waveCtx.st);
+    return waveRunsParallel(wave, waveCtx.cc, waveCtx.st) ? wave : null;
+  };
   const skipped = [];
   for (;;) {
-    const pick = pr.tasks.find((t) => t.state === "~") || pr.tasks.find((t) => t.state === " ");
+    const pick = pr.tasks.find((t) => inScope(t) && t.state === "~") || pr.tasks.find((t) => inScope(t) && t.state === " ");
+    const wave = pick ? parallelWaveOf(pick) : null;
+    if (wave) {
+      writeProgress(pr);
+      if (skipped.length) gitCommitIfChanged([P.progress], `progress: skip ${skipped.map((x) => x.id).join(", ")}`);
+      setLockPaused(wave.index);
+      return {
+        done: true,
+        paused: true,
+        wave: wave.index,
+        streams: Object.keys(wave.streams),
+        counts: counts(pr.tasks),
+        skipped,
+        message: `Everything you can do serially is done: the next open task (${pick.id}) belongs to parallel wave ${wave.index}, whose streams the flight controller hands out next. Stop now. Do NOT write docs/HANDOFF.md and do NOT call foundry_run_finish: the plan is not finished.`,
+      };
+    }
     if (!pick) {
       writeProgress(pr);
       if (skipped.length) gitCommitIfChanged([P.progress], `progress: skip ${skipped.map((s) => s.id).join(", ")}`);
-      return { done: true, counts: counts(pr.tasks), skipped };
+      return { done: true, counts: counts(pr.tasks), skipped, ...(stream !== undefined ? { stream } : {}) };
     }
     const task = planTask(pick.id);
     const bad = task.depends.find((d) => {
@@ -1139,6 +1718,7 @@ function taskNext() {
     const resumed = pick.state === "~";
     setTaskState(pr, pick.id, "~");
     writeProgress(pr);
+    setLockPaused(null);
     const dependencyLogs = {};
     for (const d of task.depends) if (pr.logs[d]) dependencyLogs[d] = pr.logs[d];
     return {
@@ -1152,68 +1732,204 @@ function taskNext() {
       skipped,
       counts: counts(pr.tasks),
       resumed,
+      ...(stream !== undefined ? { stream } : {}),
     };
   }
 }
 
-function taskDone({ id, log }) {
+/**
+ * The worktree a stream-scoped task call works in, plus the untracked files
+ * to ignore there. Refuses a task that is not the stream's own, or a stream
+ * that has no worktree yet.
+ */
+function streamTaskContext(stream, pr, task) {
+  const scope = streamScope(stream);
+  if (task.stream !== stream) throw new ToolError(`task ${task.id} belongs to stream '${task.stream ?? "none"}', not '${stream}'`);
+  const cwd = streamDir(stream);
+  if (!exists(cwd)) throw new ToolError(`stream '${stream}' has no worktree; call foundry_run_start({ stream: "${stream}" }) first`);
+  return { cwd, ignore: (scope.st.streams || {})[stream]?.preexistingUntracked || [] };
+}
+
+function taskDone({ stream, id, log }) {
   if (!id || !log) throw new ToolError("id and log are required");
   const pr = parseProgress();
   const t = pr.tasks.find((x) => x.id === id);
   if (!t) throw new ToolError(`task ${id} not in docs/PROGRESS.md`);
   if (t.state !== "~") throw new ToolError(`task ${id} is '${STATE_NAMES[t.state]}', not in progress; call foundry_task_next first`);
-  const subject = git(["log", "-1", "--format=%s"]).out;
+  let cwd = ROOT;
+  let ignore = loadState().preexistingUntracked;
+  if (stream !== undefined) ({ cwd, ignore } = streamTaskContext(stream, pr, t));
+  else refuseSerialInParallelWave(pr, t);
+  const subject = git(["log", "-1", "--format=%s"], { cwd }).out;
   if (!subject.startsWith(`${id}:`)) {
     throw new ToolError(`HEAD commit '${subject}' is not this task's commit; commit the task as '${id}: <title>' before calling foundry_task_done`);
   }
-  const st = loadState();
-  const dirtyOutsideProgress = porcelainExcludingPreexisting(st.preexistingUntracked).filter((l) => !l.endsWith("docs/PROGRESS.md"));
+  const dirtyOutsideProgress = porcelainExcludingPreexisting(ignore, cwd).filter((l) => !l.endsWith("docs/PROGRESS.md"));
   if (dirtyOutsideProgress.length) {
     throw new ToolError(
       `uncommitted changes remain after the task commit:\n${dirtyOutsideProgress.join("\n")}\nCommit them as part of ${id} or \`git checkout --\`/\`git clean\` them.`,
     );
   }
-  const sha = git(["rev-parse", "--short", "HEAD"]).out;
+  const sha = git(["rev-parse", "--short", "HEAD"], { cwd }).out;
   setTaskState(pr, id, "x");
   appendLog(pr, id, sha, log);
   writeProgress(pr);
   const psha = gitCommitIfChanged([P.progress], `progress: ${id} done`);
   resetLockCounter();
-  return { id, taskCommit: sha, progressCommit: psha, counts: counts(pr.tasks), guardReset: true };
+  return { id, taskCommit: sha, progressCommit: psha, counts: counts(pr.tasks), guardReset: true, ...(stream !== undefined ? { stream } : {}) };
 }
 
-function taskBlock({ id, reason }) {
+function taskBlock({ stream, id, reason }) {
   if (!id || !reason) throw new ToolError("id and reason are required");
   let pr = parseProgress();
   const t = pr.tasks.find((x) => x.id === id);
   if (!t) throw new ToolError(`task ${id} not in docs/PROGRESS.md`);
-  const st = loadState();
+  let cwd = ROOT;
+  let ignore = loadState().preexistingUntracked;
+  if (stream !== undefined) ({ cwd, ignore } = streamTaskContext(stream, pr, t));
+  else refuseSerialInParallelWave(pr, t);
   // Discard whatever the attempt left behind; the lock is gitignored so
   // clean leaves it alone, and -e spares every path that was already
   // untracked before this run started (F-09) — `git clean` would otherwise
   // delete it outright, which is worse than merely being tempted to move it.
-  git(["reset", "-q", "--hard", "HEAD"]);
-  git(["clean", "-qfd", ...(st.preexistingUntracked || []).flatMap((p) => ["-e", gitCleanExcludePattern(p)])]);
+  // For a stream this happens in the stream's worktree only: the main
+  // checkout holds every other stream's uncommitted bookkeeping.
+  git(["reset", "-q", "--hard", "HEAD"], { cwd });
+  git(["clean", "-qfd", ...(ignore || []).flatMap((p) => ["-e", gitCleanExcludePattern(p)])], { cwd });
   pr = parseProgress();
   setTaskState(pr, id, "!");
   appendLog(pr, id, "blocked", `BLOCKED: ${reason}`);
   writeProgress(pr);
   const psha = gitCommitIfChanged([P.progress], `progress: ${id} blocked`);
   resetLockCounter();
-  return { id, progressCommit: psha, counts: counts(pr.tasks) };
+  return { id, progressCommit: psha, counts: counts(pr.tasks), ...(stream !== undefined ? { stream } : {}) };
 }
 
-function runShell(cmd, timeoutMs) {
-  const r = spawnSync(cmd, { cwd: ROOT, shell: true, encoding: "utf8", timeout: timeoutMs, maxBuffer: 64 * 1024 * 1024 });
-  const tail = (s, n = 60) => (s || "").replace(/\s+$/, "").split("\n").slice(-n).join("\n");
+/**
+ * Set every id in `ids` back to todo, logging `body` under `stamp`, then
+ * reopen every skipped task that depends — directly, or through another task
+ * reopened here — on one of them. A reopened dependent that still has a
+ * different blocked dependency is simply skipped again by the next
+ * foundry_task_next, so reopening generously is safe; leaving dependents
+ * skipped is not (F-05, F-18, F-19 of the 2026-09-30 cleanflate feedback: one
+ * cleared blocker left 17 tasks skipped with no sanctioned way back).
+ * Mutates `pr`; returns the dependents reopened, in PROGRESS.md order.
+ */
+function reopenWithDependents(pr, ids, stamp, body) {
+  for (const id of ids) {
+    setTaskState(pr, id, " ");
+    appendLog(pr, id, stamp, body);
+  }
+  const planLines = exists(P.plan) ? read(P.plan).split("\n") : [];
+  const reopened = new Set(ids);
+  const dependents = [];
+  for (let changed = true; changed; ) {
+    changed = false;
+    for (const t of pr.tasks) {
+      if (t.state !== "-") continue;
+      let depends;
+      try {
+        depends = planTaskFrom(planLines, t.id).depends;
+      } catch {
+        continue;
+      }
+      const via = depends.find((d) => reopened.has(d));
+      if (!via) continue;
+      setTaskState(pr, t.id, " ");
+      appendLog(pr, t.id, stamp, `reopened: it was skipped because of ${via}, which is open again`);
+      reopened.add(t.id);
+      dependents.push(t.id);
+      changed = true;
+    }
+  }
+  return dependents;
+}
+
+/**
+ * Reopen one blocked or skipped task once whatever stopped it is resolved
+ * (an operator supplied a missing file, a flaky service came back), together
+ * with every task skipped because of it. The next foundry_task_next picks it
+ * up; after a finished run, foundry_next hands out an implement stage again.
+ */
+function taskReopen({ id, reason } = {}) {
+  if (!id || !reason) throw new ToolError("id and reason are required");
+  refuseWhileStreamsPending();
+  const st = loadState();
+  if (st.summarized) throw new ToolError("the flight is complete (summarized); reopening a task now would reopen an approved build — start a new flight instead");
+  const pr = parseProgress();
+  const t = pr.tasks.find((x) => x.id === id);
+  if (!t) throw new ToolError(`task ${id} not in docs/PROGRESS.md`);
+  if (t.state !== "!" && t.state !== "-") throw new ToolError(`task ${id} is '${STATE_NAMES[t.state]}'; only a blocked or skipped task can be reopened`);
+  const dependents = reopenWithDependents(pr, [id], "reopened", `REOPENED: ${reason}`);
+  writeProgress(pr);
+  const commit = gitCommitIfChanged([P.progress], `progress: reopen ${id}${dependents.length ? ` (+${dependents.length} dependent${dependents.length === 1 ? "" : "s"})` : ""}`);
+  resetLockCounter();
+  return { id, reopenedDependents: dependents, commit, counts: counts(pr.tasks) };
+}
+
+// Every command Foundry runs for the model goes through mcp/run-command.mjs,
+// which runs it in its own process group so a timeout kills the whole tree,
+// and keeps only a bounded tail of its output (F-04, F-09, F-16 of the
+// 2026-09-30 cleanflate feedback: a runaway mutant hung the reviewer, left
+// orphaned test binaries spinning, and took the server down).
+const RUNNER = path.join(path.dirname(fileURLToPath(import.meta.url)), "run-command.mjs");
+// A command that writes more than this in total is killed, not buffered.
+const OUTPUT_LIMIT_BYTES = 64 * 1024 * 1024;
+// What a result carries of each stream: the last 60 lines, and never more
+// than this many characters of them, so one long line cannot overflow the
+// tool result either.
+const TAIL_LINES = 60;
+const TAIL_CHARS = 4000;
+// How long the server waits beyond a command's own timeout before it gives
+// up on the runner itself (which should never need it).
+const RUNNER_BACKSTOP_MS = 30_000;
+
+function runShell(cmd, timeoutMs, cwd = ROOT) {
+  const spec = { cmd, cwd, timeoutMs, maxOutputBytes: OUTPUT_LIMIT_BYTES, keepBytes: TAIL_CHARS * 8 };
+  const r = spawnSync(process.execPath, [RUNNER, JSON.stringify(spec)], {
+    encoding: "utf8",
+    timeout: timeoutMs + RUNNER_BACKSTOP_MS,
+    maxBuffer: 4 * 1024 * 1024,
+  });
+  let res;
+  try {
+    res = JSON.parse((r.stdout || "").trim().split("\n").pop());
+  } catch {
+    res = {
+      exitCode: null,
+      signal: null,
+      timedOut: r.error?.code === "ETIMEDOUT",
+      outputLimitExceeded: false,
+      orphansKilled: false,
+      stdout: "",
+      stderr: `foundry could not supervise this command: ${(r.error?.message || r.stderr || "the runner produced no result").trim()}`,
+    };
+  }
+  let truncated = false;
+  const tail = (s) => {
+    const lines = (s || "").replace(/\s+$/, "").split("\n");
+    let t = lines.slice(-TAIL_LINES).join("\n");
+    if (lines.length > TAIL_LINES) truncated = true;
+    if (t.length > TAIL_CHARS) {
+      t = t.slice(-TAIL_CHARS);
+      truncated = true;
+    }
+    return t;
+  };
+  const stdoutTail = tail(res.stdout);
+  const stderrTail = tail(res.stderr);
+  if (res.outputLimitExceeded) truncated = true;
   return {
     command: cmd,
-    ok: r.status === 0 && !r.error,
-    exitCode: r.status,
-    timedOut: r.error?.code === "ETIMEDOUT",
+    ok: res.exitCode === 0 && !res.timedOut && !res.outputLimitExceeded,
+    exitCode: res.exitCode,
+    timedOut: res.timedOut,
     timeoutMs,
-    stdoutTail: tail(r.stdout),
-    stderrTail: tail(r.stderr),
+    ...(res.outputLimitExceeded ? { outputLimitExceeded: true } : {}),
+    ...(res.orphansKilled ? { orphansKilled: true } : {}),
+    ...(truncated ? { truncated: true } : {}),
+    stdoutTail,
+    stderrTail,
   };
 }
 
@@ -1224,11 +1940,17 @@ const pathUnder = (file, p) => file === p || file.startsWith(p.endsWith("/") ? p
  * Run every constraint rule: first self-test it against its own fixtures —
  * a `shouldMatch` line that fails to match, or a `shouldNotMatch` line that
  * matches, fails the rule outright and is never trusted to scan anything
- * (F-14) — then scan every *tracked* file under its `paths` minus
- * `exclude` (`git ls-files`, so untracked and ignored files are never
- * scanned), line by line. Line-based only; no multi-line patterns.
+ * (F-14) — then scan every file under its `paths` minus `exclude` that is
+ * tracked or untracked-but-not-ignored (`git ls-files --cached --others
+ * --exclude-standard`), line by line, except the untracked files in
+ * `ignore` — those that were already there when the run started, which are
+ * not the run's business (F-09). A new file an implementer has not yet
+ * committed is scanned, so a regression cannot slip past a verify run made
+ * before its commit (F-26 of the 2026-09-30 cleanflate feedback). Ignored
+ * files never are. Line-based only; no multi-line patterns.
  */
-function checkConstraints(constraints) {
+function checkConstraints(constraints, cwd = ROOT, ignore = []) {
+  const skip = new Set(ignore);
   const testLine = (c, line) => new RegExp(c.pattern, c.flags || "").test(line);
   const results = constraints.map((c) => {
     for (const line of c.shouldMatch) {
@@ -1237,13 +1959,13 @@ function checkConstraints(constraints) {
     for (const line of c.shouldNotMatch) {
       if (testLine(c, line)) return { id: c.id, ok: false, fixture: `shouldNotMatch ${JSON.stringify(line)} matched`, hits: [] };
     }
-    const listed = git(["ls-files", "--", ...c.paths], { allowFail: true });
-    const files = listed.ok ? listed.out.split("\n").filter(Boolean) : [];
+    const listed = git(["ls-files", "--cached", "--others", "--exclude-standard", "--", ...c.paths], { allowFail: true, cwd });
+    const files = listed.ok ? [...new Set(listed.out.split("\n").filter(Boolean))].filter((f) => !skip.has(f)) : [];
     const excluded = c.exclude || [];
     const hits = [];
     for (const file of files) {
       if (excluded.some((ex) => pathUnder(file, ex))) continue;
-      const full = path.join(ROOT, file);
+      const full = path.join(cwd, file);
       if (!exists(full)) continue; // e.g. a submodule gitlink git ls-files can list but fs cannot read
       read(full)
         .split("\n")
@@ -1270,17 +1992,35 @@ function verifyCommands(cc, touched) {
   return cmds;
 }
 
-function verify({ files = [] } = {}) {
+function verify({ files = [], stream } = {}) {
   const recovered = recoverMutation();
   const c = loadConfig();
   if (!c) throw new ToolError("docs/foundry.json is missing; the plan stage must write it");
   const cc = cfg();
   if (!cc.verify.length) throw new ToolError("docs/foundry.json has no 'verify' commands");
+  let cwd = ROOT;
+  let ignore = loadState().preexistingUntracked || [];
+  if (stream !== undefined) {
+    const scope = streamScope(stream);
+    ignore = (scope.st.streams || {})[stream]?.preexistingUntracked || [];
+    cwd = streamDir(stream);
+    if (!exists(cwd)) throw new ToolError(`stream '${stream}' has no worktree; call foundry_run_start({ stream: "${stream}" }) first`);
+  }
+  const touched = Array.isArray(files) ? files : String(files).split(/[\s,]+/).filter(Boolean);
+  const cmds = verifyCommands(cc, touched);
+  if (stream !== undefined) {
+    // An exclusive command is keyed to the directory or port it runs from and
+    // only ever runs from the main checkout. Validation keeps its tasks out of
+    // waves, so reaching this is a bug to surface, not to paper over.
+    const exclusive = cmds.find((x) => x.exclusive);
+    if (exclusive) {
+      throw new ToolError(`${JSON.stringify(exclusive.cmd)} is exclusive: it only runs from the main checkout, never a stream worktree. A task that triggers it should not have been in a wave; report this as pipeline friction and call foundry_verify without stream from the main checkout.`);
+    }
+  }
   // Constraints are whole-repo, always — `files` narrows which shell
   // commands' extras run, never what a constraint scans.
-  const constraints = checkConstraints(cc.constraints);
-  const touched = Array.isArray(files) ? files : String(files).split(/[\s,]+/).filter(Boolean);
-  const results = verifyCommands(cc, touched).map((c2) => runShell(c2.cmd, c2.timeoutMs));
+  const constraints = checkConstraints(cc.constraints, cwd, ignore);
+  const results = cmds.map((c2) => runShell(c2.cmd, c2.timeoutMs, cwd));
   return { ok: constraints.ok && results.every((r) => r.ok), constraints, results, ...(recovered ? { recoveredMutation: recovered } : {}) };
 }
 
@@ -1343,13 +2083,36 @@ function recoverMutation() {
   return relPath;
 }
 
-function mutate({ file, find, replace, commands } = {}) {
+/** Tracked paths that differ from HEAD (modified, deleted or staged), sorted. */
+const trackedChanges = () => git(["diff", "--name-only", "HEAD"]).out.split("\n").filter(Boolean).sort();
+
+/**
+ * Put back everything a mutation's commands changed besides the mutated file
+ * itself (F-10, F-14, F-17 of the 2026-09-30 cleanflate feedback: a killed
+ * mutant made proptest write a regressions file). Only paths that were clean,
+ * or did not exist, before the mutation are touched; ignored files never are.
+ * Returns `{ restored, removed }`.
+ */
+function undoMutationResidue(before) {
+  const dirtyBefore = new Set(before.tracked);
+  const untrackedBefore = new Set(before.untracked);
+  const restored = trackedChanges().filter((p) => !dirtyBefore.has(p));
+  if (restored.length) git(["checkout", "-q", "HEAD", "--", ...restored]);
+  const removed = untrackedPaths().filter((p) => !untrackedBefore.has(p));
+  for (const p of removed) fs.rmSync(path.join(ROOT, p), { force: true });
+  return { restored, removed };
+}
+
+function mutate({ file, find, replace, commands, timeoutMs } = {}) {
   if (typeof file !== "string" || !file) throw new ToolError("file is required: a repo-relative path to a tracked source file");
   if (typeof find !== "string" || !find) throw new ToolError("find is required and must be a non-empty string: the exact text to replace");
   if (typeof replace !== "string") throw new ToolError('replace is required and must be a string (use "" to delete the matched text)');
   if (find === replace) throw new ToolError("find and replace are identical; that is not a mutation");
   if (commands !== undefined && (!Array.isArray(commands) || !commands.length || !commands.every((x) => typeof x === "string"))) {
     throw new ToolError("commands must be a non-empty array of command strings taken from docs/foundry.json's verify/extraVerify");
+  }
+  if (timeoutMs !== undefined && (!Number.isInteger(timeoutMs) || timeoutMs <= 0)) {
+    throw new ToolError("timeoutMs must be a positive integer (milliseconds)");
   }
   if (!gitFacts().inRepo) throw new ToolError("not a git repository");
   if (!loadConfig()) throw new ToolError("docs/foundry.json is missing; the plan stage must write it");
@@ -1390,6 +2153,11 @@ function mutate({ file, find, replace, commands } = {}) {
   } else {
     cmds = verifyCommands(cc, [relPath]);
   }
+  // A per-call timeout only ever shortens a command's configured one: a
+  // reviewer who suspects a mutant hangs should not wait out a 30-minute
+  // suite timeout to find out (F-06).
+  if (timeoutMs !== undefined) cmds = cmds.map((c2) => ({ ...c2, timeoutMs: Math.min(c2.timeoutMs, timeoutMs) }));
+  const before = { tracked: trackedChanges(), untracked: untrackedPaths() };
 
   // The sentinel is per-clone state, not part of the reviewed branch: exclude
   // it through .git/info/exclude rather than .gitignore, which would dirty
@@ -1409,6 +2177,7 @@ function mutate({ file, find, replace, commands } = {}) {
     throw new ToolError(`foundry_mutate could NOT restore ${relPath}: it still differs from HEAD. Run \`git checkout HEAD -- ${relPath}\` before doing anything else. The sentinel ${rel(P.mutation)} is left in place.`);
   }
   fs.rmSync(P.mutation, { force: true });
+  const residue = undoMutationResidue(before);
 
   const killed = results.some((r) => !r.ok);
   return {
@@ -1416,6 +2185,8 @@ function mutate({ file, find, replace, commands } = {}) {
     killed,
     verdict: killed ? "killed: the tests caught the mutation" : "survived: no command failed — the mechanic is untested",
     results,
+    restored: residue.restored,
+    removed: residue.removed,
     recoveredMutation: recovered,
   };
 }
@@ -1436,6 +2207,10 @@ function pushBranch(branch, pushAllowed) {
 }
 
 function runFinish() {
+  const pending = streamWorktrees();
+  if (pending.length) {
+    throw new ToolError(`stream worktree(s) still exist (${pending.join(", ")}); merge each back with foundry_stream_finish before finishing the run`);
+  }
   const pr = parseProgress();
   const cnt = counts(pr.tasks);
   if (cnt.open > 0) throw new ToolError(`${cnt.open} task(s) still open; keep calling foundry_task_next`);
@@ -1463,17 +2238,53 @@ function runFinish() {
       if (existing.status === 0 && existing.stdout.trim()) pr_url = existing.stdout.trim();
       else {
         const title = st.round === 0 ? `Build: ${g.branch}` : `Build: ${g.branch} (review round ${st.round})`;
-        const cr = spawnSync("gh", ["pr", "create", "--draft", "--title", title, "--body-file", P.handoff], { cwd: ROOT, encoding: "utf8" });
+        // --base, always: without it gh targets the repository's default
+        // branch, not the one this flight branched from (F-24 of the
+        // 2026-09-30 cleanflate feedback).
+        const cr = spawnSync("gh", ["pr", "create", "--draft", "--base", c.baseBranch, "--title", title, "--body-file", P.handoff], { cwd: ROOT, encoding: "utf8" });
         pr_url = cr.status === 0 ? cr.stdout.trim() : `pr create failed: ${(cr.stderr || "").trim()}`;
       }
     }
   }
   if (exists(P.lock)) fs.unlinkSync(P.lock);
   const head = git(["rev-parse", "--short", "HEAD"]).out;
+  // A whole-tree constraint scan at handoff, reported rather than refused:
+  // the reviewer sees a regression the task-by-task verify runs missed
+  // (F-26), and a flight is never stalled on it here.
+  const scan = checkConstraints(c.constraints, ROOT, st.preexistingUntracked);
+  const failing = scan.results.filter((r) => !r.ok).map((r) => r.id);
   return {
     branch: g.branch, base: g.base, head, handoffCommit, stateCommit, push, pr: pr_url, counts: cnt, round: st.round,
-    readyLine: `READY FOR REVIEW — branch ${g.branch}, head ${head}, ${cnt.done} done / ${cnt.blocked} blocked / ${cnt.skipped} skipped of ${cnt.total}`,
+    constraints: { ok: scan.ok, failing },
+    readyLine: `READY FOR REVIEW — branch ${g.branch}, head ${head}, ${cnt.done} done / ${cnt.blocked} blocked / ${cnt.skipped} skipped of ${cnt.total}${failing.length ? `; constraints failing: ${failing.join(", ")}` : ""}`,
   };
+}
+
+const FLIGHT_OPTION_KEYS = ["maxRounds", "maxRoundsHard"];
+
+/**
+ * Apply the options an operator passed to /foundry:go-flight ("maximum
+ * review depth of 6 rounds") to docs/foundry.json and commit them, so the
+ * controller never hand-edits a config file (F-20 of the 2026-09-30
+ * cleanflate feedback). Only the review-loop bounds are settable; anything
+ * else is the planner's to decide from SPEC. Refused before the plan stage
+ * has written docs/foundry.json.
+ */
+function flightOptions(args = {}) {
+  const given = FLIGHT_OPTION_KEYS.filter((k) => args[k] !== undefined);
+  if (!given.length) throw new ToolError(`pass at least one of ${FLIGHT_OPTION_KEYS.join(", ")}`);
+  for (const k of given) {
+    if (!Number.isInteger(args[k]) || args[k] <= 0) throw new ToolError(`${k} must be a positive integer`);
+  }
+  if (!exists(P.config)) throw new ToolError("docs/foundry.json does not exist yet; set flight options once the plan stage has written it");
+  const raw = loadConfig();
+  const was = cfg();
+  const before = Object.fromEntries(FLIGHT_OPTION_KEYS.map((k) => [k, was[k]]));
+  for (const k of given) raw[k] = args[k];
+  write(P.config, `${JSON.stringify(raw, null, 2)}\n`);
+  const after = Object.fromEntries(FLIGHT_OPTION_KEYS.map((k) => [k, cfg()[k]]));
+  const commit = gitCommitIfChanged([P.config], `chore: flight options (${given.map((k) => `${k}=${args[k]}`).join(", ")})`);
+  return { before, after, commit };
 }
 
 /**
@@ -1544,7 +2355,9 @@ function reviewSubmit({ verdict, tasks = [], unblock = [] }) {
     saveState(st);
     const sha = gitCommitIfChanged([P.review, P.state], `review: round ${N} approved`);
     const push = pushBranch(gitFacts().branch, st.policies.push);
-    return { verdict, round: st.round, commit: sha, push, ...recoveredField };
+    // `round` is the number this review was stamped with, as for CHANGES
+    // REQUESTED — never the count of fix rounds (F-21).
+    return { verdict, round: N, fixRounds: st.round, commit: sha, push, ...recoveredField };
   }
 
   if (!tasks.length && !unblock.length) throw new ToolError("CHANGES REQUESTED requires at least one fix task or unblock");
@@ -1567,14 +2380,18 @@ function reviewSubmit({ verdict, tasks = [], unblock = [] }) {
     appendTaskLines(pr, tasks.map((t, i) => ({ id: ids[i], title: t.title })));
   }
   const unblocked = [];
+  const reopened = [];
   for (const u of unblock) {
     const id = typeof u === "string" ? u : u.id;
     const reason = typeof u === "string" ? "unblocked by reviewer" : u.reason || "unblocked by reviewer";
     const t = pr.tasks.find((x) => x.id === id);
     if (!t) throw new ToolError(`cannot unblock ${id}: not in PROGRESS.md`);
-    if (t.state !== "!" && t.state !== "-") throw new ToolError(`cannot unblock ${id}: it is '${STATE_NAMES[t.state]}'`);
-    setTaskState(pr, id, " ");
-    appendLog(pr, id, `unblocked (round ${N})`, reason);
+    if (t.state !== "!" && t.state !== "-") {
+      // Already reopened as a dependent of an earlier unblock in this call.
+      if (reopened.includes(id)) continue;
+      throw new ToolError(`cannot unblock ${id}: it is '${STATE_NAMES[t.state]}'`);
+    }
+    reopened.push(...reopenWithDependents(pr, [id], `unblocked (round ${N})`, reason));
     unblocked.push(id);
   }
   writeProgress(pr);
@@ -1605,7 +2422,31 @@ function reviewSubmit({ verdict, tasks = [], unblock = [] }) {
   // Re-read rather than reuse `pr`: appendTaskLines edits pr.lines but not
   // pr.tasks, so counts(pr.tasks) would describe the file as it was before
   // this call queued its own fix tasks (F-03 of the 2026-09-23 flight feedback).
-  return { verdict, round: N, fixTasks: ids, unblocked, commit: sha, halted: st.halted, counts: counts(parseProgress().tasks), push, ...recoveredField };
+  return { verdict, round: N, fixTasks: ids, unblocked, reopenedDependents: reopened, commit: sha, halted: st.halted, counts: counts(parseProgress().tasks), push, ...recoveredField };
+}
+
+/**
+ * The current branch's pull request as GitHub sees it, for a stage that
+ * needs to say whether one exists (F-25): `{ url, state, draft, base }`
+ * (plus `expectedBase` when it does not target `baseBranch`), or a string —
+ * `"skipped: policy"`, `"none"`, or `"unknown: <why>"`. Never throws.
+ */
+function prState(policies, baseBranch) {
+  if (policies.pr === "none") return "skipped: policy";
+  if (!gitFacts().hasOrigin) return "none";
+  if (spawnSync("gh", ["--version"], { encoding: "utf8" }).status !== 0) return "unknown: gh is not available";
+  const r = spawnSync("gh", ["pr", "view", "--json", "url,state,isDraft,baseRefName"], { cwd: ROOT, encoding: "utf8" });
+  if (r.status !== 0) {
+    const why = (r.stderr || r.stdout || "").trim().split("\n")[0];
+    return /no (open )?pull requests? found/i.test(why) ? "none" : `unknown: ${why || "gh pr view failed"}`;
+  }
+  try {
+    const j = JSON.parse(r.stdout);
+    const pr = { url: j.url, state: j.state, draft: j.isDraft, base: j.baseRefName };
+    return pr.base === baseBranch ? pr : { ...pr, expectedBase: baseBranch };
+  } catch {
+    return "unknown: gh pr view returned unparseable output";
+  }
 }
 
 function summaryCommit() {
@@ -1617,7 +2458,7 @@ function summaryCommit() {
   const sha = gitCommitIfChanged([P.summary, P.state], "chore: build summary");
   const g = gitFacts();
   const push = pushBranch(g.branch, st.policies.push);
-  return { commit: sha, branch: g.branch, base: g.base, head: g.head, rounds: st.round, push };
+  return { commit: sha, branch: g.branch, base: g.base, head: g.head, reviews: reviewCount(st), fixRounds: st.round, push, pr: prState(st.policies, cfg().baseBranch) };
 }
 
 // ---------------------------------------------------------------- MCP plumbing
@@ -1631,18 +2472,34 @@ const S = (props, required = []) => ({
 });
 const TOOLS = [
   { name: "foundry_status", description: "Everything the pipeline knows from disk: which docs exist, task counts by state, branch/base/head, lock, round, review verdict. Read-only.", inputSchema: S({}), fn: status },
-  { name: "foundry_next", description: "Deterministic stage selection: returns { stage, agent, agentFallback, fallbackAgent, restartRequired, model, agentModel, agentModelExact, round, reason, prompt }. stage is plan | implement | review | summarize | done | halt. agentModel is the value to pass as the Agent tool's model when agentFallback is true (an alias, or null to pass none); agentModelExact is false when a full claude-* id was mapped to its family alias. restartRequired is true only when the routed model cannot be reached without relaunching the session. Read-only.", inputSchema: S({}), fn: next },
-  { name: "foundry_run_start", description: "Begin (or resume) an implementation run: create/reuse the build branch, arm the implement guard lock, stamp Branch/Started in PROGRESS.md, commit. Idempotent.", inputSchema: S({}), fn: runStart },
-  { name: "foundry_task_next", description: "Select the next task (first [~], else first [ ]), auto-skip tasks whose dependencies are blocked, mark it [~], and return its PLAN.md text plus dependency log entries. Returns { done: true } when none remain.", inputSchema: S({}), fn: taskNext },
-  { name: "foundry_task_done", description: "Mark a task [x] and append its log entry stamped with HEAD's sha. Requires HEAD's commit subject to start with '<id>:' and a clean tree. Commits PROGRESS.md.", inputSchema: S({ id: { type: "string" }, log: { type: "string", description: "Log entry body, under 15 lines" } }, ["id", "log"]), fn: taskDone },
-  { name: "foundry_task_block", description: "Give up on a task: hard-reset uncommitted changes, mark it [!], log BLOCKED: <reason>, commit PROGRESS.md.", inputSchema: S({ id: { type: "string" }, reason: { type: "string", description: "what you tried / what fails / what you think the fix is" } }, ["id", "reason"]), fn: taskBlock },
-  { name: "foundry_verify", description: "Self-tests and runs every docs/foundry.json constraint against the whole tracked repo, then runs the verify commands plus extraVerify commands for any path prefix the given files fall under. Returns constraint results and per-command exit status and output tails.", inputSchema: S({ files: { type: "array", items: { type: "string" }, description: "Files touched by the task (optional); narrows extraVerify only, never the constraint scan" } }), fn: verify },
-  { name: "foundry_run_finish", description: "End an implementation run: requires zero open tasks and docs/HANDOFF.md; commits it, pushes and opens a draft PR unless policies say otherwise, disarms the lock, records the round as implemented.", inputSchema: S({}), fn: runFinish },
+  { name: "foundry_next", description: "Deterministic stage selection: returns { stage, agent, agentFallback, fallbackAgent, restartRequired, model, agentModel, agentModelExact, round, reason, prompt, streams? }. stage is plan | implement | review | summarize | done | halt. agentModel is the value to pass as the Agent tool's model when agentFallback is true (an alias, or null to pass none); agentModelExact is false when a full claude-* id was mapped to its family alias. restartRequired is true only when the routed model cannot be reached without relaunching the session. Read-only, except that when a parallel wave's partition is invalid it records once (state, one feedback entry, one commit, only on a build branch) that the wave runs serially. When streams is present, spawn one implementer per entry, all at once, and wait for all of them.", inputSchema: S({}), fn: next },
+  { name: "foundry_run_start", description: "Begin (or resume) an implementation run: create/reuse the build branch, arm the implement guard lock, stamp Branch/Started in PROGRESS.md, commit. Idempotent. With stream, also create (or resume) that stream's git worktree for a parallel wave, run parallel.setup in it, and return its cwd: do all of that stream's work inside cwd.", inputSchema: S({ stream: { type: "string", description: "a stream of the current parallel wave, when foundry_next handed you one" } }), fn: runStart },
+  { name: "foundry_task_next", description: "Select the next task (first [~], else first [ ]), auto-skip tasks whose dependencies are blocked, mark it [~], and return its PLAN.md text plus dependency log entries. Returns { done: true } when none remain.", inputSchema: S({ stream: { type: "string", description: "restrict to this stream's tasks (parallel waves only)" } }), fn: taskNext },
+  { name: "foundry_task_done", description: "Mark a task [x] and append its log entry stamped with HEAD's sha. Requires HEAD's commit subject to start with '<id>:' and a clean tree. Commits PROGRESS.md.", inputSchema: S({ stream: { type: "string", description: "the stream this task belongs to, when working in a parallel wave" }, id: { type: "string" }, log: { type: "string", description: "Log entry body, under 15 lines" } }, ["id", "log"]), fn: taskDone },
+  { name: "foundry_task_block", description: "Give up on a task: hard-reset uncommitted changes, mark it [!], log BLOCKED: <reason>, commit PROGRESS.md.", inputSchema: S({ stream: { type: "string", description: "the stream this task belongs to, when working in a parallel wave" }, id: { type: "string" }, reason: { type: "string", description: "what you tried / what fails / what you think the fix is" } }, ["id", "reason"]), fn: taskBlock },
+  {
+    name: "foundry_task_reopen",
+    description: "Reopen a blocked [!] or skipped [-] task once whatever stopped it is resolved, together with every task skipped because of it (directly or transitively): sets them back to [ ], logs REOPENED: <reason>, commits PROGRESS.md. The next foundry_task_next picks them up; after a finished run, foundry_next hands out an implement stage again. Refused once the flight is summarized or while stream worktrees exist.",
+    inputSchema: S({ id: { type: "string" }, reason: { type: "string", description: "what changed so the task can now succeed" } }, ["id", "reason"]),
+    fn: taskReopen,
+  },
+  { name: "foundry_verify", description: "Self-tests and runs every docs/foundry.json constraint against the whole repo (tracked files plus new untracked ones, never ignored files or files untracked before the run started), then runs the verify commands plus extraVerify commands for any path prefix the given files fall under. Returns constraint results and per-command exit status and output tails.", inputSchema: S({ files: { type: "array", items: { type: "string" }, description: "Files touched by the task (optional); narrows extraVerify only, never the constraint scan" }, stream: { type: "string", description: "run in this stream's worktree (parallel waves only); refuses if an exclusive command would run" } }), fn: verify },
+  { name: "foundry_stream_finish", description: "Finish one stream of a parallel wave: requires no open tasks in the stream and a clean worktree, merges the stream's branch into the build branch (git merge --no-ff), then removes the worktree and branch. On a merge conflict it aborts, keeps the stream's branch and worktree, and halts the flight with instructions. Returns { stream, merged, mergeCommit, remainingStreams }.", inputSchema: S({ stream: { type: "string", description: "the stream whose tasks are all done or blocked" } }, ["stream"]), fn: streamFinish },
+  { name: "foundry_run_finish", description: "End an implementation run: requires zero open tasks and docs/HANDOFF.md; commits it, pushes and opens a draft PR against baseBranch unless policies say otherwise, disarms the lock, records the round as implemented, and reports a whole-tree constraint scan (constraints: { ok, failing }) without refusing on it.", inputSchema: S({}), fn: runFinish },
   {
     name: "foundry_run_halt",
     description: "Stop the flight for an operator-level reason the implementer cannot resolve (a dead signing agent, a full disk, a vanished base branch): records the reason, disarms the lock, commits state and PROGRESS.md if they changed. Never resets or cleans the tree.",
     inputSchema: S({ reason: { type: "string", description: "why the flight cannot continue" } }, ["reason"]),
     fn: runHalt,
+  },
+  {
+    name: "foundry_flight_options",
+    description: "Apply an operator's flight options to docs/foundry.json and commit them: maxRounds (non-converging review rounds tolerated) and maxRoundsHard (absolute ceiling on review rounds). For the flight controller, when /foundry:go-flight was given options such as a maximum review depth. Refused before the plan stage has written docs/foundry.json. Returns { before, after, commit }.",
+    inputSchema: S({
+      maxRounds: { type: "integer", minimum: 1, description: "non-converging review rounds tolerated before the flight halts" },
+      maxRoundsHard: { type: "integer", minimum: 1, description: "a review numbered above this halts the flight, converging or not" },
+    }),
+    fn: flightOptions,
   },
   {
     name: "foundry_feedback_log",
@@ -1659,13 +2516,14 @@ const TOOLS = [
   },
   {
     name: "foundry_mutate",
-    description: "Mutation-test one file: apply one exact find/replace to a clean tracked file, run the verify commands that file triggers (verify plus matching extraVerify), always restore the file, and commit nothing. Returns { file, killed, verdict, results, recoveredMutation }; killed is true when at least one command failed. For reviewers checking that a test fails without the mechanic it covers — never edit source by hand instead.",
+    description: "Mutation-test one file: apply one exact find/replace to a clean tracked file, run the verify commands that file triggers (verify plus matching extraVerify), always restore the file, undo anything else the commands changed (tracked files that were clean, untracked files that are new), and commit nothing. Returns { file, killed, verdict, results, restored, removed, recoveredMutation }; killed is true when at least one command failed. For reviewers checking that a test fails without the mechanic it covers — never edit source by hand instead.",
     inputSchema: S(
       {
         file: { type: "string", description: "repo-relative path of a tracked, clean text file" },
         find: { type: "string", description: "exact text to replace; must appear exactly once in the file" },
         replace: { type: "string", description: "the mutated text (\"\" deletes the match)" },
         commands: { type: "array", items: { type: "string" }, description: "optional: run only these configured verify/extraVerify commands, each spelled exactly as in docs/foundry.json" },
+        timeoutMs: { type: "integer", minimum: 1, description: "optional: cap every command's timeout for this call (never raises a configured one), for a mutant you suspect hangs" },
       },
       ["file", "find", "replace"],
     ),
@@ -1673,7 +2531,7 @@ const TOOLS = [
   },
   {
     name: "foundry_review_submit",
-    description: "Record a review verdict. APPROVED commits REVIEW.md. CHANGES REQUESTED assigns R<N>-<nn> ids, appends '## Review fixes (round N)' to PLAN.md, appends checkbox lines to PROGRESS.md, resets unblocked tasks, and commits 'review: round N'.",
+    description: "Record a review verdict. APPROVED commits REVIEW.md. CHANGES REQUESTED assigns R<N>-<nn> ids, appends '## Review fixes (round N)' to PLAN.md, appends checkbox lines to PROGRESS.md, resets unblocked tasks along with every task skipped because of them (reopenedDependents), and commits 'review: round N'.",
     inputSchema: S({
       verdict: { type: "string", enum: ["APPROVED", "CHANGES REQUESTED"] },
       tasks: {
@@ -1688,7 +2546,7 @@ const TOOLS = [
     }, ["verdict"]),
     fn: reviewSubmit,
   },
-  { name: "foundry_summary_commit", description: "Commit docs/SUMMARY.md and mark the flight complete. Only valid after an APPROVED review.", inputSchema: S({}), fn: summaryCommit },
+  { name: "foundry_summary_commit", description: "Commit docs/SUMMARY.md and mark the flight complete. Only valid after an APPROVED review. Returns { commit, branch, base, head, reviews, fixRounds, push, pr }; pr is the branch's pull request ({ url, state, draft, base }) or \"none\", \"skipped: policy\" or \"unknown: <why>\".", inputSchema: S({}), fn: summaryCommit },
   {
     name: "foundry_agents_sync",
     description: "Generate .claude/agents/foundry-<role>.md from the merged routing config (plugin defaults < global file < profile < docs/foundry.json roles). Writes only files whose content changed, excludes them from git, and returns the resolved per-role table. `restartRequired` is true only when this is the directory's first population and a changed role's model cannot be named directly by the Agent tool. Also ensures the MCP allow rule in .claude/settings.local.json (`permissions` in the result), without which a subagent's first foundry_status call is denied under any permission mode.",

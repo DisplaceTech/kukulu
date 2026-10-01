@@ -37,7 +37,11 @@ await withServer(repo, async ({ call }) => {
 
   let n = await call("foundry_next");
   eq(n.stage, "plan", "a repo with only a spec needs a plan");
-  eq(n.agent, "foundry-planner", "the generated planner agent is named");
+  // This is the project's first flight: the sync above created the agents
+  // directory, which loads only in the next session, so every stage names
+  // the plugin's own agent outright (cleanflate F-22). The fresh-process
+  // block below covers the generated names.
+  eq(n.agent, "foundry:planner", "the plugin planner agent is named on a first flight");
   ok(n.model, "a resolved model is reported for the plan stage");
 
   writeFile(repo, "docs/PLAN.md", planDoc(TASKS));
@@ -53,7 +57,7 @@ await withServer(repo, async ({ call }) => {
   n = await call("foundry_next");
   eq(n.stage, "implement", "a plan on disk means it is time to build");
   eq(n.round, 0, "the first build is round 0");
-  eq(n.agent, "foundry-implementer", "the generated implementer agent is named");
+  eq(n.agent, "foundry:implementer", "the plugin implementer agent is named");
   ok(n.model, "a resolved model is reported for the implement stage");
 
   // ---------------------------------------------------------------- build
@@ -110,7 +114,7 @@ await withServer(repo, async ({ call }) => {
 
   n = await call("foundry_next");
   eq(n.stage, "review", "a handoff means it is the reviewer's turn");
-  eq(n.agent, "foundry-reviewer", "the generated reviewer agent is named");
+  eq(n.agent, "foundry:reviewer", "the plugin reviewer agent is named");
   ok(n.model, "a resolved model is reported for the review stage");
 
   // ---------------------------------------------------------------- review
@@ -126,6 +130,7 @@ await withServer(repo, async ({ call }) => {
   });
   eq(r.fixTasks.join(","), "R1-01", "the finding becomes a task with an id");
   eq(r.unblocked.join(","), "P0-02", "the reviewer reopens the blocked task");
+  eq(r.reopenedDependents.join(","), "P0-03", "...and the task skipped because of it");
   eq(subject(repo), "review: round 1", "the round is one commit");
   like(readFile(repo, "docs/PLAN.md"), /## Review fixes \(round 1\)\n\n### R1-01: Fix hello/, "the fix task is written into the plan");
   like(readFile(repo, "docs/PROGRESS.md"), /- \[ \] R1-01 Fix hello\n\n## Log/, "and onto the end of the task list");
@@ -133,7 +138,7 @@ await withServer(repo, async ({ call }) => {
   n = await call("foundry_next");
   eq(n.stage, "implement", "changes requested sends the flight back to the implementer");
   eq(n.round, 1, "on round 1");
-  eq(n.agent, "foundry-implementer", "still the generated implementer agent, on the fix round");
+  eq(n.agent, "foundry:implementer", "still the plugin implementer agent, on the fix round");
 
   // ---------------------------------------------------------------- fix round
 
@@ -146,13 +151,18 @@ await withServer(repo, async ({ call }) => {
   await call("foundry_task_done", { id: "P0-02", log: "Turned out to be possible." });
 
   t = await call("foundry_task_next");
+  eq(t.id, "P0-03", "then its reopened dependent");
+  commitTask(repo, "P0-03", "Depends on the impossible one", { "x": "x\n" });
+  await call("foundry_task_done", { id: "P0-03", log: "Ran once its dependency landed." });
+
+  t = await call("foundry_task_next");
   eq(t.id, "R1-01", "then the reviewer's fix task");
   like(t.text, /hello must actually greet/, "which reads back exactly as the reviewer wrote it");
   commitTask(repo, "R1-01", "Fix hello", { "hello.txt": "hello\n" });
   await call("foundry_task_done", { id: "R1-01", log: "hello.txt now greets." });
 
   eq((await call("foundry_task_next")).done, true, "the fix round is complete");
-  writeFile(repo, "docs/HANDOFF.md", "# handoff\n## Round 1\nBoth tasks landed.\n");
+  writeFile(repo, "docs/HANDOFF.md", "# handoff\n## Round 1\nAll three tasks landed.\n");
   r = await call("foundry_run_finish");
   eq(r.round, 1, "the handoff belongs to round 1");
 
@@ -160,26 +170,29 @@ await withServer(repo, async ({ call }) => {
 
   n = await call("foundry_next");
   eq(n.stage, "review", "round 1 goes back for review");
-  eq(n.agent, "foundry-reviewer", "still the generated reviewer agent, on round 1");
+  eq(n.agent, "foundry:reviewer", "still the plugin reviewer agent, on round 1");
 
   writeFile(repo, "docs/REVIEW.md", "# Review\nRound: 2\n**Verdict**: APPROVED\n");
   isError(await call("foundry_summary_commit"), /docs\/SUMMARY\.md does not exist/, "there is no summary to commit yet");
-  await call("foundry_review_submit", { verdict: "APPROVED" });
+  r = await call("foundry_review_submit", { verdict: "APPROVED" });
+  eq(r.round, 2, "the approval reports round 2, the number REVIEW.md carries");
   eq(subject(repo), "review: round 2 approved", "the approval is committed");
 
   n = await call("foundry_next");
   eq(n.stage, "summarize", "an approved branch needs its summary");
-  eq(n.agent, "foundry-summarizer", "the generated summarizer agent is named");
+  eq(n.agent, "foundry:summarizer", "the plugin summarizer agent is named");
   ok(n.model, "a resolved model is reported for the summarize stage");
 
   writeFile(repo, "docs/SUMMARY.md", "# summary\nMerge build/... into main.\n");
   r = await call("foundry_summary_commit");
-  eq(r.rounds, 1, "the flight took one review round");
+  eq(r.reviews, 2, "the flight took two reviews");
+  eq(r.fixRounds, 1, "...and one fix round between them");
 
   n = await call("foundry_next");
   eq(n.stage, "done", "and the flight is done");
   eq(n.agent, null, "done still has no agent to delegate to");
   like(n.reason, /ready for a human to merge/, n.reason);
+  like(n.reason, /after 2 reviews \(1 fix round\)/, "done counts reviews, not fix rounds (cleanflate F-21)");
 
   // ---------------------------------------------------------------- the record
 
@@ -220,6 +233,208 @@ await withServer(repo, async ({ call }) => {
     const n = await call("foundry_next");
     eq(n.agentFallback, false, "a fresh process against an already-synced repo trusts the generated agent immediately");
     eq(n.agent, "foundry-implementer", "...and names it directly");
+  });
+}
+
+// ---------------------------------------------------------------- parallel flights (0.4.0)
+//
+// The same loop go-flight runs, driven by hand: foundry_next, then a simulated
+// implementer per result. Stream implementers are simulated by calling the
+// stream-scoped tools *interleaved* across streams (a's next, b's next, a's
+// commit, b's commit …), not one stream to completion before the other, so
+// the run exercises the server's one-call-at-a-time guarantee rather than
+// assuming sequential streams. Nothing here asserts timing.
+
+const W = (id, files, extra = {}) => ({ id, title: `Task ${id}`, goal: `do ${id}`, files: files.map((x) => `\`${x}\``).join(", "), ...extra });
+
+/** The file a simulated implementer writes for a task: the first backticked path in Files touched (a directory gets `<id>.txt`). */
+const fileFor = (t) => {
+  const p = (t.files.match(/`([^`]+)`/) || [])[1] || `work/${t.id}.txt`;
+  return p.endsWith("/") ? `${p}${t.id}.txt` : p;
+};
+
+/** A serial implementer: run_start, work until done. Returns "paused" at a wave boundary, else finishes the run. */
+async function serialImplementer(call, repo) {
+  await call("foundry_run_start");
+  for (;;) {
+    const t = await call("foundry_task_next");
+    if (t.done) {
+      if (t.paused) return "paused";
+      break;
+    }
+    commitTask(repo, t.id, t.title, { [fileFor(t)]: `${t.id}\n` });
+    await call("foundry_task_done", { id: t.id, log: `did ${t.id}` });
+  }
+  writeFile(repo, "docs/HANDOFF.md", "# handoff\n");
+  await call("foundry_run_finish");
+  return "finished";
+}
+
+/** Stream implementers, interleaved one call at a time. Returns any conflict a finish reported. */
+async function streamImplementers(call, names) {
+  const st = Object.fromEntries(names.map((n) => [n, { phase: "start" }]));
+  let conflict = null;
+  while (Object.values(st).some((x) => x.phase !== "finished")) {
+    for (const [name, x] of Object.entries(st)) {
+      if (x.phase === "start") {
+        x.cwd = (await call("foundry_run_start", { stream: name })).cwd;
+        x.phase = "next";
+      } else if (x.phase === "next") {
+        const t = await call("foundry_task_next", { stream: name });
+        if (t.done) x.phase = "finish";
+        else {
+          commitTask(x.cwd, t.id, t.title, { [fileFor(t)]: `${t.id}\n` });
+          x.pending = t.id;
+          x.phase = "record";
+        }
+      } else if (x.phase === "record") {
+        await call("foundry_task_done", { stream: name, id: x.pending, log: `did ${x.pending}` });
+        x.phase = "next";
+      } else if (x.phase === "finish") {
+        const f = await call("foundry_stream_finish", { stream: name });
+        if (!f.merged) conflict = f;
+        x.phase = "finished";
+      }
+    }
+  }
+  return conflict;
+}
+
+/** go-flight's loop. Returns the sequence of stages it walked, with the streams of each wave. */
+async function fly(call, repo) {
+  const events = [];
+  for (let i = 0; i < 12; i++) {
+    const n = await call("foundry_next");
+    events.push(n.streams ? `${n.stage}[${n.streams.map((x) => x.stream).join("+")}]` : n.stage);
+    if (n.stage === "done" || n.stage === "halt") return events;
+    if (n.stage === "implement") {
+      if (n.streams) {
+        const conflict = await streamImplementers(call, n.streams.map((x) => x.stream));
+        if (conflict) return [...events, "conflict"];
+      } else await serialImplementer(call, repo);
+    } else if (n.stage === "review") {
+      writeFile(repo, "docs/REVIEW.md", `# Review\nRound: ${n.reviewRound}\n**Verdict**: APPROVED\n`);
+      await call("foundry_review_submit", { verdict: "APPROVED" });
+    } else if (n.stage === "summarize") {
+      writeFile(repo, "docs/SUMMARY.md", "# summary\n");
+      await call("foundry_summary_commit");
+    }
+  }
+  throw new Error(`the flight did not finish: ${events.join(" → ")}`);
+}
+
+const feedbackLines = (repo) => (hasFile(repo, ".foundry/feedback.jsonl") ? readFile(repo, ".foundry/feedback.jsonl").trim().split("\n").map((l) => JSON.parse(l)) : []);
+const flightRepo = (tasks, config = {}) => {
+  const repo = plannedRepo({ tasks, config: { verify: ["true"], policies: { pr: "none", push: false }, ...config } });
+  writeFile(repo, "OPERATOR_NOTES.md", "predates the flight\n"); // untracked, must survive
+  return repo;
+};
+
+const PARALLEL_PLAN = [
+  W("P0-01", ["package.json"]),
+  W("P0-02", ["docs/"]),
+  W("P1-01", ["src/api/a.txt"], { stream: "api" }),
+  W("P1-02", ["src/api/b.txt"], { stream: "api", depends: ["P1-01"] }),
+  W("P1-03", ["src/ui/a.txt"], { stream: "ui" }),
+  W("P1-04", ["src/ui/b.txt"], { stream: "ui" }),
+  W("P2-01", ["README.md"]),
+];
+const ALL_IDS = PARALLEL_PLAN.map((t) => t.id);
+
+// The whole flight, with a real wave.
+{
+  const repo = flightRepo(PARALLEL_PLAN);
+  await withServer(repo, async ({ call }) => {
+    const events = await fly(call, repo);
+    eq(events.join(" → "), "implement → implement[api+ui] → implement → review → summarize → done", "serial, then the wave's two streams, then serial again, then review, summary, done");
+
+    const prog = readFile(repo, "docs/PROGRESS.md");
+    for (const id of ALL_IDS) {
+      eq((prog.match(new RegExp(`^- \\[x\\] ${id} `, "m")) || []).length, 1, `${id} is done exactly once in PROGRESS.md`);
+      eq((prog.match(new RegExp(`^### ${id} — `, "gm")) || []).length, 1, `${id} has exactly one log entry`);
+    }
+    const history = git(repo, ["log", "--format=%s"]);
+    for (const id of ALL_IDS) like(history, new RegExp(`^${id}: Task ${id}$`, "m"), `${id}'s commit is on the build branch`);
+    eq(history.split("\n").filter((l) => l.startsWith("merge stream ")).sort().join("|"), "merge stream api (wave 1)|merge stream ui (wave 1)", "one merge commit per stream");
+    eq(git(repo, ["worktree", "list"]).split("\n").length, 1, "no worktrees are left");
+    eq(git(repo, ["branch", "--list", "*--*"]), "", "no stream branches are left");
+    for (const p of ["src/api/a.txt", "src/api/b.txt", "src/ui/a.txt", "src/ui/b.txt", "README.md"]) ok(hasFile(repo, p), `${p} is in the final tree`);
+    eq(git(repo, ["status", "--porcelain"]), "?? OPERATOR_NOTES.md", "the tree is clean apart from the operator's pre-existing file");
+    eq(readFile(repo, "OPERATOR_NOTES.md"), "predates the flight\n", "which the whole flight left untouched");
+    eq(feedbackLines(repo).length, 0, "a healthy parallel flight logs no friction");
+    eq(runGuard(repo), "", "and the guard has nothing to say");
+  });
+}
+
+// maxStreams 1: the same plan, serially, with no merges.
+{
+  const repo = flightRepo(PARALLEL_PLAN, { parallel: { maxStreams: 1 } });
+  await withServer(repo, async ({ call }) => {
+    const events = await fly(call, repo);
+    eq(events.join(" → "), "implement → review → summarize → done", "with maxStreams 1 one serial implementer does the whole plan");
+    const history = git(repo, ["log", "--format=%s"]);
+    eq(history.split("\n").filter((l) => l.startsWith("merge stream ")).length, 0, "and there are no merge commits");
+    for (const id of ALL_IDS) like(readFile(repo, "docs/PROGRESS.md"), new RegExp(`^- \\[x\\] ${id} `, "m"), `${id} is done`);
+    eq(feedbackLines(repo).length, 0, "nothing is logged: it was the operator's choice");
+  });
+}
+
+// A deliberately overlapping partition degrades to serial, and says so once.
+{
+  const overlapping = PARALLEL_PLAN.map((t) => (t.id === "P1-03" ? W("P1-03", ["src/api/a.txt"], { stream: "ui" }) : t));
+  const repo = flightRepo(overlapping);
+  await withServer(repo, async ({ call }) => {
+    const events = await fly(call, repo);
+    eq(events.join(" → "), "implement → review → summarize → done", "an invalid wave is worked serially by one implementer");
+    const fb = feedbackLines(repo);
+    eq(fb.length, 1, "exactly one feedback entry");
+    eq(fb[0].category, "stream-partition", "of category stream-partition");
+    like(fb[0].message, /P1-01 \(stream api\) and P1-03 \(stream ui\) both touch `src\/api\/a\.txt`/, "naming the conflict");
+    eq(git(repo, ["log", "--format=%s"]).split("\n").filter((l) => l === "chore: wave 1 runs serially").length, 1, "and one commit recording it");
+    for (const id of ALL_IDS) like(readFile(repo, "docs/PROGRESS.md"), new RegExp(`^- \\[x\\] ${id} `, "m"), `${id} is done`);
+  });
+}
+
+// A plan that ENDS with a wave: the flight still finishes through the handoff.
+{
+  const repo = flightRepo(PARALLEL_PLAN.slice(0, 6));
+  await withServer(repo, async ({ call }) => {
+    const events = await fly(call, repo);
+    eq(events.join(" → "), "implement → implement[api+ui] → implement → review → summarize → done", "a trailing wave is followed by a serial implementer that writes the handoff");
+    like(readFile(repo, "docs/PROGRESS.md"), /^- \[x\] P1-04 /m, "every wave task is done");
+  });
+}
+
+// Review of PR #6: a review-fix round that unblocks a task inside a stream.
+// The task keeps its {stream} tag, so the round re-opens that wave for just
+// the unblocked stream; the reviewer's own R-tasks stay serial after it.
+{
+  const repo = flightRepo(PARALLEL_PLAN);
+  await withServer(repo, async ({ call }) => {
+    // Round 0 by hand: serial, then the wave with api's first task blocked (its dependent skipped), then serial.
+    await serialImplementer(call, repo);
+    const a = await call("foundry_run_start", { stream: "api" });
+    await call("foundry_task_next", { stream: "api" });
+    await call("foundry_task_block", { stream: "api", id: "P1-01", reason: "needs an API that looks missing" });
+    eq((await call("foundry_task_next", { stream: "api" })).skipped.map((x) => x.id).join(","), "P1-02", "api's dependent is skipped");
+    await call("foundry_stream_finish", { stream: "api" });
+    await streamImplementers(call, ["ui"]);
+    eq(await serialImplementer(call, repo), "finished", "round 0 finishes");
+    void a;
+
+    writeFile(repo, "docs/REVIEW.md", "# Review\nRound: 1\n**Verdict**: CHANGES REQUESTED\n");
+    await call("foundry_review_submit", {
+      verdict: "CHANGES REQUESTED",
+      tasks: [{ title: "Tidy readme", goal: "tidy", files: ["README.md"], tests: "none", dependsOn: [] }],
+      unblock: [{ id: "P1-01", reason: "the API exists" }, { id: "P1-02", reason: "follows P1-01" }],
+    });
+    like(readFile(repo, "docs/PROGRESS.md"), /- \[ \] P1-01 Task P1-01 \{stream: api\}/, "the unblocked task keeps its stream tag");
+
+    const events = await fly(call, repo);
+    eq(events.join(" → "), "implement[api] → implement → review → summarize → done", "the fix round runs the unblocked stream alone, then the serial R-task, then finishes");
+    const prog = readFile(repo, "docs/PROGRESS.md");
+    for (const id of [...ALL_IDS, "R1-01"]) like(prog, new RegExp(`^- \\[x\\] ${id} `, "m"), `${id} ends done`);
+    eq(git(repo, ["worktree", "list"]).split("\n").length, 1, "no worktree is left behind");
   });
 }
 

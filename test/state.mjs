@@ -7,7 +7,7 @@ import path from "node:path";
 import {
   finish, ok, eq, like, isError,
   mkDir, specRepo, plannedRepo, withServer,
-  writeFile, setState, markTasks, git,
+  writeFile, readFile, setState, markTasks, git,
 } from "./harness.mjs";
 
 const ALL_DONE = { "P0-01": "x", "P0-02": "x", "P0-03": "x" };
@@ -40,8 +40,8 @@ await withServer(specRepo(), async ({ call }) => {
 
   await call("foundry_agents_sync");
   n = await call("foundry_next");
-  eq(n.agent, "foundry-planner", "once the file is on disk, next names the generated agent");
-  eq(n.agentFallback, true, "but this process created the agents directory itself, so fallback stays in effect");
+  eq(n.agentFallback, true, "this process created the agents directory itself, so fallback stays in effect");
+  eq(n.agent, "foundry:planner", "...and next names the plugin agent outright, not a generated one that cannot load yet (cleanflate F-22)");
   eq(n.restartRequired, false, "still no restart needed for an Anthropic-routed role");
 });
 
@@ -279,6 +279,10 @@ for (const [body, expected, label] of [
   ["# Review\nVerdict: CHANGES REQUESTED\n", "CHANGES REQUESTED", "plain verdict"],
   ["# Review\n**Verdict**: `APPROVED`\n", "APPROVED", "backticked verdict"],
   ["# Review\n**Verdict**: approved\n", "APPROVED", "lowercase verdict"],
+  ["# Review\nRound: 4\n**Verdict:** APPROVED\n", "APPROVED", "verdict with the colon inside the bold"],
+  ["# Review\n## Verdict\n\n**CHANGES REQUESTED**\n", "CHANGES REQUESTED", "verdict under its own heading"],
+  ["# Review\n- **Verdict:** `approved`\n", "APPROVED", "verdict in a list item"],
+  ["# Review\nThe verdict is pending; nothing is APPROVED yet.\n", null, "verdict word in prose"],
   ["# Review\nno verdict here\n", null, "missing verdict"],
 ]) {
   const repo = plannedRepo();
@@ -288,6 +292,29 @@ for (const [body, expected, label] of [
     eq(s.reviewVerdictInFile, expected, `status reads the ${label} from REVIEW.md`);
   });
 }
+
+// -------------------------------------------------------------- flight options (2026-09-30 cleanflate F-20)
+
+{
+  const repo = plannedRepo();
+  await withServer(repo, async ({ call }) => {
+    isError(await call("foundry_flight_options", {}), /pass at least one of maxRounds, maxRoundsHard/, "an empty options call is refused");
+    isError(await call("foundry_flight_options", { maxRounds: 0 }), /maxRounds must be a positive integer/, "a non-positive bound is refused");
+    const r = await call("foundry_flight_options", { maxRounds: 6, maxRoundsHard: 6 });
+    eq(JSON.stringify(r.before), JSON.stringify({ maxRounds: 3, maxRoundsHard: 6 }), "the previous bounds are reported");
+    eq(JSON.stringify(r.after), JSON.stringify({ maxRounds: 6, maxRoundsHard: 6 }), "...and the new ones");
+    eq(git(repo, ["log", "-1", "--format=%s"]), "chore: flight options (maxRounds=6, maxRoundsHard=6)", "the change is one commit");
+    const c = JSON.parse(readFile(repo, "docs/foundry.json"));
+    eq(c.maxRounds, 6, "docs/foundry.json carries the new bound");
+    eq(JSON.stringify(c.verify), JSON.stringify(["true"]), "...and keeps everything else");
+    const again = await call("foundry_flight_options", { maxRounds: 6 });
+    eq(again.commit, null, "applying the same options twice commits nothing");
+  });
+}
+
+await withServer(specRepo(), async ({ call }) => {
+  isError(await call("foundry_flight_options", { maxRoundsHard: 4 }), /does not exist yet[\s\S]*plan stage/, "options are refused before the plan exists");
+});
 
 // -------------------------------------------------------------- counts and config
 

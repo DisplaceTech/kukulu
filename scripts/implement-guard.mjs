@@ -34,6 +34,27 @@
 //      transcript: allow. A guard that cannot identify the stopping party
 //      must never guess block.
 //
+// Parallel streams (0.4.0) refine the block decision for the implementer:
+//
+//   5. `paused` in the lock: a serial implementer whose next open task belongs
+//      to a parallel wave was told, by foundry_task_next, to stop and let the
+//      flight controller hand the wave out. The MCP set the flag; the guard
+//      just honours it and allows the stop.
+//   6. A SubagentStop for the implementer whose *own* transcript
+//      (`agent_transcript_path` — never the parent's `transcript_path`, where
+//      sibling streams' calls can appear inline) shows a *last*
+//      `foundry_run_start` call that passed a `stream` is one stream's
+//      implementer: block only while *that stream* has open tasks
+//      (`{stream: <s>}` tags on the PROGRESS.md lines), never because another
+//      stream's tasks are open — a finished stream must not be held hostage
+//      by its siblings.
+//   7. If the stream cannot be determined (no agent transcript, no
+//      `foundry_run_start` call in it, or an unreadable one) and stream
+//      worktrees exist, a wave is
+//      in flight: allow. The controller's next foundry_next re-hands out any
+//      stream that stopped early, so this is an optimisation, not the only
+//      safety net. With no worktrees, the rules above apply unchanged.
+//
 // A hard cap on re-blocks (default 60, see FOUNDRY_GUARD_CAP or
 // docs/foundry.json's guardCap) still prevents a runaway. The counter
 // resets to zero on every task state change, so the cap bounds re-blocks
@@ -67,21 +88,23 @@ function parseInput(raw) {
 const RUN_START_TOOL = /^(?:mcp__.+__)?foundry_run_start$/;
 
 /**
- * Does the transcript at `transcriptPath` hold an assistant `tool_use` of
- * foundry_run_start? The transcript is JSONL; a line that does not parse is
- * skipped, and an unreadable file means no. `includeSidechain` says whether
- * entries logged inline for a subagent (`isSidechain: true`) count: they do
- * for a SubagentStop, where the subagent's calls are the point, and do not
- * for a Stop, where they belong to someone else.
+ * The `input` of every assistant `tool_use` of foundry_run_start in the
+ * transcript at `transcriptPath`, in order. The transcript is JSONL; a line
+ * that does not parse is skipped, and an unreadable file yields none.
+ * `includeSidechain` says whether entries logged inline for a subagent
+ * (`isSidechain: true`) count: they do for a SubagentStop, where the
+ * subagent's calls are the point, and do not for a Stop, where they belong to
+ * someone else.
  */
-function transcriptCalledRunStart(transcriptPath, { includeSidechain }) {
-  if (!transcriptPath) return false;
+function runStartCalls(transcriptPath, { includeSidechain }) {
+  if (!transcriptPath) return [];
   let raw;
   try {
     raw = fs.readFileSync(transcriptPath, "utf8");
   } catch {
-    return false;
+    return [];
   }
+  const calls = [];
   for (const line of raw.split("\n")) {
     if (!line.trim()) continue;
     let entry;
@@ -93,10 +116,14 @@ function transcriptCalledRunStart(transcriptPath, { includeSidechain }) {
     if (!includeSidechain && entry?.isSidechain === true) continue;
     const content = entry?.message?.content;
     if (!Array.isArray(content)) continue;
-    if (content.some((item) => item?.type === "tool_use" && typeof item.name === "string" && RUN_START_TOOL.test(item.name))) return true;
+    for (const item of content) {
+      if (item?.type === "tool_use" && typeof item.name === "string" && RUN_START_TOOL.test(item.name)) calls.push(item.input && typeof item.input === "object" ? item.input : {});
+    }
   }
-  return false;
+  return calls;
 }
+
+const transcriptCalledRunStart = (transcriptPath, opts) => runStartCalls(transcriptPath, opts).length > 0;
 
 /** Whether this stop belongs to the implementer, per the decision rule above. */
 function isImplementerStop(input) {
@@ -137,12 +164,17 @@ function writeLock(lockPath, lock, count) {
   fs.writeFileSync(lockPath, `${text}\n`);
 }
 
-/** Open-task count and the id to resume with, scanning only the `## Tasks` section. */
+/**
+ * Open-task count and the id to resume with, scanning only the `## Tasks`
+ * section, plus the same per stream: a PROGRESS.md line may end in a
+ * `{stream: <slug>}` tag.
+ */
 function openTasks(progressPath) {
   let inTasks = false;
   let open = 0;
   let inProgress = null;
   let todo = null;
+  const byStream = {};
   for (const line of fs.readFileSync(progressPath, "utf8").split("\n")) {
     if (/^## Tasks/.test(line)) {
       inTasks = true;
@@ -153,13 +185,29 @@ function openTasks(progressPath) {
       continue;
     }
     if (!inTasks) continue;
-    const m = line.match(/^- \[([ ~])\] (\S+)/);
+    const m = line.match(/^- \[([ ~])\] (\S+)(.*)$/);
     if (!m) continue;
     open++;
     if (m[1] === "~" && inProgress === null) inProgress = m[2];
     if (m[1] === " " && todo === null) todo = m[2];
+    const tag = m[3].match(/\{stream:\s*([a-z][a-z0-9-]{0,23})\}\s*$/);
+    if (tag) {
+      const st = (byStream[tag[1]] = byStream[tag[1]] || { open: 0, inProgress: null, todo: null });
+      st.open++;
+      if (m[1] === "~" && st.inProgress === null) st.inProgress = m[2];
+      if (m[1] === " " && st.todo === null) st.todo = m[2];
+    }
   }
-  return { open, next: inProgress || todo, stalled: inProgress };
+  return { open, next: inProgress || todo, stalled: inProgress, byStream };
+}
+
+/** Does any stream worktree exist under `.foundry/worktrees/`? A wave is in flight when one does. */
+function streamWorktreesExist(root) {
+  try {
+    return fs.readdirSync(path.join(root, ".foundry", "worktrees"), { withFileTypes: true }).some((d) => d.isDirectory());
+  } catch {
+    return false;
+  }
 }
 
 function main() {
@@ -170,12 +218,37 @@ function main() {
 
   if (!fs.existsSync(lockPath) || !fs.existsSync(progressPath)) return;
 
-  const { open, next, stalled } = openTasks(progressPath);
+  const { open, next, stalled, byStream } = openTasks(progressPath);
   if (open === 0) return;
 
   if (!isImplementerStop(input)) return;
 
   const lock = readLock(lockPath);
+  // Rule 5: parked at a wave boundary by foundry_task_next.
+  if (lock.json?.paused) return;
+
+  // Rules 6 and 7: a stream's implementer answers only for its own stream.
+  let stream = null;
+  if (input.hook_event_name === "SubagentStop") {
+    // Only the subagent's *own* transcript can say which stream it runs.
+    // `transcript_path` may be the parent's, where every stream's calls can
+    // appear inline, so its last foundry_run_start may be a sibling's — and
+    // blocking on a sibling's behalf would send a second implementer into the
+    // same stream. Without an agent transcript, no stream is attributed.
+    const calls = input.agent_transcript_path ? runStartCalls(input.agent_transcript_path, { includeSidechain: true }) : [];
+    if (calls.length) {
+      const last = calls[calls.length - 1];
+      stream = typeof last.stream === "string" && last.stream ? last.stream : null;
+    } else if (streamWorktreesExist(root)) {
+      return;
+    }
+  }
+  let scope = { open, next, stalled, label: "" };
+  if (stream) {
+    const mine = byStream[stream];
+    if (!mine || mine.open === 0) return;
+    scope = { open: mine.open, next: mine.inProgress || mine.todo, stalled: mine.inProgress, label: ` stream '${stream}'` };
+  }
   // The effective cap bounds re-blocks *since the last task state change*
   // (foundry_task_done / foundry_task_block / foundry_run_start all reset
   // the counter to zero), not the whole run — so a per-run cap set in
@@ -189,17 +262,19 @@ function main() {
     // Give up rather than loop forever; leave the lock so the orchestrator
     // sees it. Name the stalled task, if there is one in progress, so a
     // human knows exactly where to look.
-    const stuckOn = stalled ? ` stuck on ${stalled}` : "";
+    const stuckOn = scope.stalled ? ` stuck on ${scope.stalled}` : "";
     const recover = "block it by hand with foundry_task_block, or resume the flight and it will pick up where it stalled";
     process.stdout.write(
-      `${JSON.stringify({ systemMessage: `foundry: implement guard cap (${cap}) reached with ${open} open tasks${stuckOn}; run halted — ${recover}` })}\n`,
+      `${JSON.stringify({ systemMessage: `foundry: implement guard cap (${cap}) reached with ${scope.open} open tasks${scope.label}${stuckOn}; run halted — ${recover}` })}\n`,
     );
     return;
   }
 
-  const reason =
-    `foundry: implementation run is not finished — ${open} task(s) still open in docs/PROGRESS.md (next: ${next}). ` +
-    "Do not stop. Call foundry_task_next and continue; call foundry_run_finish only when foundry_status reports zero open tasks.";
+  const reason = stream
+    ? `foundry: stream '${stream}' is not finished — ${scope.open} task(s) of its still open in docs/PROGRESS.md (next: ${scope.next}). ` +
+      `Do not stop. Call foundry_task_next with stream: "${stream}" and continue; call foundry_stream_finish only when it reports done.`
+    : `foundry: implementation run is not finished — ${scope.open} task(s) still open in docs/PROGRESS.md (next: ${scope.next}). ` +
+      "Do not stop. Call foundry_task_next and continue; call foundry_run_finish only when foundry_status reports zero open tasks.";
   process.stdout.write(`${JSON.stringify({ decision: "block", reason })}\n`);
 }
 

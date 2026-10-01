@@ -152,7 +152,7 @@ const goFlight = read("skills/go-flight/SKILL.md");
 const fmGo = frontmatter(goFlight);
 const allowed = String(fmGo["allowed-tools"]).split(",").map((s) => s.trim());
 const toolNames = Array.from(serverSrc.matchAll(/name: "(foundry_[a-z_]+)"/g), (m) => m[1]);
-eq(toolNames.length, 15, "the server defines fifteen tools");
+eq(toolNames.length, 18, "the server defines eighteen tools");
 
 // Every stage agent's own tool set is explicit (F-16): no agent is left to
 // discover by trial and error what it is allowed to call.
@@ -190,12 +190,13 @@ for (const t of allowed.filter((a) => a.startsWith("mcp__"))) {
 }
 ok(
   allowed.every((a) => a === "Agent" || MCP_PREFIXES.some((p) => a.startsWith(p))),
-  "the flight controller is allowed nothing beyond Agent, the read-only foundry tools, agents_sync, and run_halt",
+  "the flight controller is allowed nothing beyond Agent, the read-only foundry tools, agents_sync, run_halt and flight_options",
 );
 ok(
-  // run_halt is the one deliberate exception: it records a clean halt reason
-  // when a stage cannot even be spawned, rather than leaving the flight to
-  // silently retry against whatever broke.
+  // run_halt is a deliberate exception: it records a clean halt reason when
+  // a stage cannot even be spawned, rather than leaving the flight to
+  // silently retry against whatever broke. flight_options is the other: it
+  // applies the operator's own go-flight options, never a judgment call.
   !allowed.some((a) => /run_start|task_|run_finish|review_submit|summary_commit/.test(a)),
   "the flight controller cannot touch the tools that change project state",
 );
@@ -208,6 +209,34 @@ ok(String(frontmatter(read("agents/reviewer.md")).tools).includes("mcp__plugin_f
   const reviewSkill = read("skills/review-build/SKILL.md");
   like(reviewSkill, /foundry_mutate/, "review-build tells the reviewer to mutation-test with foundry_mutate");
   ok(!reviewSkill.includes("git checkout -- <file>"), "review-build no longer tells the reviewer to hand-edit source and git checkout it");
+}
+// V4-06: the planner carves streams, and only where they are safe.
+{
+  const planSkill = read("skills/plan-build/SKILL.md");
+  like(planSkill, /## Parallel streams \(optional\)/, "plan-build has a Parallel streams section");
+  like(planSkill, /\*\*Stream:\*\* <slug>/, "...documenting the PLAN.md Stream field");
+  like(planSkill, /\{stream: <slug>\}/, "...and the PROGRESS.md suffix tag");
+  like(planSkill, /disjoint across the streams of a\s+wave/, "...the disjoint-files rule");
+  like(planSkill, /Keep shared-edit hotspots out of waves/, "...the hotspots rule");
+  like(planSkill, /package manifests and lockfiles/, "...naming the usual hotspots");
+  like(planSkill, /Phase-end tasks are always serial/, "...that phase-end tasks stay serial");
+  like(planSkill, /"exclusive": true/, "...the exclusive marker for port- or directory-bound commands");
+  like(planSkill, /`parallel\.setup`/, "...parallel.setup for a fresh worktree");
+  like(planSkill, /do not force them/, "...and that a fully serial plan is fine");
+  like(read("docs/writing-specs.md"), /Independent components parallelize/, "writing-specs.md tells spec authors how to help");
+}
+// V4-04: parallel waves.
+like(goFlight, /streams/, "go-flight describes the streams a parallel wave returns");
+like(goFlight, /in a single message/, "go-flight spawns a wave's streams in a single message so they run concurrently");
+like(goFlight, /every\*\* spawned stream has finished|all of\s+them have returned/, "go-flight waits for every stream before calling foundry_next again");
+like(goFlight, /Exactly one `foundry_next` result is in\s+flight at a time/, "go-flight's one-at-a-time rule is restated per foundry_next result");
+{
+  const implSkill = read("skills/implement/SKILL.md");
+  like(implSkill, /## Stream mode/, "the implement skill has a Stream mode section");
+  like(implSkill, /foundry_stream_finish/, "...naming foundry_stream_finish");
+  like(implSkill, /STREAM NOT\s+STARTED/, "...and telling a stream implementer to stop, not retry, when run_start refuses");
+  like(implSkill, /never `cd` out of `cwd`|`cd <cwd> &&`/, "...and telling the implementer to work only inside its cwd");
+  like(implSkill, /docs\/PROGRESS\.md`,\s+`docs\/PLAN\.md`,\s+`docs\/HANDOFF\.md`/, "...and to leave the shared files to the MCP");
 }
 like(goFlight, /agentModel/, "go-flight passes agentModel (an Agent-legal alias) on a fallback spawn");
 ok(!/`model: model`|and `model: model`/.test(goFlight), "go-flight no longer passes the raw routed model to the Agent tool (F-02)");
@@ -329,6 +358,11 @@ ok(read("skills/plan-build/SKILL.md").includes("templates/constraints.example.js
       ok(opsDoc.includes("`policies.push`"), "operations.md documents policies.push");
       ok(opsDoc.includes("`policies.pr`"), "operations.md documents policies.pr");
       ok(opsDoc.includes("`policies.feedback`"), "operations.md documents policies.feedback");
+      continue;
+    }
+    if (key === "parallel") {
+      ok(opsDoc.includes("`parallel.maxStreams`"), "operations.md documents parallel.maxStreams");
+      ok(opsDoc.includes("`parallel.setup`"), "operations.md documents parallel.setup");
       continue;
     }
     ok(opsDoc.includes(`\`${key}\``), `operations.md's config table documents '${key}'`);

@@ -34,7 +34,9 @@ calling it on a run already in progress is harmless.
 
 ## Per-task loop
 
-Repeat until `foundry_task_next` returns `{ done: true }`:
+Repeat until `foundry_task_next` returns `{ done: true }` — but see
+**Paused at a wave** just below: a `done` that carries `paused: true` is not
+the end of the plan.
 
 1. **Select.** Call `foundry_task_next`. It marks the task `[~]` and returns
    the task text, the log entries of the tasks it depends on, and any tasks it
@@ -57,11 +59,26 @@ Repeat until `foundry_task_next` returns `{ done: true }`:
 6. **Commit** with the template in CLAUDE.md: title `<ID>: <title>`, body with
    Goal / Tests / Interpretation / Measurement (if tuning) / Manual check.
    Stage only the files the task touched. Do not stage `docs/PROGRESS.md`.
+   Write the message to a file in your scratch space and commit with `git
+   commit -F <file>`, not `-m`: some projects run a hook that scans the
+   whole Bash command line for forbidden words, and a commit message that
+   only *mentions* one is then denied along with the commit.
 7. **Record.** Call `foundry_task_done` with the task ID and a log entry
    (under 15 lines): tests added, any Interpretation choices, config keys
    introduced, anything a later task or the reviewer must know. The tool marks
    the task `[x]`, stamps the commit sha, and commits PROGRESS.md.
 8. Go to step 1. Do not summarise, do not ask, do not stop.
+
+## Paused at a wave
+
+If `foundry_task_next` returns `{ done: true, paused: true, wave, streams,
+message }`, everything you can do serially is finished and the next open task
+belongs to a parallel wave. The flight controller hands the wave's streams to
+other implementers next. **Stop.** Do not write `docs/HANDOFF.md`, do not call
+`foundry_run_finish`, and do not go on to "Finishing": the plan is not
+finished. Print one line starting `PAUSED FOR WAVE` with the wave number. The
+guard hook lets you stop; the flight controller resumes serial work, if any,
+once the wave is merged.
 
 ## Phase-end tasks
 
@@ -110,6 +127,44 @@ workaround — call `foundry_feedback_log` with `stage: "implement"` right
 then. Do not save it up for `docs/HANDOFF.md`: this entry has to survive a
 run that never reaches `foundry_run_finish`.
 
+## Stream mode
+
+Your prompt may instead name one **stream** of a parallel wave ("Run the
+Foundry implement stage for stream `<s>` of wave `<n>`"). Other implementers
+are working on the other streams at the same time, in their own worktrees;
+everything above still applies, with these changes:
+
+- **Setup.** Call `foundry_run_start` with `stream: "<s>"`. It returns a
+  `cwd`: the absolute path of your own git worktree, already set up. Work
+  only there. If it refuses instead — the stream is no longer available, or
+  its setup failed and the wave now runs serially — do not retry and do not
+  work around it: print its message on one line starting `STREAM NOT
+  STARTED` and stop. The flight controller's next `foundry_next` decides what
+  runs instead.
+- **Absolute paths under `cwd`.** Every Read, Write and Edit uses an
+  absolute path under `cwd`. Every Bash command starts with `cd <cwd> &&`,
+  because your shell does not stay in it. Never read or edit files in the
+  main checkout, and never `cd` out of `cwd` to run git.
+- **Pass `stream` on every call.** `foundry_task_next`, `foundry_task_done`,
+  `foundry_task_block` and `foundry_verify` each take `stream: "<s>"`. Without
+  it they refuse, or would act on the main checkout.
+- **The MCP owns the shared files.** Never touch `docs/PROGRESS.md`,
+  `docs/PLAN.md`, `docs/HANDOFF.md` or anything under `.foundry/`. Your
+  worktree's copies of them are stale by design. Stage only the task's own
+  files.
+- **No handoff.** You do not write `docs/HANDOFF.md`, and you do not call
+  `foundry_run_finish`: another implementer does, after every stream is
+  merged. Put your Interpretation choices in your `foundry_task_done` log
+  entries, since that is the only place the handoff writer will find them.
+- **Finishing.** When `foundry_task_next` returns `{ done: true }` for your
+  stream, call `foundry_stream_finish` with `stream: "<s>"`. It merges your
+  branch into the build branch and removes your worktree. If it reports a
+  merge conflict, the flight is halted for a human: print what it returned
+  and stop. Then print one line starting `STREAM DONE` with the stream name
+  and the counts of done and blocked tasks.
+- Blocking works the same way, in your worktree only: `foundry_task_block`
+  with your `stream`.
+
 ## Constraints you may not relax
 
 Everything under `## Constraints` in `CLAUDE.md`, on every task. SPEC.md wins
@@ -131,7 +186,7 @@ over PLAN.md wins over code comments.
 
 ## Finishing
 
-When `foundry_task_next` returns `{ done: true }`:
+When `foundry_task_next` returns `{ done: true }` *without* `paused`:
 
 1. Call `foundry_verify` with no files. If anything is red, fix it in a commit
    titled `chore: final green` and re-run.

@@ -257,7 +257,7 @@ const cfgDir = () => mkDir("foundry-cfg-");
     await call("foundry_agents_sync");
 
     n = await call("foundry_next");
-    eq(n.agent, "foundry-implementer", "after sync, the generated agent name is used");
+    eq(n.agent, "foundry:implementer", "after this process's own first sync, the plugin agent is still named: the new directory loads next session");
     eq(n.model, modelBefore, "the resolved model is unchanged by sync");
 
     s = await call("foundry_status");

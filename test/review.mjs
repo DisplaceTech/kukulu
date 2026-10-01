@@ -158,11 +158,14 @@ const FIX = {
     eq(r.round, 1, "changes requested opens the next round");
     eq(r.fixTasks.join(","), "R1-01,R1-02", "fix tasks are numbered and zero-padded");
     eq(r.unblocked.join(","), "P0-02", "unblocked tasks are reported");
+    eq(r.reopenedDependents.join(","), "P0-03", "the task skipped because of it is reopened with it (cleanflate F-05)");
     eq(r.halted, null, "a round inside the cap does not halt the flight");
     // F-03: the returned counts describe PROGRESS.md as this call left it —
-    // two new fix tasks and one unblocked task — not as it was before.
-    eq(r.counts.todo, 3, "the returned counts include the unblocked task and both new fix tasks");
-    eq(r.counts.open, 3, "...as open");
+    // two new fix tasks, one unblocked task and its reopened dependent — not
+    // as it was before.
+    eq(r.counts.todo, 4, "the returned counts include the unblocked task, its dependent and both new fix tasks");
+    eq(r.counts.open, 4, "...as open");
+    eq(r.counts.skipped, 0, "...and nothing is left skipped");
     eq(r.counts.blocked, 0, "...and the unblocked task is no longer blocked");
     eq(r.counts.total, 5, "...and total includes the new tasks");
     eq(subject(repo), "review: round 1", "the round is one commit");
@@ -176,11 +179,12 @@ const FIX = {
     like(plan, /### R1-01[\s\S]*\*\*Depends on:\*\* none/, "a fix task with no dependencies says none");
 
     const prog = readFile(repo, "docs/PROGRESS.md");
-    like(prog, /- \[ \] P0-02 Impossible task\n- \[-\] P0-03[^\n]*\n- \[ \] R1-01 Fix hello\n- \[ \] R1-02 Second fix\n\n## Log/, "fix tasks are appended to Tasks, above the Log");
+    like(prog, /- \[ \] P0-02 Impossible task\n- \[ \] P0-03[^\n]*\n- \[ \] R1-01 Fix hello\n- \[ \] R1-02 Second fix\n\n## Log/, "fix tasks are appended to Tasks, above the Log");
     like(prog, /### P0-02 — unblocked \(round 1\)\nthe API does exist; see SPEC §6/, "the unblock reason is logged");
+    like(prog, /### P0-03 — unblocked \(round 1\)\nreopened: it was skipped because of P0-02, which is open again/, "the dependent's reopening is logged with its cause");
 
     const s = await call("foundry_status");
-    eq(s.counts.open, 3, "the unblocked task and both fixes are open");
+    eq(s.counts.open, 4, "the unblocked task, its dependent and both fixes are open");
     eq(s.reviewRoundsInPlan, 1, "status counts the review sections in PLAN.md");
     eq(s.state.verdict, "CHANGES REQUESTED", "the verdict is persisted");
 
@@ -193,6 +197,7 @@ const FIX = {
     eq(first.id, "P0-02", "the unblocked task is picked up again");
     await call("foundry_task_block", { id: "P0-02", reason: "still blocked / same error / needs a spec change" });
     const fix = await call("foundry_task_next");
+    eq(fix.skipped.map((x) => x.id).join(","), "P0-03", "a reopened dependent whose blocker blocks again is skipped again");
     eq(fix.id, "R1-01", "the fix task is next");
     like(fix.text, /hello must actually greet/, "the fix task's text is readable from PLAN.md");
     eq(fix.files, "hello.txt", "the fix task's files parse back out");
@@ -330,14 +335,16 @@ async function driveRounds(call, repo, counts) {
 
     const r = await call("foundry_review_submit", { verdict: "APPROVED" });
     eq(r.verdict, "APPROVED", "the approval is recorded");
-    eq(r.round, 0, "approving does not open a new round");
+    eq(r.round, 1, "an approval reports the round it was stamped with, like a change request (cleanflate F-21)");
+    eq(r.fixRounds, 0, "...and separately, that no fix round was opened");
     eq(subject(repo), "review: round 1 approved", "approval is its own commit");
 
     const n = await call("foundry_next");
     eq(n.stage, "summarize", "approval hands off to the summarizer");
 
     const sum = await call("foundry_summary_commit");
-    eq(sum.rounds, 0, "the summary reports how many rounds it took");
+    eq(sum.reviews, 1, "the summary reports how many reviews it took");
+    eq(sum.fixRounds, 0, "...and how many fix rounds");
     eq(subject(repo), "chore: build summary", "the summary is committed");
     like(sum.branch, /^build\//, "the summary reports the branch a human has to merge");
     eq(git(repo, ["status", "--porcelain"]), "", "the flight ends with a clean tree");
@@ -466,6 +473,50 @@ const untouched = (repo, head) => {
     eq(r.killed, true, "a timeout counts as the mutation being noticed");
     eq(readFile(repo, "src/add.mjs"), ADD_SRC, "the file is restored after a timeout");
     untouched(repo, head);
+  });
+}
+
+// Residue (2026-09-30 cleanflate F-10, F-14): a killed mutant's suite may
+// rewrite a tracked file or leave a new untracked one; mutate undoes both,
+// and never touches what was already dirty or untracked before it ran.
+{
+  const repo = mutationRepo({ config: { verify: ["echo seed >> tests/regressions.txt; echo seed > tests/new.regressions; node test/add.test.mjs"] } });
+  writeFile(repo, "tests/regressions.txt", "# seeds\n");
+  writeFile(repo, "notes.md", "tracked note\n");
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-qm", "regressions file"]);
+  writeFile(repo, "notes.md", "a reviewer's uncommitted edit\n");
+  writeFile(repo, "scratch.txt", "already untracked\n");
+  await withServer(repo, async ({ call }) => {
+    const r = await call("foundry_mutate", { file: "src/add.mjs", find: "a + b", replace: "a - b" });
+    eq(r.killed, true, "the mutant is killed");
+    eq(JSON.stringify(r.restored), JSON.stringify(["tests/regressions.txt"]), "the tracked file the suite rewrote is reported restored");
+    eq(JSON.stringify(r.removed), JSON.stringify(["tests/new.regressions"]), "the untracked file the suite created is reported removed");
+    eq(readFile(repo, "tests/regressions.txt"), "# seeds\n", "the tracked file is back to HEAD");
+    ok(!hasFile(repo, "tests/new.regressions"), "the new untracked file is gone");
+    eq(readFile(repo, "notes.md"), "a reviewer's uncommitted edit\n", "a tracked file that was already dirty is left alone");
+    eq(readFile(repo, "scratch.txt"), "already untracked\n", "a file that was already untracked is left alone");
+  });
+}
+
+// A per-call timeout only ever shortens the configured one (cleanflate F-06).
+{
+  const repo = mutationRepo({ config: { verify: [{ cmd: "sleep 30", timeoutMs: 600000 }] } });
+  await withServer(repo, async ({ call }) => {
+    const t0 = Date.now();
+    const r = await call("foundry_mutate", { file: "src/add.mjs", find: "a + b", replace: "a * b", timeoutMs: 400 });
+    ok(Date.now() - t0 < 15_000, "timeoutMs cuts a hanging mutant short");
+    eq(r.results[0].timedOut, true, "...reported as a timeout");
+    eq(r.results[0].timeoutMs, 400, "...with the shortened timeout");
+    eq(readFile(repo, "src/add.mjs"), ADD_SRC, "...and the file is restored");
+    isError(await call("foundry_mutate", { file: "src/add.mjs", find: "a + b", replace: "a * b", timeoutMs: 0 }), /timeoutMs must be a positive integer/, "a non-positive timeoutMs is refused");
+  });
+}
+{
+  const repo = mutationRepo({ config: { verify: [{ cmd: "node test/add.test.mjs", timeoutMs: 1000 }] } });
+  await withServer(repo, async ({ call }) => {
+    const r = await call("foundry_mutate", { file: "src/add.mjs", find: "a + b", replace: "a - b", timeoutMs: 999999 });
+    eq(r.results[0].timeoutMs, 1000, "timeoutMs never raises a configured timeout");
   });
 }
 
