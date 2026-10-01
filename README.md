@@ -428,4 +428,5 @@ in it maps to a task in [`docs/plans/v0.3.md`](./docs/plans/v0.3.md).
 
 ## License
 
-[MIT](./LICENSE).
+[Apache License 2.0](./LICENSE), from 0.4.0 on; see also [NOTICE](./NOTICE).
+Releases 0.3.x and earlier remain available under the MIT License.

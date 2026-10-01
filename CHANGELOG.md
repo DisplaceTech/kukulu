@@ -80,6 +80,14 @@ suite passes unchanged.
   its `{stream}` tag, so a fix round re-runs just that stream in its own
   worktree before the serial fix tasks.
 
+### License
+
+- Relicensed from MIT to Apache License 2.0. Releases 0.3.x and earlier
+  remain available under MIT. A `NOTICE` file is added, and
+  `package.json`, `.claude-plugin/plugin.json` and the marketplace entry
+  carry `"license": "Apache-2.0"`. Contributions are accepted under Apache
+  2.0 (inbound = outbound; see `CONTRIBUTING.md`).
+
 ## [0.3.2] — 2026-09-23
 
 Fixes from the first real flight on 0.3.1

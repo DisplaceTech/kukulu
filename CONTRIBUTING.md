@@ -119,3 +119,10 @@ is clean and `npm test` passes, CI will agree.
 `package.json`, `.claude-plugin/plugin.json` and the `VERSION` constant in
 `mcp/server.mjs` must agree; the `plugin` suite fails if they drift. Bump all
 three, add a `CHANGELOG.md` entry, and tag.
+
+## License
+
+Foundry is licensed under the [Apache License 2.0](./LICENSE) from 0.4.0
+on. Contributions are accepted under the same license (inbound = outbound):
+by submitting a contribution you agree it is licensed under Apache 2.0, as
+section 5 of the license describes, with no additional terms.
