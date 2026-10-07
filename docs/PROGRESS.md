@@ -35,7 +35,7 @@ Started: 2026-10-07T17:30:53.739Z
 - [x] P3-06 Phase 3 end: push for the draft PR and record the manual check
 - [x] R1-01 commitStaged rolls back its own signing fallback when the unsigned retry fails
 - [x] R1-02 Tests for four mcp/server.mjs mechanics that survive mutation
-- [ ] R1-03 Agent tool contracts and README routing defaults are asserted
+- [x] R1-03 Agent tool contracts and README routing defaults are asserted
 
 ## Log
 
@@ -130,3 +130,6 @@ commitStaged snapshots state.json, feedback.jsonl and local commit.gpgsign befor
 
 ### R1-02 — 8640e32
 Added tests for mutants (a)-(d) in test/review.mjs and test/state.mjs; each confirmed failing against its mutant, server.mjs restored. Interpretation: (c) drives 12 equal-count rounds with maxRounds 11 (rounds 2-12 non-converging). (d) uses a global fake-signer config so the finalize commit is signed.
+
+### R1-03 — 2f95667
+test/plugin.mjs asserts planner/summarizer MCP tools and README agent defaults (model, effort) vs agents/*.md. README lines fixed (opus summarizer; reflowed so patterns match on one line); routing.md "(unchanged)" became "(the default)".
