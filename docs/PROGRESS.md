@@ -7,7 +7,7 @@ Started: 2026-10-07T17:30:53.739Z
 
 - [x] P1-01 Opus routing defaults, and flight artifacts out of the plugin's own checks
 - [x] P1-02 One commit helper with a bounded, prompt-free unsigned fallback
-- [ ] P1-03 Snapshot and restore around every writing tool
+- [x] P1-03 Snapshot and restore around every writing tool
 - [ ] P1-04 foundry_summary_commit writes SUMMARY.md from content
 - [ ] P1-05 from: constraints and commands that activate at a task
 - [ ] P1-06 Targeted mutation commands
@@ -43,3 +43,6 @@ Agents/template/README/docs now opus for planner, reviewer, summarizer. Tests: r
 
 ### P1-02 — bba9c9b
 Added commitStaged + SIGNING_TIMEOUT_MS in server.mjs; gitCommitIfChanged takes {stage}. Auto: sets local gpgsign false, state.signing/signingOverride, one "signing" feedback entry, retries unsigned in the same commit. Required: ToolError. startRun sets signingOverride on failed probe only. Tests in test/implement.mjs (S-02 section). Docs updated (mcp-tools intro, operations signing row).
+
+### P1-03 — 319a41e
+withRollback(paths, fn) added; wraps startRun, taskDone, taskBlock (progress write only), taskReopen, runFinish (handoff commit and state commit separately), flightOptions, runHalt, summaryCommit, reviewSubmit (both verdict branches). Tests: review_submit rollback + retry, task_done and flight_options rollback via commit-msg hook. Later writing tools must reuse withRollback. Docs: mcp-tools intro and review_submit section.
