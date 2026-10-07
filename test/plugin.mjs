@@ -123,6 +123,20 @@ for (const name of ["plan-build", "implement"]) {
 }
 
 {
+  const pb = read("skills/plan-build/SKILL.md");
+  like(pb, /foundry_plan_commit/, "plan-build commits through foundry_plan_commit (project-d F-03)");
+  ok(!pb.includes("Commit PLAN.md, PROGRESS.md, foundry.json and CLAUDE.md as"), "...and no longer tells the planner to commit by hand");
+  like(pb, /renumber: true/, "plan-build renumbers with renumber: true (project-c F-07)");
+  like(pb, /"from": "<that task's id>"/, "plan-build gates late rules with from (project-d F-01)");
+  like(pb, /test ! -f X \|\| bash X/, "...and forbids the test-or-skip guard");
+  like(pb, /## Flight <slug> notes/, "plan-build caps only its own flight section of an existing CLAUDE.md (project-c F-20)");
+  like(pb, /60 lines/, "...at 60 lines");
+  like(pb, /strayArtifacts/, "plan-build regenerates stray artifacts (project-c F-04)");
+  like(pb, /mutation\.targeted/, "plan-build fills mutation.targeted");
+  like(pb, /"flight"/, "...and sets flight");
+}
+
+{
   const rb = read("skills/review-build/SKILL.md");
   like(rb, /targeted: <name>/, "review-build prefers targeted mutation commands (project-c F-12)");
   like(rb, /mutation\.targeted/, "...when the config has them");
