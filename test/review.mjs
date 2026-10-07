@@ -4,6 +4,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 import {
   finish, ok, eq, like, isError,
   plannedRepo, withServer, readFile, writeFile, subject, hasFile,
@@ -926,6 +927,100 @@ for (const [verify, want] of [["err", 0], ["bad", 2]]) {
     if (want === 0) eq(r.unsigned, 0, "E counts as signed");
     else ok(r.unsigned >= want, "B does not: every signed commit counts as unsigned");
   }, { env: { ...opts.env, FAKE_GPG_VERIFY: verify } });
+}
+
+/** Global git config holding a working fake signer, so the server (and nothing else) sees signing on. */
+function fakeSignerGlobal(gpg) {
+  const file = path.join(path.dirname(gpg), "gitconfig");
+  fs.writeFileSync(file, `[commit]\n\tgpgsign = true\n[gpg]\n\tformat = openpgp\n\tprogram = ${gpg}\n[user]\n\tsigningkey = 0123456789ABCDEF\n`);
+  return file;
+}
+
+/** An unsigned build/x branch with a --no-ff merge in it, summarized, awaiting signing. */
+function resignRepo({ extraState = {} } = {}) {
+  const f = finalizeRepo({ signed: false });
+  const { repo } = f;
+  git(repo, ["config", "--local", "commit.gpgsign", "false"]);
+  git(repo, ["checkout", "-q", "-b", "side"]);
+  writeFile(repo, "side.txt", "s\n");
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-qm", "P0-02: side"]);
+  git(repo, ["checkout", "-q", "build/x"]);
+  writeFile(repo, "main.txt", "m\n");
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-qm", "P0-03: main"]);
+  git(repo, ["merge", "-q", "--no-ff", "-m", "merge side", "side"]);
+  setState(repo, { awaitingSigning: { unsigned: 3, first: "abc1234", since: "2026-01-01T00:00:00Z" }, signingOverride: true, signing: "off (probe failed: x)", breaking: false, ...extraState });
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-qm", "chore: awaiting signing"]);
+  git(repo, ["push", "-q", "-u", "origin", "build/x"]);
+  return f;
+}
+
+{
+  // resign re-signs the branch and finalizes
+  const { repo, ghDir, opts } = resignRepo();
+  const gpg = mkFakeGpg();
+  const globalCfg = fakeSignerGlobal(gpg);
+  const mb = git(repo, ["merge-base", "main", "HEAD"]);
+  await withServer(repo, async ({ call }) => {
+    const r = await call("foundry_pr_finalize", { breaking: false, resign: true });
+    eq(r.resigned, true, "resign re-signs the branch and finalizes");
+    const log = git(repo, ["-c", `gpg.program=${gpg}`, "log", "--format=%G?", `${mb}..HEAD`]).split("\n").filter(Boolean);
+    ok(log.length > 0 && log.every((x) => x !== "N" && x !== "B"), "...every commit since the merge base is signed");
+    const merges = git(repo, ["log", "--merges", "--format=%P", `${mb}..HEAD`]).split("\n").filter(Boolean);
+    ok(merges.length === 1 && merges[0].split(" ").length === 2, "...the merge commit still has two parents");
+    eq(spawnSync("git", ["config", "--local", "commit.gpgsign"], { cwd: repo, encoding: "utf8" }).stdout.trim(), "", "...the local commit.gpgsign override is unset");
+    const st = JSON.parse(readFile(repo, ".foundry/state.json"));
+    ok(st.signing === "on" && st.awaitingSigning === undefined && st.signingOverride === undefined, "...state is signing on, with no awaiting or override");
+    eq(git(repo, ["rev-parse", "origin/build/x"]), git(repo, ["rev-parse", "HEAD"]), "...origin's branch equals local HEAD");
+    ok(ghCalls(ghDir).some((c) => c.startsWith("pr ready")), "...and the pull request was marked ready");
+  }, { env: { ...opts.env, GIT_CONFIG_GLOBAL: globalCfg } });
+}
+
+{
+  const { repo, opts } = resignRepo();
+  const gpg = mkFakeGpg();
+  const env = { ...opts.env, GIT_CONFIG_GLOBAL: fakeSignerGlobal(gpg) };
+  const head = git(repo, ["rev-parse", "HEAD"]);
+  const localCfg = () => spawnSync("git", ["config", "--local", "commit.gpgsign"], { cwd: repo, encoding: "utf8" }).stdout.trim();
+  await withServer(repo, async ({ call }) => {
+    writeFile(repo, "dirty.txt", "x");
+    isError(await call("foundry_pr_finalize", { breaking: false, resign: true }), /working tree is not clean/, "resign refuses a dirty tree");
+    fs.rmSync(path.join(repo, "dirty.txt"));
+    isError(await call("foundry_pr_finalize", { breaking: false, resign: "yes" }), /resign must be a boolean/, "...and a non-boolean resign");
+    git(repo, ["checkout", "-q", "-B", "main"]);
+    isError(await call("foundry_pr_finalize", { breaking: false, resign: true }), /on the base branch/, "...and the base branch");
+    git(repo, ["checkout", "-q", "build/x"]);
+    eq(git(repo, ["rev-parse", "HEAD"]), head, "refusals leave HEAD unchanged");
+    eq(localCfg(), "false", "...and the local config unchanged");
+  }, { env });
+}
+
+{
+  // a failing probe puts the override back
+  const { repo, opts } = resignRepo();
+  const gpg = mkFakeGpg();
+  const globalCfg = fakeSignerGlobal(gpg);
+  git(repo, ["config", "--local", "gpg.program", "/nonexistent-signing-agent"]);
+  await withServer(repo, async ({ call }) => {
+    isError(await call("foundry_pr_finalize", { breaking: false, resign: true }), /signing probe failed/, "a failing probe refuses resign");
+    eq(git(repo, ["config", "--local", "commit.gpgsign"]), "false", "...and puts the local override back");
+  }, { env: { ...opts.env, GIT_CONFIG_GLOBAL: globalCfg } });
+}
+
+{
+  // a failing rebase is aborted
+  const { repo, opts } = resignRepo();
+  const gpg = mkFakeGpg({ failAfter: 1 });
+  const globalCfg = fakeSignerGlobal(gpg);
+  const head = git(repo, ["rev-parse", "HEAD"]);
+  await withServer(repo, async ({ call }) => {
+    isError(await call("foundry_pr_finalize", { breaking: false, resign: true }), /re-signing failed/, "a failing rebase refuses resign");
+    ok(!hasFile(repo, ".git/rebase-merge") && !hasFile(repo, ".git/rebase-apply"), "...the rebase is aborted");
+    eq(git(repo, ["rev-parse", "HEAD"]), head, "...HEAD is unchanged");
+    eq(git(repo, ["config", "--local", "commit.gpgsign"]), "false", "...and the override is back");
+  }, { env: { ...opts.env, GIT_CONFIG_GLOBAL: globalCfg } });
 }
 
 {

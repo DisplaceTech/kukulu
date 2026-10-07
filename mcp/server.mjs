@@ -2817,7 +2817,7 @@ function finalizeConfig(st) {
   return cfg();
 }
 
-function prFinalize({ breaking } = {}) {
+function prFinalize({ breaking, resign } = {}) {
   const st = loadState();
   let summarized = st.summarized === true;
   if (!summarized && st.archived) {
@@ -2829,6 +2829,7 @@ function prFinalize({ breaking } = {}) {
   }
   if (!summarized) throw new ToolError("the summary is not committed yet; call foundry_summary_commit first, then foundry_pr_finalize");
   if (breaking !== undefined && typeof breaking !== "boolean") throw new ToolError("breaking must be a boolean");
+  if (resign !== undefined && typeof resign !== "boolean") throw new ToolError("resign must be a boolean");
   const brk = breaking !== undefined ? breaking : st.breaking;
   if (typeof brk !== "boolean") throw new ToolError("breaking is required on the first call: pass true or false");
   const cc = finalizeConfig(st);
@@ -2859,6 +2860,53 @@ function prFinalize({ breaking } = {}) {
       push: pushBranch(branch, cc.policies.push), pr: prState(cc.policies, cc.baseBranch), next: nextSteps(mb),
     };
   };
+
+  let resigned = false;
+  let resignPush;
+  if (resign === true) {
+    const dirty = porcelainExcludingPreexisting(st.preexistingUntracked);
+    if (dirty.length) throw new ToolError(`the working tree is not clean:\n${dirty.join("\n")}\nCommit or discard these before re-signing; the rebase needs a clean tree.`);
+    if (branch === cc.baseBranch) throw new ToolError(`on the base branch '${cc.baseBranch}'; check out the build branch before re-signing`);
+    // A run that fell back to unsigned commits left commit.gpgsign false
+    // locally; the probe and the rebase must see the operator's own setting.
+    const hadOverride = st.signingOverride === true;
+    if (hadOverride) git(["config", "--local", "--unset", "commit.gpgsign"], { allowFail: true });
+    const putOverrideBack = () => {
+      if (hadOverride) git(["config", "--local", "commit.gpgsign", "false"]);
+    };
+    try {
+      probeSigning("required");
+    } catch (e) {
+      putOverrideBack();
+      throw e;
+    }
+    const rb = spawnSync("git", ["rebase", "-f", "--rebase-merges", "--gpg-sign", mb], {
+      cwd: ROOT,
+      encoding: "utf8",
+      timeout: cc.commandTimeoutMs,
+      env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+    });
+    if (rb.status !== 0 || rb.error) {
+      git(["rebase", "--abort"], { allowFail: true });
+      putOverrideBack();
+      const why = (rb.stderr || rb.stdout || rb.error?.message || "git rebase failed").trim().split("\n").slice(0, 3).join(" | ");
+      throw new ToolError(`re-signing failed: ${why}. The rebase was aborted and the branch is as it was.`);
+    }
+    delete st.signingOverride;
+    const check = signedCheck(mb);
+    if (check.unsigned) {
+      throw new ToolError(`${check.unsigned} commit(s) are still unsigned after the rebase, the oldest ${String(check.first).slice(0, 7)}. The rewritten branch has been left as it is; check the signing agent and try again.`);
+    }
+    if (!cc.policies.push) resignPush = "skipped: policy";
+    else if (!gitFacts().hasOrigin) resignPush = "skipped: no origin remote";
+    else {
+      const p = git(["push", "--force-with-lease", "origin", branch], { allowFail: true });
+      resignPush = p.ok ? "pushed" : `failed: ${(p.err || p.out || "unknown error").split("\n")[0]}`;
+    }
+    delete st.awaitingSigning;
+    st.signing = "on";
+    resigned = true;
+  }
 
   const before = signedCheck(mb);
   if (before.unsigned) return awaiting(before);
@@ -2901,7 +2949,7 @@ function prFinalize({ breaking } = {}) {
   }
   return {
     signed: after.signed, unsigned: 0, ready: typeof pr === "object" ? pr.draft === false : false, merge, breaking: brk,
-    awaitingSigning: null, resigned: false, push, pr,
+    awaitingSigning: null, resigned, ...(resignPush !== undefined ? { resignPush } : {}), push, pr,
   };
 }
 
@@ -3286,7 +3334,7 @@ const TOOLS = [
   },
   { name: "foundry_summary_commit", description: "Write docs/SUMMARY.md from `content` (preferred) or commit the file already on disk, and mark the flight complete. Only valid after an APPROVED review. Returns { commit, branch, base, head, reviews, fixRounds, push, pr, archive }; archive is the policies.archive setting (true means call foundry_flight_archive next); pr is the branch's pull request ({ url, state, draft, base }) or \"none\", \"skipped: policy\" or \"unknown: <why>\".", inputSchema: S({ content: { type: "string", description: "the full text of docs/SUMMARY.md; the tool writes the file itself, so never Write it yourself" } }), fn: summaryCommit },
   { name: "foundry_flight_archive", description: "Archive a summarized flight so the repository can run its next flight: move PLAN, PROGRESS, HANDOFF, REVIEW, SUMMARY, foundry.json, .foundry/state.json and .foundry/feedback.jsonl into docs/flights/<slug>/ (copying SPEC.md, which stays), write a fresh state.json, commit 'chore: archive flight <slug>' and push per policy. slug defaults to the 'flight' key in docs/foundry.json. Refused unless the flight is summarized, no run is armed, and the tree is clean. All-or-nothing. Returns { slug, dir, moved, copied, commit, push }.", inputSchema: S({ slug: { type: "string", description: "lowercase letters, digits and - (at most 40 characters); defaults to docs/foundry.json's flight" } }), fn: flightArchive },
-  { name: "foundry_pr_finalize", description: "End a flight. Checks that every commit since the merge base with baseBranch is signed (judged from the commits, not from state): if so, marks the draft PR ready and, unless breaking is true, enables auto-merge (gh pr merge --auto, never an immediate merge), per policies.finalize and policies.mergeMethod. If any commit is unsigned the PR stays a draft, state.awaitingSigning is recorded, the steps are appended to SUMMARY.md, and foundry_next reports done until it is resolved. breaking is required on the first call. Returns { signed, unsigned, ready, merge, breaking, awaitingSigning, resigned, push, pr, next? }; merge is enabled, skipped: breaking, skipped: policy, skipped: no pull request, skipped: awaiting signing or unavailable: <why>.", inputSchema: S({ breaking: { type: "boolean", description: "whether this flight is a breaking change, so its PR must not auto-merge; required on the first call, remembered after" } }), fn: prFinalize },
+  { name: "foundry_pr_finalize", description: "End a flight. Checks that every commit since the merge base with baseBranch is signed (judged from the commits, not from state): if so, marks the draft PR ready and, unless breaking is true, enables auto-merge (gh pr merge --auto, never an immediate merge), per policies.finalize and policies.mergeMethod. If any commit is unsigned the PR stays a draft, state.awaitingSigning is recorded, the steps are appended to SUMMARY.md, and foundry_next reports done until it is resolved. breaking is required on the first call. Returns { signed, unsigned, ready, merge, breaking, awaitingSigning, resigned, push, pr, next? }; merge is enabled, skipped: breaking, skipped: policy, skipped: no pull request, skipped: awaiting signing or unavailable: <why>.", inputSchema: S({ breaking: { type: "boolean", description: "whether this flight is a breaking change, so its PR must not auto-merge; required on the first call, remembered after" }, resign: { type: "boolean", description: "HUMAN-INITIATED ONLY: never pass this on your own. Re-sign every commit of the branch (git rebase -f --rebase-merges --gpg-sign), force-push with lease, then finalize. For an operator who has unlocked the signing agent after an awaiting-signing result" } }), fn: prFinalize },
   {
     name: "foundry_agents_sync",
     description: "Generate .claude/agents/foundry-<role>.md from the merged routing config (plugin defaults < global file < profile < docs/foundry.json roles). Writes only files whose content changed, excludes them from git, and returns the resolved per-role table. `restartRequired` is true only when this is the directory's first population and a changed role's model cannot be named directly by the Agent tool. Also ensures the MCP allow rule in .claude/settings.local.json (`permissions` in the result), without which a subagent's first foundry_status call is denied under any permission mode.",

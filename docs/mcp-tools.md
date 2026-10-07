@@ -896,13 +896,29 @@ End a flight: mark its draft pull request ready and, unless the flight is
 breaking, ask GitHub to merge it once its checks pass. Foundry never merges a
 pull request itself; the only `gh pr merge` it ever runs carries `--auto`.
 
-**Arguments:** `{ breaking }`, a boolean. Required on the first call; later
-calls reuse the remembered `state.breaking`.
+**Arguments:** `{ breaking, resign? }`, booleans. `breaking` is required on
+the first call; later calls reuse the remembered `state.breaking`. `resign` is
+human-initiated only: no agent passes it on its own (see below).
 
 **Refuses when** (before anything is written): the summary is not committed
 (`state.summarized`, or, after an archive, the archived `state.json`); `breaking` is
 not a boolean or was never given; or there is no merge base with `baseBranch`.
 After an archive it reads `docs/flights/<slug>/foundry.json` for the config.
+
+**`resign: true`** is for an operator who has unlocked the signing agent after
+an awaiting-signing result. After the preconditions and before the signed
+check it: refuses a dirty tree (apart from files untracked before the run) or
+being on `baseBranch`; unsets the local `commit.gpgsign` override a fallback
+left behind, then proves signing with the `required` probe (on failure the
+override goes back and the probe's refusal is returned); runs `git rebase -f
+--rebase-merges --gpg-sign <merge-base>` (no prompts, bounded by
+`commandTimeoutMs`; on failure it aborts the rebase, restores the override and
+refuses with git's first lines); re-runs the signed check and refuses, naming
+the count and oldest sha, if anything is still unsigned (the rewritten branch
+is left as it is); force-pushes with `--force-with-lease` per the push policy,
+reported as `resignPush`; clears `awaitingSigning` and `signingOverride`,
+records `signing: "on"`, and carries on into the all-signed path below.
+The result has `resigned: true`.
 
 **Signed check.** It runs `git log --format='%H %G?' <merge-base>..HEAD`. A
 commit whose `%G?` is `N` (none) or `B` (bad) is unsigned; anything else,
