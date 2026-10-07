@@ -259,6 +259,8 @@ parse. Edit it between stages, not during one.
 | `policies.push` | `true` | `false` skips every push `foundry_run_start`, `foundry_run_finish`, `foundry_review_submit` and `foundry_summary_commit` would otherwise make |
 | `policies.pr` | `"draft"` | `"none"` skips draft-PR creation in `foundry_run_finish` even when `gh` is available |
 | `policies.archive` | `false` | ⚠️ ASSUMPTION. `true` makes the summarizer call `foundry_flight_archive` after the summary, moving the finished flight into `docs/flights/<flight>/` so the repository can run another. Off until it has been proven in real flights |
+| `policies.finalize` | `"auto"` | What `foundry_pr_finalize` does to a fully signed flight's draft pull request: `"auto"` marks it ready and, unless the flight is breaking, enables auto-merge; `"ready"` only marks it ready; `"draft"` leaves it alone |
+| `policies.mergeMethod` | `"merge"` | The method `foundry_pr_finalize` passes to `gh pr merge --auto`: `"merge"`, `"squash"` or `"rebase"`. Foundry never merges without `--auto` |
 | `flight` | absent | A slug (`^[a-z0-9][a-z0-9-]{0,39}$`) naming this flight; the default `slug` for `foundry_flight_archive` |
 | `policies.feedback` | `true` | `false` disables `foundry_feedback_log` (it returns `{ logged: false }` without writing) and every internal auto-log point |
 | `parallel.maxStreams` | `3` | The most streams of one wave handed to implementers at once; `1` runs every wave serially, silently |

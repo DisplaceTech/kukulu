@@ -7,7 +7,7 @@ import path from "node:path";
 import {
   finish, ok, eq, like, isError,
   plannedRepo, withServer, readFile, writeFile, subject, hasFile,
-  markTasks, setState, git, mkBareRemote,
+  markTasks, setState, git, mkBareRemote, mkFakeGhBin, mkFakeGpg, useFakeSigner,
 } from "./harness.mjs";
 
 const TODAY = new Date().toISOString().slice(0, 10);
@@ -831,6 +831,111 @@ for (const [archive, want] of [[undefined, false], [true, true]]) {
     await call("foundry_review_submit", { verdict: "APPROVED" });
     const r = await call("foundry_summary_commit", { content: "# s\n" });
     eq(r.archive, want, `summary_commit returns archive: ${want}`);
+  });
+}
+
+// ---------------------------------------------------------------- pr_finalize (S-14)
+
+const DRAFT_PR = '{"url":"https://github.invalid/pull/1","state":"OPEN","isDraft":true,"baseRefName":"main"}\n';
+
+/** A summarized build branch with a bare origin and a fake gh holding a draft PR. `signed` signs every commit on it. */
+function finalizeRepo({ signed = false, policies = {}, summarized = true } = {}) {
+  const repo = plannedRepo({ config: { policies } });
+  git(repo, ["checkout", "-q", "-b", "build/x"]);
+  if (signed) useFakeSigner(repo, mkFakeGpg());
+  writeFile(repo, "docs/SUMMARY.md", "# summary\n");
+  writeFile(repo, "hello.txt", "hi\n");
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-qm", "P0-01: hello"]);
+  setState(repo, { summarized, verdict: "APPROVED" });
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-qm", "chore: build summary"]);
+  git(repo, ["remote", "add", "origin", mkBareRemote()]);
+  const ghDir = mkFakeGhBin();
+  writeFile(ghDir, "pr.json", DRAFT_PR);
+  return { repo, ghDir, opts: { env: { PATH: `${ghDir}:${process.env.PATH}` } } };
+}
+
+const ghCalls = (ghDir) => readFile(ghDir, "calls.log").split("\n").filter(Boolean);
+
+{
+  const { repo, opts } = finalizeRepo({ summarized: false });
+  const before = readFile(repo, ".foundry/state.json");
+  await withServer(repo, async ({ call }) => {
+    isError(await call("foundry_pr_finalize", { breaking: false }), /summary is not committed yet/, "finalize is refused before the summary is committed");
+    setState(repo, { summarized: true });
+    isError(await call("foundry_pr_finalize", {}), /breaking is required on the first call/, "the first call without breaking is refused");
+    isError(await call("foundry_pr_finalize", { breaking: "no" }), /breaking must be a boolean/, "a non-boolean breaking is refused");
+    eq(JSON.parse(readFile(repo, ".foundry/state.json")).breaking, undefined, "...and state records no breaking");
+    ok(before.length > 0, "...state existed");
+  }, opts);
+}
+
+{
+  const { repo, opts } = finalizeRepo();
+  await withServer(repo, async ({ call }) => {
+    const r = await call("foundry_pr_finalize", { breaking: false });
+    ok(r.awaitingSigning && r.awaitingSigning.unsigned >= 1, "an unsigned commit keeps the PR draft: awaitingSigning counts it");
+    eq(r.ready, false, "...ready is false");
+    eq(r.merge, "skipped: awaiting signing", "...and merge is skipped");
+    like(r.next, /foundry_pr_finalize\(\{ resign: true \}\)/, "...next names the resign call");
+    like(r.next, /git rebase -f --rebase-merges --gpg-sign/, "...and the by-hand rebase");
+    const st = JSON.parse(readFile(repo, ".foundry/state.json"));
+    ok(st.awaitingSigning && st.breaking === false, "...state records awaitingSigning and breaking");
+    const signing = readFile(repo, ".foundry/feedback.jsonl").trim().split("\n").map((l) => JSON.parse(l)).filter((e) => e.category === "signing");
+    eq(signing.length, 1, "...exactly one signing feedback entry");
+    eq(readFile(repo, "docs/SUMMARY.md").split("## Awaiting signing").length - 1, 1, "...SUMMARY.md has the awaiting section once");
+    const n = await call("foundry_next");
+    eq(n.stage, "done", "foundry_next is done");
+    like(n.reason, /^awaiting signing:/, "...with an awaiting signing reason");
+    const since = st.awaitingSigning.since;
+    await call("foundry_pr_finalize", { breaking: false });
+    const again = JSON.parse(readFile(repo, ".foundry/state.json"));
+    eq(again.awaitingSigning.since, since, "a second call keeps since");
+    eq(readFile(repo, ".foundry/feedback.jsonl").trim().split("\n").length, 1, "...and adds no feedback entry");
+    eq(readFile(repo, "docs/SUMMARY.md").split("## Awaiting signing").length - 1, 1, "...nor a second section");
+    eq(ghCalls(opts.env.PATH.split(":")[0]).filter((c) => c.startsWith("pr ready") || c.startsWith("pr merge")).length, 0, "gh never marked it ready or merged");
+  }, opts);
+}
+
+for (const [label, args, policies, expect, mergeFails] of [
+  ["auto, not breaking", { breaking: false }, {}, { calls: ["pr ready", "pr merge --auto --merge"], merge: "enabled", ready: true }],
+  ["squash", { breaking: false }, { mergeMethod: "squash" }, { calls: ["pr ready", "pr merge --auto --squash"], merge: "enabled", ready: true }],
+  ["breaking", { breaking: true }, {}, { calls: ["pr ready"], merge: "skipped: breaking", ready: true }],
+  ["finalize ready", { breaking: false }, { finalize: "ready" }, { calls: ["pr ready"], merge: "skipped: policy", ready: true }],
+  ["finalize draft", { breaking: false }, { finalize: "draft" }, { calls: [], merge: "skipped: policy", ready: false }],
+  ["merge unavailable", { breaking: false }, {}, { calls: ["pr ready", "pr merge --auto --merge"], merge: "unavailable: auto-merge is not allowed", ready: true }, "auto-merge is not allowed\nsecond line\n"],
+]) {
+  const { repo, ghDir, opts } = finalizeRepo({ signed: true, policies });
+  if (mergeFails) writeFile(ghDir, "merge-fails", mergeFails);
+  await withServer(repo, async ({ call }) => {
+    const r = await call("foundry_pr_finalize", args);
+    eq(r.unsigned, 0, `all signed, ${label}: no unsigned commits`);
+    eq(r.merge, expect.merge, `...merge is ${expect.merge}`);
+    eq(r.ready, expect.ready, `...ready is ${expect.ready}`);
+    const calls = ghCalls(ghDir).filter((c) => c.startsWith("pr ready") || c.startsWith("pr merge"));
+    eq(calls.join("|"), expect.calls.join("|"), "...and the gh calls are exactly those");
+    ok(calls.every((c) => !c.startsWith("pr merge") || c.includes("--auto")), "...no merge without --auto");
+  }, opts);
+}
+
+for (const [verify, want] of [["err", 0], ["bad", 2]]) {
+  const { repo, opts } = finalizeRepo({ signed: true });
+  await withServer(repo, async ({ call }) => {
+    const r = await call("foundry_pr_finalize", { breaking: false });
+    if (want === 0) eq(r.unsigned, 0, "E counts as signed");
+    else ok(r.unsigned >= want, "B does not: every signed commit counts as unsigned");
+  }, { env: { ...opts.env, FAKE_GPG_VERIFY: verify } });
+}
+
+{
+  // after an archive
+  const repo = summarizedRepo();
+  await withServer(repo, async ({ call }) => {
+    await call("foundry_flight_archive");
+    const r = await call("foundry_pr_finalize", { breaking: false });
+    ok(r.awaitingSigning, "after an archive, finalize reads the archived summarized state");
+    like(readFile(repo, "docs/flights/w1-share/SUMMARY.md"), /## Awaiting signing/, "...and appends the awaiting section to the archived SUMMARY.md");
   });
 }
 

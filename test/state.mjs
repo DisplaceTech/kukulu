@@ -494,6 +494,8 @@ await withServer(specRepo(), async ({ call }) => {
 for (const [config, re, label] of [
   [{ flight: "Bad" }, /flight must be a slug/, "flight: Bad"],
   [{ policies: { archive: "yes" } }, /policies\.archive must be a boolean/, "policies.archive: yes"],
+  [{ policies: { finalize: "sometimes" } }, /policies\.finalize must be one of auto, ready, draft/, "policies.finalize: sometimes"],
+  [{ policies: { mergeMethod: "ff" } }, /policies\.mergeMethod must be one of merge, squash, rebase/, "policies.mergeMethod: ff"],
 ]) {
   const repo = plannedRepo({ config });
   await withServer(repo, async ({ call }) => {

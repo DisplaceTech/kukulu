@@ -228,7 +228,9 @@ function loadConfig() {
 
 const SIGNING_POLICIES = ["auto", "off", "required"];
 const PR_POLICIES = ["draft", "none"];
-const POLICY_KEYS = ["signing", "push", "pr", "feedback", "archive"];
+const POLICY_KEYS = ["signing", "push", "pr", "feedback", "archive", "finalize", "mergeMethod"];
+const FINALIZE_POLICIES = ["auto", "ready", "draft"];
+const MERGE_METHODS = ["merge", "squash", "rebase"];
 const FLIGHT_SLUG = /^[a-z0-9][a-z0-9-]{0,39}$/;
 
 /** Validate `docs/foundry.json`'s `policies` block; throws, never defaults a bad value away. */
@@ -254,6 +256,12 @@ function validatePolicies(policies) {
   }
   if (policies.archive !== undefined && typeof policies.archive !== "boolean") {
     throw new ToolError("docs/foundry.json policies.archive must be a boolean");
+  }
+  if (policies.finalize !== undefined && !FINALIZE_POLICIES.includes(policies.finalize)) {
+    throw new ToolError(`docs/foundry.json policies.finalize must be one of ${FINALIZE_POLICIES.join(", ")}`);
+  }
+  if (policies.mergeMethod !== undefined && !MERGE_METHODS.includes(policies.mergeMethod)) {
+    throw new ToolError(`docs/foundry.json policies.mergeMethod must be one of ${MERGE_METHODS.join(", ")}`);
   }
 }
 
@@ -439,6 +447,8 @@ function cfgFrom(c, planIds) {
       feedback: c.policies?.feedback ?? true,
       // ⚠️ ASSUMPTION: archiving a finished flight is opt-in until it has been proven in real flights.
       archive: c.policies?.archive ?? false,
+      finalize: c.policies?.finalize ?? "auto",
+      mergeMethod: c.policies?.mergeMethod ?? "merge",
     },
   };
 }
@@ -1581,6 +1591,10 @@ function next() {
 
   if (!s.specPresent) return stage("halt", "docs/SPEC.md is missing; nothing to build from");
   if (st.halted) return stage("halt", st.halted);
+  if (st.awaitingSigning) {
+    const mb = git(["merge-base", c.baseBranch, "HEAD"], { allowFail: true }).out || "<merge-base>";
+    return stage("done", `awaiting signing: ${st.awaitingSigning.unsigned} unsigned commit(s), oldest ${String(st.awaitingSigning.first).slice(0, 7)}. ${nextSteps(mb)}`);
+  }
   if (st.archived && !s.planPresent && exists(path.join(ROOT, st.archived.dir, "SPEC.md")) && read(P.spec) === read(path.join(ROOT, st.archived.dir, "SPEC.md"))) {
     return stage("done", `flight ${st.archived.slug} is archived in ${st.archived.dir}; edit docs/SPEC.md for the next flight, then run /foundry:go-flight`);
   }
@@ -1619,7 +1633,7 @@ const PROMPTS = {
   review: (round, s, policies, reviewRound) =>
     `Run the Foundry review stage. This review is round ${reviewRound}; write \`Round: ${reviewRound}\` on the second line of docs/REVIEW.md, and use \`R${reviewRound}-<nn>\` when a fix task's dependsOn must reference another fix task in the same submission. Review the whole build branch against docs/SPEC.md and docs/PLAN.md as your review-build instructions specify, write docs/REVIEW.md, and call foundry_review_submit exactly once with your verdict. Do not fix code yourself. ${policies}`,
   summarize: (round, s, policies) =>
-    `Run the Foundry summarize stage. The review is APPROVED. Compose docs/SUMMARY.md as your summarize instructions specify and pass its full text as \`content\` to foundry_summary_commit, which writes and commits it; do not write the file yourself. Do not merge. ${policies}`,
+    `Run the Foundry summarize stage. The review is APPROVED. Compose docs/SUMMARY.md as your summarize instructions specify and pass its full text as \`content\` to foundry_summary_commit, which writes and commits it; do not write the file yourself. After that, archive if foundry_summary_commit reports archive: true, and end with foundry_pr_finalize; never pass resign. Do not merge. ${policies}`,
 };
 
 /**
@@ -2768,6 +2782,129 @@ function summaryCommit({ content } = {}) {
   return { commit: sha, branch: g.branch, base: g.base, head: g.head, reviews: reviewCount(st), fixRounds: st.round, push, pr: prState(st.policies, cfg().baseBranch), archive: cfg().policies.archive };
 }
 
+/** The one line the operator needs when a flight's commits are not all signed. */
+function nextSteps(mergeBase) {
+  return `Unlock the signing agent, then tell the flight controller to finalize with re-signing: foundry_pr_finalize({ resign: true }). Or by hand: git rebase -f --rebase-merges --gpg-sign ${mergeBase}, then git push --force-with-lease, then foundry_pr_finalize({}).`;
+}
+
+/**
+ * Count the flight's commits that carry no valid-looking signature, judged
+ * from the commits themselves, never from state.signing. `%G?` of N (none)
+ * or B (bad) is unsigned; anything else, E (cannot check) included, is
+ * signed, because a machine without the signer's public key still holds a
+ * signed commit. `first` is the oldest unsigned sha.
+ */
+function signedCheck(mergeBase) {
+  const log = git(["log", "--format=%H %G?", `${mergeBase}..HEAD`]).out.split("\n").filter(Boolean);
+  const unsigned = log.filter((l) => ["N", "B"].includes(l.split(" ")[1]));
+  return { signed: log.length - unsigned.length, unsigned: unsigned.length, first: unsigned.length ? unsigned[unsigned.length - 1].split(" ")[0] : null };
+}
+
+/** The config a finalize runs under: docs/foundry.json, or the archived copy once the flight has been archived. */
+function finalizeConfig(st) {
+  if (!exists(P.config) && st.archived) {
+    const archived = path.join(ROOT, st.archived.dir, "foundry.json");
+    if (exists(archived)) {
+      let raw;
+      try {
+        raw = JSON.parse(read(archived));
+      } catch (e) {
+        throw new ToolError(`${st.archived.dir}/foundry.json is not valid JSON: ${e.message}`);
+      }
+      return cfgFrom(raw, null);
+    }
+  }
+  return cfg();
+}
+
+function prFinalize({ breaking } = {}) {
+  const st = loadState();
+  let summarized = st.summarized === true;
+  if (!summarized && st.archived) {
+    try {
+      summarized = JSON.parse(read(path.join(ROOT, st.archived.dir, "state.json"))).summarized === true;
+    } catch {
+      summarized = false;
+    }
+  }
+  if (!summarized) throw new ToolError("the summary is not committed yet; call foundry_summary_commit first, then foundry_pr_finalize");
+  if (breaking !== undefined && typeof breaking !== "boolean") throw new ToolError("breaking must be a boolean");
+  const brk = breaking !== undefined ? breaking : st.breaking;
+  if (typeof brk !== "boolean") throw new ToolError("breaking is required on the first call: pass true or false");
+  const cc = finalizeConfig(st);
+  const mb = git(["merge-base", cc.baseBranch, "HEAD"], { allowFail: true }).out;
+  if (!mb) throw new ToolError(`cannot find a merge base with baseBranch '${cc.baseBranch}'; check out the build branch, or fix baseBranch in docs/foundry.json`);
+
+  const branch = gitFacts().branch;
+  const summaryPath = exists(P.summary) ? P.summary : st.archived && exists(path.join(ROOT, st.archived.dir, "SUMMARY.md")) ? path.join(ROOT, st.archived.dir, "SUMMARY.md") : null;
+
+  const awaiting = (check) => {
+    const prior = st.awaitingSigning;
+    st.breaking = brk;
+    st.awaitingSigning = { unsigned: check.unsigned, first: check.first, since: prior?.since || new Date().toISOString() };
+    const paths = [P.state, P.feedback, ...(summaryPath ? [summaryPath] : [])];
+    withRollback(paths, () => {
+      saveState(st);
+      if (!prior && feedbackEnabled()) {
+        appendFeedback("summarize", `Flight is awaiting signing: ${check.unsigned} unsigned commit(s), oldest ${String(check.first).slice(0, 7)}.`, "signing", "auto");
+      }
+      if (summaryPath && !read(summaryPath).includes("## Awaiting signing")) {
+        fs.appendFileSync(summaryPath, `${read(summaryPath).endsWith("\n") ? "" : "\n"}\n## Awaiting signing\n\n${nextSteps(mb)}\n`);
+      }
+      gitCommitIfChanged(paths, "chore: awaiting signing", { stage: "summarize" });
+    });
+    return {
+      signed: check.signed, unsigned: check.unsigned, ready: false, merge: "skipped: awaiting signing", breaking: brk,
+      awaitingSigning: st.awaitingSigning, resigned: false,
+      push: pushBranch(branch, cc.policies.push), pr: prState(cc.policies, cc.baseBranch), next: nextSteps(mb),
+    };
+  };
+
+  const before = signedCheck(mb);
+  if (before.unsigned) return awaiting(before);
+
+  st.breaking = brk;
+  delete st.awaitingSigning;
+  if (st.signingOverride) {
+    git(["config", "--local", "--unset", "commit.gpgsign"], { allowFail: true });
+    delete st.signingOverride;
+    st.signing = "on";
+  }
+  withRollback([P.state], () => {
+    saveState(st);
+    gitCommitIfChanged([P.state], "chore: finalize flight", { stage: "summarize" });
+  });
+  const after = signedCheck(mb);
+  if (after.unsigned) return awaiting(after);
+
+  const push = pushBranch(branch, cc.policies.push);
+  let pr = prState(cc.policies, cc.baseBranch);
+  let merge;
+  const gh = (args) => spawnSync("gh", args, { cwd: ROOT, encoding: "utf8" });
+  const firstLine = (r) => (r.stderr || r.stdout || "gh failed").trim().split("\n")[0];
+  if (typeof pr !== "object") {
+    merge = "skipped: no pull request";
+  } else if (cc.policies.pr !== "draft") {
+    merge = "skipped: policy";
+  } else if (cc.policies.finalize === "draft") {
+    merge = "skipped: policy";
+  } else {
+    const readied = pr.draft ? gh(["pr", "ready"]) : { status: 0 };
+    if (readied.status !== 0) merge = `unavailable: gh pr ready failed: ${firstLine(readied)}`;
+    else if (cc.policies.finalize === "ready") merge = "skipped: policy";
+    else if (brk) merge = "skipped: breaking";
+    else {
+      const m = spawnSync("gh", ["pr", "merge", "--auto", `--${cc.policies.mergeMethod}`], { cwd: ROOT, encoding: "utf8" });
+      merge = m.status === 0 ? "enabled" : `unavailable: ${firstLine(m)}`;
+    }
+    pr = prState(cc.policies, cc.baseBranch);
+  }
+  return {
+    signed: after.signed, unsigned: 0, ready: typeof pr === "object" ? pr.draft === false : false, merge, breaking: brk,
+    awaitingSigning: null, resigned: false, push, pr,
+  };
+}
+
 const ARCHIVED = [
   [P.plan, "docs/PLAN.md"], [P.progress, "docs/PROGRESS.md"], [P.handoff, "docs/HANDOFF.md"], [P.review, "docs/REVIEW.md"],
   [P.summary, "docs/SUMMARY.md"], [P.config, "docs/foundry.json"], [P.state, ".foundry/state.json"], [P.feedback, ".foundry/feedback.jsonl"],
@@ -3149,6 +3286,7 @@ const TOOLS = [
   },
   { name: "foundry_summary_commit", description: "Write docs/SUMMARY.md from `content` (preferred) or commit the file already on disk, and mark the flight complete. Only valid after an APPROVED review. Returns { commit, branch, base, head, reviews, fixRounds, push, pr, archive }; archive is the policies.archive setting (true means call foundry_flight_archive next); pr is the branch's pull request ({ url, state, draft, base }) or \"none\", \"skipped: policy\" or \"unknown: <why>\".", inputSchema: S({ content: { type: "string", description: "the full text of docs/SUMMARY.md; the tool writes the file itself, so never Write it yourself" } }), fn: summaryCommit },
   { name: "foundry_flight_archive", description: "Archive a summarized flight so the repository can run its next flight: move PLAN, PROGRESS, HANDOFF, REVIEW, SUMMARY, foundry.json, .foundry/state.json and .foundry/feedback.jsonl into docs/flights/<slug>/ (copying SPEC.md, which stays), write a fresh state.json, commit 'chore: archive flight <slug>' and push per policy. slug defaults to the 'flight' key in docs/foundry.json. Refused unless the flight is summarized, no run is armed, and the tree is clean. All-or-nothing. Returns { slug, dir, moved, copied, commit, push }.", inputSchema: S({ slug: { type: "string", description: "lowercase letters, digits and - (at most 40 characters); defaults to docs/foundry.json's flight" } }), fn: flightArchive },
+  { name: "foundry_pr_finalize", description: "End a flight. Checks that every commit since the merge base with baseBranch is signed (judged from the commits, not from state): if so, marks the draft PR ready and, unless breaking is true, enables auto-merge (gh pr merge --auto, never an immediate merge), per policies.finalize and policies.mergeMethod. If any commit is unsigned the PR stays a draft, state.awaitingSigning is recorded, the steps are appended to SUMMARY.md, and foundry_next reports done until it is resolved. breaking is required on the first call. Returns { signed, unsigned, ready, merge, breaking, awaitingSigning, resigned, push, pr, next? }; merge is enabled, skipped: breaking, skipped: policy, skipped: no pull request, skipped: awaiting signing or unavailable: <why>.", inputSchema: S({ breaking: { type: "boolean", description: "whether this flight is a breaking change, so its PR must not auto-merge; required on the first call, remembered after" } }), fn: prFinalize },
   {
     name: "foundry_agents_sync",
     description: "Generate .claude/agents/foundry-<role>.md from the merged routing config (plugin defaults < global file < profile < docs/foundry.json roles). Writes only files whose content changed, excludes them from git, and returns the resolved per-role table. `restartRequired` is true only when this is the directory's first population and a changed role's model cannot be named directly by the Agent tool. Also ensures the MCP allow rule in .claude/settings.local.json (`permissions` in the result), without which a subagent's first foundry_status call is denied under any permission mode.",

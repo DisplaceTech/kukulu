@@ -153,7 +153,7 @@ const goFlight = read("skills/go-flight/SKILL.md");
 const fmGo = frontmatter(goFlight);
 const allowed = String(fmGo["allowed-tools"]).split(",").map((s) => s.trim());
 const toolNames = Array.from(serverSrc.matchAll(/name: "(foundry_[a-z_]+)"/g), (m) => m[1]);
-eq(toolNames.length, 20, "the server defines twenty tools");
+eq(toolNames.length, 21, "the server defines twenty-one tools");
 
 const COUNT_WORDS = { 18: "Eighteen", 19: "Nineteen", 20: "Twenty", 21: "Twenty-one", 22: "Twenty-two", 23: "Twenty-three", 24: "Twenty-four", 25: "Twenty-five" };
 like(read("docs/mcp-tools.md").split("\n")[2], new RegExp(`^${COUNT_WORDS[toolNames.length]} tools,`), "docs/mcp-tools.md states the tool count in words");
@@ -369,6 +369,8 @@ ok(read("skills/plan-build/SKILL.md").includes("templates/constraints.example.js
       ok(opsDoc.includes("`policies.pr`"), "operations.md documents policies.pr");
       ok(opsDoc.includes("`policies.feedback`"), "operations.md documents policies.feedback");
       ok(opsDoc.includes("`policies.archive`"), "operations.md documents policies.archive");
+      ok(opsDoc.includes("`policies.finalize`"), "operations.md documents policies.finalize");
+      ok(opsDoc.includes("`policies.mergeMethod`"), "operations.md documents policies.mergeMethod");
       continue;
     }
     if (key === "mutation") {

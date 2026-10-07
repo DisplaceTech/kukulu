@@ -23,6 +23,7 @@ const EXPECTED_TOOLS = [
   "foundry_review_submit",
   "foundry_summary_commit",
   "foundry_flight_archive",
+  "foundry_pr_finalize",
   "foundry_agents_sync",
   "foundry_config_show",
 ];

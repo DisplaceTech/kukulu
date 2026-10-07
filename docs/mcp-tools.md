@@ -1,6 +1,6 @@
 # MCP tool reference
 
-Twenty tools, served over stdio by `mcp/server.mjs` with no dependencies.
+Twenty-one tools, served over stdio by `mcp/server.mjs` with no dependencies.
 The server is launched by Claude Code from [`.mcp.json`](../.mcp.json) with
 `FOUNDRY_PROJECT_DIR` set to the project root; every path below is relative to
 that root.
@@ -133,7 +133,10 @@ streams? }`.
   [`foundry_flight_archive`](#foundry_flight_archive) it is `done` with the
   reason "flight <slug> is archived in <dir>; edit docs/SPEC.md for the next
   flight, then run /foundry:go-flight", until `docs/SPEC.md` differs from the
-  archived copy; then the stage is `plan` again
+  archived copy; then the stage is `plan` again. While
+  `foundry_pr_finalize` has recorded `state.awaitingSigning` the stage is
+  `done` with the reason "awaiting signing: <n> unsigned commit(s), oldest
+  <sha>." followed by the steps to take
 - `prompt` — the text to hand the subagent **verbatim**; the implement,
   review and summarize prompts each end with a sentence stating this run's
   policies (see `foundry_run_start`)
@@ -884,6 +887,50 @@ After it, `foundry_next` reports `done` until `docs/SPEC.md` is edited, then
 the slug is malformed; the flight is not summarized; the implement lock is
 armed; the working tree is dirty (apart from files that were untracked before
 the run started); or `docs/flights/<slug>/` already exists.
+
+---
+
+## `foundry_pr_finalize`
+
+End a flight: mark its draft pull request ready and, unless the flight is
+breaking, ask GitHub to merge it once its checks pass. Foundry never merges a
+pull request itself; the only `gh pr merge` it ever runs carries `--auto`.
+
+**Arguments:** `{ breaking }`, a boolean. Required on the first call; later
+calls reuse the remembered `state.breaking`.
+
+**Refuses when** (before anything is written): the summary is not committed
+(`state.summarized`, or, after an archive, the archived `state.json`); `breaking` is
+not a boolean or was never given; or there is no merge base with `baseBranch`.
+After an archive it reads `docs/flights/<slug>/foundry.json` for the config.
+
+**Signed check.** It runs `git log --format='%H %G?' <merge-base>..HEAD`. A
+commit whose `%G?` is `N` (none) or `B` (bad) is unsigned; anything else,
+`E` (the signature cannot be checked here) included, is signed. It judges the
+commits themselves, never `state.signing`.
+
+**Any unsigned commit.** The pull request stays a draft. It records
+`state.awaitingSigning = { unsigned, first, since }` (`since` is kept across
+calls), logs one `signing` feedback entry the first time, appends an
+`## Awaiting signing` section with the steps to the flight's `SUMMARY.md`
+(once), commits as `chore: awaiting signing`, and pushes per policy.
+`foundry_next` then reports `done` with the reason `awaiting signing: …`.
+Returns `{ signed, unsigned, ready: false, merge: "skipped: awaiting signing",
+breaking, awaitingSigning, resigned: false, push, pr, next }`; `next` is
+the instruction to unlock the signing agent and finalize again.
+
+**All signed.** It records `breaking`, clears `awaitingSigning`, (if signing was
+switched off for the run, unsets the local `commit.gpgsign` and records
+`signing: "on"`), commits `chore: finalize flight` (and takes the unsigned path
+if that very commit came out unsigned), pushes, and then, when `policies.pr` is
+`draft` and the pull request exists, follows `policies.finalize`: `"auto"` runs
+`gh pr ready` and then `gh pr merge --auto --<policies.mergeMethod>`;
+`"ready"` runs only `gh pr ready`; `"draft"` changes nothing.
+Returns `{ signed, unsigned: 0, ready, merge, breaking, awaitingSigning: null,
+resigned: false, push, pr }`. `ready` is true when the pull request ends up
+not a draft. `merge` is `"enabled"`, `"skipped: breaking"`, `"skipped: policy"`,
+`"skipped: no pull request"`, or `"unavailable: <gh's first stderr line>"`
+(the pull request is left ready).
 
 ---
 

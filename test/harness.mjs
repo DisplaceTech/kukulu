@@ -150,11 +150,64 @@ if [ "$1 $2" = "pr create" ]; then
   echo https://github.invalid/pull/1
   exit 0
 fi
+if [ "$1 $2" = "pr ready" ]; then
+  if [ -f "$dir/pr.json" ]; then sed -i 's/"isDraft":true/"isDraft":false/' "$dir/pr.json"; fi
+  exit 0
+fi
+if [ "$1 $2" = "pr merge" ]; then
+  if [ -f "$dir/merge-fails" ]; then cat "$dir/merge-fails" >&2; exit 1; fi
+  exit 0
+fi
 exit 1
 `,
   );
   fs.chmodSync(gh, 0o755);
   return dir;
+}
+
+/**
+ * A fake gpg program that signs anything; its verify result comes from
+ * FAKE_GPG_VERIFY (good | bad | err), which git reads as %G? of U, B or E.
+ * With `failAfter`, signing starts failing once that many signatures have
+ * been made. Returns the program's absolute path.
+ */
+export function mkFakeGpg({ failAfter } = {}) {
+  const dir = mkDir("foundry-gpg-");
+  const gpg = path.join(dir, "gpg");
+  fs.writeFileSync(
+    gpg,
+    `#!/bin/sh
+# Fake gpg for tests: signs anything; verify result from FAKE_GPG_VERIFY (good|bad|err).
+dir=$(dirname "$0")
+for a in "$@"; do
+  if [ "$a" = "--verify" ]; then
+    echo "[GNUPG:] NEWSIG"
+    case "\${FAKE_GPG_VERIFY:-good}" in
+      bad) echo "[GNUPG:] BADSIG 0123456789ABCDEF foundry test" ;;
+      err) echo "[GNUPG:] ERRSIG 0123456789ABCDEF 1 10 00 1700000000 9 -"; echo "[GNUPG:] NO_PUBKEY 0123456789ABCDEF" ;;
+      *) echo "[GNUPG:] GOODSIG 0123456789ABCDEF foundry test" ;;
+    esac
+    exit 0
+  fi
+done
+n=$(cat "$dir/sign-count" 2>/dev/null || echo 0); n=$((n+1)); echo "$n" > "$dir/sign-count"
+if [ -f "$dir/fail-after" ] && [ "$n" -gt "$(cat "$dir/fail-after")" ]; then echo "gpg: signing failed: fake" >&2; exit 2; fi
+cat >/dev/null
+echo "[GNUPG:] SIG_CREATED D 1 10 00 1700000000 0123456789ABCDEF0123456789ABCDEF01234567" >&2
+printf -- '-----BEGIN PGP SIGNATURE-----\\n\\nZmFrZQ==\\n-----END PGP SIGNATURE-----\\n'
+`,
+  );
+  fs.chmodSync(gpg, 0o755);
+  if (failAfter !== undefined) fs.writeFileSync(path.join(dir, "fail-after"), String(failAfter));
+  return gpg;
+}
+
+/** Point `repo`'s local git config at a fake gpg so every commit is signed. */
+export function useFakeSigner(repo, gpgPath) {
+  gitIn(repo, ["config", "--local", "gpg.format", "openpgp"]);
+  gitIn(repo, ["config", "--local", "gpg.program", gpgPath]);
+  gitIn(repo, ["config", "--local", "user.signingkey", "0123456789ABCDEF"]);
+  gitIn(repo, ["config", "--local", "commit.gpgsign", "true"]);
 }
 
 export const sh = (dir, cmd) => execFileSync("/bin/sh", ["-c", cmd], { cwd: dir, encoding: "utf8" }).trim();
