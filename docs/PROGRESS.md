@@ -39,7 +39,7 @@ Started: 2026-10-07T17:30:53.739Z
 - [x] R2-01 The fake gh's pr ready works on BSD sed, and a constraint forbids sed -i
 - [x] R2-02 A scoped .gitleaks.toml allowlist clears the fake-signer fixture findings
 - [x] R2-03 Test that a failed unsigned retry unsets a commit.gpgsign that was unset locally
-- [ ] R3-01 Pin CI gitleaks to the pre-commit version and assert the allowlist stays value-scoped
+- [x] R3-01 Pin CI gitleaks to the pre-commit version and assert the allowlist stays value-scoped
 
 ## Log
 
@@ -146,3 +146,6 @@ Added .gitleaks.toml (useDefault, AND allowlist on ^test/(harness|review).mjs$ +
 
 ### R2-03 — a978fb7
 Added test block with isolated GIT_CONFIG_GLOBAL and counter hook; asserts local commit.gpgsign unset after failed retry. Mutant (else branch emptied) fails assertion 248; server.mjs restored. verify green.
+
+### R3-01 — 23015cc
+Added GITLEAKS_VERSION "8.28.0" to gitleaks-action env in secret-scan.yml. plugin.mjs: two new assertions (pin equals pre-commit rev; .gitleaks.toml has condition AND and regexes exactly 0123456789ABCDEF). Mutant check: deleting regexes line fails 1 assertion. Verified with official gitleaks 8.28.0 binary: range a91777982208..HEAD and full history both report no leaks. gh pr checks 7 / CI log version: NOT VERIFIED (human).
