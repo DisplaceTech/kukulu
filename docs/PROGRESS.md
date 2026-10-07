@@ -8,7 +8,7 @@ Started: 2026-10-07T17:30:53.739Z
 - [x] P1-01 Opus routing defaults, and flight artifacts out of the plugin's own checks
 - [x] P1-02 One commit helper with a bounded, prompt-free unsigned fallback
 - [x] P1-03 Snapshot and restore around every writing tool
-- [ ] P1-04 foundry_summary_commit writes SUMMARY.md from content
+- [x] P1-04 foundry_summary_commit writes SUMMARY.md from content
 - [ ] P1-05 from: constraints and commands that activate at a task
 - [ ] P1-06 Targeted mutation commands
 - [ ] P1-07 failedCommands and confirmKill in foundry_mutate
@@ -46,3 +46,6 @@ Added commitStaged + SIGNING_TIMEOUT_MS in server.mjs; gitCommitIfChanged takes 
 
 ### P1-03 — 319a41e
 withRollback(paths, fn) added; wraps startRun, taskDone, taskBlock (progress write only), taskReopen, runFinish (handoff commit and state commit separately), flightOptions, runHalt, summaryCommit, reviewSubmit (both verdict branches). Tests: review_submit rollback + retry, task_done and flight_options rollback via commit-msg hook. Later writing tools must reuse withRollback. Docs: mcp-tools intro and review_submit section.
+
+### P1-04 — bd1573f
+summary_commit takes optional content (SUMMARY_MAX_BYTES 1 MiB), validates before writing, writes inside withRollback over SUMMARY/state/feedback. Interpretation: with content, verdict check first; without content, does-not-exist check stays first (existing test order). PROMPTS.summarize updated. Tests in review.mjs; docs/mcp-tools.md updated.
