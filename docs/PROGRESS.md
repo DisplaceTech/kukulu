@@ -15,7 +15,7 @@ Started: 2026-10-07T17:30:53.739Z
 - [x] P1-08 foundry_status reports artifacts, strayArtifacts and lastReviewCommit
 - [x] P1-09 Resume a round-cap halt through foundry_flight_options
 - [x] P1-10 foundry_plan_commit validates and commits the plan
-- [ ] P1-11 foundry_plan_commit renumbers split task ids
+- [x] P1-11 foundry_plan_commit renumbers split task ids
 - [ ] P1-12 The flight key, policies.archive and foundry_flight_archive
 - [ ] P1-13 foundry_pr_finalize signed check, ready, auto-merge and awaiting signing
 - [ ] P1-14 foundry_pr_finalize resign path
@@ -67,3 +67,6 @@ reviewSubmit sets st.haltCap and new halt messages naming foundry_flight_options
 
 ### P1-10 — eda2c5d
 New foundry_plan_commit (after foundry_next; 19 tools). Refactors: parseProgressText, cfgFrom(raw, planIds) (cfg() wraps; validateFrom takes planIds), computeWaves(pr, cc, planLines). validatePlanTexts({planText, progressText, configRaw, configError, claudeExists, allowSuffix}) is pure and returns [{check,id?,message}] - P1-11 reuses it. ToolError(message, data) -> structuredContent in handle(). Interpretation: from is checked in the validator with cfgFrom(raw, null) so no duplicate config problem; suffixed ids skipped by sequence check; waves[].streams = names. plugin.mjs cfg-keys regex now matches cfgFrom. Tests: state/protocol/plugin; docs/mcp-tools.md section + count.
+
+### P1-11 — ac6ac5f
+plan_commit gains renumber (boolean). renumberMap + single-pass SPLIT_ID rewrite over PLAN/PROGRESS text and "from" values in foundry.json raw text; validatePlanTexts runs on rewritten text; nothing written when problems remain; files written inside withRollback. Heading problem for suffixed ids now suggests renumber: true. Refused when Started: is stamped or any task box is not a space. Tests in state.mjs; docs updated. Phase 1 ends here: push is handled by run_finish (see below).
