@@ -12,7 +12,7 @@ Started: 2026-10-07T17:30:53.739Z
 - [x] P1-05 from: constraints and commands that activate at a task
 - [x] P1-06 Targeted mutation commands
 - [x] P1-07 failedCommands and confirmKill in foundry_mutate
-- [ ] P1-08 foundry_status reports artifacts, strayArtifacts and lastReviewCommit
+- [x] P1-08 foundry_status reports artifacts, strayArtifacts and lastReviewCommit
 - [ ] P1-09 Resume a round-cap halt through foundry_flight_options
 - [ ] P1-10 foundry_plan_commit validates and commits the plan
 - [ ] P1-11 foundry_plan_commit renumbers split task ids
@@ -58,3 +58,6 @@ validateMutation + cfg().mutation.targeted (timeoutMs defaults to commandTimeout
 
 ### P1-07 — 4005111
 mutate returns failedCommands always; confirmKill (boolean, validated) re-runs failed commands on the restored tree, undoes residue against the same before snapshot, returns confirm, and flips to killed:false/inconclusive:true if a re-run fails. Tests in review.mjs; docs/mcp-tools.md updated.
+
+### P1-08 — 700aa76
+status() gains artifacts (7 keys), strayArtifacts (untracked while PLAN.md absent) and lastReviewCommit (review: commits in baseBranch..HEAD; base falls back to main if cfg throws). Read-only. Tests in state.mjs; mcp-tools.md updated.
