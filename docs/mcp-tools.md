@@ -749,7 +749,10 @@ task that does not exist or is not blocked or skipped.
 
 ## `foundry_summary_commit`
 
-**Arguments:** none.
+**Arguments:** `content` (optional string): the full text of `docs/SUMMARY.md`.
+This is the preferred form: the tool writes the file itself (adding a final
+newline), so the summarizer never needs `Write`. It must be non-empty and
+under 1 MiB. Without it the tool commits the file already on disk, as in 0.4.0.
 
 **Does:** marks the flight complete, commits `docs/SUMMARY.md` as
 `chore: build summary`, and pushes the branch per `policies.push` (F-18).
@@ -762,8 +765,9 @@ base }`, with `expectedBase` added when it does not target `baseBranch`.
 Otherwise it is `"none"`, `"skipped: policy"` or `"unknown: <why>"` (`gh`
 missing or failing). This is never a refusal (cleanflate F-25).
 
-**Refuses when:** `SUMMARY.md` does not exist, or the recorded verdict is not
-`APPROVED`.
+**Refuses when:** the recorded verdict is not `APPROVED` (before anything is
+written); `content` is not a string, is empty after trimming, or is 1 MiB or
+more; or `content` is absent and `SUMMARY.md` does not exist.
 
 ---
 

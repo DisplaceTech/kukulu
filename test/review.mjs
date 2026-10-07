@@ -621,6 +621,26 @@ const untouched = (repo, head) => {
   });
 }
 
+// ---------------------------------------------------------------- summary from content
+
+{
+  const repo = reviewableRepo({ verdict: "APPROVED" });
+  await withServer(repo, async ({ call }) => {
+    isError(await call("foundry_summary_commit", { content: "# Summary\n" }), /only be committed after an APPROVED review/, "content is refused before APPROVED, and nothing is written");
+    ok(!hasFile(repo, "docs/SUMMARY.md"), "...no SUMMARY.md exists afterwards");
+    await call("foundry_review_submit", { verdict: "APPROVED" });
+    isError(await call("foundry_summary_commit", { content: "  \n" }), /content is empty/, "empty content is refused");
+    isError(await call("foundry_summary_commit", { content: "x".repeat(1024 * 1024) }), /bytes or more/, "content of 1 MiB or more is refused");
+    isError(await call("foundry_summary_commit", { content: 42 }), /content must be a string/, "non-string content is refused");
+    ok(!hasFile(repo, "docs/SUMMARY.md"), "...none of them wrote a file");
+    const r = await call("foundry_summary_commit", { content: "# Summary\nAll done." });
+    eq(subject(repo), "chore: build summary", "summary_commit writes SUMMARY.md from content and commits it");
+    eq(git(repo, ["show", "HEAD:docs/SUMMARY.md"]), "# Summary\nAll done.", "...with exactly that text");
+    eq(readFile(repo, "docs/SUMMARY.md"), "# Summary\nAll done.\n", "...plus a final newline on disk");
+    eq(r.reviews, 1, "the return shape is unchanged");
+  });
+}
+
 // ---------------------------------------------------------------- rollback
 
 {

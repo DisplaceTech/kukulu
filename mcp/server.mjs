@@ -1500,7 +1500,7 @@ const PROMPTS = {
   review: (round, s, policies, reviewRound) =>
     `Run the Foundry review stage. This review is round ${reviewRound}; write \`Round: ${reviewRound}\` on the second line of docs/REVIEW.md, and use \`R${reviewRound}-<nn>\` when a fix task's dependsOn must reference another fix task in the same submission. Review the whole build branch against docs/SPEC.md and docs/PLAN.md as your review-build instructions specify, write docs/REVIEW.md, and call foundry_review_submit exactly once with your verdict. Do not fix code yourself. ${policies}`,
   summarize: (round, s, policies) =>
-    `Run the Foundry summarize stage. The review is APPROVED. Write docs/SUMMARY.md as your summarize instructions specify and call foundry_summary_commit. Do not merge. ${policies}`,
+    `Run the Foundry summarize stage. The review is APPROVED. Compose docs/SUMMARY.md as your summarize instructions specify and pass its full text as \`content\` to foundry_summary_commit, which writes and commits it; do not write the file yourself. Do not merge. ${policies}`,
 };
 
 /**
@@ -2545,14 +2545,27 @@ function prState(policies, baseBranch) {
   }
 }
 
-function summaryCommit() {
-  if (!exists(P.summary)) throw new ToolError("docs/SUMMARY.md does not exist");
+const SUMMARY_MAX_BYTES = 1024 * 1024;
+
+function summaryCommit({ content } = {}) {
   const st = loadState();
-  if (st.verdict !== "APPROVED") throw new ToolError("summary can only be committed after an APPROVED review");
+  if (content === undefined) {
+    // 0.4.0 behavior: the summarizer wrote the file itself.
+    if (!exists(P.summary)) throw new ToolError("docs/SUMMARY.md does not exist; pass the summary's full text as `content` and the tool will write it");
+    if (st.verdict !== "APPROVED") throw new ToolError("summary can only be committed after an APPROVED review");
+  } else {
+    if (st.verdict !== "APPROVED") throw new ToolError("summary can only be committed after an APPROVED review; nothing was written");
+    if (typeof content !== "string") throw new ToolError("content must be a string holding the full text of docs/SUMMARY.md");
+    if (!content.trim()) throw new ToolError("content is empty; pass the full text of docs/SUMMARY.md");
+    if (Buffer.byteLength(content, "utf8") >= SUMMARY_MAX_BYTES) {
+      throw new ToolError(`content is ${SUMMARY_MAX_BYTES} bytes or more; a summary is for a human to read, so shorten it`);
+    }
+  }
   st.summarized = true;
-  const sha = withRollback([P.summary, P.state], () => {
+  const sha = withRollback([P.summary, P.state, P.feedback], () => {
+    if (content !== undefined) write(P.summary, content.endsWith("\n") ? content : `${content}\n`);
     saveState(st);
-    return gitCommitIfChanged([P.summary, P.state], "chore: build summary", { stage: "summarize" });
+    return gitCommitIfChanged([P.summary, P.state, P.feedback], "chore: build summary", { stage: "summarize" });
   });
   const g = gitFacts();
   const push = pushBranch(g.branch, st.policies.push);
@@ -2644,7 +2657,7 @@ const TOOLS = [
     }, ["verdict"]),
     fn: reviewSubmit,
   },
-  { name: "foundry_summary_commit", description: "Commit docs/SUMMARY.md and mark the flight complete. Only valid after an APPROVED review. Returns { commit, branch, base, head, reviews, fixRounds, push, pr }; pr is the branch's pull request ({ url, state, draft, base }) or \"none\", \"skipped: policy\" or \"unknown: <why>\".", inputSchema: S({}), fn: summaryCommit },
+  { name: "foundry_summary_commit", description: "Write docs/SUMMARY.md from `content` (preferred) or commit the file already on disk, and mark the flight complete. Only valid after an APPROVED review. Returns { commit, branch, base, head, reviews, fixRounds, push, pr }; pr is the branch's pull request ({ url, state, draft, base }) or \"none\", \"skipped: policy\" or \"unknown: <why>\".", inputSchema: S({ content: { type: "string", description: "the full text of docs/SUMMARY.md; the tool writes the file itself, so never Write it yourself" } }), fn: summaryCommit },
   {
     name: "foundry_agents_sync",
     description: "Generate .claude/agents/foundry-<role>.md from the merged routing config (plugin defaults < global file < profile < docs/foundry.json roles). Writes only files whose content changed, excludes them from git, and returns the resolved per-role table. `restartRequired` is true only when this is the directory's first population and a changed role's model cannot be named directly by the Agent tool. Also ensures the MCP allow rule in .claude/settings.local.json (`permissions` in the result), without which a subagent's first foundry_status call is denied under any permission mode.",
