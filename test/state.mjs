@@ -386,4 +386,45 @@ await withServer(specRepo(), async ({ call }) => {
   });
 }
 
+// ---------------------------------------------------------------- artifacts (S-08)
+
+{
+  // an untracked foundry.json with no plan is a stray artifact (project-c F-04)
+  const repo = specRepo();
+  writeFile(repo, "docs/foundry.json", "{}\n");
+  await withServer(repo, async ({ call }) => {
+    const s = await call("foundry_status");
+    eq(s.artifacts["foundry.json"], "untracked", "an unstaged foundry.json is untracked");
+    eq(s.artifacts["PLAN.md"], "absent", "...PLAN.md is absent");
+    eq(s.artifacts["SPEC.md"], "tracked", "...SPEC.md is tracked");
+    eq(Object.keys(s.artifacts).join(","), "SPEC.md,PLAN.md,PROGRESS.md,HANDOFF.md,REVIEW.md,SUMMARY.md,foundry.json", "...and the keys are exactly the seven artifacts");
+    eq(s.strayArtifacts.join(","), "foundry.json", "...so it is a stray artifact");
+  });
+}
+
+{
+  const repo = plannedRepo();
+  writeFile(repo, "docs/PLAN.md", readFile(repo, "docs/PLAN.md") + "\nedit\n");
+  await withServer(repo, async ({ call }) => {
+    const s = await call("foundry_status");
+    eq(s.artifacts["PLAN.md"], "modified", "a modified tracked artifact is modified");
+    eq(s.strayArtifacts.length, 0, "...and nothing is stray");
+  });
+}
+
+{
+  const repo = plannedRepo();
+  writeFile(repo, "docs/REVIEW.md", "# early\n");
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-qm", "review: round 1 (on main)"]);
+  git(repo, ["checkout", "-q", "-b", "build/2020-01-01"]);
+  await withServer(repo, async ({ call }) => {
+    eq((await call("foundry_status")).lastReviewCommit, null, "lastReviewCommit is null with no review on the branch (main's own review: commit is not reported)");
+    writeFile(repo, "docs/REVIEW.md", "# later\n");
+    git(repo, ["add", "-A"]);
+    git(repo, ["commit", "-qm", "review: round 1"]);
+    eq((await call("foundry_status")).lastReviewCommit, git(repo, ["rev-parse", "--short", "HEAD"]), "after a review commit on the branch, its short sha");
+  });
+}
+
 finish();

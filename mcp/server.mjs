@@ -1415,7 +1415,40 @@ function status() {
   }
   out.agentsGenerated = agentsOnDisk();
   out.agentsGeneratedThisSession = Array.from(generatedThisProcess);
+  out.artifacts = artifactStates(g.inRepo);
+  out.strayArtifacts = out.artifacts["PLAN.md"] === "absent" ? Object.keys(out.artifacts).filter((k) => out.artifacts[k] === "untracked") : [];
+  out.lastReviewCommit = lastReviewCommit(g.inRepo);
   return out;
+}
+
+const ARTIFACT_NAMES = ["SPEC.md", "PLAN.md", "PROGRESS.md", "HANDOFF.md", "REVIEW.md", "SUMMARY.md", "foundry.json"];
+
+/** Where each flight artifact stands: absent, untracked, modified (tracked but changed) or tracked. Read-only. */
+function artifactStates(inRepo) {
+  const out = {};
+  for (const name of ARTIFACT_NAMES) {
+    const abs = path.join(ROOT, "docs", name);
+    const relPath = rel(abs);
+    if (!exists(abs)) out[name] = "absent";
+    else if (!inRepo || !git(["ls-files", "--error-unmatch", "--", relPath], { allowFail: true }).ok) out[name] = "untracked";
+    else out[name] = git(["status", "--porcelain", "--", relPath], { allowFail: true }).out ? "modified" : "tracked";
+  }
+  return out;
+}
+
+/** Short sha of the newest `review:` commit on this branch since it left the base branch, or null. */
+function lastReviewCommit(inRepo) {
+  if (!inRepo) return null;
+  let base = "main";
+  try {
+    base = cfg().baseBranch;
+  } catch {
+    // a malformed config is reported elsewhere; the default base is good enough here
+  }
+  const log = git(["log", "--format=%h%x09%s", `${base}..HEAD`], { allowFail: true });
+  if (!log.ok) return null;
+  const line = log.out.split("\n").find((l) => l.split("\t")[1]?.startsWith("review:"));
+  return line ? line.split("\t")[0] : null;
 }
 
 const AGENT = { plan: "foundry:planner", implement: "foundry:implementer", review: "foundry:reviewer", summarize: "foundry:summarizer" };
