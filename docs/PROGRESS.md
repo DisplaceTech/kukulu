@@ -39,6 +39,7 @@ Started: 2026-10-07T17:30:53.739Z
 - [x] R2-01 The fake gh's pr ready works on BSD sed, and a constraint forbids sed -i
 - [x] R2-02 A scoped .gitleaks.toml allowlist clears the fake-signer fixture findings
 - [x] R2-03 Test that a failed unsigned retry unsets a commit.gpgsign that was unset locally
+- [ ] R3-01 Pin CI gitleaks to the pre-commit version and assert the allowlist stays value-scoped
 
 ## Log
 
