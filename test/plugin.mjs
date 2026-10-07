@@ -252,6 +252,16 @@ for (const name of agentNames) {
   ok(mcpTools.some((t) => t.endsWith("foundry_status")), `agents/${name} can call foundry_status to re-orient itself`);
   ok(tools.includes("mcp__plugin_foundry_foundry__foundry_feedback_log"), `agents/${name} can log pipeline friction the moment it happens`);
 }
+const agentTools = (n) => frontmatter(read(`agents/${n}.md`)).tools.split(",").map((t) => t.trim());
+const PFX = "mcp__plugin_foundry_foundry__";
+ok(agentTools("planner").includes(`${PFX}foundry_plan_commit`), "agents/planner names foundry_plan_commit");
+for (const t of ["foundry_summary_commit", "foundry_flight_archive", "foundry_pr_finalize"]) {
+  ok(agentTools("summarizer").includes(PFX + t), `agents/summarizer names ${t}`);
+}
+for (const name of agentNames) {
+  const fm = frontmatter(read(`agents/${name}.md`));
+  ok(read("README.md").includes(`\`${name}\` (${fm.model}, ${fm.effort})`), `README's agent defaults match agents/${name}.md`);
+}
 // A plugin-shipped MCP server's tools are exposed as
 // mcp__plugin_<plugin>_<server>__<tool> (verified with --plugin-dir), not as
 // the bare mcp__<server>__<tool> a project .mcp.json would give. The

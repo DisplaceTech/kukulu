@@ -54,7 +54,7 @@ You need Node ≥ 22, git, and Claude Code. Nothing to `npm install`.
    synchronously: the only merge it ever asks for is GitHub's own `--auto`.
 
 > **Optional — run a stage on a different model or backend.** By default the
-> planner and reviewer use `opus` and the implementer uses `sonnet`, all on
+> planner, reviewer and summarizer use `opus` and the implementer uses `sonnet`, all on
 > your Anthropic account. To point any role somewhere else — `haiku`, a full
 > model id, or a local or hosted model through
 > [claude-code-router](https://github.com/musistudio/claude-code-router) —
@@ -68,8 +68,8 @@ You need Node ≥ 22, git, and Claude Code. Nothing to `npm install`.
 ## What's in the box
 
 - **Four stage agents**, each pinned to its own model and effort level by
-  default: `planner` (opus, high), `implementer` (sonnet, medium), `reviewer`
-  (opus, high), `summarizer` (fable, medium). Switching happens per stage,
+  default: `planner` (opus, high), `implementer` (sonnet, medium),
+  `reviewer` (opus, high), `summarizer` (opus, medium). Switching happens per stage,
   not per session, so the expensive model is only spent on the parts that
   need it.
 - **Per-role model routing** — a global config file, optional profiles, and
