@@ -122,6 +122,13 @@ for (const name of ["plan-build", "implement"]) {
   like(read(`skills/${name}/SKILL.md`), /heredoc/, `skills/${name} states the shell-heredoc fallback for a refused Write`);
 }
 
+{
+  const ws = read("docs/writing-specs.md");
+  like(ws, /from: "<that task's id>"/, "writing-specs.md teaches from");
+  like(ws, /mutation\.targeted/, "writing-specs.md teaches mutation.targeted");
+  like(ws, /commit-msg/, "writing-specs.md shows a commit-msg hook for provenance logging");
+  like(read("templates/SPEC.md"), /\{filter\}/, "templates/SPEC.md names the {filter} placeholder");
+}
 like(read("docs/operations.md"), /^## Running flight after flight$/m, "operations.md explains running flight after flight");
 like(read("docs/operations.md"), /^## Signing$/m, "operations.md has a signing section");
 like(read("skills/pull-feedback/SKILL.md"), /docs\/flights\/\*\/feedback\.jsonl/, "pull-feedback reads archived flight logs too");
@@ -415,6 +422,7 @@ for (const rule of constraintsTemplate) {
   ok(Array.isArray(rule.shouldMatch) && rule.shouldMatch.length, `${rule.id} has at least one shouldMatch fixture`);
   ok(Array.isArray(rule.shouldNotMatch) && rule.shouldNotMatch.length, `${rule.id} has at least one shouldNotMatch fixture`);
 }
+ok(constraintsTemplate.some((r) => r.from), "some constraints template rule carries from");
 ok(read("docs/operations.md").includes("templates/constraints.example.json"), "the constraints template is referenced from docs/operations.md");
 ok(read("skills/plan-build/SKILL.md").includes("templates/constraints.example.json"), "...and from the plan-build skill that would actually use it");
 

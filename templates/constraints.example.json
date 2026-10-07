@@ -2,8 +2,12 @@
   {
     "id": "no-direct-lodash-import",
     "description": "Import from the project's own utils wrapper, not lodash directly, so a swap never touches every call site.",
-    "paths": ["src/"],
-    "exclude": ["src/utils/"],
+    "paths": [
+      "src/"
+    ],
+    "exclude": [
+      "src/utils/"
+    ],
     "pattern": "from ['\"]lodash['\"]",
     "shouldMatch": [
       "import _ from 'lodash';",
@@ -17,8 +21,12 @@
   {
     "id": "no-hardcoded-tick-rate",
     "description": "The simulation tick rate is an ⚠️ ASSUMPTION config value (config.TICK_RATE); a literal number anywhere else is a rule that was never actually wired to config. Three shapes an implementer reaches for are covered, because a grep that only catches one shape passes silently past the others (F-14).",
-    "paths": ["src/"],
-    "exclude": ["src/config/"],
+    "paths": [
+      "src/"
+    ],
+    "exclude": [
+      "src/config/"
+    ],
     "pattern": "(tickRate|TICK_RATE)['\"]?\\s*(=|:|=>)\\s*[0-9]",
     "shouldMatch": [
       "const tickRate = 60;",
@@ -34,8 +42,12 @@
   {
     "id": "no-fetch-outside-net-client",
     "description": "Every network call goes through src/net/client.ts, so retry, auth and logging live in one place instead of being re-implemented at each call site.",
-    "paths": ["src/"],
-    "exclude": ["src/net/"],
+    "paths": [
+      "src/"
+    ],
+    "exclude": [
+      "src/net/"
+    ],
     "pattern": "\\bfetch\\(",
     "shouldMatch": [
       "const res = fetch('/api/x');",
@@ -44,6 +56,23 @@
     "shouldNotMatch": [
       "const res = client.fetchJson('/api/x');",
       "// network access is centralized in src/net/client.ts"
+    ]
+  },
+  {
+    "id": "no-todo-in-src",
+    "description": "No TODO marker survives in src/ once the cleanup task has run. The rule is gated with from: until that task starts, the markers it will clear are still expected, so the rule stays inactive (and still self-tests its fixtures).",
+    "paths": [
+      "src/"
+    ],
+    "from": "P2-01",
+    "pattern": "\\bTODO\\b",
+    "shouldMatch": [
+      "// TODO: wire this up",
+      "# TODO(eric): remove after the migration"
+    ],
+    "shouldNotMatch": [
+      "const todoList = [];",
+      "// every item is tracked in docs/PLAN.md"
     ]
   }
 ]

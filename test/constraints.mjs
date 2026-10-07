@@ -183,12 +183,22 @@ for (const [bad, re, label] of [
 // ---------------------------------------------------------------- the shipped template
 
 {
+  // every template rule validates and passes its own fixtures
   const template = JSON.parse(fs.readFileSync(path.join(ROOT, "templates/constraints.example.json"), "utf8"));
-  ok(Array.isArray(template) && template.length >= 3, "the template ships at least three worked rules");
-  const repo = constraintRepo(template);
+  ok(Array.isArray(template) && template.length >= 4, "the template ships at least four worked rules");
+  ok(template.some((r) => r.from), "...one of them gated with from");
+  const needed = [...new Set(template.map((r) => r.from).filter(Boolean))];
+  const tasks = [
+    { id: "P0-01", title: "One" },
+    ...needed.map((id) => ({ id, title: `Task ${id}` })),
+  ];
+  const repo = plannedRepo({ config: { constraints: template }, tasks });
+  writeFile(repo, "src/.keep", "");
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-qm", "chore: src/"]);
   await withServer(repo, async ({ call }) => {
     const v = await call("foundry_verify");
-    eq(v.constraints.ok, true, "the shipped template passes its own self-test");
+    eq(v.constraints.ok, true, "every template rule validates and passes its own fixtures");
     for (const r of v.constraints.results) eq(r.fixture, null, `${r.id}'s fixtures agree with its pattern`);
   });
 }
