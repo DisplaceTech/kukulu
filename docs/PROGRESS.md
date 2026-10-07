@@ -26,7 +26,7 @@ Started: 2026-10-07T17:30:53.739Z
 - [x] P2-04 Implement skill: codebase notes stay out of the feedback log
 - [x] P2-05 Go-flight skill: resume, signing unlocked, flight slug
 - [x] P2-06 Pull-feedback skill reads archived flight logs
-- [ ] P2-07 Phase 2 end: push and record the manual check
+- [x] P2-07 Phase 2 end: push and record the manual check
 - [ ] P3-01 Tool reference and README for twenty-one tools
 - [ ] P3-02 Operations: flight after flight, and signing
 - [ ] P3-03 Writing specs and templates: from, targeted mutation, provenance
@@ -100,3 +100,6 @@ go-flight skill: three new options (continue allow N rounds -> flight_options re
 
 ### P2-06 — ef4733b
 pull-feedback skill now reads .foundry/feedback.jsonl plus every docs/flights/*/feedback.jsonl, stops only when all are missing/empty, header names each source log with its item count. Interpretation: duplicates within one pull keep one copy by exact at. plugin.mjs assertions. Phase 2 push deferred to run_finish.
+
+### P2-07 — 006c321
+Push: pushed build/2026-10-07 to origin. Agent tools check: agents/planner.md names foundry_plan_commit; agents/summarizer.md names foundry_flight_archive and foundry_pr_finalize (none missing). Manual check: NOT VERIFIED (human): read each changed SKILL.md top to bottom for contradictions with the tool reference.
