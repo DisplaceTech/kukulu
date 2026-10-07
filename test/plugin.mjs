@@ -534,4 +534,9 @@ like(read("skills/summarize/SKILL.md"), /\.foundry\/feedback\.jsonl/, "...and re
 like(read("docs/feedback/README.md"), /foundry_feedback_log/, "docs/feedback/README.md documents the tool that produces the source log");
 like(read("docs/feedback/README.md"), /\/foundry:pull-feedback/, "...and the skill that pulls it back here");
 
+// R2-02: the fake-signer fixture is allowlisted narrowly, defaults kept.
+const gitleaks = read(".gitleaks.toml");
+const glPaths = [...gitleaks.matchAll(/^paths\s*=\s*\[(.*)\]\s*$/gm)].flatMap((m) => [...m[1].matchAll(/\x27\x27\x27(.*?)\x27\x27\x27/g)].map((x) => x[1]));
+ok(/useDefault\s*=\s*true/.test(gitleaks) && glPaths.length > 0 && glPaths.every((p) => p.startsWith("^test/")), ".gitleaks.toml keeps the default rules and allowlists only the test fixtures");
+
 finish();
