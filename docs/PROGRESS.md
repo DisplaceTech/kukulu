@@ -21,7 +21,7 @@ Started: 2026-10-07T17:30:53.739Z
 - [x] P1-14 foundry_pr_finalize resign path
 - [x] P1-15 Phase 1 end: push and record the manual check
 - [x] P2-01 Summarize skill: content, archive, codebase notes, finalize
-- [ ] P2-02 Review-build skill: targeted mutants, confirmKill, converging rounds
+- [x] P2-02 Review-build skill: targeted mutants, confirmKill, converging rounds
 - [ ] P2-03 Plan-build skill: plan_commit, from, stray artifacts, per-flight CLAUDE.md
 - [ ] P2-04 Implement skill: codebase notes stay out of the feedback log
 - [ ] P2-05 Go-flight skill: resume, signing unlocked, flight slug
@@ -85,3 +85,6 @@ Push: pushed build/2026-10-07 to origin at phase end (full verify was green at P
 
 ### P2-01 — d2ee0fd
 Summarize skill rewritten: composes the document, passes content to foundry_summary_commit (no Write/heredoc), adds sections 9-11 (Suggested CLAUDE.md additions, Advisory mutation survivors, Breaking call), archives when archive: true, ends with foundry_pr_finalize({ breaking }) and never resign; final message statuses AWAITING SIGNING / AUTO-MERGE ON / READY / PR UNCHANGED. plugin.mjs: summarize dropped from heredoc loop, new assertions.
+
+### P2-02 — c5f5793
+review-build skill gains targeted mutants, confirmKill/failedCommands/inconclusive guidance, round 1 sweep (at least three, one R-task per file), round 2+ scoping via lastReviewCommit with out-of-diff survivors under ## Notes. The sweep size lives only in this skill. plugin.mjs assertions added.
