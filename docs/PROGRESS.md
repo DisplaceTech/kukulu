@@ -33,7 +33,7 @@ Started: 2026-10-07T17:30:53.739Z
 - [x] P3-04 Architecture, contributing table, and feedback headers
 - [x] P3-05 Version 0.5.0 and the CHANGELOG
 - [x] P3-06 Phase 3 end: push for the draft PR and record the manual check
-- [ ] R1-01 commitStaged rolls back its own signing fallback when the unsigned retry fails
+- [x] R1-01 commitStaged rolls back its own signing fallback when the unsigned retry fails
 - [ ] R1-02 Tests for four mcp/server.mjs mechanics that survive mutation
 - [ ] R1-03 Agent tool contracts and README routing defaults are asserted
 
@@ -124,3 +124,6 @@ Version 0.5.0 in package.json, plugin.json and server VERSION only. CHANGELOG [0
 
 ### P3-06 — 7e72b78
 Push: pushed build/2026-10-07 to origin; foundry_run_finish opens the draft PR. Not merged, tagged or released. Manual check: NOT VERIFIED (human): CI is green on the PR.
+
+### R1-01 — 7686bdc
+commitStaged snapshots state.json, feedback.jsonl and local commit.gpgsign before fallback; restores all (and unstages) if the unsigned retry fails. Test added in implement.mjs (counter hook). No interpretation choices.
