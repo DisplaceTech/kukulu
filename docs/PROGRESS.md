@@ -37,7 +37,7 @@ Started: 2026-10-07T17:30:53.739Z
 - [x] R1-02 Tests for four mcp/server.mjs mechanics that survive mutation
 - [x] R1-03 Agent tool contracts and README routing defaults are asserted
 - [x] R2-01 The fake gh's pr ready works on BSD sed, and a constraint forbids sed -i
-- [ ] R2-02 A scoped .gitleaks.toml allowlist clears the fake-signer fixture findings
+- [x] R2-02 A scoped .gitleaks.toml allowlist clears the fake-signer fixture findings
 - [ ] R2-03 Test that a failed unsigned retry unsets a commit.gpgsign that was unset locally
 
 ## Log
@@ -139,3 +139,6 @@ test/plugin.mjs asserts planner/summarizer MCP tools and README agent defaults (
 
 ### R2-01 — a2fb767
 Replaced sed -i in fake gh pr ready with tmp+mv. Added no-gnu-sed-inplace constraint (fixture passes, no hits) and CLAUDE.md entry. verify green. macos CI check NOT VERIFIED (human).
+
+### R2-02 — a5bbdca
+Added .gitleaks.toml (useDefault, AND allowlist on ^test/(harness|review).mjs$ + 0123456789ABCDEF). Both gitleaks runs (range and full) report no leaks. plugin.mjs assertion added. PR check NOT VERIFIED (human).
