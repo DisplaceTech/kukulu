@@ -33,6 +33,9 @@ Started: 2026-10-07T17:30:53.739Z
 - [x] P3-04 Architecture, contributing table, and feedback headers
 - [x] P3-05 Version 0.5.0 and the CHANGELOG
 - [x] P3-06 Phase 3 end: push for the draft PR and record the manual check
+- [ ] R1-01 commitStaged rolls back its own signing fallback when the unsigned retry fails
+- [ ] R1-02 Tests for four mcp/server.mjs mechanics that survive mutation
+- [ ] R1-03 Agent tool contracts and README routing defaults are asserted
 
 ## Log
 
