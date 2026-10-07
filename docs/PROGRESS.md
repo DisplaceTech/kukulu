@@ -30,7 +30,7 @@ Started: 2026-10-07T17:30:53.739Z
 - [x] P3-01 Tool reference and README for twenty-one tools
 - [x] P3-02 Operations: flight after flight, and signing
 - [x] P3-03 Writing specs and templates: from, targeted mutation, provenance
-- [ ] P3-04 Architecture, contributing table, and feedback headers
+- [x] P3-04 Architecture, contributing table, and feedback headers
 - [ ] P3-05 Version 0.5.0 and the CHANGELOG
 - [ ] P3-06 Phase 3 end: push for the draft PR and record the manual check
 
@@ -112,3 +112,6 @@ operations.md: new ## Running flight after flight and ## Signing sections, confi
 
 ### P3-03 — a04b419
 writing-specs.md gains {filter} guidance, Rules that become true at a task, Provenance logging (commit-msg hook sh fence); templates/SPEC.md section 7 names {filter}; templates/constraints.example.json gains no-todo-in-src with from P2-01 (file reformatted, multi-line arrays). Tests: constraints.mjs template test now builds a plan containing the from task; plugin.mjs assertions.
+
+### P3-04 — ffb76d2
+architecture.md: stateDiagram gains done_signing/done_archived, decision list renumbered to 12 with the two new dones, Who-may-write diagram and paragraph cover plan_commit/flight_archive/pr_finalize, State on disk lists new state fields and docs/flights/<slug>/. CONTRIBUTING suite table updated (still eleven). Both 2026-10-07 feedback headers say addressed in docs/SPEC.md (Foundry 0.5.0); nothing else under docs/feedback changed. Diagram check run in a scratch copy: 7/7 parse. plugin.mjs assertion added.
