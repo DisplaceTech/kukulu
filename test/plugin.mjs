@@ -367,6 +367,10 @@ ok(read("skills/plan-build/SKILL.md").includes("templates/constraints.example.js
       ok(opsDoc.includes("`policies.feedback`"), "operations.md documents policies.feedback");
       continue;
     }
+    if (key === "mutation") {
+      ok(opsDoc.includes("`mutation.targeted`"), "operations.md documents mutation.targeted");
+      continue;
+    }
     if (key === "parallel") {
       ok(opsDoc.includes("`parallel.maxStreams`"), "operations.md documents parallel.maxStreams");
       ok(opsDoc.includes("`parallel.setup`"), "operations.md documents parallel.setup");

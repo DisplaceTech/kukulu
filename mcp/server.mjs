@@ -313,6 +313,32 @@ function validateParallel(parallel) {
   }
 }
 
+const MUTATION_FILTER = /^[A-Za-z0-9_.:\\/-]{1,200}$/;
+
+/** Validate `docs/foundry.json`'s `mutation` block: named test commands with one `{filter}` slot, for foundry_mutate's `targeted` argument. */
+function validateMutation(mutation) {
+  if (mutation === undefined) return;
+  const isObj = (v) => typeof v === "object" && v !== null && !Array.isArray(v);
+  if (!isObj(mutation)) throw new ToolError("docs/foundry.json 'mutation' must be an object");
+  for (const k of Object.keys(mutation)) {
+    if (k !== "targeted") throw new ToolError(`docs/foundry.json mutation has an unknown key '${k}'`);
+  }
+  if (mutation.targeted === undefined) return;
+  if (!isObj(mutation.targeted)) throw new ToolError("docs/foundry.json mutation.targeted must be an object mapping a name to { cmd, timeoutMs }");
+  for (const [name, entry] of Object.entries(mutation.targeted)) {
+    const where = `docs/foundry.json mutation.targeted.${name}`;
+    if (!isObj(entry)) throw new ToolError(`${where} must be an object { cmd, timeoutMs }`);
+    for (const k of Object.keys(entry)) {
+      if (!["cmd", "timeoutMs"].includes(k)) throw new ToolError(`${where} has an unknown key '${k}'`);
+    }
+    if (typeof entry.cmd !== "string" || !entry.cmd) throw new ToolError(`${where}.cmd must be a non-empty string`);
+    if (entry.cmd.split("{filter}").length - 1 !== 1) throw new ToolError(`${where}.cmd must contain {filter} exactly once`);
+    if (entry.timeoutMs !== undefined && (!Number.isInteger(entry.timeoutMs) || entry.timeoutMs <= 0)) {
+      throw new ToolError(`${where}.timeoutMs must be a positive integer`);
+    }
+  }
+}
+
 const CONSTRAINT_KEYS = ["id", "description", "paths", "exclude", "pattern", "flags", "shouldMatch", "shouldNotMatch", "from"];
 
 /**
@@ -362,7 +388,11 @@ function cfg() {
   validatePolicies(c.policies);
   validateConstraints(c.constraints);
   validateParallel(c.parallel);
+  validateMutation(c.mutation);
   const commandTimeoutMs = c.commandTimeoutMs || 10 * 60 * 1000;
+  const targeted = Object.fromEntries(
+    Object.entries(c.mutation?.targeted || {}).map(([name, e]) => [name, { cmd: e.cmd, timeoutMs: e.timeoutMs ?? commandTimeoutMs }]),
+  );
   const norm = (entry, i, where, opts) => normalizeCommand(entry, commandTimeoutMs, `docs/foundry.json ${where}[${i}]`, opts);
   const gated = { allowFrom: true };
   return {
@@ -382,6 +412,7 @@ function cfg() {
     commandTimeoutMs,
     guardCap: Number.isInteger(c.guardCap) ? c.guardCap : 60,
     constraints: c.constraints || [],
+    mutation: { targeted },
     policies: {
       signing: c.policies?.signing ?? "auto",
       push: c.policies?.push ?? true,
@@ -2223,7 +2254,7 @@ function undoMutationResidue(before) {
   return { restored, removed };
 }
 
-function mutate({ file, find, replace, commands, timeoutMs } = {}) {
+function mutate({ file, find, replace, commands, timeoutMs, targeted, filter } = {}) {
   if (typeof file !== "string" || !file) throw new ToolError("file is required: a repo-relative path to a tracked source file");
   if (typeof find !== "string" || !find) throw new ToolError("find is required and must be a non-empty string: the exact text to replace");
   if (typeof replace !== "string") throw new ToolError('replace is required and must be a string (use "" to delete the matched text)');
@@ -2237,6 +2268,16 @@ function mutate({ file, find, replace, commands, timeoutMs } = {}) {
   if (!gitFacts().inRepo) throw new ToolError("not a git repository");
   if (!loadConfig()) throw new ToolError("docs/foundry.json is missing; the plan stage must write it");
   const cc = cfg();
+  if ((targeted === undefined) !== (filter === undefined)) throw new ToolError("targeted and filter must be passed together");
+  if (targeted !== undefined) {
+    if (commands !== undefined) throw new ToolError("targeted cannot be combined with commands; pass one or the other");
+    const names = Object.keys(cc.mutation.targeted);
+    const legal = names.length ? `Configured names: ${names.join(", ")}.` : "No targeted commands are configured; add them under `mutation.targeted` in docs/foundry.json.";
+    if (typeof targeted !== "string" || !Object.hasOwn(cc.mutation.targeted, targeted)) throw new ToolError(`unknown targeted command ${JSON.stringify(targeted)}. ${legal}`);
+    if (typeof filter !== "string" || !MUTATION_FILTER.test(filter)) {
+      throw new ToolError(`filter must be 1 to 200 characters from letters, digits and _ . : / - (no spaces, quotes or shell characters); got ${JSON.stringify(filter)}`);
+    }
+  }
   const recovered = recoverMutation();
   if (exists(P.lock)) {
     throw new ToolError("an implementation run is in progress (.foundry/implement.lock exists); foundry_mutate is a review-stage tool — run it after foundry_run_finish");
@@ -2263,7 +2304,10 @@ function mutate({ file, find, replace, commands, timeoutMs } = {}) {
   }
 
   let cmds;
-  if (commands) {
+  if (targeted !== undefined) {
+    const t = cc.mutation.targeted[targeted];
+    cmds = [{ cmd: t.cmd.replace("{filter}", () => `'${filter}'`), timeoutMs: t.timeoutMs, exclusive: false, from: null }];
+  } else if (commands) {
     const legal = new Map([...cc.verify, ...Object.values(cc.extraVerify).flat()].map((x) => [x.cmd, x]));
     const unknown = commands.filter((x) => !legal.has(x));
     if (unknown.length) {
@@ -2672,6 +2716,8 @@ const TOOLS = [
         find: { type: "string", description: "exact text to replace; must appear exactly once in the file" },
         replace: { type: "string", description: "the mutated text (\"\" deletes the match)" },
         commands: { type: "array", items: { type: "string" }, description: "optional: run only these configured verify/extraVerify commands, each spelled exactly as in docs/foundry.json" },
+        targeted: { type: "string", description: "optional: the name of a docs/foundry.json mutation.targeted command to run instead of the verify commands; pass with filter, never with commands" },
+        filter: { type: "string", description: "with targeted: the test name or path substituted for {filter} (letters, digits and _ . : / - only)" },
         timeoutMs: { type: "integer", minimum: 1, description: "optional: cap every command's timeout for this call (never raises a configured one), for a mutant you suspect hangs" },
       },
       ["file", "find", "replace"],

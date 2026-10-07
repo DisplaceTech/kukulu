@@ -444,7 +444,7 @@ with `git checkout` — an in-tree edit the auto-mode classifier refuses for a
 reviewer told not to fix code, and one a scratch copy cannot replace for
 suites bound to the repo root (wp-env).
 
-**Arguments:** `{ file, find, replace, commands?, timeoutMs? }`.
+**Arguments:** `{ file, find, replace, commands?, timeoutMs?, targeted?, filter? }`.
 
 - `file` — a repo-relative path to a tracked text file with no uncommitted
   changes
@@ -453,6 +453,13 @@ suites bound to the repo root (wp-env).
 - `replace` — the mutated text; `""` deletes the match
 - `commands` — optional: run only these commands, each spelled exactly as
   in `docs/foundry.json`'s `verify` or `extraVerify`
+- `targeted`, `filter` — optional, together: run the named
+  `mutation.targeted` command from `docs/foundry.json` instead of the file's
+  verify commands, with `{filter}` replaced by `filter` as one single-quoted
+  shell word. `filter` is 1 to 200 characters from letters, digits and
+  `_ . : / -`. Refused, before the file is touched, when only one of the two
+  is passed, when combined with `commands`, for an unknown name (the message
+  lists the configured names), or for a filter with any other character
 - `timeoutMs` — optional: cap every command's timeout for this call. It only
   ever shortens a configured timeout, never raises one; it is for a mutant you
   suspect makes a test hang (cleanflate F-06)

@@ -621,6 +621,50 @@ const untouched = (repo, head) => {
   });
 }
 
+// ---------------------------------------------------------------- targeted mutation commands
+
+{
+  const repo = mutationRepo({ config: { verify: ["false"], mutation: { targeted: { unit: { cmd: "echo FILTER={filter}" } } } } });
+  const head = git(repo, ["rev-parse", "HEAD"]);
+  await withServer(repo, async ({ call }) => {
+    const base = { file: "src/add.mjs", find: "a + b", replace: "a - b" };
+    const r = await call("foundry_mutate", { ...base, targeted: "unit", filter: "tests/Unit/FooTest.php" });
+    eq(r.killed, false, "a targeted command runs instead of verify (verify's false never ran)");
+    like(r.results[0].stdoutTail, /FILTER=tests\/Unit\/FooTest\.php/, "...and its stdout carries the substituted filter");
+    for (const [args, re, label] of [
+      [{ targeted: "unit" }, /targeted and filter must be passed together/, "targeted without filter"],
+      [{ filter: "x" }, /targeted and filter must be passed together/, "filter without targeted"],
+      [{ targeted: "unit", filter: "x", commands: ["false"] }, /cannot be combined with commands/, "targeted with commands"],
+      [{ targeted: "nope", filter: "x" }, /unknown targeted command "nope".*unit/, "an unknown name"],
+      [{ targeted: "unit", filter: "a;rm -rf x" }, /filter must be 1 to 200 characters/, "a shell-metacharacter filter"],
+    ]) {
+      isError(await call("foundry_mutate", { ...base, ...args }), re, `targeted: ${label} is refused`);
+      eq(readFile(repo, "src/add.mjs"), ADD_SRC, "...and the file is unchanged");
+    }
+    untouched(repo, head);
+  });
+}
+
+{
+  const repo = mutationRepo();
+  await withServer(repo, async ({ call }) => {
+    isError(await call("foundry_mutate", { file: "src/add.mjs", find: "a + b", replace: "a - b", targeted: "unit", filter: "x" }), /No targeted commands are configured/, "targeted with nothing configured says so");
+  });
+}
+
+for (const [mutation, re, label] of [
+  [{ targeted: { php: { cmd: "phpunit" } } }, /mutation\.targeted\.php\.cmd must contain \{filter\} exactly once/, "{filter} absent"],
+  [{ targeted: { php: { cmd: "phpunit {filter} {filter}" } } }, /exactly once/, "{filter} twice"],
+  [{ other: {} }, /mutation has an unknown key 'other'/, "an unknown key under mutation"],
+  [{ targeted: { php: { cmd: "x {filter}", extra: 1 } } }, /mutation\.targeted\.php has an unknown key 'extra'/, "an unknown key in an entry"],
+  [{ targeted: { php: { cmd: "x {filter}", timeoutMs: 1.5 } } }, /mutation\.targeted\.php\.timeoutMs must be a positive integer/, "a non-integer timeoutMs"],
+]) {
+  const repo = mutationRepo({ config: { mutation } });
+  await withServer(repo, async ({ call }) => {
+    isError(await call("foundry_mutate", { file: "src/add.mjs", find: "a + b", replace: "a - b" }), re, `mutation config refuses ${label}`);
+  });
+}
+
 // ---------------------------------------------------------------- summary from content
 
 {
