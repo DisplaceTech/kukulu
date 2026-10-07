@@ -34,6 +34,10 @@ repos:
     rev: v0.45.0
     hooks:
       - id: markdownlint
+        # The MCP writes these files (log headings with no blank line after
+        # them), so they cannot be kept lint-clean by hand; docs/flights/ will
+        # hold archived copies of them (S-07).
+        exclude: '^docs/(PLAN|PROGRESS|HANDOFF|REVIEW|SUMMARY)\.md$|^docs/flights/'
         args: ["--config", ".markdownlint.yaml"]
 
   - repo: https://github.com/gitleaks/gitleaks

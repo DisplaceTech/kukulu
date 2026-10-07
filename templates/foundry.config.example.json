@@ -1,9 +1,9 @@
 {
   "roles": {
-    "planner": { "model": "fable", "effort": "high" },
+    "planner": { "model": "opus", "effort": "high" },
     "implementer": { "model": "sonnet", "effort": "medium" },
-    "reviewer": { "model": "fable", "effort": "high" },
-    "summarizer": { "model": "fable", "effort": "medium" }
+    "reviewer": { "model": "opus", "effort": "high" },
+    "summarizer": { "model": "opus", "effort": "medium" }
   },
   "profiles": {
     "local": {

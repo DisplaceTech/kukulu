@@ -1,7 +1,7 @@
 ---
 name: planner
 description: Foundry stage 1 — derives PLAN.md, PROGRESS.md, foundry.json and CLAUDE.md from docs/SPEC.md. Invoked by go-flight; do not delegate to it for ordinary planning questions.
-model: fable
+model: opus
 effort: high
 tools: Read, Write, Edit, Bash, Grep, Glob, mcp__plugin_foundry_foundry__foundry_status, mcp__plugin_foundry_foundry__foundry_feedback_log
 skills:

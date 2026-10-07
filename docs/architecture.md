@@ -152,10 +152,15 @@ mutation is a finding, and the fix still goes through the fix-task loop.
 | Stage | Model | Effort | Why |
 |---|---|---|---|
 | go-flight | sonnet | low | Reads a JSON field, calls one tool. Any judgment here is a bug. |
-| planner | fable | high | The plan is the whole product. Everything downstream inherits its mistakes, and nothing downstream is empowered to fix a bad decomposition. |
+| planner | opus | high | The plan is the whole product. Everything downstream inherits its mistakes, and nothing downstream is empowered to fix a bad decomposition. |
 | implementer | sonnet | medium | Bounded, well-specified tasks with acceptance tests named up front. This is the stage that runs for hours, so it is the one worth making cheap. |
-| reviewer | fable | high | Reviews work it did not do, against a spec it must read in full, with the authority to reject. Weak review is worse than none. |
-| summarizer | fable | medium | Synthesis across plan, handoff and every review round, for a human who was not there. |
+| reviewer | opus | high | Reviews work it did not do, against a spec it must read in full, with the authority to reject. Weak review is worse than none. |
+| summarizer | opus | medium | Synthesis across plan, handoff and every review round, for a human who was not there. |
+
+Opus is the default for the planner, reviewer and summarizer because it has
+outperformed Fable on the plan, review and summary roles in the operator's own
+flights. The "why" column still holds: it describes what each role needs, not
+which model supplies it. `fable` remains a legal alias for anyone who prefers it.
 
 These are the plugin defaults, in `agents/*.md`; per-machine and per-project
 routing overrides them — see [routing.md](./routing.md). The stage skills

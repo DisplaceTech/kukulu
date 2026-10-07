@@ -129,6 +129,7 @@ for (const name of agentNames) {
   eq(fm.name, name, `agents/${name}'s name matches its filename`);
   ok(fm.description && fm.description.length > 40, `agents/${name} has a description the orchestrator can route on`);
   ok(MODELS.includes(fm.model), `agents/${name} pins a known model (${fm.model})`);
+  ok(fm.model !== "fable", `agents/${name} does not default to fable`);
   ok(EFFORTS.includes(fm.effort), `agents/${name} pins an effort level (${fm.effort})`);
   ok(fm.color, `agents/${name} has a colour`);
   const skills = Array.isArray(fm.skills) ? fm.skills : [];
@@ -251,9 +252,14 @@ const MD = [
 ];
 const PROSE = [...MD, ...skillNames.map((n) => `skills/${n}/SKILL.md`), ...agentNames.map((n) => `agents/${n}.md`), "templates/SPEC.md"];
 
+// These files describe a flight, and a flight's spec names tools it has not
+// built yet, so the tool/skill-name check cannot hold for them.
+const FLIGHT_ARTIFACTS = ["docs/SPEC.md", "docs/PLAN.md", "docs/PROGRESS.md", "docs/HANDOFF.md", "docs/REVIEW.md", "docs/SUMMARY.md"];
+
 let unknownTool = null;
 let unknownSkill = null;
 for (const file of PROSE) {
+  if (FLIGHT_ARTIFACTS.includes(file)) continue;
   const body = read(file);
   for (const m of body.matchAll(/\bfoundry_[a-z_]+/g)) {
     if (!toolNames.includes(m[0]) && !unknownTool) unknownTool = `${file}: ${m[0]}`;
@@ -269,7 +275,8 @@ eq(unknownSkill, null, "every foundry:* skill or agent named in prose exists");
 let brokenLink = null;
 for (const file of MD) {
   const dir = path.dirname(path.join(ROOT, file));
-  for (const m of read(file).matchAll(/\[[^\]]*\]\(([^)]+)\)/g)) {
+  // Inline code spans quote example link text (a PLAN task shows the line it will add elsewhere), so they are not links.
+  for (const m of read(file).replace(/`[^`\n]*`/g, "").matchAll(/\[[^\]]*\]\(([^)]+)\)/g)) {
     const target = m[1].split("#")[0];
     if (!target || /^(https?:|mailto:)/.test(target)) continue;
     if (!fs.existsSync(path.resolve(dir, target)) && !brokenLink) brokenLink = `${file} → ${m[1]}`;

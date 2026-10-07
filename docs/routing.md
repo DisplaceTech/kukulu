@@ -117,10 +117,10 @@ the base branch before a run can start.
 ```json
 {
   "roles": {
-    "planner":     { "model": "fable",  "effort": "high" },
+    "planner":     { "model": "opus",    "effort": "high" },
     "implementer": { "model": "sonnet", "effort": "medium" },
-    "reviewer":    { "model": "fable",  "effort": "high" },
-    "summarizer":  { "model": "fable",  "effort": "medium" }
+    "reviewer":    { "model": "opus",    "effort": "high" },
+    "summarizer":  { "model": "opus",    "effort": "medium" }
   },
   "profiles": {
     "local": {
@@ -299,7 +299,7 @@ locally:
 |---|---|---|
 | `implementer` | Qwen 3.6-35B-A3B, or Qwen 3.6-27B (Q6) with a 64K context cap | The stage that runs for hours; a mixture-of-experts model this size fits comfortably and the implement loop's tasks are bounded and well-specified |
 | `reviewer` | DeepSeek V4 Pro or GLM-5.2, via OpenRouter | Review needs the stronger judgment a hosted model gives, at a fraction of a flagship Anthropic model's cost |
-| `planner` | `fable` (unchanged) | The plan is the whole product; everything downstream inherits its mistakes |
+| `planner` | `opus` (unchanged) | The plan is the whole product; everything downstream inherits its mistakes |
 
 Set the context cap in Ollama itself (`num_ctx` on the model, or a
 Modelfile) — the client side of the connection does not control it.
