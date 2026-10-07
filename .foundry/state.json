@@ -1,9 +1,9 @@
 {
-  "round": 3,
-  "implemented": true,
-  "reviewed": true,
-  "verdict": "APPROVED",
-  "summarized": true,
+  "round": 0,
+  "implemented": false,
+  "reviewed": false,
+  "verdict": null,
+  "summarized": false,
   "halted": null,
   "preexistingUntracked": [],
   "policies": {
@@ -12,38 +12,11 @@
     "pr": "draft",
     "feedback": true
   },
-  "signing": "on",
-  "rounds": [
-    {
-      "round": 1,
-      "fixTasks": 3,
-      "unblocked": 0,
-      "verdict": "CHANGES REQUESTED",
-      "nonConverging": false,
-      "at": "2026-10-07T19:22:31.904Z"
-    },
-    {
-      "round": 2,
-      "fixTasks": 3,
-      "unblocked": 0,
-      "verdict": "CHANGES REQUESTED",
-      "nonConverging": true,
-      "at": "2026-10-07T19:59:25.691Z"
-    },
-    {
-      "round": 3,
-      "fixTasks": 1,
-      "unblocked": 0,
-      "verdict": "CHANGES REQUESTED",
-      "nonConverging": false,
-      "at": "2026-10-07T20:23:36.412Z"
-    },
-    {
-      "round": 4,
-      "fixTasks": 0,
-      "unblocked": 0,
-      "verdict": "APPROVED",
-      "at": "2026-10-07T20:39:15.235Z"
-    }
-  ]
+  "signing": null,
+  "rounds": [],
+  "archived": {
+    "slug": "v0-5-0",
+    "dir": "docs/flights/v0-5-0",
+    "at": "2026-10-07T20:54:01.917Z"
+  }
 }
