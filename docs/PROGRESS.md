@@ -31,7 +31,7 @@ Started: 2026-10-07T17:30:53.739Z
 - [x] P3-02 Operations: flight after flight, and signing
 - [x] P3-03 Writing specs and templates: from, targeted mutation, provenance
 - [x] P3-04 Architecture, contributing table, and feedback headers
-- [ ] P3-05 Version 0.5.0 and the CHANGELOG
+- [x] P3-05 Version 0.5.0 and the CHANGELOG
 - [ ] P3-06 Phase 3 end: push for the draft PR and record the manual check
 
 ## Log
@@ -115,3 +115,6 @@ writing-specs.md gains {filter} guidance, Rules that become true at a task, Prov
 
 ### P3-04 — ffb76d2
 architecture.md: stateDiagram gains done_signing/done_archived, decision list renumbered to 12 with the two new dones, Who-may-write diagram and paragraph cover plan_commit/flight_archive/pr_finalize, State on disk lists new state fields and docs/flights/<slug>/. CONTRIBUTING suite table updated (still eleven). Both 2026-10-07 feedback headers say addressed in docs/SPEC.md (Foundry 0.5.0); nothing else under docs/feedback changed. Diagram check run in a scratch copy: 7/7 parse. plugin.mjs assertion added.
+
+### P3-05 — 6d6c97b
+Version 0.5.0 in package.json, plugin.json and server VERSION only. CHANGELOG [0.5.0] with Added/Changed/Fixed/Breaking changes (opus defaults, summarizer no longer writes the file, policies.finalize auto). plugin.mjs assertion that the newest changelog heading equals the package version. No tag, release or merge.
