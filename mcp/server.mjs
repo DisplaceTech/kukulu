@@ -138,6 +138,33 @@ function commitStaged(rels, message, { stage } = {}) {
   }
 }
 
+/**
+ * Run a tool's write-then-commit section so that if it throws, every file it
+ * may have written is put back byte for byte (or deleted if it did not exist)
+ * and the index is unstaged, then the original error is rethrown. A tool that
+ * fails therefore leaves the tree as it found it and is safe to call again.
+ * Every writing tool uses this; never copy the logic into a tool.
+ */
+function withRollback(paths, fn) {
+  const snaps = paths.map((p) => [p, exists(p) ? fs.readFileSync(p) : null]);
+  try {
+    return fn();
+  } catch (e) {
+    for (const [p, bytes] of snaps) {
+      if (bytes === null) fs.rmSync(p, { force: true });
+      else {
+        fs.mkdirSync(path.dirname(p), { recursive: true });
+        fs.writeFileSync(p, bytes);
+      }
+    }
+    const rels = paths.map(rel);
+    if (!git(["reset", "-q", "--", ...rels], { allowFail: true }).ok) {
+      for (const r of rels) git(["reset", "-q", "--", r], { allowFail: true });
+    }
+    throw e;
+  }
+}
+
 function gitCommitIfChanged(paths, message, { stage } = {}) {
   // A path that neither exists on disk nor is tracked yet (e.g. a feedback
   // log nothing has written to this run) is not "nothing changed" to `git
@@ -1554,6 +1581,7 @@ function startRun() {
   const preexistingUntracked = untrackedPaths();
 
   // .gitignore the lock, arm it, stamp PROGRESS, commit.
+  const sha = withRollback([P.gitignore, P.progress, P.state, P.feedback], () => {
   ensureLineInFile(P.gitignore, ".foundry/implement.lock");
   // Only a plan that declares streams ever creates worktrees, so only such a
   // plan gets the extra line (a plan without streams stays byte-identical).
@@ -1578,7 +1606,8 @@ function startRun() {
   if (c.policies.feedback && st.signing.startsWith("off (probe failed")) {
     appendFeedback("implement", `Signing disabled for this run: ${st.signing}`, "signing", "auto");
   }
-  const sha = gitCommitIfChanged([P.gitignore, P.progress, P.state, P.feedback], st.round === 0 ? "chore: start implementation run" : `chore: start review-fix round ${st.round}`);
+  return gitCommitIfChanged([P.gitignore, P.progress, P.state, P.feedback], st.round === 0 ? "chore: start implementation run" : `chore: start review-fix round ${st.round}`);
+  });
   return { alreadyStarted: false, branch, commit: sha, counts: counts(pr.tasks), round: st.round, policies: st.policies, signing: st.signing, basePush };
 }
 
@@ -1821,10 +1850,12 @@ function taskDone({ stream, id, log }) {
     );
   }
   const sha = git(["rev-parse", "--short", "HEAD"], { cwd }).out;
-  setTaskState(pr, id, "x");
-  appendLog(pr, id, sha, log);
-  writeProgress(pr);
-  const psha = gitCommitIfChanged([P.progress], `progress: ${id} done`);
+  const psha = withRollback([P.progress], () => {
+    setTaskState(pr, id, "x");
+    appendLog(pr, id, sha, log);
+    writeProgress(pr);
+    return gitCommitIfChanged([P.progress], `progress: ${id} done`);
+  });
   resetLockCounter();
   return { id, taskCommit: sha, progressCommit: psha, counts: counts(pr.tasks), guardReset: true, ...(stream !== undefined ? { stream } : {}) };
 }
@@ -1847,10 +1878,12 @@ function taskBlock({ stream, id, reason }) {
   git(["reset", "-q", "--hard", "HEAD"], { cwd });
   git(["clean", "-qfd", ...(ignore || []).flatMap((p) => ["-e", gitCleanExcludePattern(p)])], { cwd });
   pr = parseProgress();
-  setTaskState(pr, id, "!");
-  appendLog(pr, id, "blocked", `BLOCKED: ${reason}`);
-  writeProgress(pr);
-  const psha = gitCommitIfChanged([P.progress], `progress: ${id} blocked`);
+  const psha = withRollback([P.progress], () => {
+    setTaskState(pr, id, "!");
+    appendLog(pr, id, "blocked", `BLOCKED: ${reason}`);
+    writeProgress(pr);
+    return gitCommitIfChanged([P.progress], `progress: ${id} blocked`);
+  });
   resetLockCounter();
   return { id, progressCommit: psha, counts: counts(pr.tasks), ...(stream !== undefined ? { stream } : {}) };
 }
@@ -1910,9 +1943,12 @@ function taskReopen({ id, reason } = {}) {
   const t = pr.tasks.find((x) => x.id === id);
   if (!t) throw new ToolError(`task ${id} not in docs/PROGRESS.md`);
   if (t.state !== "!" && t.state !== "-") throw new ToolError(`task ${id} is '${STATE_NAMES[t.state]}'; only a blocked or skipped task can be reopened`);
-  const dependents = reopenWithDependents(pr, [id], "reopened", `REOPENED: ${reason}`);
-  writeProgress(pr);
-  const commit = gitCommitIfChanged([P.progress], `progress: reopen ${id}${dependents.length ? ` (+${dependents.length} dependent${dependents.length === 1 ? "" : "s"})` : ""}`);
+  let dependents;
+  const commit = withRollback([P.progress], () => {
+    dependents = reopenWithDependents(pr, [id], "reopened", `REOPENED: ${reason}`);
+    writeProgress(pr);
+    return gitCommitIfChanged([P.progress], `progress: reopen ${id}${dependents.length ? ` (+${dependents.length} dependent${dependents.length === 1 ? "" : "s"})` : ""}`);
+  });
   resetLockCounter();
   return { id, reopenedDependents: dependents, commit, counts: counts(pr.tasks) };
 }
@@ -2268,15 +2304,17 @@ function runFinish() {
   const st = loadState();
   const c = cfg();
   const g = gitFacts();
-  const handoffCommit = gitCommitIfChanged([P.handoff], "chore: handoff for review");
+  const handoffCommit = withRollback([P.handoff], () => gitCommitIfChanged([P.handoff], "chore: handoff for review"));
   const dirtyLines = porcelainExcludingPreexisting(st.preexistingUntracked);
   if (dirtyLines.length) {
     throw new ToolError(`working tree is not clean:\n${dirtyLines.join("\n")}\nCommit them as part of the handoff or \`git checkout --\`/\`git clean\` them.`);
   }
 
   st.implemented = true; st.reviewed = false; st.verdict = null;
-  saveState(st);
-  const stateCommit = gitCommitIfChanged([P.state], `chore: round ${st.round} implemented`);
+  const stateCommit = withRollback([P.state], () => {
+    saveState(st);
+    return gitCommitIfChanged([P.state], `chore: round ${st.round} implemented`);
+  });
 
   const push = pushBranch(g.branch, st.policies.push);
   let pr_url = null;
@@ -2331,10 +2369,12 @@ function flightOptions(args = {}) {
   const was = cfg();
   const before = Object.fromEntries(FLIGHT_OPTION_KEYS.map((k) => [k, was[k]]));
   for (const k of given) raw[k] = args[k];
-  write(P.config, `${JSON.stringify(raw, null, 2)}\n`);
-  const after = Object.fromEntries(FLIGHT_OPTION_KEYS.map((k) => [k, cfg()[k]]));
-  const commit = gitCommitIfChanged([P.config], `chore: flight options (${given.map((k) => `${k}=${args[k]}`).join(", ")})`);
-  return { before, after, commit };
+  return withRollback([P.config], () => {
+    write(P.config, `${JSON.stringify(raw, null, 2)}\n`);
+    const after = Object.fromEntries(FLIGHT_OPTION_KEYS.map((k) => [k, cfg()[k]]));
+    const commit = gitCommitIfChanged([P.config], `chore: flight options (${given.map((k) => `${k}=${args[k]}`).join(", ")})`);
+    return { before, after, commit };
+  });
 }
 
 /**
@@ -2348,10 +2388,12 @@ function runHalt({ reason }) {
   if (!reason) throw new ToolError("reason is required");
   const st = loadState();
   st.halted = reason;
-  saveState(st);
-  if (exists(P.lock)) fs.unlinkSync(P.lock);
-  if (cfg().policies.feedback) appendFeedback("controller", `Run halted: ${reason}`, "halt", "auto");
-  const commit = gitCommitIfChanged([P.state, P.progress, P.feedback], "chore: run halted");
+  const commit = withRollback([P.state, P.progress, P.feedback], () => {
+    saveState(st);
+    if (exists(P.lock)) fs.unlinkSync(P.lock);
+    if (cfg().policies.feedback) appendFeedback("controller", `Run halted: ${reason}`, "halt", "auto");
+    return gitCommitIfChanged([P.state, P.progress, P.feedback], "chore: run halted");
+  });
   const g = gitFacts();
   const dirty = git(["status", "--porcelain"], { allowFail: true }).out !== "";
   return { halted: reason, branch: g.branch, head: g.head, commit, dirty };
@@ -2402,8 +2444,10 @@ function reviewSubmit({ verdict, tasks = [], unblock = [] }) {
     if (tasks.length || unblock.length) throw new ToolError("an APPROVED verdict cannot carry fix tasks or unblocks");
     st.reviewed = true; st.verdict = "APPROVED";
     st.rounds = [...st.rounds, { round: N, fixTasks: 0, unblocked: 0, verdict: "APPROVED", at: new Date().toISOString() }];
-    saveState(st);
-    const sha = gitCommitIfChanged([P.review, P.state], `review: round ${N} approved`, { stage: "review" });
+    const sha = withRollback([P.review, P.state], () => {
+      saveState(st);
+      return gitCommitIfChanged([P.review, P.state], `review: round ${N} approved`, { stage: "review" });
+    });
     const push = pushBranch(gitFacts().branch, st.policies.push);
     // `round` is the number this review was stamped with, as for CHANGES
     // REQUESTED — never the count of fix rounds (F-21).
@@ -2424,50 +2468,52 @@ function reviewSubmit({ verdict, tasks = [], unblock = [] }) {
       throw new ToolError(`fix task '${t.title}' depends on '${dep}', which is neither an existing task in PROGRESS.md nor one of this submission's own ids (${ids.join(", ") || "none"})`);
     }
   }
-  if (tasks.length) {
-    const block = [``, `## Review fixes (round ${N})`, ``, ...tasks.map((t, i) => formatTask(ids[i], t) + "\n")].join("\n");
-    write(P.plan, read(P.plan).replace(/\s*$/, "\n") + block);
-    appendTaskLines(pr, tasks.map((t, i) => ({ id: ids[i], title: t.title })));
-  }
   const unblocked = [];
   const reopened = [];
-  for (const u of unblock) {
-    const id = typeof u === "string" ? u : u.id;
-    const reason = typeof u === "string" ? "unblocked by reviewer" : u.reason || "unblocked by reviewer";
-    const t = pr.tasks.find((x) => x.id === id);
-    if (!t) throw new ToolError(`cannot unblock ${id}: not in PROGRESS.md`);
-    if (t.state !== "!" && t.state !== "-") {
-      // Already reopened as a dependent of an earlier unblock in this call.
-      if (reopened.includes(id)) continue;
-      throw new ToolError(`cannot unblock ${id}: it is '${STATE_NAMES[t.state]}'`);
+  const sha = withRollback([P.review, P.plan, P.progress, P.state, P.feedback], () => {
+    if (tasks.length) {
+      const block = [``, `## Review fixes (round ${N})`, ``, ...tasks.map((t, i) => formatTask(ids[i], t) + "\n")].join("\n");
+      write(P.plan, read(P.plan).replace(/\s*$/, "\n") + block);
+      appendTaskLines(pr, tasks.map((t, i) => ({ id: ids[i], title: t.title })));
     }
-    reopened.push(...reopenWithDependents(pr, [id], `unblocked (round ${N})`, reason));
-    unblocked.push(id);
-  }
-  writeProgress(pr);
+    for (const u of unblock) {
+      const id = typeof u === "string" ? u : u.id;
+      const reason = typeof u === "string" ? "unblocked by reviewer" : u.reason || "unblocked by reviewer";
+      const t = pr.tasks.find((x) => x.id === id);
+      if (!t) throw new ToolError(`cannot unblock ${id}: not in PROGRESS.md`);
+      if (t.state !== "!" && t.state !== "-") {
+        // Already reopened as a dependent of an earlier unblock in this call.
+        if (reopened.includes(id)) continue;
+        throw new ToolError(`cannot unblock ${id}: it is '${STATE_NAMES[t.state]}'`);
+      }
+      reopened.push(...reopenWithDependents(pr, [id], `unblocked (round ${N})`, reason));
+      unblocked.push(id);
+    }
+    writeProgress(pr);
 
-  // Convergence: a round is non-converging when it queues at least as much
-  // work as the round before it. Round 1 has nothing to compare against, so
-  // it is always allowed. maxRounds bounds how many non-converging rounds a
-  // flight tolerates; maxRoundsHard is the absolute ceiling regardless
-  // (F-13, F-15) — three rounds that shrink 15 → 3 → 2 never hit either.
-  const thisCount = ids.length + unblocked.length;
-  const priorFixRounds = st.rounds.filter((r) => r.verdict === "CHANGES REQUESTED");
-  const prevRound = priorFixRounds[priorFixRounds.length - 1];
-  const nonConverging = Boolean(prevRound) && thisCount >= prevRound.fixTasks + prevRound.unblocked;
-  st.rounds = [...st.rounds, { round: N, fixTasks: ids.length, unblocked: unblocked.length, verdict: "CHANGES REQUESTED", nonConverging, at: new Date().toISOString() }];
-  const nonConvergingSoFar = st.rounds.filter((r) => r.nonConverging).length;
-  const trail = st.rounds.filter((r) => r.verdict === "CHANGES REQUESTED").map((r) => r.fixTasks + r.unblocked).join(" → ");
+    // Convergence: a round is non-converging when it queues at least as much
+    // work as the round before it. Round 1 has nothing to compare against, so
+    // it is always allowed. maxRounds bounds how many non-converging rounds a
+    // flight tolerates; maxRoundsHard is the absolute ceiling regardless
+    // (F-13, F-15) — three rounds that shrink 15 → 3 → 2 never hit either.
+    const thisCount = ids.length + unblocked.length;
+    const priorFixRounds = st.rounds.filter((r) => r.verdict === "CHANGES REQUESTED");
+    const prevRound = priorFixRounds[priorFixRounds.length - 1];
+    const nonConverging = Boolean(prevRound) && thisCount >= prevRound.fixTasks + prevRound.unblocked;
+    st.rounds = [...st.rounds, { round: N, fixTasks: ids.length, unblocked: unblocked.length, verdict: "CHANGES REQUESTED", nonConverging, at: new Date().toISOString() }];
+    const nonConvergingSoFar = st.rounds.filter((r) => r.nonConverging).length;
+    const trail = st.rounds.filter((r) => r.verdict === "CHANGES REQUESTED").map((r) => r.fixTasks + r.unblocked).join(" → ");
 
-  st.round = N; st.implemented = false; st.reviewed = true; st.verdict = "CHANGES REQUESTED";
-  if (N > c.maxRoundsHard) {
-    st.halted = `review round ${N} exceeds the hard cap maxRoundsHard=${c.maxRoundsHard} (findings per round: ${trail}); a human must decide whether to continue (edit .foundry/state.json to clear 'halted' and raise maxRoundsHard in docs/foundry.json)`;
-  } else if (nonConvergingSoFar >= c.maxRounds) {
-    st.halted = `round ${N} is non-converging (findings per round: ${trail}), the ${nonConvergingSoFar}th non-converging round, reaching maxRounds=${c.maxRounds}; a human must decide whether to continue (edit .foundry/state.json to clear 'halted' and raise maxRounds in docs/foundry.json)`;
-  }
-  if (st.halted && c.policies.feedback) appendFeedback("review", st.halted, "round-cap", "auto");
-  saveState(st);
-  const sha = gitCommitIfChanged([P.review, P.plan, P.progress, P.state, P.feedback], `review: round ${N}`, { stage: "review" });
+    st.round = N; st.implemented = false; st.reviewed = true; st.verdict = "CHANGES REQUESTED";
+    if (N > c.maxRoundsHard) {
+      st.halted = `review round ${N} exceeds the hard cap maxRoundsHard=${c.maxRoundsHard} (findings per round: ${trail}); a human must decide whether to continue (edit .foundry/state.json to clear 'halted' and raise maxRoundsHard in docs/foundry.json)`;
+    } else if (nonConvergingSoFar >= c.maxRounds) {
+      st.halted = `round ${N} is non-converging (findings per round: ${trail}), the ${nonConvergingSoFar}th non-converging round, reaching maxRounds=${c.maxRounds}; a human must decide whether to continue (edit .foundry/state.json to clear 'halted' and raise maxRounds in docs/foundry.json)`;
+    }
+    if (st.halted && c.policies.feedback) appendFeedback("review", st.halted, "round-cap", "auto");
+    saveState(st);
+    return gitCommitIfChanged([P.review, P.plan, P.progress, P.state, P.feedback], `review: round ${N}`, { stage: "review" });
+  });
   const push = pushBranch(gitFacts().branch, st.policies.push);
   // Re-read rather than reuse `pr`: appendTaskLines edits pr.lines but not
   // pr.tasks, so counts(pr.tasks) would describe the file as it was before
@@ -2504,8 +2550,10 @@ function summaryCommit() {
   const st = loadState();
   if (st.verdict !== "APPROVED") throw new ToolError("summary can only be committed after an APPROVED review");
   st.summarized = true;
-  saveState(st);
-  const sha = gitCommitIfChanged([P.summary, P.state], "chore: build summary", { stage: "summarize" });
+  const sha = withRollback([P.summary, P.state], () => {
+    saveState(st);
+    return gitCommitIfChanged([P.summary, P.state], "chore: build summary", { stage: "summarize" });
+  });
   const g = gitFacts();
   const push = pushBranch(g.branch, st.policies.push);
   return { commit: sha, branch: g.branch, base: g.base, head: g.head, reviews: reviewCount(st), fixRounds: st.round, push, pr: prState(st.policies, cfg().baseBranch) };

@@ -621,4 +621,28 @@ const untouched = (repo, head) => {
   });
 }
 
+// ---------------------------------------------------------------- rollback
+
+{
+  // review_submit rolls back when its commit fails (project-d F-04)
+  const repo = reviewableRepo({ config: { policies: { signing: "required" } } });
+  git(repo, ["config", "--local", "commit.gpgsign", "true"]);
+  git(repo, ["config", "--local", "gpg.format", "openpgp"]);
+  git(repo, ["config", "--local", "gpg.program", "/nonexistent-signing-agent"]);
+  const before = {};
+  for (const f of ["docs/PLAN.md", "docs/PROGRESS.md", ".foundry/state.json", "docs/REVIEW.md"]) before[f] = readFile(repo, f);
+  const head = git(repo, ["rev-parse", "HEAD"]);
+  await withServer(repo, async ({ call }) => {
+    isError(await call("foundry_review_submit", { verdict: "CHANGES REQUESTED", tasks: [FIX] }), /could not be signed/, "review_submit rolls back when its commit fails: the call is an error");
+    for (const f of ["docs/PLAN.md", "docs/PROGRESS.md", ".foundry/state.json", "docs/REVIEW.md"]) eq(readFile(repo, f), before[f], `...${f} is byte-identical afterwards`);
+    eq(git(repo, ["diff", "--cached", "--name-only"]), "", "...nothing is staged");
+    eq(git(repo, ["rev-parse", "HEAD"]), head, "...and HEAD did not move");
+    git(repo, ["config", "commit.gpgsign", "false"]);
+    const r = await call("foundry_review_submit", { verdict: "CHANGES REQUESTED", tasks: [FIX] });
+    eq(r.verdict, "CHANGES REQUESTED", "the same submission then succeeds");
+    eq(readFile(repo, "docs/PLAN.md").split("## Review fixes (round 1)").length - 1, 1, "...PLAN.md holds the fix section exactly once");
+    eq(readFile(repo, "docs/PROGRESS.md").split("R1-01").length - 1, 1, "...and PROGRESS.md names R1-01 exactly once");
+  });
+}
+
 finish();

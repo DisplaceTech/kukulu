@@ -26,6 +26,10 @@ so a signing agent that wants a pinentry cannot hang the server. Under
 unsigned, and `state.signing` and `state.signingOverride` record that signing
 was turned off for the run; under `"required"` the tool refuses instead.
 
+A tool that writes and then fails to commit leaves the tree as it found it:
+every file it wrote is restored byte for byte and nothing stays staged, so
+the same call can simply be made again.
+
 A tool that refuses returns a normal MCP result with `isError: true` and a
 plain-English message. It is not a transport error: the model is expected to
 read it, fix what it did, and try again.
@@ -677,7 +681,9 @@ list of what logs itself.
 
 ## `foundry_review_submit`
 
-Record a verdict. Call it exactly once per review.
+Record a verdict. Call it exactly once per review. It is all-or-nothing: if its
+commit fails, every file it wrote is restored, nothing stays staged, and
+calling it again is safe.
 
 **Arguments:**
 

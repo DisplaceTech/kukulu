@@ -914,4 +914,44 @@ function failingSignerRepo(config) {
   });
 }
 
+// ---------------------------------------------------------------- rollback
+
+function rejectCommitsStarting(repo, prefix) {
+  const hook = path.join(repo, ".git", "hooks", "commit-msg");
+  fs.mkdirSync(path.dirname(hook), { recursive: true });
+  fs.writeFileSync(hook, `#!/bin/sh\nif head -n1 "$1" | grep -q '^${prefix}'; then echo "rejected by test hook" >&2; exit 1; fi\n`);
+  fs.chmodSync(hook, 0o755);
+}
+
+{
+  // task_done rolls back when its progress commit fails
+  const repo = plannedRepo();
+  git(repo, ["checkout", "-q", "-b", `build/${TODAY}`]);
+  await withServer(repo, async ({ call }) => {
+    await call("foundry_run_start");
+    await call("foundry_task_next");
+    writeFile(repo, "hello.txt", "hi\n");
+    git(repo, ["add", "hello.txt"]);
+    git(repo, ["commit", "-qm", "P0-01: hello"]);
+    const head = git(repo, ["rev-parse", "HEAD"]);
+    const before = readFile(repo, "docs/PROGRESS.md");
+    rejectCommitsStarting(repo, "progress:");
+    isError(await call("foundry_task_done", { id: "P0-01", log: "done" }), /commit failed/, "task_done rolls back when its progress commit fails: the call is an error");
+    eq(readFile(repo, "docs/PROGRESS.md"), before, "...PROGRESS.md is byte-identical (still in progress)");
+    eq(git(repo, ["diff", "--cached", "--name-only"]), "", "...nothing is staged");
+    eq(git(repo, ["rev-parse", "HEAD"]), head, "...and HEAD is the task commit");
+  });
+}
+
+{
+  const repo = plannedRepo();
+  rejectCommitsStarting(repo, "chore: flight options");
+  const before = readFile(repo, "docs/foundry.json");
+  await withServer(repo, async ({ call }) => {
+    isError(await call("foundry_flight_options", { maxRounds: 7 }), /commit failed/, "flight_options rolls back when its commit fails: the call is an error");
+    eq(readFile(repo, "docs/foundry.json"), before, "...docs/foundry.json is byte-identical");
+    eq(git(repo, ["diff", "--cached", "--name-only"]), "", "...nothing is staged");
+  });
+}
+
 finish();
