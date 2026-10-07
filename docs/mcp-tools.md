@@ -165,7 +165,16 @@ The full decision order is in [architecture.md](./architecture.md#the-stage-mach
 Validate the plan as a whole and commit it. The planner calls it last, in
 place of `git add` and `git commit`.
 
-**Arguments:** none.
+**Arguments:** `{ renumber? }`, a boolean. `renumber: true` is for a planner
+that split a task and gave the new half a temporary suffix such as `P1-02a`:
+it renumbers every phase's `P` ids to `P<n>-01, P<n>-02, …` in document order,
+and rewrites each changed id everywhere it appears (all of `PLAN.md` and
+`PROGRESS.md` as whole words in one pass, never chained, plus the `"from"`
+values in `docs/foundry.json`), then validates the rewritten texts and commits.
+`R` ids are never renumbered. It is refused once a run has started (a
+`Started:` stamp in `PROGRESS.md`, or any task that is not `[ ]`), and when
+problems remain after the rewrite it writes nothing. Without `renumber`, a
+suffixed id is a `heading` problem whose message suggests it.
 
 **Does:** reads `docs/PLAN.md`, `docs/PROGRESS.md`, `docs/foundry.json` and
 `CLAUDE.md`, checks them together, and, only when nothing is wrong, commits
@@ -191,7 +200,8 @@ The checks, by the name each problem carries in `check`:
 
 **Returns:** `{ commit, tasks, phases: [{ phase, tasks }], waves: [{ index,
 streams, valid }], renumbered }`. `commit` is `null` when everything is
-already committed; `renumbered` is `{}` (reserved).
+already committed; `renumbered` is the `{ old: new }` map of ids
+`renumber: true` changed, `{}` otherwise.
 
 **Refuses when:** any check fails. Every problem is listed at once, so one
 call shows the whole job: the message's first line counts them, then one

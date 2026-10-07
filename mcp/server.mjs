@@ -2782,7 +2782,8 @@ function validatePlanTexts({ planText, progressText, configRaw, configError, cla
     for (const line of planLines) {
       if (!/^#{2,4}\s*[PR]\d+-\d+/.test(line)) continue;
       if (!okHeading.test(line)) {
-        add("heading", `heading ${JSON.stringify(line)} must be exactly "### <ID>: <title>" (for example "### P1-03: Add the parser")`);
+        const hint = /^### P\d+-\d+[a-z]: /.test(line) ? "; a suffixed id such as P1-02a marks a split task, and foundry_plan_commit with renumber: true gives it a clean number everywhere" : "";
+        add("heading", `heading ${JSON.stringify(line)} must be exactly "### <ID>: <title>" (for example "### P1-03: Add the parser")${hint}`);
         continue;
       }
       const id = line.match(/^### ([PR]\d+-\d+[a-z]?):/)[1];
@@ -2907,15 +2908,46 @@ function validatePlanTexts({ planText, progressText, configRaw, configError, cla
   return problems;
 }
 
-function planCommit() {
+const SPLIT_ID = /(?<![A-Za-z0-9-])(P\d+-\d+[a-z]?)(?![A-Za-z0-9])/g;
+
+/** `{ old: new }` for every P id that must change so each phase counts P<n>-01, P<n>-02, … in document order. */
+function renumberMap(planText) {
+  const next = new Map();
+  const map = {};
+  for (const m of planText.matchAll(/^### (P(\d+)-\d+[a-z]?):/gm)) {
+    const n = (next.get(m[2]) || 0) + 1;
+    next.set(m[2], n);
+    const fresh = `P${m[2]}-${String(n).padStart(2, "0")}`;
+    if (fresh !== m[1]) map[m[1]] = fresh;
+  }
+  return map;
+}
+
+function planCommit({ renumber } = {}) {
+  if (renumber !== undefined && typeof renumber !== "boolean") throw new ToolError("renumber must be a boolean");
   const readOrNull = (p) => (exists(p) ? read(p) : null);
-  const planText = readOrNull(P.plan);
-  const progressText = readOrNull(P.progress);
+  let planText = readOrNull(P.plan);
+  let progressText = readOrNull(P.progress);
+  let configText = readOrNull(P.config);
+  let map = {};
+  if (renumber === true && planText != null && progressText != null) {
+    const started = (progressText.match(/^Started:\s*(.*)$/m) || [])[1];
+    const touched = /^- \[[^ ]\] /m.test(progressText);
+    if ((started && !started.startsWith("(")) || touched) {
+      throw new ToolError("renumber is only for a plan no run has touched: docs/PROGRESS.md shows a run has started (a Started: stamp, or a task that is not [ ]). Renumbering now would rewrite ids that commits and log entries already cite.");
+    }
+    map = renumberMap(planText);
+    // One pass over each text, never chained: P1-03 -> P1-04 must not then become P1-05.
+    const swap = (text) => text.replace(SPLIT_ID, (id) => map[id] || id);
+    planText = swap(planText);
+    progressText = swap(progressText);
+    if (configText != null) configText = configText.replace(/("from"\s*:\s*")([^"]+)(")/g, (_, a, id, b) => `${a}${map[id] || id}${b}`);
+  }
   let configRaw = null;
   let configError = null;
-  if (exists(P.config)) {
+  if (configText != null) {
     try {
-      configRaw = JSON.parse(read(P.config));
+      configRaw = JSON.parse(configText);
     } catch (e) {
       configError = `docs/foundry.json is not valid JSON: ${e.message}`;
     }
@@ -2927,7 +2959,14 @@ function planCommit() {
     throw new ToolError(`${head}\n${problems.map((p, i) => `${i + 1}. [${p.check}] ${p.message}`).join("\n")}`, { problems });
   }
   const paths = [P.plan, P.progress, P.config, claudePath];
-  const commit = withRollback(paths, () => gitCommitIfChanged(paths, "plan: derive build plan from SPEC", { stage: "plan" }));
+  const commit = withRollback(paths, () => {
+    if (Object.keys(map).length) {
+      write(P.plan, planText);
+      write(P.progress, progressText);
+      if (configText != null) write(P.config, configText);
+    }
+    return gitCommitIfChanged(paths, "plan: derive build plan from SPEC", { stage: "plan" });
+  });
   const pr = parseProgressText(progressText);
   const phases = new Map();
   for (const t of pr.tasks) {
@@ -2939,7 +2978,7 @@ function planCommit() {
     tasks: pr.tasks.length,
     phases: [...phases].map(([phase, tasks]) => ({ phase, tasks })),
     waves: computeWaves(pr, cfg()).map((w) => ({ index: w.index, streams: Object.keys(w.streams), valid: w.valid })),
-    renumbered: {},
+    renumbered: map,
   };
 }
 
@@ -2955,7 +2994,7 @@ const S = (props, required = []) => ({
 const TOOLS = [
   { name: "foundry_status", description: "Everything the pipeline knows from disk: which docs exist, task counts by state, branch/base/head, lock, round, review verdict. Read-only.", inputSchema: S({}), fn: status },
   { name: "foundry_next", description: "Deterministic stage selection: returns { stage, agent, agentFallback, fallbackAgent, restartRequired, model, agentModel, agentModelExact, round, reason, prompt, streams? }. stage is plan | implement | review | summarize | done | halt. agentModel is the value to pass as the Agent tool's model when agentFallback is true (an alias, or null to pass none); agentModelExact is false when a full claude-* id was mapped to its family alias. restartRequired is true only when the routed model cannot be reached without relaunching the session. Read-only, except that when a parallel wave's partition is invalid it records once (state, one feedback entry, one commit, only on a build branch) that the wave runs serially. When streams is present, spawn one implementer per entry, all at once, and wait for all of them.", inputSchema: S({}), fn: next },
-  { name: "foundry_plan_commit", description: "Validate the plan as a whole and commit it: docs/PLAN.md, docs/PROGRESS.md, docs/foundry.json and CLAUDE.md must exist and agree (task headings, numbering, dependencies, streams, config, from references). Every problem is listed at once, as numbered lines and as structuredContent.problems [{ check, id?, message }]; nothing is committed while any remain. On success it commits 'plan: derive build plan from SPEC' and returns { commit, tasks, phases, waves, renumbered }. For the planner, as its last step.", inputSchema: S({}), fn: planCommit },
+  { name: "foundry_plan_commit", description: "Validate the plan as a whole and commit it: docs/PLAN.md, docs/PROGRESS.md, docs/foundry.json and CLAUDE.md must exist and agree (task headings, numbering, dependencies, streams, config, from references). Every problem is listed at once, as numbered lines and as structuredContent.problems [{ check, id?, message }]; nothing is committed while any remain. With renumber: true (only before any run has started) it first renumbers split ids everywhere. On success it commits 'plan: derive build plan from SPEC' and returns { commit, tasks, phases, waves, renumbered }. For the planner, as its last step.", inputSchema: S({ renumber: { type: "boolean", description: "rewrite split or out-of-sequence task ids (such as P1-02a) to a clean P<n>-01.. sequence everywhere they appear, then validate and commit; refused once a run has started" } }), fn: planCommit },
   { name: "foundry_run_start", description: "Begin (or resume) an implementation run: create/reuse the build branch, arm the implement guard lock, stamp Branch/Started in PROGRESS.md, commit. Idempotent. With stream, also create (or resume) that stream's git worktree for a parallel wave, run parallel.setup in it, and return its cwd: do all of that stream's work inside cwd.", inputSchema: S({ stream: { type: "string", description: "a stream of the current parallel wave, when foundry_next handed you one" } }), fn: runStart },
   { name: "foundry_task_next", description: "Select the next task (first [~], else first [ ]), auto-skip tasks whose dependencies are blocked, mark it [~], and return its PLAN.md text plus dependency log entries. Returns { done: true } when none remain.", inputSchema: S({ stream: { type: "string", description: "restrict to this stream's tasks (parallel waves only)" } }), fn: taskNext },
   { name: "foundry_task_done", description: "Mark a task [x] and append its log entry stamped with HEAD's sha. Requires HEAD's commit subject to start with '<id>:' and a clean tree. Commits PROGRESS.md.", inputSchema: S({ stream: { type: "string", description: "the stream this task belongs to, when working in a parallel wave" }, id: { type: "string" }, log: { type: "string", description: "Log entry body, under 15 lines" } }, ["id", "log"]), fn: taskDone },

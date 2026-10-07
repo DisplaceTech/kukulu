@@ -7,7 +7,7 @@ import path from "node:path";
 import {
   finish, ok, eq, like, isError,
   mkDir, specRepo, plannedRepo, withServer,
-  writeFile, readFile, setState, markTasks, git, subject,
+  writeFile, readFile, setState, markTasks, git, subject, planDoc, progressDoc,
 } from "./harness.mjs";
 
 const ALL_DONE = { "P0-01": "x", "P0-02": "x", "P0-03": "x" };
@@ -527,6 +527,59 @@ await withServer(specRepo(), async ({ call }) => {
     const numbered = text.split("\n").filter((l) => /^\d+\. /.test(l)).length;
     eq(numbered, e.structuredContent.problems.length, "...with one numbered line per problem");
     eq(git(repo, ["rev-parse", "HEAD"]), head, "...and nothing was committed");
+  });
+}
+
+/** A spec-only repo with an uncommitted plan whose P1-02 was split into P1-02a. */
+function splitPlanRepo(progressPatch = (t) => t) {
+  const repo = specRepo();
+  const tasks = [
+    { id: "P1-01", title: "One" },
+    { id: "P1-02", title: "Two" },
+    { id: "P1-02a", title: "Two and a half" },
+    { id: "P1-03", title: "Three", depends: ["P1-02a"], goal: "see P1-02a, and not P1-02" },
+  ];
+  writeFile(repo, "docs/PLAN.md", planDoc(tasks));
+  writeFile(repo, "docs/PROGRESS.md", progressPatch(progressDoc(tasks)));
+  writeFile(repo, "docs/foundry.json", JSON.stringify({ verify: ["true"], constraints: [{ id: "c", paths: ["src/"], pattern: "x", shouldMatch: ["x"], shouldNotMatch: ["y"], from: "P1-03" }] }, null, 2) + "\n");
+  writeFile(repo, "CLAUDE.md", "# rules\n");
+  return repo;
+}
+
+{
+  const repo = splitPlanRepo();
+  await withServer(repo, async ({ call }) => {
+    const r = await call("foundry_plan_commit", { renumber: true });
+    eq(JSON.stringify(r.renumbered), JSON.stringify({ "P1-02a": "P1-03", "P1-03": "P1-04" }), "renumber rewrites a split task: the map");
+    const plan = readFile(repo, "docs/PLAN.md");
+    like(plan, /### P1-03: Two and a half/, "...the split heading takes its clean number");
+    like(plan, /### P1-04: Three\n[\s\S]*\*\*Depends on:\*\* P1-03\b/, "...and the Depends on line follows it");
+    like(plan, /see P1-03, and not P1-02/, "...prose is rewritten too, and P1-02 is untouched");
+    ok(!/P1-02a/.test(plan), "...no suffixed id is left in PLAN.md");
+    like(readFile(repo, "docs/PROGRESS.md"), /- \[ \] P1-03 Two and a half\n- \[ \] P1-04 Three/, "...PROGRESS.md's lines are rewritten");
+    like(readFile(repo, "docs/foundry.json"), /"from": "P1-04"/, "...and the from value follows its task");
+    eq(subject(repo), "plan: derive build plan from SPEC", "...in the plan commit");
+    ok(plan.includes("### P1-02: Two"), "...P1-02 keeps its heading");
+  });
+}
+
+{
+  const repo = splitPlanRepo();
+  await withServer(repo, async ({ call }) => {
+    isError(await call("foundry_plan_commit"), /renumber: true/, "a suffix without renumber is refused, suggesting renumber");
+    isError(await call("foundry_plan_commit", { renumber: "yes" }), /renumber must be a boolean/, "a non-boolean renumber is refused");
+  });
+}
+
+for (const [label, patch] of [
+  ["a Started stamp", (t) => t.replace("Started: (set by implement)", "Started: 2026-10-07T00:00:00Z")],
+  ["a task that is not [ ]", (t) => t.replace("- [ ] P1-01", "- [x] P1-01")],
+]) {
+  const repo = splitPlanRepo(patch);
+  const before = { plan: readFile(repo, "docs/PLAN.md"), progress: readFile(repo, "docs/PROGRESS.md"), cfg: readFile(repo, "docs/foundry.json") };
+  await withServer(repo, async ({ call }) => {
+    isError(await call("foundry_plan_commit", { renumber: true }), /only for a plan no run has touched/, `renumber is refused once a run has started: ${label}`);
+    ok(readFile(repo, "docs/PLAN.md") === before.plan && readFile(repo, "docs/PROGRESS.md") === before.progress && readFile(repo, "docs/foundry.json") === before.cfg, "...and every file is unchanged");
   });
 }
 
