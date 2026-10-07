@@ -47,6 +47,16 @@ const cfgDir = () => mkDir("foundry-cfg-");
   });
 }
 
+// plugin defaults: opus for planner, reviewer and summarizer, sonnet for the implementer
+{
+  const want = { planner: ["opus", "high"], implementer: ["sonnet", "medium"], reviewer: ["opus", "high"], summarizer: ["opus", "medium"] };
+  for (const role of ROLES) {
+    const { frontmatter: fm } = pluginAgent(role);
+    eq(fm.model, want[role][0], `plugin defaults: ${role} model is ${want[role][0]}`);
+    eq(fm.effort, want[role][1], `plugin defaults: ${role} effort is ${want[role][1]}`);
+  }
+}
+
 // ---------------------------------------------------------------- sync writes four files
 
 {
@@ -318,7 +328,7 @@ const cfgDir = () => mkDir("foundry-cfg-");
     eq(cfg.effortDropped.implementer, "medium", "the dropped effort is reported");
     eq(cfg.roles.reviewer.model, "openrouter,deepseek/deepseek-v4-pro", "the profile overrides the reviewer's model");
     eq(cfg.roles.reviewer.effort, undefined, "effort is dropped for the reviewer too");
-    eq(cfg.roles.planner.model, "fable", "the planner is untouched by the profile");
+    eq(cfg.roles.planner.model, "opus", "the planner is untouched by the profile");
     eq(cfg.roles.planner.effort, "high", "...and keeps its effort");
 
     await call("foundry_agents_sync");
@@ -328,7 +338,7 @@ const cfgDir = () => mkDir("foundry-cfg-");
     const rev = splitFrontmatter(readFile(repo, AGENT_FILE("reviewer"))).frontmatter;
     eq(rev.effort, undefined, "generated reviewer file has no effort line either");
     const pln = splitFrontmatter(readFile(repo, AGENT_FILE("planner"))).frontmatter;
-    eq(pln.model, "fable", "generated planner file is untouched");
+    eq(pln.model, "opus", "generated planner file is untouched");
     eq(pln.effort, "high", "...and keeps its effort");
 
     const n = await call("foundry_next");

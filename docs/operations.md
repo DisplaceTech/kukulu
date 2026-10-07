@@ -148,9 +148,12 @@ git log --oneline --grep '^review:'
 git show <sha>:docs/REVIEW.md
 ```
 
-To continue anyway: raise `maxRounds` (or `maxRoundsHard`, whichever
-tripped) in `docs/foundry.json` (or with `foundry_flight_options`), set
-`"halted": null` in `.foundry/state.json`, commit both, and re-run the
+To continue anyway, make the call the halt message names:
+`foundry_flight_options({ maxRounds: <k + 1>, resume: true })` for the soft
+cap, `foundry_flight_options({ maxRoundsHard: <N>, resume: true })` for the
+hard one. It raises the bound in `docs/foundry.json`, clears `halted` in
+`.foundry/state.json` and commits both; it refuses if the bound would not lift
+the cap that fired, and it never clears any other halt. Then re-run the
 flight.
 
 **Missing spec.** No `docs/SPEC.md` means there is nothing to build from. Write
@@ -222,6 +225,91 @@ The one file not to hand-edit casually is `docs/PROGRESS.md` while a run is
 armed — the guard counts its checkboxes, and the MCP rewrites it from its own
 parse. Edit it between stages, not during one.
 
+## Running flight after flight
+
+A repository usually runs more than one flight. Three things make the second
+one start cleanly.
+
+**Name the flight.** Set `"flight"` in `docs/foundry.json` to a slug
+(`^[a-z0-9][a-z0-9-]{0,39}$`), or pass `flight=<slug>` to
+`/foundry:go-flight` and the planner writes it for you. The slug names the
+flight's archive directory.
+
+**Archive it.** `foundry_flight_archive` moves a summarized flight into
+`docs/flights/<slug>/`: `PLAN.md`, `PROGRESS.md`, `HANDOFF.md`, `REVIEW.md`,
+`SUMMARY.md`, `foundry.json`, `.foundry/state.json` and
+`.foundry/feedback.jsonl`, each one that exists. It copies `docs/SPEC.md`
+there but leaves the live spec where it is, writes a fresh
+`.foundry/state.json` recording the archive, and commits everything as
+`chore: archive flight <slug>`. It refuses unless the flight is summarized, no
+run is armed, the working tree is clean and the destination is free, and if
+its commit fails it puts every file back. By default the summarizer does not
+call it; set `policies.archive` to `true` (a ⚠️ ASSUMPTION, default `false`,
+until it has been proven in real flights) and the summarizer calls it after
+`foundry_summary_commit`. Or call it yourself.
+
+**Edit the spec.** After an archive, `foundry_next` reports `done` ("flight
+`<slug>` is archived in `docs/flights/<slug>`") for as long as `docs/SPEC.md`
+is byte-identical to the archived copy. Edit it for the next flight and
+`foundry_next` returns `plan` again.
+
+`CLAUDE.md` outlives a flight. The planner creates it under 150 lines, but
+for the next flight it adds or replaces one `## Flight <slug> notes` section
+and leaves other flights' sections alone, merging only flight-agnostic facts
+into the shared sections. `/foundry:pull-feedback` reads
+`docs/flights/*/feedback.jsonl` as well as the live log, so friction from
+archived flights is not lost. And when a flight halts on a round cap, the
+halt message names the call that lifts it:
+`foundry_flight_options({ …, resume: true })` (see [Halts](#halts)).
+
+## Signing
+
+`policies.signing` decides what Foundry does about commit signing:
+
+- `"auto"` (the default) signs when signing works and falls back when it does
+  not. At `foundry_run_start` it makes a real signed object to prove the
+  agent answers. Later, every commit Foundry makes runs with no terminal
+  prompt and a 30-second bound; if one fails to sign, the commit is retried
+  once unsigned, local `commit.gpgsign` is set to `false`, and
+  `state.signing` (`off (commit signing failed: …)`) and
+  `state.signingOverride: true` record it, together with one `signing`
+  feedback entry. Only a failed signing sets `signingOverride`, never
+  `"off"`.
+- `"off"` never signs and records `off`.
+- `"required"` refuses to start without working signing, and a commit that
+  cannot be signed throws and leaves the tree as it found it (every file the
+  tool wrote is restored, nothing stays staged), so the same call can be made
+  again once the agent is back.
+
+At the end of a flight, `foundry_pr_finalize` looks at the commits
+themselves, never at `state.signing`: every commit since the merge base with
+`baseBranch` is checked with `git log --format='%H %G?'`. `N` (none) and `B`
+(bad) are unsigned; anything else, `E` included, counts as signed, because a
+machine without your public key still holds a signed commit.
+
+- **All signed.** The draft PR is marked ready and, per `policies.finalize`,
+  set to auto-merge. `"auto"` (the default) does both unless the flight is
+  `breaking`; `"ready"` only marks it ready; `"draft"` leaves it alone.
+  `policies.mergeMethod` (`"merge"`, `"squash"` or `"rebase"`) is the method
+  passed to `gh pr merge --auto`. If auto-merge cannot be enabled the PR is
+  left ready and the result says `unavailable: <why>`.
+- **Any unsigned commit.** The PR stays a draft. `state.awaitingSigning`
+  records the count, the oldest unsigned sha and when it began; one `signing`
+  feedback entry is logged; an `## Awaiting signing` section is appended to
+  `SUMMARY.md`; the commit is `chore: awaiting signing`; and `foundry_next`
+  reports `done` with "awaiting signing: …" until it is resolved. The steps
+  are, verbatim from the tool's `next` text: unlock the signing agent, then
+  tell the flight controller to finalize with re-signing,
+  `foundry_pr_finalize({ resign: true })`; or by hand,
+  `git rebase -f --rebase-merges --gpg-sign <merge-base>`, then
+  `git push --force-with-lease`, then `foundry_pr_finalize({})`.
+
+Telling go-flight "signing is unlocked, finish it" is the one way the
+controller calls `foundry_pr_finalize({ resign: true })`; no agent ever passes
+`resign` on its own. A flight that finalizes cleanly leaves `chore: finalize
+flight` behind it, and re-enables the operator's own signing setting if a
+fallback had switched it off.
+
 ## Configuration
 
 `docs/foundry.json`, written by the planner, read by the MCP:
@@ -237,14 +325,16 @@ parse. Edit it between stages, not during one.
   "maxRoundsHard": 6,
   "commandTimeoutMs": 600000,
   "guardCap": 60,
-  "policies": { "signing": "auto", "push": true, "pr": "draft" }
+  "policies": { "signing": "auto", "push": true, "pr": "draft", "archive": false, "finalize": "auto", "mergeMethod": "merge" },
+  "flight": "w1-share",
+  "mutation": { "targeted": { "unit": { "cmd": "npm test -- {filter}" } } }
 }
 ```
 
 | Key | Default | Effect |
 |---|---|---|
-| `verify` | `[]` | Commands run after every task. At least one is required. Each entry is a string, or `{ cmd, timeoutMs, exclusive }`: `timeoutMs` overrides `commandTimeoutMs` for that one command, and `exclusive: true` marks a command that starts a port-, container- or directory-keyed environment (wp-env, docker compose) so it only ever runs from the main checkout, never a parallel stream's worktree. |
-| `extraVerify` | `{}` | Path prefix → extra commands (same entries as `verify`), run when a task touches that prefix |
+| `verify` | `[]` | Commands run after every task. At least one is required. Each entry is a string, or `{ cmd, timeoutMs, exclusive, from }`: `from` names a task id (such as `P1-03`) and keeps the command inactive until that task is in progress or done; `timeoutMs` overrides `commandTimeoutMs` for that one command, and `exclusive: true` marks a command that starts a port-, container- or directory-keyed environment (wp-env, docker compose) so it only ever runs from the main checkout, never a parallel stream's worktree. |
+| `extraVerify` | `{}` | Path prefix → extra commands (same entries as `verify`, including `from`), run when a task touches that prefix |
 | `build` | `[]` | Recorded for the plan's use; the MCP does not run it |
 | `baseBranch` | `main` | Branch runs start from, and the merge-base reported as `base` |
 | `branchPrefix` | `build/` | Prefix for run branches (`build/2026-09-18`, `-2`, …) |
@@ -252,12 +342,17 @@ parse. Edit it between stages, not during one.
 | `maxRoundsHard` | `6` | Absolute review-round ceiling, regardless of convergence; a review numbered above it halts |
 | `commandTimeoutMs` | `600000` | Per-command timeout for `foundry_verify`, `foundry_mutate` and `parallel.setup`; a timeout kills the command's whole process group |
 | `guardCap` | `60` | Re-blocks since the last task state change before the implement guard gives up; carried into `.foundry/implement.lock` at `foundry_run_start` and wins over `FOUNDRY_GUARD_CAP` |
-| `policies.signing` | `"auto"` | `"off"` disables commit signing for the run; `"required"` refuses to start unless a real signed commit succeeds; `"auto"` uses signing when it works and falls back to off, recording why, when it does not |
+| `policies.signing` | `"auto"` | `"off"` disables commit signing for the run; `"required"` refuses to start unless a real signed commit succeeds; `"auto"` uses signing when it works and falls back to off, recording why, when it does not; this includes any later commit whose signing fails or exceeds 30 seconds, which is retried once unsigned and recorded in `state.signing` and `state.signingOverride` (under `"required"` that commit refuses instead) |
 | `policies.push` | `true` | `false` skips every push `foundry_run_start`, `foundry_run_finish`, `foundry_review_submit` and `foundry_summary_commit` would otherwise make |
 | `policies.pr` | `"draft"` | `"none"` skips draft-PR creation in `foundry_run_finish` even when `gh` is available |
+| `policies.archive` | `false` | ⚠️ ASSUMPTION. `true` makes the summarizer call `foundry_flight_archive` after the summary, moving the finished flight into `docs/flights/<flight>/` so the repository can run another. Off until it has been proven in real flights |
+| `policies.finalize` | `"auto"` | What `foundry_pr_finalize` does to a fully signed flight's draft pull request: `"auto"` marks it ready and, unless the flight is breaking, enables auto-merge; `"ready"` only marks it ready; `"draft"` leaves it alone |
+| `policies.mergeMethod` | `"merge"` | The method `foundry_pr_finalize` passes to `gh pr merge --auto`: `"merge"`, `"squash"` or `"rebase"`. Foundry never merges without `--auto` |
+| `flight` | absent | A slug (`^[a-z0-9][a-z0-9-]{0,39}$`) naming this flight; the default `slug` for `foundry_flight_archive` |
 | `policies.feedback` | `true` | `false` disables `foundry_feedback_log` (it returns `{ logged: false }` without writing) and every internal auto-log point |
 | `parallel.maxStreams` | `3` | The most streams of one wave handed to implementers at once; `1` runs every wave serially, silently |
 | `parallel.setup` | `[]` | Commands (same entries as `verify`) run once in each newly created stream worktree, before its implementer starts — the dependency install a fresh checkout needs (`npm ci`, `composer install`) |
+| `mutation.targeted` | `{}` | Name → `{ cmd, timeoutMs }`: a test command with exactly one `{filter}` slot that `foundry_mutate` can run instead of the whole verify set, e.g. `{ "php": { "cmd": "vendor/bin/phpunit --filter {filter}" } }`. The reviewer passes `targeted` and `filter`; the filter is limited to letters, digits and `_ . : / -` and is substituted as one single-quoted word. `timeoutMs` defaults to `commandTimeoutMs` |
 | `constraints` | `[]` | `CLAUDE.md` rules expressed as data and checked by `foundry_verify` — see [Constraints](#constraints) below |
 
 Environment variables:
@@ -346,6 +441,7 @@ check works:
 | `flags` | no | `RegExp` flags, e.g. `"i"` |
 | `shouldMatch` | yes, ≥ 1 | Lines the pattern must catch |
 | `shouldNotMatch` | yes, ≥ 1 | Lines it must not |
+| `from` | no | A task id such as `P1-03`. The rule stays inactive (reported `inactive: "until P1-03"`, no scan) while that task is todo, blocked or skipped, and applies once it is in progress or done, or once no task is open. Its fixtures are self-tested either way. Use it for a rule that only becomes true when a task has run |
 
 `foundry_verify` runs constraints before any shell command, always against
 the whole repo regardless of the `files` argument: first it self-tests every
@@ -480,6 +576,9 @@ A `build/<date>` branch containing:
   `REVIEW.md` and the fix tasks it queued
 - `docs/HANDOFF.md`, `docs/REVIEW.md` and `docs/SUMMARY.md` at the tip
 - a draft PR, if `gh` was available and `policies.pr` is not `"none"`
+- `chore: finalize flight` or `chore: awaiting signing`, from
+  `foundry_pr_finalize`, and `chore: archive flight <slug>` when the flight
+  was archived
 
 When there is an `origin`, every one of those commits is pushed as it lands —
 `foundry_run_finish`, `foundry_review_submit` and `foundry_summary_commit`
@@ -492,4 +591,8 @@ Read `SUMMARY.md` first. It is written for someone who was not there: what was
 built, what was decided and by whom, which assumptions are still guesses, which
 spec issues need your edit, and what you still have to check by hand.
 
-Then merge it yourself. Nothing in Foundry merges anything.
+Then look at the pull request. Foundry never merges synchronously: it never
+runs `gh pr merge` without `--auto`. At most, `foundry_pr_finalize` asks
+GitHub to merge a signed, non-breaking flight's PR once CI is green
+(`policies.finalize: "auto"`), and GitHub does that, not Foundry. A breaking
+flight, or one with an unsigned commit, is yours to merge.

@@ -50,7 +50,7 @@ const MCP_ALLOW_RULE = "mcp__plugin_foundry_foundry";
 const PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 // Keep in sync with .claude-plugin/plugin.json and package.json; test/plugin.mjs checks it.
-const VERSION = "0.4.0";
+const VERSION = "0.5.0";
 
 const TASK_ID = /\b[PR]\d+-\d+\b/g;
 const TASK_LINE = /^- \[( |~|x|!|-)\] ([PR]\d+-\d+)(?: (.*))?$/;
@@ -62,7 +62,13 @@ const STATE_NAMES = { " ": "todo", "~": "inProgress", x: "done", "!": "blocked",
 
 // ---------------------------------------------------------------- utilities
 
-class ToolError extends Error {}
+class ToolError extends Error {
+  /** `data`, when given, rides on the error reply as structuredContent (see handle()). */
+  constructor(message, data) {
+    super(message);
+    if (data !== undefined) this.data = data;
+  }
+}
 
 const exists = (p) => fs.existsSync(p);
 const read = (p) => fs.readFileSync(p, "utf8");
@@ -89,7 +95,101 @@ function git(args, { allowFail = false, cwd = ROOT } = {}) {
   return { ok: r.status === 0, out: (r.stdout || "").trim(), err: (r.stderr || "").trim() };
 }
 
-function gitCommitIfChanged(paths, message) {
+const SIGNING_TIMEOUT_MS = 30_000;
+const SIGNING_FAILURE = /gpg failed to sign|failed to sign|signing failed|cannot exec|pinentry|ssh-keygen|gpg:/i;
+
+/**
+ * The one place the server runs `git commit`. A signing agent that wants a
+ * pinentry would hang the server forever, so the commit is bounded and told
+ * never to prompt. Under policies.signing "auto" a signing failure turns
+ * signing off for the run and retries once, with the record of that decision
+ * in the same commit; under "required" it throws (S-02).
+ */
+function commitStaged(rels, message, { stage } = {}) {
+  const run = (args) =>
+    spawnSync("git", args, {
+      cwd: ROOT,
+      encoding: "utf8",
+      timeout: SIGNING_TIMEOUT_MS,
+      env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+    });
+  const r = run(["commit", "-q", "-m", message, "--", ...rels]);
+  if (r.status === 0 && !r.error) return;
+  const text = (r.stderr || r.stdout || "").trim();
+  const timedOut = r.error?.code === "ETIMEDOUT" || Boolean(r.signal);
+  if (!timedOut && !SIGNING_FAILURE.test(text)) {
+    throw new ToolError(`git commit failed: ${text || r.error?.message || "unknown error"}`);
+  }
+  const line = timedOut ? "timed out" : text.split("\n")[0];
+  let policy = "auto";
+  try {
+    policy = cfg().policies.signing;
+  } catch {
+    // a malformed config must not keep a commit from being made
+  }
+  if (policy === "required") {
+    throw new ToolError(`policies.signing is 'required' and the commit could not be signed: ${line}. Nothing was committed; fix the signing agent or set policies.signing to 'off', then call this tool again.`);
+  }
+  const snapFiles = [P.state, P.feedback].map((f) => [f, exists(f) ? fs.readFileSync(f) : null]);
+  const prevSign = git(["config", "--local", "--get", "commit.gpgsign"], { allowFail: true }).out;
+  const undoFallback = () => {
+    for (const [f, bytes] of snapFiles) {
+      if (bytes === null) fs.rmSync(f, { force: true });
+      else fs.writeFileSync(f, bytes);
+    }
+    git(["reset", "-q", "--", rel(P.state), rel(P.feedback)], { allowFail: true });
+    if (prevSign) git(["config", "--local", "commit.gpgsign", prevSign], { allowFail: true });
+    else git(["config", "--local", "--unset", "commit.gpgsign"], { allowFail: true });
+  };
+  git(["config", "--local", "commit.gpgsign", "false"]);
+  const st = loadState();
+  st.signing = `off (commit signing failed: ${line})`;
+  st.signingOverride = true;
+  saveState(st);
+  if (feedbackEnabled()) appendFeedback(stage || "implement", `Signing disabled for this run: ${st.signing}`, "signing", "auto");
+  const all = [...new Set([...rels, rel(P.state), rel(P.feedback)])].filter((x) => exists(path.join(ROOT, x)));
+  let retry;
+  try {
+    git(["add", "-A", "--", ...all]);
+    retry = run(["-c", "commit.gpgsign=false", "commit", "-q", "-m", message, "--", ...all]);
+  } catch (e) {
+    undoFallback();
+    throw e;
+  }
+  if (retry.status !== 0 || retry.error) {
+    undoFallback();
+    throw new ToolError(`git commit failed even unsigned: ${(retry.stderr || retry.stdout || retry.error?.message || "").trim()}`);
+  }
+}
+
+/**
+ * Run a tool's write-then-commit section so that if it throws, every file it
+ * may have written is put back byte for byte (or deleted if it did not exist)
+ * and the index is unstaged, then the original error is rethrown. A tool that
+ * fails therefore leaves the tree as it found it and is safe to call again.
+ * Every writing tool uses this; never copy the logic into a tool.
+ */
+function withRollback(paths, fn) {
+  const snaps = paths.map((p) => [p, exists(p) ? fs.readFileSync(p) : null]);
+  try {
+    return fn();
+  } catch (e) {
+    for (const [p, bytes] of snaps) {
+      if (bytes === null) fs.rmSync(p, { force: true });
+      else {
+        fs.mkdirSync(path.dirname(p), { recursive: true });
+        fs.writeFileSync(p, bytes);
+      }
+    }
+    const rels = paths.map(rel);
+    if (!git(["reset", "-q", "--", ...rels], { allowFail: true }).ok) {
+      for (const r of rels) git(["reset", "-q", "--", r], { allowFail: true });
+    }
+    throw e;
+  }
+}
+
+function gitCommitIfChanged(paths, message, { stage } = {}) {
   // A path that neither exists on disk nor is tracked yet (e.g. a feedback
   // log nothing has written to this run) is not "nothing changed" to `git
   // add` — it is a pathspec error. Drop those before asking git about them.
@@ -98,7 +198,7 @@ function gitCommitIfChanged(paths, message) {
   git(["add", "-A", "--", ...rels]);
   const staged = git(["diff", "--cached", "--name-only", "--", ...rels]).out;
   if (!staged) return null;
-  git(["commit", "-q", "-m", message, "--", ...rels]);
+  commitStaged(rels, message, { stage });
   return git(["rev-parse", "--short", "HEAD"]).out;
 }
 
@@ -146,7 +246,10 @@ function loadConfig() {
 
 const SIGNING_POLICIES = ["auto", "off", "required"];
 const PR_POLICIES = ["draft", "none"];
-const POLICY_KEYS = ["signing", "push", "pr", "feedback"];
+const POLICY_KEYS = ["signing", "push", "pr", "feedback", "archive", "finalize", "mergeMethod"];
+const FINALIZE_POLICIES = ["auto", "ready", "draft"];
+const MERGE_METHODS = ["merge", "squash", "rebase"];
+const FLIGHT_SLUG = /^[a-z0-9][a-z0-9-]{0,39}$/;
 
 /** Validate `docs/foundry.json`'s `policies` block; throws, never defaults a bad value away. */
 function validatePolicies(policies) {
@@ -169,6 +272,15 @@ function validatePolicies(policies) {
   if (policies.feedback !== undefined && typeof policies.feedback !== "boolean") {
     throw new ToolError("docs/foundry.json policies.feedback must be a boolean");
   }
+  if (policies.archive !== undefined && typeof policies.archive !== "boolean") {
+    throw new ToolError("docs/foundry.json policies.archive must be a boolean");
+  }
+  if (policies.finalize !== undefined && !FINALIZE_POLICIES.includes(policies.finalize)) {
+    throw new ToolError(`docs/foundry.json policies.finalize must be one of ${FINALIZE_POLICIES.join(", ")}`);
+  }
+  if (policies.mergeMethod !== undefined && !MERGE_METHODS.includes(policies.mergeMethod)) {
+    throw new ToolError(`docs/foundry.json policies.mergeMethod must be one of ${MERGE_METHODS.join(", ")}`);
+  }
 }
 
 /**
@@ -181,16 +293,42 @@ function validatePolicies(policies) {
  * everything else, and mark a port- or directory-bound command `exclusive`
  * so it only ever runs from the main checkout, never a stream's worktree.
  */
-function normalizeCommand(entry, defaultTimeoutMs, where) {
-  if (typeof entry === "string") return { cmd: entry, timeoutMs: defaultTimeoutMs, exclusive: false };
+function normalizeCommand(entry, defaultTimeoutMs, where, { allowFrom = false, planIds = null } = {}) {
+  if (typeof entry === "string") return { cmd: entry, timeoutMs: defaultTimeoutMs, exclusive: false, from: null };
   if (entry && typeof entry === "object" && !Array.isArray(entry)) {
     if (typeof entry.cmd !== "string" || !entry.cmd) throw new ToolError(`${where} is missing 'cmd'`);
     const timeoutMs = entry.timeoutMs === undefined ? defaultTimeoutMs : entry.timeoutMs;
     if (!Number.isInteger(timeoutMs) || timeoutMs <= 0) throw new ToolError(`${where}.timeoutMs must be a positive integer`);
     if (entry.exclusive !== undefined && typeof entry.exclusive !== "boolean") throw new ToolError(`${where}.exclusive must be a boolean`);
-    return { cmd: entry.cmd, timeoutMs, exclusive: entry.exclusive === true };
+    if (entry.from !== undefined && !allowFrom) throw new ToolError(`${where}.from is only valid on verify and extraVerify entries`);
+    return { cmd: entry.cmd, timeoutMs, exclusive: entry.exclusive === true, from: entry.from === undefined ? null : validateFrom(entry.from, where, planIds) };
   }
   throw new ToolError(`${where} must be a command string or { cmd, timeoutMs }`);
+}
+
+/** A `from` value names the task that makes a rule true; it must be a task id that PLAN.md (when it exists) defines. */
+function validateFrom(from, where, planIds) {
+  if (typeof from !== "string" || !/^[PR]\d+-\d+$/.test(from)) throw new ToolError(`${where}.from must be a task id such as P1-03`);
+  if (planIds && !planIds.has(from)) throw new ToolError(`${where}.from names ${from}, which is not a task in docs/PLAN.md`);
+  return from;
+}
+
+/** The task ids that have a `### <id>:` heading in PLAN.md text. */
+const planIdsOf = (planText) => new Set(Array.from(planText.matchAll(/^### ([PR]\d+-\d+):/gm), (m) => m[1]));
+
+/**
+ * `null` when a rule gated by `from` is active, else the task id it waits
+ * for. Active when ungated, when there is no PROGRESS.md, when no task is
+ * open (the flight is over, so everything applies), when the task is not in
+ * PROGRESS.md, or when the task has started or finished. Inactive while the
+ * task is todo, blocked or skipped.
+ */
+function inactiveUntil(from, pr) {
+  if (!from || !pr) return null;
+  if (counts(pr.tasks).open === 0) return null;
+  const t = pr.tasks.find((x) => x.id === from);
+  if (!t) return null;
+  return t.state === "~" || t.state === "x" ? null : from;
 }
 
 const PARALLEL_KEYS = ["maxStreams", "setup"];
@@ -212,7 +350,33 @@ function validateParallel(parallel) {
   }
 }
 
-const CONSTRAINT_KEYS = ["id", "description", "paths", "exclude", "pattern", "flags", "shouldMatch", "shouldNotMatch"];
+const MUTATION_FILTER = /^[A-Za-z0-9_.:\\/-]{1,200}$/;
+
+/** Validate `docs/foundry.json`'s `mutation` block: named test commands with one `{filter}` slot, for foundry_mutate's `targeted` argument. */
+function validateMutation(mutation) {
+  if (mutation === undefined) return;
+  const isObj = (v) => typeof v === "object" && v !== null && !Array.isArray(v);
+  if (!isObj(mutation)) throw new ToolError("docs/foundry.json 'mutation' must be an object");
+  for (const k of Object.keys(mutation)) {
+    if (k !== "targeted") throw new ToolError(`docs/foundry.json mutation has an unknown key '${k}'`);
+  }
+  if (mutation.targeted === undefined) return;
+  if (!isObj(mutation.targeted)) throw new ToolError("docs/foundry.json mutation.targeted must be an object mapping a name to { cmd, timeoutMs }");
+  for (const [name, entry] of Object.entries(mutation.targeted)) {
+    const where = `docs/foundry.json mutation.targeted.${name}`;
+    if (!isObj(entry)) throw new ToolError(`${where} must be an object { cmd, timeoutMs }`);
+    for (const k of Object.keys(entry)) {
+      if (!["cmd", "timeoutMs"].includes(k)) throw new ToolError(`${where} has an unknown key '${k}'`);
+    }
+    if (typeof entry.cmd !== "string" || !entry.cmd) throw new ToolError(`${where}.cmd must be a non-empty string`);
+    if (entry.cmd.split("{filter}").length - 1 !== 1) throw new ToolError(`${where}.cmd must contain {filter} exactly once`);
+    if (entry.timeoutMs !== undefined && (!Number.isInteger(entry.timeoutMs) || entry.timeoutMs <= 0)) {
+      throw new ToolError(`${where}.timeoutMs must be a positive integer`);
+    }
+  }
+}
+
+const CONSTRAINT_KEYS = ["id", "description", "paths", "exclude", "pattern", "flags", "shouldMatch", "shouldNotMatch", "from"];
 
 /**
  * Validate `docs/foundry.json`'s `constraints` array: every rule must carry
@@ -221,7 +385,7 @@ const CONSTRAINT_KEYS = ["id", "description", "paths", "exclude", "pattern", "fl
  * against real files — that is `checkConstraints`'s job at `foundry_verify`
  * time — only that the rule is well-formed.
  */
-function validateConstraints(constraints) {
+function validateConstraints(constraints, planIds = null) {
   if (constraints === undefined) return;
   if (!Array.isArray(constraints)) throw new ToolError("docs/foundry.json 'constraints' must be an array");
   const seen = new Set();
@@ -238,6 +402,7 @@ function validateConstraints(constraints) {
     if (c.exclude !== undefined && (!Array.isArray(c.exclude) || !c.exclude.every((p) => typeof p === "string" && p))) {
       throw new ToolError(`constraint '${c.id}'.exclude must be an array of strings`);
     }
+    if (c.from !== undefined) validateFrom(c.from, `constraint '${c.id}'`, planIds);
     if (typeof c.pattern !== "string" || !c.pattern) throw new ToolError(`constraint '${c.id}' must have a non-empty 'pattern'`);
     if (c.flags !== undefined && typeof c.flags !== "string") throw new ToolError(`constraint '${c.id}'.flags must be a string`);
     try {
@@ -256,16 +421,28 @@ function validateConstraints(constraints) {
 }
 
 function cfg() {
-  const c = loadConfig() || {};
+  return cfgFrom(loadConfig() || {}, exists(P.plan) ? planIdsOf(read(P.plan)) : null);
+}
+
+/** The resolved config for parsed `docs/foundry.json` content; `planIds` (or null to skip the check) are the tasks a `from` may name. */
+function cfgFrom(c, planIds) {
   validatePolicies(c.policies);
-  validateConstraints(c.constraints);
+  if (c.flight !== undefined && (typeof c.flight !== "string" || !FLIGHT_SLUG.test(c.flight))) {
+    throw new ToolError(`docs/foundry.json flight must be a slug matching ${FLIGHT_SLUG} (lowercase letters, digits and -, at most 40 characters)`);
+  }
+  validateConstraints(c.constraints, planIds);
   validateParallel(c.parallel);
+  validateMutation(c.mutation);
   const commandTimeoutMs = c.commandTimeoutMs || 10 * 60 * 1000;
-  const norm = (entry, i, where) => normalizeCommand(entry, commandTimeoutMs, `docs/foundry.json ${where}[${i}]`);
+  const targeted = Object.fromEntries(
+    Object.entries(c.mutation?.targeted || {}).map(([name, e]) => [name, { cmd: e.cmd, timeoutMs: e.timeoutMs ?? commandTimeoutMs }]),
+  );
+  const norm = (entry, i, where, opts) => normalizeCommand(entry, commandTimeoutMs, `docs/foundry.json ${where}[${i}]`, opts);
+  const gated = { allowFrom: true, planIds };
   return {
-    verify: (c.verify || []).map((e, i) => norm(e, i, "verify")),
+    verify: (c.verify || []).map((e, i) => norm(e, i, "verify", gated)),
     extraVerify: Object.fromEntries(
-      Object.entries(c.extraVerify || {}).map(([prefix, arr]) => [prefix, (arr || []).map((e, i) => norm(e, i, `extraVerify['${prefix}']`))]),
+      Object.entries(c.extraVerify || {}).map(([prefix, arr]) => [prefix, (arr || []).map((e, i) => norm(e, i, `extraVerify['${prefix}']`, gated))]),
     ),
     build: (c.build || []).map((e, i) => norm(e, i, "build")),
     parallel: {
@@ -279,11 +456,17 @@ function cfg() {
     commandTimeoutMs,
     guardCap: Number.isInteger(c.guardCap) ? c.guardCap : 60,
     constraints: c.constraints || [],
+    flight: c.flight ?? null,
+    mutation: { targeted },
     policies: {
       signing: c.policies?.signing ?? "auto",
       push: c.policies?.push ?? true,
       pr: c.policies?.pr ?? "draft",
       feedback: c.policies?.feedback ?? true,
+      // ⚠️ ASSUMPTION: archiving a finished flight is opt-in until it has been proven in real flights.
+      archive: c.policies?.archive ?? false,
+      finalize: c.policies?.finalize ?? "auto",
+      mergeMethod: c.policies?.mergeMethod ?? "merge",
     },
   };
 }
@@ -711,7 +894,11 @@ function saveState(s) {
 
 function parseProgress() {
   if (!exists(P.progress)) throw new ToolError("docs/PROGRESS.md does not exist; run the plan stage first");
-  const lines = read(P.progress).split("\n");
+  return parseProgressText(read(P.progress));
+}
+
+function parseProgressText(text) {
+  const lines = text.split("\n");
   const tasks = [];
   let section = null;
   let tasksStart = -1, tasksEnd = -1, logStart = -1;
@@ -932,7 +1119,7 @@ function validateWave(index, tasks, planLines, cc) {
 }
 
 /** Every wave in `pr`, in order, numbered from 1, each already judged. `[]` for a plan with no streams. */
-function computeWaves(pr, cc) {
+function computeWaves(pr, cc, planLines) {
   const groups = [];
   let cur = null;
   for (const t of pr.tasks) {
@@ -944,8 +1131,8 @@ function computeWaves(pr, cc) {
     }
   }
   if (!groups.length) return [];
-  const planLines = exists(P.plan) ? read(P.plan).split("\n") : null;
-  return groups.map((tasks, i) => validateWave(i + 1, tasks, planLines, cc));
+  const lines = planLines !== undefined ? planLines : exists(P.plan) ? read(P.plan).split("\n") : null;
+  return groups.map((tasks, i) => validateWave(i + 1, tasks, lines, cc));
 }
 
 // ---------------------------------------------------------------- streams at run time
@@ -1189,7 +1376,7 @@ function countFeedback() {
 function feedbackLog({ stage, message, category }) {
   if (!cfg().policies.feedback) return { logged: false, reason: "disabled by policy" };
   appendFeedback(stage, message, category, "agent");
-  const commit = gitCommitIfChanged([P.feedback], `chore: pipeline friction (${stage})`);
+  const commit = gitCommitIfChanged([P.feedback], `chore: pipeline friction (${stage})`, { stage });
   return { logged: true, count: countFeedback(), commit };
 }
 
@@ -1281,7 +1468,40 @@ function status() {
   }
   out.agentsGenerated = agentsOnDisk();
   out.agentsGeneratedThisSession = Array.from(generatedThisProcess);
+  out.artifacts = artifactStates(g.inRepo);
+  out.strayArtifacts = out.artifacts["PLAN.md"] === "absent" ? Object.keys(out.artifacts).filter((k) => out.artifacts[k] === "untracked") : [];
+  out.lastReviewCommit = lastReviewCommit(g.inRepo);
   return out;
+}
+
+const ARTIFACT_NAMES = ["SPEC.md", "PLAN.md", "PROGRESS.md", "HANDOFF.md", "REVIEW.md", "SUMMARY.md", "foundry.json"];
+
+/** Where each flight artifact stands: absent, untracked, modified (tracked but changed) or tracked. Read-only. */
+function artifactStates(inRepo) {
+  const out = {};
+  for (const name of ARTIFACT_NAMES) {
+    const abs = path.join(ROOT, "docs", name);
+    const relPath = rel(abs);
+    if (!exists(abs)) out[name] = "absent";
+    else if (!inRepo || !git(["ls-files", "--error-unmatch", "--", relPath], { allowFail: true }).ok) out[name] = "untracked";
+    else out[name] = git(["status", "--porcelain", "--", relPath], { allowFail: true }).out ? "modified" : "tracked";
+  }
+  return out;
+}
+
+/** Short sha of the newest `review:` commit on this branch since it left the base branch, or null. */
+function lastReviewCommit(inRepo) {
+  if (!inRepo) return null;
+  let base = "main";
+  try {
+    base = cfg().baseBranch;
+  } catch {
+    // a malformed config is reported elsewhere; the default base is good enough here
+  }
+  const log = git(["log", "--format=%h%x09%s", `${base}..HEAD`], { allowFail: true });
+  if (!log.ok) return null;
+  const line = log.out.split("\n").find((l) => l.split("\t")[1]?.startsWith("review:"));
+  return line ? line.split("\t")[0] : null;
 }
 
 const AGENT = { plan: "foundry:planner", implement: "foundry:implementer", review: "foundry:reviewer", summarize: "foundry:summarizer" };
@@ -1389,6 +1609,13 @@ function next() {
 
   if (!s.specPresent) return stage("halt", "docs/SPEC.md is missing; nothing to build from");
   if (st.halted) return stage("halt", st.halted);
+  if (st.awaitingSigning) {
+    const mb = git(["merge-base", c.baseBranch, "HEAD"], { allowFail: true }).out || "<merge-base>";
+    return stage("done", `awaiting signing: ${st.awaitingSigning.unsigned} unsigned commit(s), oldest ${String(st.awaitingSigning.first).slice(0, 7)}. ${nextSteps(mb)}`);
+  }
+  if (st.archived && !s.planPresent && exists(path.join(ROOT, st.archived.dir, "SPEC.md")) && read(P.spec) === read(path.join(ROOT, st.archived.dir, "SPEC.md"))) {
+    return stage("done", `flight ${st.archived.slug} is archived in ${st.archived.dir}; edit docs/SPEC.md for the next flight, then run /foundry:go-flight`);
+  }
   if (!s.planPresent || !s.progressPresent || !s.configPresent) {
     return stage("plan", "no plan on disk (docs/PLAN.md, docs/PROGRESS.md and docs/foundry.json are all required)");
   }
@@ -1424,7 +1651,7 @@ const PROMPTS = {
   review: (round, s, policies, reviewRound) =>
     `Run the Foundry review stage. This review is round ${reviewRound}; write \`Round: ${reviewRound}\` on the second line of docs/REVIEW.md, and use \`R${reviewRound}-<nn>\` when a fix task's dependsOn must reference another fix task in the same submission. Review the whole build branch against docs/SPEC.md and docs/PLAN.md as your review-build instructions specify, write docs/REVIEW.md, and call foundry_review_submit exactly once with your verdict. Do not fix code yourself. ${policies}`,
   summarize: (round, s, policies) =>
-    `Run the Foundry summarize stage. The review is APPROVED. Write docs/SUMMARY.md as your summarize instructions specify and call foundry_summary_commit. Do not merge. ${policies}`,
+    `Run the Foundry summarize stage. The review is APPROVED. Compose docs/SUMMARY.md as your summarize instructions specify and pass its full text as \`content\` to foundry_summary_commit, which writes and commits it; do not write the file yourself. After that, archive if foundry_summary_commit reports archive: true, and end with foundry_pr_finalize; never pass resign. Do not merge. ${policies}`,
 };
 
 /**
@@ -1449,7 +1676,7 @@ function probeSigning(signingPolicy) {
   const probe = spawnSync("git", ["commit-tree", "-S", "HEAD^{tree}", "-m", "foundry signing probe"], {
     cwd: ROOT,
     encoding: "utf8",
-    timeout: 30_000,
+    timeout: SIGNING_TIMEOUT_MS,
     env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
   });
   if (probe.status === 0 && !probe.error) return "on";
@@ -1505,6 +1732,7 @@ function startRun() {
   const preexistingUntracked = untrackedPaths();
 
   // .gitignore the lock, arm it, stamp PROGRESS, commit.
+  const sha = withRollback([P.gitignore, P.progress, P.state, P.feedback], () => {
   ensureLineInFile(P.gitignore, ".foundry/implement.lock");
   // Only a plan that declares streams ever creates worktrees, so only such a
   // plan gets the extra line (a plan without streams stays byte-identical).
@@ -1520,6 +1748,7 @@ function startRun() {
   st.preexistingUntracked = preexistingUntracked;
   st.policies = c.policies;
   st.signing = probeSigning(c.policies.signing);
+  if (st.signing.startsWith("off (probe failed")) st.signingOverride = true;
   st.implemented = false; st.reviewed = false; st.verdict = null;
   saveState(st);
   // Only the auto fallback is friction — an explicit "off" or an
@@ -1528,7 +1757,8 @@ function startRun() {
   if (c.policies.feedback && st.signing.startsWith("off (probe failed")) {
     appendFeedback("implement", `Signing disabled for this run: ${st.signing}`, "signing", "auto");
   }
-  const sha = gitCommitIfChanged([P.gitignore, P.progress, P.state, P.feedback], st.round === 0 ? "chore: start implementation run" : `chore: start review-fix round ${st.round}`);
+  return gitCommitIfChanged([P.gitignore, P.progress, P.state, P.feedback], st.round === 0 ? "chore: start implementation run" : `chore: start review-fix round ${st.round}`);
+  });
   return { alreadyStarted: false, branch, commit: sha, counts: counts(pr.tasks), round: st.round, policies: st.policies, signing: st.signing, basePush };
 }
 
@@ -1642,6 +1872,7 @@ function streamFinish({ stream } = {}) {
     const halted = `merging stream '${stream}' (branch ${streamBranch}) into ${g.branch} ${what}; the stream's branch and worktree ${rel(dir)} are kept. A human must resolve it: from the main checkout run \`git merge --no-ff ${streamBranch}\`, fix what it reports and commit, then \`git worktree remove --force ${rel(dir)}\` and clear 'halted' in .foundry/state.json.`;
     const cur = loadState();
     cur.halted = halted;
+    delete cur.haltCap;
     saveState(cur);
     if (cc.policies.feedback) appendFeedback("implement", halted, "stream-merge", "auto");
     gitCommitIfChanged([P.state, P.feedback], `chore: run halted (stream ${stream} merge conflict)`);
@@ -1771,10 +2002,12 @@ function taskDone({ stream, id, log }) {
     );
   }
   const sha = git(["rev-parse", "--short", "HEAD"], { cwd }).out;
-  setTaskState(pr, id, "x");
-  appendLog(pr, id, sha, log);
-  writeProgress(pr);
-  const psha = gitCommitIfChanged([P.progress], `progress: ${id} done`);
+  const psha = withRollback([P.progress], () => {
+    setTaskState(pr, id, "x");
+    appendLog(pr, id, sha, log);
+    writeProgress(pr);
+    return gitCommitIfChanged([P.progress], `progress: ${id} done`);
+  });
   resetLockCounter();
   return { id, taskCommit: sha, progressCommit: psha, counts: counts(pr.tasks), guardReset: true, ...(stream !== undefined ? { stream } : {}) };
 }
@@ -1797,10 +2030,12 @@ function taskBlock({ stream, id, reason }) {
   git(["reset", "-q", "--hard", "HEAD"], { cwd });
   git(["clean", "-qfd", ...(ignore || []).flatMap((p) => ["-e", gitCleanExcludePattern(p)])], { cwd });
   pr = parseProgress();
-  setTaskState(pr, id, "!");
-  appendLog(pr, id, "blocked", `BLOCKED: ${reason}`);
-  writeProgress(pr);
-  const psha = gitCommitIfChanged([P.progress], `progress: ${id} blocked`);
+  const psha = withRollback([P.progress], () => {
+    setTaskState(pr, id, "!");
+    appendLog(pr, id, "blocked", `BLOCKED: ${reason}`);
+    writeProgress(pr);
+    return gitCommitIfChanged([P.progress], `progress: ${id} blocked`);
+  });
   resetLockCounter();
   return { id, progressCommit: psha, counts: counts(pr.tasks), ...(stream !== undefined ? { stream } : {}) };
 }
@@ -1860,9 +2095,12 @@ function taskReopen({ id, reason } = {}) {
   const t = pr.tasks.find((x) => x.id === id);
   if (!t) throw new ToolError(`task ${id} not in docs/PROGRESS.md`);
   if (t.state !== "!" && t.state !== "-") throw new ToolError(`task ${id} is '${STATE_NAMES[t.state]}'; only a blocked or skipped task can be reopened`);
-  const dependents = reopenWithDependents(pr, [id], "reopened", `REOPENED: ${reason}`);
-  writeProgress(pr);
-  const commit = gitCommitIfChanged([P.progress], `progress: reopen ${id}${dependents.length ? ` (+${dependents.length} dependent${dependents.length === 1 ? "" : "s"})` : ""}`);
+  let dependents;
+  const commit = withRollback([P.progress], () => {
+    dependents = reopenWithDependents(pr, [id], "reopened", `REOPENED: ${reason}`);
+    writeProgress(pr);
+    return gitCommitIfChanged([P.progress], `progress: reopen ${id}${dependents.length ? ` (+${dependents.length} dependent${dependents.length === 1 ? "" : "s"})` : ""}`);
+  });
   resetLockCounter();
   return { id, reopenedDependents: dependents, commit, counts: counts(pr.tasks) };
 }
@@ -1951,6 +2189,7 @@ const pathUnder = (file, p) => file === p || file.startsWith(p.endsWith("/") ? p
  */
 function checkConstraints(constraints, cwd = ROOT, ignore = []) {
   const skip = new Set(ignore);
+  const progress = exists(P.progress) ? parseProgress() : null;
   const testLine = (c, line) => new RegExp(c.pattern, c.flags || "").test(line);
   const results = constraints.map((c) => {
     for (const line of c.shouldMatch) {
@@ -1959,6 +2198,8 @@ function checkConstraints(constraints, cwd = ROOT, ignore = []) {
     for (const line of c.shouldNotMatch) {
       if (testLine(c, line)) return { id: c.id, ok: false, fixture: `shouldNotMatch ${JSON.stringify(line)} matched`, hits: [] };
     }
+    const waiting = inactiveUntil(c.from, progress);
+    if (waiting) return { id: c.id, ok: true, inactive: `until ${waiting}`, fixture: null, hits: [] };
     const listed = git(["ls-files", "--cached", "--others", "--exclude-standard", "--", ...c.paths], { allowFail: true, cwd });
     const files = listed.ok ? [...new Set(listed.out.split("\n").filter(Boolean))].filter((f) => !skip.has(f)) : [];
     const excluded = c.exclude || [];
@@ -2020,8 +2261,12 @@ function verify({ files = [], stream } = {}) {
   // Constraints are whole-repo, always — `files` narrows which shell
   // commands' extras run, never what a constraint scans.
   const constraints = checkConstraints(cc.constraints, cwd, ignore);
-  const results = cmds.map((c2) => runShell(c2.cmd, c2.timeoutMs, cwd));
-  return { ok: constraints.ok && results.every((r) => r.ok), constraints, results, ...(recovered ? { recoveredMutation: recovered } : {}) };
+  const progress = exists(P.progress) ? parseProgress() : null;
+  const results = cmds.map((c2) => {
+    const waiting = inactiveUntil(c2.from, progress);
+    return waiting ? { cmd: c2.cmd, skipped: `inactive until ${waiting}` } : runShell(c2.cmd, c2.timeoutMs, cwd);
+  });
+  return { ok: constraints.ok && results.every((r) => r.skipped || r.ok), constraints, results, ...(recovered ? { recoveredMutation: recovered } : {}) };
 }
 
 // ---------------------------------------------------------------- mutation testing
@@ -2103,7 +2348,7 @@ function undoMutationResidue(before) {
   return { restored, removed };
 }
 
-function mutate({ file, find, replace, commands, timeoutMs } = {}) {
+function mutate({ file, find, replace, commands, timeoutMs, targeted, filter, confirmKill } = {}) {
   if (typeof file !== "string" || !file) throw new ToolError("file is required: a repo-relative path to a tracked source file");
   if (typeof find !== "string" || !find) throw new ToolError("find is required and must be a non-empty string: the exact text to replace");
   if (typeof replace !== "string") throw new ToolError('replace is required and must be a string (use "" to delete the matched text)');
@@ -2117,6 +2362,17 @@ function mutate({ file, find, replace, commands, timeoutMs } = {}) {
   if (!gitFacts().inRepo) throw new ToolError("not a git repository");
   if (!loadConfig()) throw new ToolError("docs/foundry.json is missing; the plan stage must write it");
   const cc = cfg();
+  if (confirmKill !== undefined && typeof confirmKill !== "boolean") throw new ToolError("confirmKill must be a boolean");
+  if ((targeted === undefined) !== (filter === undefined)) throw new ToolError("targeted and filter must be passed together");
+  if (targeted !== undefined) {
+    if (commands !== undefined) throw new ToolError("targeted cannot be combined with commands; pass one or the other");
+    const names = Object.keys(cc.mutation.targeted);
+    const legal = names.length ? `Configured names: ${names.join(", ")}.` : "No targeted commands are configured; add them under `mutation.targeted` in docs/foundry.json.";
+    if (typeof targeted !== "string" || !Object.hasOwn(cc.mutation.targeted, targeted)) throw new ToolError(`unknown targeted command ${JSON.stringify(targeted)}. ${legal}`);
+    if (typeof filter !== "string" || !MUTATION_FILTER.test(filter)) {
+      throw new ToolError(`filter must be 1 to 200 characters from letters, digits and _ . : / - (no spaces, quotes or shell characters); got ${JSON.stringify(filter)}`);
+    }
+  }
   const recovered = recoverMutation();
   if (exists(P.lock)) {
     throw new ToolError("an implementation run is in progress (.foundry/implement.lock exists); foundry_mutate is a review-stage tool — run it after foundry_run_finish");
@@ -2143,7 +2399,10 @@ function mutate({ file, find, replace, commands, timeoutMs } = {}) {
   }
 
   let cmds;
-  if (commands) {
+  if (targeted !== undefined) {
+    const t = cc.mutation.targeted[targeted];
+    cmds = [{ cmd: t.cmd.replace("{filter}", () => `'${filter}'`), timeoutMs: t.timeoutMs, exclusive: false, from: null }];
+  } else if (commands) {
     const legal = new Map([...cc.verify, ...Object.values(cc.extraVerify).flat()].map((x) => [x.cmd, x]));
     const unknown = commands.filter((x) => !legal.has(x));
     if (unknown.length) {
@@ -2167,7 +2426,11 @@ function mutate({ file, find, replace, commands, timeoutMs } = {}) {
   let results;
   try {
     fs.writeFileSync(abs, original.slice(0, first) + replace + original.slice(first + find.length));
-    results = cmds.map((c2) => runShell(c2.cmd, c2.timeoutMs));
+    const progress = exists(P.progress) ? parseProgress() : null;
+    results = cmds.map((c2) => {
+      const waiting = inactiveUntil(c2.from, progress);
+      return waiting ? { cmd: c2.cmd, skipped: `inactive until ${waiting}` } : runShell(c2.cmd, c2.timeoutMs);
+    });
   } finally {
     // Restore unconditionally. If git cannot, write the bytes back ourselves.
     if (!git(["checkout", "-q", "HEAD", "--", relPath], { allowFail: true }).ok) fs.writeFileSync(abs, original);
@@ -2179,11 +2442,31 @@ function mutate({ file, find, replace, commands, timeoutMs } = {}) {
   fs.rmSync(P.mutation, { force: true });
   const residue = undoMutationResidue(before);
 
-  const killed = results.some((r) => !r.ok);
+  const failedIdx = results.map((r, i) => (!r.skipped && !r.ok ? i : -1)).filter((i) => i >= 0);
+  const failedCommands = failedIdx.map((i) => cmds[i].cmd);
+  let killed = failedIdx.length > 0;
+  let verdict = killed ? "killed: the tests caught the mutation" : "survived: no command failed — the mechanic is untested";
+  let confirm;
+  let inconclusive;
+  if (killed && confirmKill) {
+    // A command that fails on the unmutated tree proves nothing about the
+    // mutation, so each failure is re-run once where nothing is mutated.
+    confirm = failedIdx.map((i) => runShell(cmds[i].cmd, cmds[i].timeoutMs));
+    undoMutationResidue(before);
+    const stillFailing = confirm.findIndex((r) => !r.ok);
+    if (stillFailing >= 0) {
+      killed = false;
+      inconclusive = true;
+      verdict = `inconclusive: ${failedCommands[stillFailing]} also fails without the mutation`;
+    }
+  }
   return {
     file: relPath,
     killed,
-    verdict: killed ? "killed: the tests caught the mutation" : "survived: no command failed — the mechanic is untested",
+    ...(inconclusive ? { inconclusive } : {}),
+    verdict,
+    failedCommands,
+    ...(confirm ? { confirm } : {}),
     results,
     restored: residue.restored,
     removed: residue.removed,
@@ -2218,15 +2501,17 @@ function runFinish() {
   const st = loadState();
   const c = cfg();
   const g = gitFacts();
-  const handoffCommit = gitCommitIfChanged([P.handoff], "chore: handoff for review");
+  const handoffCommit = withRollback([P.handoff], () => gitCommitIfChanged([P.handoff], "chore: handoff for review"));
   const dirtyLines = porcelainExcludingPreexisting(st.preexistingUntracked);
   if (dirtyLines.length) {
     throw new ToolError(`working tree is not clean:\n${dirtyLines.join("\n")}\nCommit them as part of the handoff or \`git checkout --\`/\`git clean\` them.`);
   }
 
   st.implemented = true; st.reviewed = false; st.verdict = null;
-  saveState(st);
-  const stateCommit = gitCommitIfChanged([P.state], `chore: round ${st.round} implemented`);
+  const stateCommit = withRollback([P.state], () => {
+    saveState(st);
+    return gitCommitIfChanged([P.state], `chore: round ${st.round} implemented`);
+  });
 
   const push = pushBranch(g.branch, st.policies.push);
   let pr_url = null;
@@ -2271,20 +2556,43 @@ const FLIGHT_OPTION_KEYS = ["maxRounds", "maxRoundsHard"];
  * has written docs/foundry.json.
  */
 function flightOptions(args = {}) {
+  if (args.resume !== undefined && typeof args.resume !== "boolean") throw new ToolError("resume must be a boolean");
   const given = FLIGHT_OPTION_KEYS.filter((k) => args[k] !== undefined);
   if (!given.length) throw new ToolError(`pass at least one of ${FLIGHT_OPTION_KEYS.join(", ")}`);
   for (const k of given) {
     if (!Number.isInteger(args[k]) || args[k] <= 0) throw new ToolError(`${k} must be a positive integer`);
   }
   if (!exists(P.config)) throw new ToolError("docs/foundry.json does not exist yet; set flight options once the plan stage has written it");
+  const resume = args.resume === true;
+  const st = loadState();
+  if (resume) {
+    if (!st.halted) throw new ToolError("the flight is not halted; there is nothing to resume");
+    if (!st.haltCap) throw new ToolError(`this halt is not a round-cap halt, so resume cannot clear it: ${st.halted}`);
+    const { cap, round, nonConverging } = st.haltCap;
+    if (cap === "maxRoundsHard" && !(args.maxRoundsHard >= round)) {
+      throw new ToolError(`the halt came from maxRoundsHard at round ${round}; pass maxRoundsHard: ${round} or more with resume, which is what would lift it`);
+    }
+    if (cap === "maxRounds" && !(args.maxRounds > nonConverging)) {
+      throw new ToolError(`the halt came from maxRounds with ${nonConverging} non-converging rounds; pass maxRounds: ${nonConverging + 1} or more with resume, which is what would lift it`);
+    }
+  }
   const raw = loadConfig();
   const was = cfg();
   const before = Object.fromEntries(FLIGHT_OPTION_KEYS.map((k) => [k, was[k]]));
   for (const k of given) raw[k] = args[k];
-  write(P.config, `${JSON.stringify(raw, null, 2)}\n`);
-  const after = Object.fromEntries(FLIGHT_OPTION_KEYS.map((k) => [k, cfg()[k]]));
-  const commit = gitCommitIfChanged([P.config], `chore: flight options (${given.map((k) => `${k}=${args[k]}`).join(", ")})`);
-  return { before, after, commit };
+  const paths = resume ? [P.config, P.state] : [P.config];
+  return withRollback(paths, () => {
+    write(P.config, `${JSON.stringify(raw, null, 2)}\n`);
+    if (resume) {
+      st.halted = null;
+      delete st.haltCap;
+      saveState(st);
+    }
+    const after = Object.fromEntries(FLIGHT_OPTION_KEYS.map((k) => [k, cfg()[k]]));
+    const label = `${given.map((k) => `${k}=${args[k]}`).join(", ")}${resume ? ", resume" : ""}`;
+    const commit = gitCommitIfChanged(paths, `chore: flight options (${label})`);
+    return { before, after, commit, ...(resume ? { resumed: true } : {}) };
+  });
 }
 
 /**
@@ -2298,10 +2606,13 @@ function runHalt({ reason }) {
   if (!reason) throw new ToolError("reason is required");
   const st = loadState();
   st.halted = reason;
-  saveState(st);
-  if (exists(P.lock)) fs.unlinkSync(P.lock);
-  if (cfg().policies.feedback) appendFeedback("controller", `Run halted: ${reason}`, "halt", "auto");
-  const commit = gitCommitIfChanged([P.state, P.progress, P.feedback], "chore: run halted");
+  delete st.haltCap; // only a round-cap halt is resumable through foundry_flight_options
+  const commit = withRollback([P.state, P.progress, P.feedback], () => {
+    saveState(st);
+    if (exists(P.lock)) fs.unlinkSync(P.lock);
+    if (cfg().policies.feedback) appendFeedback("controller", `Run halted: ${reason}`, "halt", "auto");
+    return gitCommitIfChanged([P.state, P.progress, P.feedback], "chore: run halted");
+  });
   const g = gitFacts();
   const dirty = git(["status", "--porcelain"], { allowFail: true }).out !== "";
   return { halted: reason, branch: g.branch, head: g.head, commit, dirty };
@@ -2325,6 +2636,13 @@ function formatTask(id, t) {
 function reviewMdRound() {
   const m = read(P.review).match(/^Round:\s*(\d+)\s*$/m);
   return m ? Number(m[1]) : null;
+}
+
+/** 1st, 2nd, 3rd, 4th, 11th, 12th, 13th, 21st, 101st, 111th. */
+function ordinal(n) {
+  const mod100 = n % 100;
+  if (mod100 >= 11 && mod100 <= 13) return `${n}th`;
+  return `${n}${{ 1: "st", 2: "nd", 3: "rd" }[n % 10] || "th"}`;
 }
 
 function reviewSubmit({ verdict, tasks = [], unblock = [] }) {
@@ -2352,8 +2670,10 @@ function reviewSubmit({ verdict, tasks = [], unblock = [] }) {
     if (tasks.length || unblock.length) throw new ToolError("an APPROVED verdict cannot carry fix tasks or unblocks");
     st.reviewed = true; st.verdict = "APPROVED";
     st.rounds = [...st.rounds, { round: N, fixTasks: 0, unblocked: 0, verdict: "APPROVED", at: new Date().toISOString() }];
-    saveState(st);
-    const sha = gitCommitIfChanged([P.review, P.state], `review: round ${N} approved`);
+    const sha = withRollback([P.review, P.state], () => {
+      saveState(st);
+      return gitCommitIfChanged([P.review, P.state], `review: round ${N} approved`, { stage: "review" });
+    });
     const push = pushBranch(gitFacts().branch, st.policies.push);
     // `round` is the number this review was stamped with, as for CHANGES
     // REQUESTED — never the count of fix rounds (F-21).
@@ -2374,50 +2694,54 @@ function reviewSubmit({ verdict, tasks = [], unblock = [] }) {
       throw new ToolError(`fix task '${t.title}' depends on '${dep}', which is neither an existing task in PROGRESS.md nor one of this submission's own ids (${ids.join(", ") || "none"})`);
     }
   }
-  if (tasks.length) {
-    const block = [``, `## Review fixes (round ${N})`, ``, ...tasks.map((t, i) => formatTask(ids[i], t) + "\n")].join("\n");
-    write(P.plan, read(P.plan).replace(/\s*$/, "\n") + block);
-    appendTaskLines(pr, tasks.map((t, i) => ({ id: ids[i], title: t.title })));
-  }
   const unblocked = [];
   const reopened = [];
-  for (const u of unblock) {
-    const id = typeof u === "string" ? u : u.id;
-    const reason = typeof u === "string" ? "unblocked by reviewer" : u.reason || "unblocked by reviewer";
-    const t = pr.tasks.find((x) => x.id === id);
-    if (!t) throw new ToolError(`cannot unblock ${id}: not in PROGRESS.md`);
-    if (t.state !== "!" && t.state !== "-") {
-      // Already reopened as a dependent of an earlier unblock in this call.
-      if (reopened.includes(id)) continue;
-      throw new ToolError(`cannot unblock ${id}: it is '${STATE_NAMES[t.state]}'`);
+  const sha = withRollback([P.review, P.plan, P.progress, P.state, P.feedback], () => {
+    if (tasks.length) {
+      const block = [``, `## Review fixes (round ${N})`, ``, ...tasks.map((t, i) => formatTask(ids[i], t) + "\n")].join("\n");
+      write(P.plan, read(P.plan).replace(/\s*$/, "\n") + block);
+      appendTaskLines(pr, tasks.map((t, i) => ({ id: ids[i], title: t.title })));
     }
-    reopened.push(...reopenWithDependents(pr, [id], `unblocked (round ${N})`, reason));
-    unblocked.push(id);
-  }
-  writeProgress(pr);
+    for (const u of unblock) {
+      const id = typeof u === "string" ? u : u.id;
+      const reason = typeof u === "string" ? "unblocked by reviewer" : u.reason || "unblocked by reviewer";
+      const t = pr.tasks.find((x) => x.id === id);
+      if (!t) throw new ToolError(`cannot unblock ${id}: not in PROGRESS.md`);
+      if (t.state !== "!" && t.state !== "-") {
+        // Already reopened as a dependent of an earlier unblock in this call.
+        if (reopened.includes(id)) continue;
+        throw new ToolError(`cannot unblock ${id}: it is '${STATE_NAMES[t.state]}'`);
+      }
+      reopened.push(...reopenWithDependents(pr, [id], `unblocked (round ${N})`, reason));
+      unblocked.push(id);
+    }
+    writeProgress(pr);
 
-  // Convergence: a round is non-converging when it queues at least as much
-  // work as the round before it. Round 1 has nothing to compare against, so
-  // it is always allowed. maxRounds bounds how many non-converging rounds a
-  // flight tolerates; maxRoundsHard is the absolute ceiling regardless
-  // (F-13, F-15) — three rounds that shrink 15 → 3 → 2 never hit either.
-  const thisCount = ids.length + unblocked.length;
-  const priorFixRounds = st.rounds.filter((r) => r.verdict === "CHANGES REQUESTED");
-  const prevRound = priorFixRounds[priorFixRounds.length - 1];
-  const nonConverging = Boolean(prevRound) && thisCount >= prevRound.fixTasks + prevRound.unblocked;
-  st.rounds = [...st.rounds, { round: N, fixTasks: ids.length, unblocked: unblocked.length, verdict: "CHANGES REQUESTED", nonConverging, at: new Date().toISOString() }];
-  const nonConvergingSoFar = st.rounds.filter((r) => r.nonConverging).length;
-  const trail = st.rounds.filter((r) => r.verdict === "CHANGES REQUESTED").map((r) => r.fixTasks + r.unblocked).join(" → ");
+    // Convergence: a round is non-converging when it queues at least as much
+    // work as the round before it. Round 1 has nothing to compare against, so
+    // it is always allowed. maxRounds bounds how many non-converging rounds a
+    // flight tolerates; maxRoundsHard is the absolute ceiling regardless
+    // (F-13, F-15) — three rounds that shrink 15 → 3 → 2 never hit either.
+    const thisCount = ids.length + unblocked.length;
+    const priorFixRounds = st.rounds.filter((r) => r.verdict === "CHANGES REQUESTED");
+    const prevRound = priorFixRounds[priorFixRounds.length - 1];
+    const nonConverging = Boolean(prevRound) && thisCount >= prevRound.fixTasks + prevRound.unblocked;
+    st.rounds = [...st.rounds, { round: N, fixTasks: ids.length, unblocked: unblocked.length, verdict: "CHANGES REQUESTED", nonConverging, at: new Date().toISOString() }];
+    const nonConvergingSoFar = st.rounds.filter((r) => r.nonConverging).length;
+    const trail = st.rounds.filter((r) => r.verdict === "CHANGES REQUESTED").map((r) => r.fixTasks + r.unblocked).join(" → ");
 
-  st.round = N; st.implemented = false; st.reviewed = true; st.verdict = "CHANGES REQUESTED";
-  if (N > c.maxRoundsHard) {
-    st.halted = `review round ${N} exceeds the hard cap maxRoundsHard=${c.maxRoundsHard} (findings per round: ${trail}); a human must decide whether to continue (edit .foundry/state.json to clear 'halted' and raise maxRoundsHard in docs/foundry.json)`;
-  } else if (nonConvergingSoFar >= c.maxRounds) {
-    st.halted = `round ${N} is non-converging (findings per round: ${trail}), the ${nonConvergingSoFar}th non-converging round, reaching maxRounds=${c.maxRounds}; a human must decide whether to continue (edit .foundry/state.json to clear 'halted' and raise maxRounds in docs/foundry.json)`;
-  }
-  if (st.halted && c.policies.feedback) appendFeedback("review", st.halted, "round-cap", "auto");
-  saveState(st);
-  const sha = gitCommitIfChanged([P.review, P.plan, P.progress, P.state, P.feedback], `review: round ${N}`);
+    st.round = N; st.implemented = false; st.reviewed = true; st.verdict = "CHANGES REQUESTED";
+    if (N > c.maxRoundsHard) {
+      st.halted = `review round ${N} exceeds the hard cap maxRoundsHard=${c.maxRoundsHard} (findings per round: ${trail}); a human must decide whether to continue: call foundry_flight_options({ maxRoundsHard: ${N}, resume: true })`;
+      st.haltCap = { cap: "maxRoundsHard", round: N };
+    } else if (nonConvergingSoFar >= c.maxRounds) {
+      st.halted = `round ${N} is non-converging (findings per round: ${trail}), the ${ordinal(nonConvergingSoFar)} non-converging round, reaching maxRounds=${c.maxRounds}; a human must decide whether to continue: call foundry_flight_options({ maxRounds: ${nonConvergingSoFar + 1}, resume: true })`;
+      st.haltCap = { cap: "maxRounds", round: N, nonConverging: nonConvergingSoFar };
+    }
+    if (st.halted && c.policies.feedback) appendFeedback("review", st.halted, "round-cap", "auto");
+    saveState(st);
+    return gitCommitIfChanged([P.review, P.plan, P.progress, P.state, P.feedback], `review: round ${N}`, { stage: "review" });
+  });
   const push = pushBranch(gitFacts().branch, st.policies.push);
   // Re-read rather than reuse `pr`: appendTaskLines edits pr.lines but not
   // pr.tasks, so counts(pr.tasks) would describe the file as it was before
@@ -2449,16 +2773,491 @@ function prState(policies, baseBranch) {
   }
 }
 
-function summaryCommit() {
-  if (!exists(P.summary)) throw new ToolError("docs/SUMMARY.md does not exist");
+const SUMMARY_MAX_BYTES = 1024 * 1024;
+
+function summaryCommit({ content } = {}) {
   const st = loadState();
-  if (st.verdict !== "APPROVED") throw new ToolError("summary can only be committed after an APPROVED review");
+  if (content === undefined) {
+    // 0.4.0 behavior: the summarizer wrote the file itself.
+    if (!exists(P.summary)) throw new ToolError("docs/SUMMARY.md does not exist; pass the summary's full text as `content` and the tool will write it");
+    if (st.verdict !== "APPROVED") throw new ToolError("summary can only be committed after an APPROVED review");
+  } else {
+    if (st.verdict !== "APPROVED") throw new ToolError("summary can only be committed after an APPROVED review; nothing was written");
+    if (typeof content !== "string") throw new ToolError("content must be a string holding the full text of docs/SUMMARY.md");
+    if (!content.trim()) throw new ToolError("content is empty; pass the full text of docs/SUMMARY.md");
+    if (Buffer.byteLength(content, "utf8") >= SUMMARY_MAX_BYTES) {
+      throw new ToolError(`content is ${SUMMARY_MAX_BYTES} bytes or more; a summary is for a human to read, so shorten it`);
+    }
+  }
   st.summarized = true;
-  saveState(st);
-  const sha = gitCommitIfChanged([P.summary, P.state], "chore: build summary");
+  const sha = withRollback([P.summary, P.state, P.feedback], () => {
+    if (content !== undefined) write(P.summary, content.endsWith("\n") ? content : `${content}\n`);
+    saveState(st);
+    return gitCommitIfChanged([P.summary, P.state, P.feedback], "chore: build summary", { stage: "summarize" });
+  });
   const g = gitFacts();
   const push = pushBranch(g.branch, st.policies.push);
-  return { commit: sha, branch: g.branch, base: g.base, head: g.head, reviews: reviewCount(st), fixRounds: st.round, push, pr: prState(st.policies, cfg().baseBranch) };
+  return { commit: sha, branch: g.branch, base: g.base, head: g.head, reviews: reviewCount(st), fixRounds: st.round, push, pr: prState(st.policies, cfg().baseBranch), archive: cfg().policies.archive };
+}
+
+/** The one line the operator needs when a flight's commits are not all signed. */
+function nextSteps(mergeBase) {
+  return `Unlock the signing agent, then tell the flight controller to finalize with re-signing: foundry_pr_finalize({ resign: true }). Or by hand: git rebase -f --rebase-merges --gpg-sign ${mergeBase}, then git push --force-with-lease, then foundry_pr_finalize({}).`;
+}
+
+/**
+ * Count the flight's commits that carry no valid-looking signature, judged
+ * from the commits themselves, never from state.signing. `%G?` of N (none)
+ * or B (bad) is unsigned; anything else, E (cannot check) included, is
+ * signed, because a machine without the signer's public key still holds a
+ * signed commit. `first` is the oldest unsigned sha.
+ */
+function signedCheck(mergeBase) {
+  const log = git(["log", "--format=%H %G?", `${mergeBase}..HEAD`]).out.split("\n").filter(Boolean);
+  const unsigned = log.filter((l) => ["N", "B"].includes(l.split(" ")[1]));
+  return { signed: log.length - unsigned.length, unsigned: unsigned.length, first: unsigned.length ? unsigned[unsigned.length - 1].split(" ")[0] : null };
+}
+
+/** The config a finalize runs under: docs/foundry.json, or the archived copy once the flight has been archived. */
+function finalizeConfig(st) {
+  if (!exists(P.config) && st.archived) {
+    const archived = path.join(ROOT, st.archived.dir, "foundry.json");
+    if (exists(archived)) {
+      let raw;
+      try {
+        raw = JSON.parse(read(archived));
+      } catch (e) {
+        throw new ToolError(`${st.archived.dir}/foundry.json is not valid JSON: ${e.message}`);
+      }
+      return cfgFrom(raw, null);
+    }
+  }
+  return cfg();
+}
+
+function prFinalize({ breaking, resign } = {}) {
+  const st = loadState();
+  let summarized = st.summarized === true;
+  if (!summarized && st.archived) {
+    try {
+      summarized = JSON.parse(read(path.join(ROOT, st.archived.dir, "state.json"))).summarized === true;
+    } catch {
+      summarized = false;
+    }
+  }
+  if (!summarized) throw new ToolError("the summary is not committed yet; call foundry_summary_commit first, then foundry_pr_finalize");
+  if (breaking !== undefined && typeof breaking !== "boolean") throw new ToolError("breaking must be a boolean");
+  if (resign !== undefined && typeof resign !== "boolean") throw new ToolError("resign must be a boolean");
+  const brk = breaking !== undefined ? breaking : st.breaking;
+  if (typeof brk !== "boolean") throw new ToolError("breaking is required on the first call: pass true or false");
+  const cc = finalizeConfig(st);
+  const mb = git(["merge-base", cc.baseBranch, "HEAD"], { allowFail: true }).out;
+  if (!mb) throw new ToolError(`cannot find a merge base with baseBranch '${cc.baseBranch}'; check out the build branch, or fix baseBranch in docs/foundry.json`);
+
+  const branch = gitFacts().branch;
+  const summaryPath = exists(P.summary) ? P.summary : st.archived && exists(path.join(ROOT, st.archived.dir, "SUMMARY.md")) ? path.join(ROOT, st.archived.dir, "SUMMARY.md") : null;
+
+  const awaiting = (check) => {
+    const prior = st.awaitingSigning;
+    st.breaking = brk;
+    st.awaitingSigning = { unsigned: check.unsigned, first: check.first, since: prior?.since || new Date().toISOString() };
+    const paths = [P.state, P.feedback, ...(summaryPath ? [summaryPath] : [])];
+    withRollback(paths, () => {
+      saveState(st);
+      if (!prior && feedbackEnabled()) {
+        appendFeedback("summarize", `Flight is awaiting signing: ${check.unsigned} unsigned commit(s), oldest ${String(check.first).slice(0, 7)}.`, "signing", "auto");
+      }
+      if (summaryPath && !read(summaryPath).includes("## Awaiting signing")) {
+        fs.appendFileSync(summaryPath, `${read(summaryPath).endsWith("\n") ? "" : "\n"}\n## Awaiting signing\n\n${nextSteps(mb)}\n`);
+      }
+      gitCommitIfChanged(paths, "chore: awaiting signing", { stage: "summarize" });
+    });
+    return {
+      signed: check.signed, unsigned: check.unsigned, ready: false, merge: "skipped: awaiting signing", breaking: brk,
+      awaitingSigning: st.awaitingSigning, resigned: false,
+      push: pushBranch(branch, cc.policies.push), pr: prState(cc.policies, cc.baseBranch), next: nextSteps(mb),
+    };
+  };
+
+  let resigned = false;
+  let resignPush;
+  if (resign === true) {
+    const dirty = porcelainExcludingPreexisting(st.preexistingUntracked);
+    if (dirty.length) throw new ToolError(`the working tree is not clean:\n${dirty.join("\n")}\nCommit or discard these before re-signing; the rebase needs a clean tree.`);
+    if (branch === cc.baseBranch) throw new ToolError(`on the base branch '${cc.baseBranch}'; check out the build branch before re-signing`);
+    // A run that fell back to unsigned commits left commit.gpgsign false
+    // locally; the probe and the rebase must see the operator's own setting.
+    const hadOverride = st.signingOverride === true;
+    if (hadOverride) git(["config", "--local", "--unset", "commit.gpgsign"], { allowFail: true });
+    const putOverrideBack = () => {
+      if (hadOverride) git(["config", "--local", "commit.gpgsign", "false"]);
+    };
+    try {
+      probeSigning("required");
+    } catch (e) {
+      putOverrideBack();
+      throw e;
+    }
+    const rb = spawnSync("git", ["rebase", "-f", "--rebase-merges", "--gpg-sign", mb], {
+      cwd: ROOT,
+      encoding: "utf8",
+      timeout: cc.commandTimeoutMs,
+      env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+    });
+    if (rb.status !== 0 || rb.error) {
+      git(["rebase", "--abort"], { allowFail: true });
+      putOverrideBack();
+      const why = (rb.stderr || rb.stdout || rb.error?.message || "git rebase failed").trim().split("\n").slice(0, 3).join(" | ");
+      throw new ToolError(`re-signing failed: ${why}. The rebase was aborted and the branch is as it was.`);
+    }
+    delete st.signingOverride;
+    const check = signedCheck(mb);
+    if (check.unsigned) {
+      throw new ToolError(`${check.unsigned} commit(s) are still unsigned after the rebase, the oldest ${String(check.first).slice(0, 7)}. The rewritten branch has been left as it is; check the signing agent and try again.`);
+    }
+    if (!cc.policies.push) resignPush = "skipped: policy";
+    else if (!gitFacts().hasOrigin) resignPush = "skipped: no origin remote";
+    else {
+      const p = git(["push", "--force-with-lease", "origin", branch], { allowFail: true });
+      resignPush = p.ok ? "pushed" : `failed: ${(p.err || p.out || "unknown error").split("\n")[0]}`;
+    }
+    delete st.awaitingSigning;
+    st.signing = "on";
+    resigned = true;
+  }
+
+  const before = signedCheck(mb);
+  if (before.unsigned) return awaiting(before);
+
+  st.breaking = brk;
+  delete st.awaitingSigning;
+  if (st.signingOverride) {
+    git(["config", "--local", "--unset", "commit.gpgsign"], { allowFail: true });
+    delete st.signingOverride;
+    st.signing = "on";
+  }
+  withRollback([P.state], () => {
+    saveState(st);
+    gitCommitIfChanged([P.state], "chore: finalize flight", { stage: "summarize" });
+  });
+  const after = signedCheck(mb);
+  if (after.unsigned) return awaiting(after);
+
+  const push = pushBranch(branch, cc.policies.push);
+  let pr = prState(cc.policies, cc.baseBranch);
+  let merge;
+  const gh = (args) => spawnSync("gh", args, { cwd: ROOT, encoding: "utf8" });
+  const firstLine = (r) => (r.stderr || r.stdout || "gh failed").trim().split("\n")[0];
+  if (typeof pr !== "object") {
+    merge = "skipped: no pull request";
+  } else if (cc.policies.pr !== "draft") {
+    merge = "skipped: policy";
+  } else if (cc.policies.finalize === "draft") {
+    merge = "skipped: policy";
+  } else {
+    const readied = pr.draft ? gh(["pr", "ready"]) : { status: 0 };
+    if (readied.status !== 0) merge = `unavailable: gh pr ready failed: ${firstLine(readied)}`;
+    else if (cc.policies.finalize === "ready") merge = "skipped: policy";
+    else if (brk) merge = "skipped: breaking";
+    else {
+      const m = spawnSync("gh", ["pr", "merge", "--auto", `--${cc.policies.mergeMethod}`], { cwd: ROOT, encoding: "utf8" });
+      merge = m.status === 0 ? "enabled" : `unavailable: ${firstLine(m)}`;
+    }
+    pr = prState(cc.policies, cc.baseBranch);
+  }
+  return {
+    signed: after.signed, unsigned: 0, ready: typeof pr === "object" ? pr.draft === false : false, merge, breaking: brk,
+    awaitingSigning: null, resigned, ...(resignPush !== undefined ? { resignPush } : {}), push, pr,
+  };
+}
+
+const ARCHIVED = [
+  [P.plan, "docs/PLAN.md"], [P.progress, "docs/PROGRESS.md"], [P.handoff, "docs/HANDOFF.md"], [P.review, "docs/REVIEW.md"],
+  [P.summary, "docs/SUMMARY.md"], [P.config, "docs/foundry.json"], [P.state, ".foundry/state.json"], [P.feedback, ".foundry/feedback.jsonl"],
+];
+
+/**
+ * Move a summarized flight's artifacts into docs/flights/<slug>/ so the
+ * repository can run its next flight (S-07). The live SPEC.md stays, copied
+ * alongside. All-or-nothing: if the commit fails, every file is put back.
+ */
+function flightArchive({ slug } = {}) {
+  const c0 = cfg();
+  slug = slug === undefined ? c0.flight : slug;
+  if (slug === null || slug === undefined) throw new ToolError('pass slug, or set "flight" in docs/foundry.json');
+  if (typeof slug !== "string" || !FLIGHT_SLUG.test(slug)) throw new ToolError(`slug must match ${FLIGHT_SLUG} (lowercase letters, digits and -, at most 40 characters), not ${JSON.stringify(slug)}`);
+  const old = loadState();
+  if (!old.summarized) throw new ToolError("the flight is not summarized yet; archive only after foundry_summary_commit has run");
+  if (exists(P.lock)) throw new ToolError("an implementation run is armed (.foundry/implement.lock exists); finish or halt the run before archiving");
+  const dirty = porcelainExcludingPreexisting(old.preexistingUntracked);
+  if (dirty.length) throw new ToolError(`the working tree is not clean:\n${dirty.join("\n")}\nCommit or discard these before archiving.`);
+  const relDir = `docs/flights/${slug}`;
+  const dir = path.join(ROOT, relDir);
+  if (exists(dir)) throw new ToolError(`${relDir} already exists; choose another slug, or remove the old archive`);
+  // Everything that needs docs/foundry.json is read before it moves.
+  const pushAllowed = c0.policies.push;
+
+  const sources = ARCHIVED.filter(([abs]) => exists(abs));
+  const copyDest = path.join(dir, "SPEC.md");
+  const touched = [...sources.map(([abs]) => abs), ...sources.map(([abs]) => path.join(dir, path.basename(abs))), copyDest, P.state, P.feedback];
+  const all = [...new Set(touched)];
+  const flightsDirExisted = exists(path.join(ROOT, "docs", "flights"));
+  let commit;
+  try {
+    commit = withRollback(all, () => {
+      fs.mkdirSync(dir, { recursive: true });
+      for (const [abs] of sources) {
+        const dest = path.join(dir, path.basename(abs));
+        const tracked = git(["ls-files", "--error-unmatch", "--", rel(abs)], { allowFail: true }).ok;
+        if (tracked) git(["mv", rel(abs), rel(dest)]);
+        else fs.renameSync(abs, dest);
+      }
+      fs.copyFileSync(P.spec, copyDest);
+      saveState({ ...DEFAULT_STATE, archived: { slug, dir: relDir, at: new Date().toISOString() }, ...(old.signingOverride ? { signingOverride: true } : {}) });
+      const rels = all.map(rel);
+      // Old paths are already staged as deletions by git mv (or were never
+      // tracked), and git add rejects a pathspec that matches nothing, so
+      // only what exists now is added.
+      git(["add", "-A", "--", ...rels.filter((r) => exists(path.join(ROOT, r)))]);
+      const known = rels.filter((r) => exists(path.join(ROOT, r)) || git(["cat-file", "-e", `HEAD:${r}`], { allowFail: true }).ok);
+      commitStaged(known, `chore: archive flight ${slug}`, { stage: "summarize" });
+      return git(["rev-parse", "--short", "HEAD"]).out;
+    });
+  } catch (e) {
+    if (exists(dir) && !fs.readdirSync(dir).length) fs.rmdirSync(dir);
+    const flights = path.join(ROOT, "docs", "flights");
+    if (!flightsDirExisted && exists(flights) && !fs.readdirSync(flights).length) fs.rmdirSync(flights);
+    throw e;
+  }
+  const push = pushBranch(gitFacts().branch, pushAllowed);
+  return { slug, dir: relDir, moved: sources.map(([, r]) => r), copied: ["docs/SPEC.md"], commit, push };
+}
+
+// ---------------------------------------------------------------- plan validation and commit (S-06)
+
+/**
+ * Check a plan's four deliverables together and return every problem found,
+ * `[{ check, id?, message }]`. Pure: it reads no files, so a caller can run
+ * it on text it has not written yet. `allowSuffix` admits a headings such as
+ * `P1-02a`, which only a renumbering pass may hold.
+ */
+function validatePlanTexts({ planText, progressText, configRaw, configError, claudeExists, allowSuffix = false }) {
+  const problems = [];
+  const add = (check, message, id) => {
+    if (!problems.some((p) => p.message === message)) problems.push({ check, ...(id ? { id } : {}), message });
+  };
+  if (planText == null) add("files", "docs/PLAN.md is missing");
+  if (progressText == null) add("files", "docs/PROGRESS.md is missing");
+  if (configRaw == null && !configError) add("files", "docs/foundry.json is missing");
+  if (configError) add("config", configError);
+  if (!claudeExists) add("claude", "CLAUDE.md does not exist at the repository root; the implementer reads it first");
+
+  const planLines = planText == null ? null : planText.split("\n");
+  const ids = []; // task ids with a well-formed heading, in document order
+  if (planLines) {
+    const okHeading = allowSuffix ? /^### (?:P\d+-\d+[a-z]?|R\d+-\d+): \S/ : /^### [PR]\d+-\d+: \S/;
+    const seen = new Set();
+    for (const line of planLines) {
+      if (!/^#{2,4}\s*[PR]\d+-\d+/.test(line)) continue;
+      if (!okHeading.test(line)) {
+        const hint = /^### P\d+-\d+[a-z]: /.test(line) ? "; a suffixed id such as P1-02a marks a split task, and foundry_plan_commit with renumber: true gives it a clean number everywhere" : "";
+        add("heading", `heading ${JSON.stringify(line)} must be exactly "### <ID>: <title>" (for example "### P1-03: Add the parser")${hint}`);
+        continue;
+      }
+      const id = line.match(/^### ([PR]\d+-\d+[a-z]?):/)[1];
+      if (seen.has(id)) add("duplicate", `${id} has two headings in docs/PLAN.md`, id);
+      else {
+        seen.add(id);
+        ids.push(id);
+      }
+    }
+
+    // P ids count up from 01 inside each phase with no gap; R ids are exempt.
+    const byPhase = new Map();
+    for (const id of ids) {
+      const m = id.match(/^P(\d+)-(\d+)$/);
+      if (m) byPhase.set(m[1], [...(byPhase.get(m[1]) || []), Number(m[2])]);
+    }
+    for (const [phase, nums] of byPhase) {
+      if (nums.every((n, i) => n === i + 1)) continue;
+      const want = nums.map((_, i) => `P${phase}-${String(i + 1).padStart(2, "0")}`).join(", ");
+      const got = nums.map((n) => `P${phase}-${String(n).padStart(2, "0")}`).join(", ");
+      add("sequence", `phase ${phase}: tasks must be numbered ${want} in document order with no gap, but are ${got}`);
+    }
+
+    // Dependencies point backwards, and never in a circle.
+    const graph = new Map();
+    for (const id of ids) {
+      let deps = [];
+      try {
+        deps = planTaskFrom(planLines, id).depends;
+      } catch {
+        deps = [];
+      }
+      graph.set(id, deps);
+      deps.forEach((dep) => {
+        if (!seen.has(dep)) add("depends", `${id} depends on ${dep}, which has no heading in docs/PLAN.md`, id);
+        else if (ids.indexOf(dep) >= ids.indexOf(id)) {
+          add("depends", dep === id ? `${id} depends on itself` : `${id} depends on ${dep}, which comes later in docs/PLAN.md; a task may only depend on an earlier one`, id);
+        }
+      });
+    }
+    const state = new Map();
+    const stack = [];
+    const reported = new Set();
+    const visit = (id) => {
+      state.set(id, 1);
+      stack.push(id);
+      for (const dep of graph.get(id) || []) {
+        if (!graph.has(dep)) continue;
+        if (state.get(dep) === 1) {
+          const cyc = stack.slice(stack.indexOf(dep));
+          const start = cyc.indexOf([...cyc].sort()[0]);
+          const canon = [...cyc.slice(start), ...cyc.slice(0, start)];
+          if (!reported.has(canon.join(">"))) {
+            reported.add(canon.join(">"));
+            add("cycle", `dependency cycle: ${[...canon, canon[0]].join(" → ")}`);
+          }
+        } else if (!state.get(dep)) visit(dep);
+      }
+      stack.pop();
+      state.set(id, 2);
+    };
+    for (const id of ids) if (!state.get(id)) visit(id);
+
+    for (const id of ids) {
+      const { stream } = planTaskFrom(planLines, id);
+      if (stream !== null && !STREAM_SLUG.test(stream)) {
+        add("streams", `${id}: **Stream:** ${JSON.stringify(stream)} must be a lowercase slug (a-z, 0-9 and -, starting with a letter) or none`, id);
+      }
+    }
+  }
+
+  let pr = null;
+  if (progressText != null) {
+    try {
+      pr = parseProgressText(progressText);
+    } catch (e) {
+      add("progress", e.message);
+    }
+  }
+  if (pr && planLines) {
+    const a = ids.join(",");
+    const b = pr.tasks.map((t) => t.id).join(",");
+    if (a !== b) {
+      const missing = ids.filter((id) => !pr.tasks.some((t) => t.id === id));
+      const extra = pr.tasks.map((t) => t.id).filter((id) => !ids.includes(id));
+      const why = [
+        missing.length ? `missing from PROGRESS.md: ${missing.join(", ")}` : "",
+        extra.length ? `not in PLAN.md: ${extra.join(", ")}` : "",
+        !missing.length && !extra.length ? "the same tasks in a different order" : "",
+      ].filter(Boolean).join("; ");
+      add("progress", `docs/PROGRESS.md's tasks must match docs/PLAN.md's, in the same order (${why})`);
+    }
+  }
+
+  let cc = null;
+  if (configRaw != null && typeof configRaw === "object") {
+    try {
+      cc = cfgFrom(configRaw, null);
+    } catch (e) {
+      add("config", e.message);
+    }
+    const named = new Map(); // from id -> where it is used
+    const note = (from, where) => {
+      if (typeof from === "string") named.set(from, [...(named.get(from) || []), where]);
+    };
+    if (Array.isArray(configRaw.constraints)) configRaw.constraints.forEach((c) => c && note(c.from, `constraint '${c.id}'`));
+    const entries = (list, label) => Array.isArray(list) && list.forEach((e, i) => e && typeof e === "object" && note(e.from, `${label}[${i}]`));
+    entries(configRaw.verify, "verify");
+    if (configRaw.extraVerify && typeof configRaw.extraVerify === "object") {
+      for (const [prefix, list] of Object.entries(configRaw.extraVerify)) entries(list, `extraVerify['${prefix}']`);
+    }
+    if (planLines) {
+      for (const [from, where] of named) {
+        if (!ids.includes(from)) add("from", `from names ${from}, which has no heading in docs/PLAN.md (used by ${where.join(", ")})`, from);
+      }
+    }
+  }
+
+  if (pr && planLines && cc) {
+    for (const w of computeWaves(pr, cc, planLines)) if (!w.valid) add("streams", `wave ${w.index}: ${w.reason}`);
+  }
+  return problems;
+}
+
+const SPLIT_ID = /(?<![A-Za-z0-9-])(P\d+-\d+[a-z]?)(?![A-Za-z0-9])/g;
+
+/** `{ old: new }` for every P id that must change so each phase counts P<n>-01, P<n>-02, … in document order. */
+function renumberMap(planText) {
+  const next = new Map();
+  const map = {};
+  for (const m of planText.matchAll(/^### (P(\d+)-\d+[a-z]?):/gm)) {
+    const n = (next.get(m[2]) || 0) + 1;
+    next.set(m[2], n);
+    const fresh = `P${m[2]}-${String(n).padStart(2, "0")}`;
+    if (fresh !== m[1]) map[m[1]] = fresh;
+  }
+  return map;
+}
+
+function planCommit({ renumber } = {}) {
+  if (renumber !== undefined && typeof renumber !== "boolean") throw new ToolError("renumber must be a boolean");
+  const readOrNull = (p) => (exists(p) ? read(p) : null);
+  let planText = readOrNull(P.plan);
+  let progressText = readOrNull(P.progress);
+  let configText = readOrNull(P.config);
+  let map = {};
+  if (renumber === true && planText != null && progressText != null) {
+    const started = (progressText.match(/^Started:\s*(.*)$/m) || [])[1];
+    const touched = /^- \[[^ ]\] /m.test(progressText);
+    if ((started && !started.startsWith("(")) || touched) {
+      throw new ToolError("renumber is only for a plan no run has touched: docs/PROGRESS.md shows a run has started (a Started: stamp, or a task that is not [ ]). Renumbering now would rewrite ids that commits and log entries already cite.");
+    }
+    map = renumberMap(planText);
+    // One pass over each text, never chained: P1-03 -> P1-04 must not then become P1-05.
+    const swap = (text) => text.replace(SPLIT_ID, (id) => map[id] || id);
+    planText = swap(planText);
+    progressText = swap(progressText);
+    if (configText != null) configText = configText.replace(/("from"\s*:\s*")([^"]+)(")/g, (_, a, id, b) => `${a}${map[id] || id}${b}`);
+  }
+  let configRaw = null;
+  let configError = null;
+  if (configText != null) {
+    try {
+      configRaw = JSON.parse(configText);
+    } catch (e) {
+      configError = `docs/foundry.json is not valid JSON: ${e.message}`;
+    }
+  }
+  const claudePath = path.join(ROOT, "CLAUDE.md");
+  const problems = validatePlanTexts({ planText, progressText, configRaw, configError, claudeExists: exists(claudePath) });
+  if (problems.length) {
+    const head = `${problems.length} problem${problems.length === 1 ? "" : "s"} in the plan; fix every one, then call foundry_plan_commit again. Nothing was committed.`;
+    throw new ToolError(`${head}\n${problems.map((p, i) => `${i + 1}. [${p.check}] ${p.message}`).join("\n")}`, { problems });
+  }
+  const paths = [P.plan, P.progress, P.config, claudePath];
+  const commit = withRollback(paths, () => {
+    if (Object.keys(map).length) {
+      write(P.plan, planText);
+      write(P.progress, progressText);
+      if (configText != null) write(P.config, configText);
+    }
+    return gitCommitIfChanged(paths, "plan: derive build plan from SPEC", { stage: "plan" });
+  });
+  const pr = parseProgressText(progressText);
+  const phases = new Map();
+  for (const t of pr.tasks) {
+    const m = t.id.match(/^P(\d+)-/);
+    if (m) phases.set(Number(m[1]), (phases.get(Number(m[1])) || 0) + 1);
+  }
+  return {
+    commit,
+    tasks: pr.tasks.length,
+    phases: [...phases].map(([phase, tasks]) => ({ phase, tasks })),
+    waves: computeWaves(pr, cfg()).map((w) => ({ index: w.index, streams: Object.keys(w.streams), valid: w.valid })),
+    renumbered: map,
+  };
 }
 
 // ---------------------------------------------------------------- MCP plumbing
@@ -2473,6 +3272,7 @@ const S = (props, required = []) => ({
 const TOOLS = [
   { name: "foundry_status", description: "Everything the pipeline knows from disk: which docs exist, task counts by state, branch/base/head, lock, round, review verdict. Read-only.", inputSchema: S({}), fn: status },
   { name: "foundry_next", description: "Deterministic stage selection: returns { stage, agent, agentFallback, fallbackAgent, restartRequired, model, agentModel, agentModelExact, round, reason, prompt, streams? }. stage is plan | implement | review | summarize | done | halt. agentModel is the value to pass as the Agent tool's model when agentFallback is true (an alias, or null to pass none); agentModelExact is false when a full claude-* id was mapped to its family alias. restartRequired is true only when the routed model cannot be reached without relaunching the session. Read-only, except that when a parallel wave's partition is invalid it records once (state, one feedback entry, one commit, only on a build branch) that the wave runs serially. When streams is present, spawn one implementer per entry, all at once, and wait for all of them.", inputSchema: S({}), fn: next },
+  { name: "foundry_plan_commit", description: "Validate the plan as a whole and commit it: docs/PLAN.md, docs/PROGRESS.md, docs/foundry.json and CLAUDE.md must exist and agree (task headings, numbering, dependencies, streams, config, from references). Every problem is listed at once, as numbered lines and as structuredContent.problems [{ check, id?, message }]; nothing is committed while any remain. With renumber: true (only before any run has started) it first renumbers split ids everywhere. On success it commits 'plan: derive build plan from SPEC' and returns { commit, tasks, phases, waves, renumbered }. For the planner, as its last step.", inputSchema: S({ renumber: { type: "boolean", description: "rewrite split or out-of-sequence task ids (such as P1-02a) to a clean P<n>-01.. sequence everywhere they appear, then validate and commit; refused once a run has started" } }), fn: planCommit },
   { name: "foundry_run_start", description: "Begin (or resume) an implementation run: create/reuse the build branch, arm the implement guard lock, stamp Branch/Started in PROGRESS.md, commit. Idempotent. With stream, also create (or resume) that stream's git worktree for a parallel wave, run parallel.setup in it, and return its cwd: do all of that stream's work inside cwd.", inputSchema: S({ stream: { type: "string", description: "a stream of the current parallel wave, when foundry_next handed you one" } }), fn: runStart },
   { name: "foundry_task_next", description: "Select the next task (first [~], else first [ ]), auto-skip tasks whose dependencies are blocked, mark it [~], and return its PLAN.md text plus dependency log entries. Returns { done: true } when none remain.", inputSchema: S({ stream: { type: "string", description: "restrict to this stream's tasks (parallel waves only)" } }), fn: taskNext },
   { name: "foundry_task_done", description: "Mark a task [x] and append its log entry stamped with HEAD's sha. Requires HEAD's commit subject to start with '<id>:' and a clean tree. Commits PROGRESS.md.", inputSchema: S({ stream: { type: "string", description: "the stream this task belongs to, when working in a parallel wave" }, id: { type: "string" }, log: { type: "string", description: "Log entry body, under 15 lines" } }, ["id", "log"]), fn: taskDone },
@@ -2494,10 +3294,11 @@ const TOOLS = [
   },
   {
     name: "foundry_flight_options",
-    description: "Apply an operator's flight options to docs/foundry.json and commit them: maxRounds (non-converging review rounds tolerated) and maxRoundsHard (absolute ceiling on review rounds). For the flight controller, when /foundry:go-flight was given options such as a maximum review depth. Refused before the plan stage has written docs/foundry.json. Returns { before, after, commit }.",
+    description: "Apply an operator's flight options to docs/foundry.json and commit them: maxRounds (non-converging review rounds tolerated) and maxRoundsHard (absolute ceiling on review rounds). For the flight controller, when /foundry:go-flight was given options such as a maximum review depth. Refused before the plan stage has written docs/foundry.json. With resume: true it also clears a round-cap halt, provided the bound passed lifts the cap that fired. Returns { before, after, commit } (plus resumed: true).",
     inputSchema: S({
       maxRounds: { type: "integer", minimum: 1, description: "non-converging review rounds tolerated before the flight halts" },
       maxRoundsHard: { type: "integer", minimum: 1, description: "a review numbered above this halts the flight, converging or not" },
+      resume: { type: "boolean", description: "clear a round-cap halt (the call the halt message names); the bound passed must lift the cap that fired. Any other halt is refused" },
     }),
     fn: flightOptions,
   },
@@ -2523,7 +3324,10 @@ const TOOLS = [
         find: { type: "string", description: "exact text to replace; must appear exactly once in the file" },
         replace: { type: "string", description: "the mutated text (\"\" deletes the match)" },
         commands: { type: "array", items: { type: "string" }, description: "optional: run only these configured verify/extraVerify commands, each spelled exactly as in docs/foundry.json" },
+        targeted: { type: "string", description: "optional: the name of a docs/foundry.json mutation.targeted command to run instead of the verify commands; pass with filter, never with commands" },
+        filter: { type: "string", description: "with targeted: the test name or path substituted for {filter} (letters, digits and _ . : / - only)" },
         timeoutMs: { type: "integer", minimum: 1, description: "optional: cap every command's timeout for this call (never raises a configured one), for a mutant you suspect hangs" },
+        confirmKill: { type: "boolean", description: "optional: when the mutant is killed, re-run each failed command once on the unmutated tree; a command that fails there too makes the result inconclusive, not a kill" },
       },
       ["file", "find", "replace"],
     ),
@@ -2546,7 +3350,9 @@ const TOOLS = [
     }, ["verdict"]),
     fn: reviewSubmit,
   },
-  { name: "foundry_summary_commit", description: "Commit docs/SUMMARY.md and mark the flight complete. Only valid after an APPROVED review. Returns { commit, branch, base, head, reviews, fixRounds, push, pr }; pr is the branch's pull request ({ url, state, draft, base }) or \"none\", \"skipped: policy\" or \"unknown: <why>\".", inputSchema: S({}), fn: summaryCommit },
+  { name: "foundry_summary_commit", description: "Write docs/SUMMARY.md from `content` (preferred) or commit the file already on disk, and mark the flight complete. Only valid after an APPROVED review. Returns { commit, branch, base, head, reviews, fixRounds, push, pr, archive }; archive is the policies.archive setting (true means call foundry_flight_archive next); pr is the branch's pull request ({ url, state, draft, base }) or \"none\", \"skipped: policy\" or \"unknown: <why>\".", inputSchema: S({ content: { type: "string", description: "the full text of docs/SUMMARY.md; the tool writes the file itself, so never Write it yourself" } }), fn: summaryCommit },
+  { name: "foundry_flight_archive", description: "Archive a summarized flight so the repository can run its next flight: move PLAN, PROGRESS, HANDOFF, REVIEW, SUMMARY, foundry.json, .foundry/state.json and .foundry/feedback.jsonl into docs/flights/<slug>/ (copying SPEC.md, which stays), write a fresh state.json, commit 'chore: archive flight <slug>' and push per policy. slug defaults to the 'flight' key in docs/foundry.json. Refused unless the flight is summarized, no run is armed, and the tree is clean. All-or-nothing. Returns { slug, dir, moved, copied, commit, push }.", inputSchema: S({ slug: { type: "string", description: "lowercase letters, digits and - (at most 40 characters); defaults to docs/foundry.json's flight" } }), fn: flightArchive },
+  { name: "foundry_pr_finalize", description: "End a flight. Checks that every commit since the merge base with baseBranch is signed (judged from the commits, not from state): if so, marks the draft PR ready and, unless breaking is true, enables auto-merge (gh pr merge --auto, never an immediate merge), per policies.finalize and policies.mergeMethod. If any commit is unsigned the PR stays a draft, state.awaitingSigning is recorded, the steps are appended to SUMMARY.md, and foundry_next reports done until it is resolved. breaking is required on the first call. Returns { signed, unsigned, ready, merge, breaking, awaitingSigning, resigned, push, pr, next? }; merge is enabled, skipped: breaking, skipped: policy, skipped: no pull request, skipped: awaiting signing or unavailable: <why>.", inputSchema: S({ breaking: { type: "boolean", description: "whether this flight is a breaking change, so its PR must not auto-merge; required on the first call, remembered after" }, resign: { type: "boolean", description: "HUMAN-INITIATED ONLY: never pass this on your own. Re-sign every commit of the branch (git rebase -f --rebase-merges --gpg-sign), force-push with lease, then finalize. For an operator who has unlocked the signing agent after an awaiting-signing result" } }), fn: prFinalize },
   {
     name: "foundry_agents_sync",
     description: "Generate .claude/agents/foundry-<role>.md from the merged routing config (plugin defaults < global file < profile < docs/foundry.json roles). Writes only files whose content changed, excludes them from git, and returns the resolved per-role table. `restartRequired` is true only when this is the directory's first population and a changed role's model cannot be named directly by the Agent tool. Also ensures the MCP allow rule in .claude/settings.local.json (`permissions` in the result), without which a subagent's first foundry_status call is denied under any permission mode.",
@@ -2586,6 +3392,7 @@ function handle(req) {
         return reply({ content: [{ type: "text", text: JSON.stringify(result, null, 2) }] });
       } catch (e) {
         const text = e instanceof ToolError ? e.message : `${e.message}\n${e.stack}`;
+        if (e instanceof ToolError && e.data !== undefined) return reply({ content: [{ type: "text", text }], isError: true, structuredContent: e.data });
         return reply({ content: [{ type: "text", text }], isError: true });
       }
     }

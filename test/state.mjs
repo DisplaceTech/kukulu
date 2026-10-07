@@ -7,7 +7,7 @@ import path from "node:path";
 import {
   finish, ok, eq, like, isError,
   mkDir, specRepo, plannedRepo, withServer,
-  writeFile, readFile, setState, markTasks, git,
+  writeFile, readFile, setState, markTasks, git, subject, planDoc, progressDoc,
 } from "./harness.mjs";
 
 const ALL_DONE = { "P0-01": "x", "P0-02": "x", "P0-03": "x" };
@@ -312,6 +312,52 @@ for (const [body, expected, label] of [
   });
 }
 
+// ---------------------------------------------------------------- resume (S-09)
+
+{
+  const repo = plannedRepo();
+  const halted = "round 4 is non-converging, the 3rd non-converging round";
+  setState(repo, { halted, haltCap: { cap: "maxRounds", round: 4, nonConverging: 3 } });
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-qm", "chore: halted"]);
+  await withServer(repo, async ({ call }) => {
+    const cfgBefore = readFile(repo, "docs/foundry.json");
+    const stateBefore = readFile(repo, ".foundry/state.json");
+    isError(await call("foundry_flight_options", { maxRounds: 3, resume: true }), /pass maxRounds: 4 or more/, "resume with a bound that does not lift the cap is refused, naming 4");
+    eq(readFile(repo, "docs/foundry.json"), cfgBefore, "...docs/foundry.json is unchanged");
+    eq(readFile(repo, ".foundry/state.json"), stateBefore, "...and so is state");
+    isError(await call("foundry_flight_options", { resume: true }), /pass at least one of/, "resume alone is refused");
+    isError(await call("foundry_flight_options", { maxRounds: 4, resume: "yes" }), /resume must be a boolean/, "a non-boolean resume is refused");
+    const head = git(repo, ["rev-list", "--count", "HEAD"]);
+    const r = await call("foundry_flight_options", { maxRounds: 4, resume: true });
+    eq(r.resumed, true, "a lifting resume succeeds");
+    eq(Number(git(repo, ["rev-list", "--count", "HEAD"])) - Number(head), 1, "...in one commit");
+    eq(subject(repo), "chore: flight options (maxRounds=4, resume)", "...with the resume subject");
+    const st = JSON.parse(readFile(repo, ".foundry/state.json"));
+    ok(st.halted === null && st.haltCap === undefined, "...and halted and haltCap are cleared");
+    eq((await call("foundry_next")).stage, "implement", "the flight goes on to implement");
+    isError(await call("foundry_flight_options", { maxRounds: 5, resume: true }), /not halted; there is nothing to resume/, "resume when not halted is refused");
+  });
+}
+
+{
+  const repo = plannedRepo();
+  setState(repo, { halted: "stopped by hand" });
+  await withServer(repo, async ({ call }) => {
+    isError(await call("foundry_flight_options", { maxRounds: 9, resume: true }), /not a round-cap halt.*stopped by hand/, "an operator halt is never cleared by resume, and the refusal names the reason");
+  });
+}
+
+{
+  const repo = plannedRepo();
+  setState(repo, { halted: "hard", haltCap: { cap: "maxRoundsHard", round: 4 } });
+  await withServer(repo, async ({ call }) => {
+    isError(await call("foundry_flight_options", { maxRoundsHard: 3, resume: true }), /maxRoundsHard: 4 or more/, "a hard cap needs maxRoundsHard >= the round");
+    const r = await call("foundry_flight_options", { maxRoundsHard: 4, resume: true });
+    eq(r.resumed, true, "maxRoundsHard: 4 lifts a hard cap at round 4");
+  });
+}
+
 await withServer(specRepo(), async ({ call }) => {
   isError(await call("foundry_flight_options", { maxRoundsHard: 4 }), /does not exist yet[\s\S]*plan stage/, "options are refused before the plan exists");
 });
@@ -383,6 +429,206 @@ await withServer(specRepo(), async ({ call }) => {
     eq(s.git.dirty, true, "status notices an unclean tree");
     eq(s.git.hasOrigin, false, "status notices there is no origin");
     like(s.git.head, /^[0-9a-f]{7,}$/, "status reports a short head sha");
+  });
+}
+
+// ---------------------------------------------------------------- artifacts (S-08)
+
+{
+  // an untracked foundry.json with no plan is a stray artifact (project-c F-04)
+  const repo = specRepo();
+  writeFile(repo, "docs/foundry.json", "{}\n");
+  await withServer(repo, async ({ call }) => {
+    const s = await call("foundry_status");
+    eq(s.artifacts["foundry.json"], "untracked", "an unstaged foundry.json is untracked");
+    eq(s.artifacts["PLAN.md"], "absent", "...PLAN.md is absent");
+    eq(s.artifacts["SPEC.md"], "tracked", "...SPEC.md is tracked");
+    eq(Object.keys(s.artifacts).join(","), "SPEC.md,PLAN.md,PROGRESS.md,HANDOFF.md,REVIEW.md,SUMMARY.md,foundry.json", "...and the keys are exactly the seven artifacts");
+    eq(s.strayArtifacts.join(","), "foundry.json", "...so it is a stray artifact");
+  });
+}
+
+{
+  // mutant (b): strayArtifacts only while PLAN.md is absent
+  const repo = plannedRepo();
+  writeFile(repo, "docs/HANDOFF.md", "# handoff\n");
+  await withServer(repo, async ({ call }) => {
+    const s = await call("foundry_status");
+    eq(s.artifacts["HANDOFF.md"], "untracked", "an untracked artifact beside a present plan is not stray: it is untracked");
+    eq(s.strayArtifacts.length, 0, "...and strayArtifacts is empty");
+  });
+}
+
+{
+  const repo = plannedRepo();
+  writeFile(repo, "docs/PLAN.md", readFile(repo, "docs/PLAN.md") + "\nedit\n");
+  await withServer(repo, async ({ call }) => {
+    const s = await call("foundry_status");
+    eq(s.artifacts["PLAN.md"], "modified", "a modified tracked artifact is modified");
+    eq(s.strayArtifacts.length, 0, "...and nothing is stray");
+  });
+}
+
+{
+  const repo = plannedRepo();
+  writeFile(repo, "docs/REVIEW.md", "# early\n");
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-qm", "review: round 1 (on main)"]);
+  git(repo, ["checkout", "-q", "-b", "build/2020-01-01"]);
+  await withServer(repo, async ({ call }) => {
+    eq((await call("foundry_status")).lastReviewCommit, null, "lastReviewCommit is null with no review on the branch (main's own review: commit is not reported)");
+    writeFile(repo, "docs/REVIEW.md", "# later\n");
+    git(repo, ["add", "-A"]);
+    git(repo, ["commit", "-qm", "review: round 1"]);
+    eq((await call("foundry_status")).lastReviewCommit, git(repo, ["rev-parse", "--short", "HEAD"]), "after a review commit on the branch, its short sha");
+  });
+}
+
+// ---------------------------------------------------------------- archive (S-07)
+
+{
+  const repo = plannedRepo({ config: { flight: "w1" } });
+  setState(repo, { summarized: true, verdict: "APPROVED", reviewed: true, implemented: true });
+  git(repo, ["checkout", "-q", "-b", "build/2020-01-01"]);
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-qm", "chore: build summary"]);
+  await withServer(repo, async ({ call }) => {
+    await call("foundry_flight_archive");
+    const n = await call("foundry_next");
+    eq(n.stage, "done", "after an archive, foundry_next is done");
+    like(n.reason, /flight w1 is archived in docs\/flights\/w1/, "...and the reason names the slug");
+    writeFile(repo, "docs/SPEC.md", "# Next spec\n");
+    eq((await call("foundry_next")).stage, "plan", "once SPEC.md changes, the stage is plan");
+  });
+}
+
+for (const [config, re, label] of [
+  [{ flight: "Bad" }, /flight must be a slug/, "flight: Bad"],
+  [{ policies: { archive: "yes" } }, /policies\.archive must be a boolean/, "policies.archive: yes"],
+  [{ policies: { finalize: "sometimes" } }, /policies\.finalize must be one of auto, ready, draft/, "policies.finalize: sometimes"],
+  [{ policies: { mergeMethod: "ff" } }, /policies\.mergeMethod must be one of merge, squash, rebase/, "policies.mergeMethod: ff"],
+]) {
+  const repo = plannedRepo({ config });
+  await withServer(repo, async ({ call }) => {
+    isError(await call("foundry_status"), re, `${label} is refused`);
+  });
+}
+
+// ---------------------------------------------------------------- plan_commit (S-06)
+
+{
+  const repo = specRepo();
+  const plan = plannedRepo(); // only for its generated texts
+  writeFile(repo, "docs/PLAN.md", readFile(plan, "docs/PLAN.md"));
+  writeFile(repo, "docs/PROGRESS.md", readFile(plan, "docs/PROGRESS.md"));
+  writeFile(repo, "docs/foundry.json", readFile(plan, "docs/foundry.json"));
+  writeFile(repo, "CLAUDE.md", "# rules\n");
+  await withServer(repo, async ({ call }) => {
+    const r = await call("foundry_plan_commit");
+    eq(r.tasks, 3, "a valid plan commits: three tasks");
+    eq(JSON.stringify(r.phases), JSON.stringify([{ phase: 0, tasks: 3 }]), "...in one phase");
+    eq(subject(repo), "plan: derive build plan from SPEC", "...as plan: derive build plan from SPEC");
+    eq((await call("foundry_plan_commit")).commit, null, "a second call commits nothing");
+  });
+}
+
+{
+  // every problem at once (project-c F-07)
+  const repo = specRepo();
+  const planText = [
+    "# Plan",
+    "",
+    "### P0-01: One",
+    "**Depends on:** P0-02",
+    "",
+    "### P0-02 - Title",
+    "**Depends on:** none",
+    "",
+    "### P0-03: Three",
+    "**Depends on:** P0-03",
+    "",
+    "### P0-03: Three again",
+    "**Depends on:** none",
+    "",
+    "### P0-05: Five",
+    "**Depends on:** none",
+    "",
+  ].join("\n");
+  writeFile(repo, "docs/PLAN.md", planText);
+  writeFile(repo, "docs/PROGRESS.md", ["# P", "Branch: (x)", "Started: (x)", "", "## Tasks", "- [ ] P0-05 Five", "- [ ] P0-03 Three", "- [ ] P0-01 One", "", "## Log", ""].join("\n"));
+  writeFile(repo, "docs/foundry.json", JSON.stringify({ verify: ["true"], constraints: [{ id: "c", paths: ["src/"], pattern: "x", shouldMatch: ["x"], shouldNotMatch: ["y"], from: "P9-01" }] }));
+  const head = git(repo, ["rev-parse", "HEAD"]);
+  await withServer(repo, async ({ rpc }) => {
+    const e = (await rpc("tools/call", { name: "foundry_plan_commit", arguments: {} })).result;
+    eq(e.isError, true, "a broken plan is refused");
+    const text = e.content[0].text;
+    like(text, /^\d+ problems? in the plan/, "...with a one-line count first");
+    const checks = new Set(e.structuredContent.problems.map((p) => p.check));
+    for (const c of ["heading", "duplicate", "sequence", "depends", "cycle", "progress", "from", "claude"]) ok(checks.has(c), `...and the list includes a ${c} problem`);
+    const numbered = text.split("\n").filter((l) => /^\d+\. /.test(l)).length;
+    eq(numbered, e.structuredContent.problems.length, "...with one numbered line per problem");
+    eq(git(repo, ["rev-parse", "HEAD"]), head, "...and nothing was committed");
+  });
+}
+
+/** A spec-only repo with an uncommitted plan whose P1-02 was split into P1-02a. */
+function splitPlanRepo(progressPatch = (t) => t) {
+  const repo = specRepo();
+  const tasks = [
+    { id: "P1-01", title: "One" },
+    { id: "P1-02", title: "Two" },
+    { id: "P1-02a", title: "Two and a half" },
+    { id: "P1-03", title: "Three", depends: ["P1-02a"], goal: "see P1-02a, and not P1-02" },
+  ];
+  writeFile(repo, "docs/PLAN.md", planDoc(tasks));
+  writeFile(repo, "docs/PROGRESS.md", progressPatch(progressDoc(tasks)));
+  writeFile(repo, "docs/foundry.json", JSON.stringify({ verify: ["true"], constraints: [{ id: "c", paths: ["src/"], pattern: "x", shouldMatch: ["x"], shouldNotMatch: ["y"], from: "P1-03" }] }, null, 2) + "\n");
+  writeFile(repo, "CLAUDE.md", "# rules\n");
+  return repo;
+}
+
+{
+  const repo = splitPlanRepo();
+  await withServer(repo, async ({ call }) => {
+    const r = await call("foundry_plan_commit", { renumber: true });
+    eq(JSON.stringify(r.renumbered), JSON.stringify({ "P1-02a": "P1-03", "P1-03": "P1-04" }), "renumber rewrites a split task: the map");
+    const plan = readFile(repo, "docs/PLAN.md");
+    like(plan, /### P1-03: Two and a half/, "...the split heading takes its clean number");
+    like(plan, /### P1-04: Three\n[\s\S]*\*\*Depends on:\*\* P1-03\b/, "...and the Depends on line follows it");
+    like(plan, /see P1-03, and not P1-02/, "...prose is rewritten too, and P1-02 is untouched");
+    ok(!/P1-02a/.test(plan), "...no suffixed id is left in PLAN.md");
+    like(readFile(repo, "docs/PROGRESS.md"), /- \[ \] P1-03 Two and a half\n- \[ \] P1-04 Three/, "...PROGRESS.md's lines are rewritten");
+    like(readFile(repo, "docs/foundry.json"), /"from": "P1-04"/, "...and the from value follows its task");
+    eq(subject(repo), "plan: derive build plan from SPEC", "...in the plan commit");
+    ok(plan.includes("### P1-02: Two"), "...P1-02 keeps its heading");
+  });
+}
+
+{
+  const repo = splitPlanRepo();
+  await withServer(repo, async ({ call }) => {
+    isError(await call("foundry_plan_commit"), /renumber: true/, "a suffix without renumber is refused, suggesting renumber");
+    isError(await call("foundry_plan_commit", { renumber: "yes" }), /renumber must be a boolean/, "a non-boolean renumber is refused");
+  });
+}
+
+for (const [label, patch] of [
+  ["a Started stamp", (t) => t.replace("Started: (set by implement)", "Started: 2026-10-07T00:00:00Z")],
+  ["a task that is not [ ]", (t) => t.replace("- [ ] P1-01", "- [x] P1-01")],
+]) {
+  const repo = splitPlanRepo(patch);
+  const before = { plan: readFile(repo, "docs/PLAN.md"), progress: readFile(repo, "docs/PROGRESS.md"), cfg: readFile(repo, "docs/foundry.json") };
+  await withServer(repo, async ({ call }) => {
+    isError(await call("foundry_plan_commit", { renumber: true }), /only for a plan no run has touched/, `renumber is refused once a run has started: ${label}`);
+    ok(readFile(repo, "docs/PLAN.md") === before.plan && readFile(repo, "docs/PROGRESS.md") === before.progress && readFile(repo, "docs/foundry.json") === before.cfg, "...and every file is unchanged");
+  });
+}
+
+{
+  const repo = plannedRepo({ config: { policies: { signing: "sometimes" } } });
+  await withServer(repo, async ({ rpc }) => {
+    const e = (await rpc("tools/call", { name: "foundry_plan_commit", arguments: {} })).result;
+    eq(e.structuredContent.problems.filter((p) => p.check === "config").length, 1, "a broken config is one config problem");
   });
 }
 

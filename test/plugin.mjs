@@ -31,6 +31,10 @@ ok(Array.isArray(plugin.keywords) && plugin.keywords.length >= 3, "the plugin ca
 eq(pkg.version, plugin.version, "package.json and plugin.json agree on the version");
 const serverVersion = read("mcp/server.mjs").match(/const VERSION = "([^"]+)"/)[1];
 eq(serverVersion, plugin.version, "the MCP server reports the plugin's version");
+{
+  const newest = read("CHANGELOG.md").match(/^## \[(\d+\.\d+\.\d+)\]/m)[1];
+  eq(newest, plugin.version, "CHANGELOG.md's newest entry is the package version");
+}
 eq(pkg.type, "module", "package.json declares ES modules");
 ok(pkg.scripts.test && pkg.scripts.lint, "package.json exposes test and lint");
 like(pkg.engines.node, /^>=\d+$/, "package.json states a Node floor");
@@ -118,8 +122,70 @@ for (const name of skillNames.filter((n) => n !== "pull-feedback")) {
 // A Write refusal should never cost a turn or a returned-as-text file
 // (F-16): every skill that writes a deliverable file states the heredoc
 // fallback.
-for (const name of ["summarize", "plan-build", "implement"]) {
+for (const name of ["plan-build", "implement"]) {
   like(read(`skills/${name}/SKILL.md`), /heredoc/, `skills/${name} states the shell-heredoc fallback for a refused Write`);
+}
+
+{
+  const ws = read("docs/writing-specs.md");
+  like(ws, /from: "<that task's id>"/, "writing-specs.md teaches from");
+  like(ws, /mutation\.targeted/, "writing-specs.md teaches mutation.targeted");
+  like(ws, /commit-msg/, "writing-specs.md shows a commit-msg hook for provenance logging");
+  like(read("templates/SPEC.md"), /\{filter\}/, "templates/SPEC.md names the {filter} placeholder");
+}
+for (const f of ["2026-10-07-project-c", "2026-10-07-project-d"]) {
+  like(read(`docs/feedback/${f}.md`), /addressed in\s+\[`docs\/SPEC\.md`\]\(\.\.\/SPEC\.md\) \(Foundry 0\.5\.0\)/, `the 2026-10-07 feedback files name the spec that addressed them: ${f}`);
+}
+like(read("docs/operations.md"), /^## Running flight after flight$/m, "operations.md explains running flight after flight");
+like(read("docs/operations.md"), /^## Signing$/m, "operations.md has a signing section");
+like(read("skills/pull-feedback/SKILL.md"), /docs\/flights\/\*\/feedback\.jsonl/, "pull-feedback reads archived flight logs too");
+like(read("skills/pull-feedback/SKILL.md"), /how many items came from each/, "...and its header names every source log with its count");
+
+{
+  const im = read("skills/implement/SKILL.md");
+  like(im, /## Codebase notes/, "the implement skill keeps project lessons out of the feedback log (project-c F-08, F-09): it names ## Codebase notes");
+  like(im, /never in `foundry_feedback_log`/, "...and says project lessons never go to foundry_feedback_log");
+  like(im, /heredoc/, "...and keeps the heredoc fallback");
+}
+
+{
+  const pb = read("skills/plan-build/SKILL.md");
+  like(pb, /foundry_plan_commit/, "plan-build commits through foundry_plan_commit (project-d F-03)");
+  ok(!pb.includes("Commit PLAN.md, PROGRESS.md, foundry.json and CLAUDE.md as"), "...and no longer tells the planner to commit by hand");
+  like(pb, /renumber: true/, "plan-build renumbers with renumber: true (project-c F-07)");
+  like(pb, /"from": "<that task's id>"/, "plan-build gates late rules with from (project-d F-01)");
+  like(pb, /test ! -f X \|\| bash X/, "...and forbids the test-or-skip guard");
+  like(pb, /## Flight <slug> notes/, "plan-build caps only its own flight section of an existing CLAUDE.md (project-c F-20)");
+  like(pb, /60 lines/, "...at 60 lines");
+  like(pb, /strayArtifacts/, "plan-build regenerates stray artifacts (project-c F-04)");
+  like(pb, /mutation\.targeted/, "plan-build fills mutation.targeted");
+  like(pb, /"flight"/, "...and sets flight");
+}
+
+{
+  const rb = read("skills/review-build/SKILL.md");
+  like(rb, /targeted: <name>/, "review-build prefers targeted mutation commands (project-c F-12)");
+  like(rb, /mutation\.targeted/, "...when the config has them");
+  like(rb, /confirmKill: true/, "review-build confirms suspicious kills (project-c F-02)");
+  like(rb, /failedCommands/, "...by reading failedCommands");
+  like(rb, /inconclusive/, "...and treating an inconclusive result as a survivor");
+  like(rb, /lastReviewCommit/, "review-build scopes later rounds to the diff since lastReviewCommit (project-c F-16)");
+  like(rb, /at least three/, "...sweeps a surviving file with at least three further mutations");
+  like(rb, /one R-task per file/, "...and queues one R-task per file");
+  like(rb, /## Notes/, "...putting out-of-diff survivors under ## Notes");
+}
+
+{
+  const sum = read("skills/summarize/SKILL.md");
+  ok(!/heredoc/i.test(sum), "the summarize skill passes content and never writes SUMMARY.md itself (project-c F-03): no heredoc");
+  for (const word of ["content", "foundry_summary_commit"]) like(sum, new RegExp(word), `...it names ${word}`);
+  like(sum, /Never call `Write`/, "...and forbids writing the file itself");
+  like(sum, /foundry_flight_archive/, "the summarize skill archives when policies.archive is true");
+  like(sum, /archive: true/, "...keyed on the archive field of the summary result");
+  like(sum, /foundry_pr_finalize\(\{ breaking \}\)/, "the summarize skill ends with foundry_pr_finalize");
+  like(sum, /Never pass `resign`/, "...and never passes resign");
+  for (const status of ["AWAITING SIGNING", "AUTO-MERGE ON", "READY"]) like(sum, new RegExp(status), `...its final message can say ${status}`);
+  like(sum, /Codebase notes/, "the summarize skill lifts Codebase notes");
 }
 
 for (const name of agentNames) {
@@ -129,6 +195,7 @@ for (const name of agentNames) {
   eq(fm.name, name, `agents/${name}'s name matches its filename`);
   ok(fm.description && fm.description.length > 40, `agents/${name} has a description the orchestrator can route on`);
   ok(MODELS.includes(fm.model), `agents/${name} pins a known model (${fm.model})`);
+  ok(fm.model !== "fable", `agents/${name} does not default to fable`);
   ok(EFFORTS.includes(fm.effort), `agents/${name} pins an effort level (${fm.effort})`);
   ok(fm.color, `agents/${name} has a colour`);
   const skills = Array.isArray(fm.skills) ? fm.skills : [];
@@ -152,7 +219,19 @@ const goFlight = read("skills/go-flight/SKILL.md");
 const fmGo = frontmatter(goFlight);
 const allowed = String(fmGo["allowed-tools"]).split(",").map((s) => s.trim());
 const toolNames = Array.from(serverSrc.matchAll(/name: "(foundry_[a-z_]+)"/g), (m) => m[1]);
-eq(toolNames.length, 18, "the server defines eighteen tools");
+eq(toolNames.length, 21, "the server defines twenty-one tools");
+
+const COUNT_WORDS = { 18: "Eighteen", 19: "Nineteen", 20: "Twenty", 21: "Twenty-one", 22: "Twenty-two", 23: "Twenty-three", 24: "Twenty-four", 25: "Twenty-five" };
+like(read("docs/mcp-tools.md").split("\n")[2], new RegExp(`^${COUNT_WORDS[toolNames.length]} tools,`), "docs/mcp-tools.md states the tool count in words");
+
+{
+  const readme = read("README.md");
+  const tableRows = readme.slice(readme.indexOf("## MCP tools"), readme.indexOf("## The guard hook"));
+  const missing = toolNames.filter((t) => !tableRows.includes(`| \`${t}\` |`));
+  eq(missing.join(","), "", "README's tool table lists every server tool");
+  const WORDS = COUNT_WORDS[toolNames.length].toLowerCase();
+  like(readme, new RegExp(`exposes ${WORDS} tools`), "README states the tool count in words");
+}
 
 // Every stage agent's own tool set is explicit (F-16): no agent is left to
 // discover by trial and error what it is allowed to call.
@@ -173,6 +252,16 @@ for (const name of agentNames) {
   ok(mcpTools.some((t) => t.endsWith("foundry_status")), `agents/${name} can call foundry_status to re-orient itself`);
   ok(tools.includes("mcp__plugin_foundry_foundry__foundry_feedback_log"), `agents/${name} can log pipeline friction the moment it happens`);
 }
+const agentTools = (n) => frontmatter(read(`agents/${n}.md`)).tools.split(",").map((t) => t.trim());
+const PFX = "mcp__plugin_foundry_foundry__";
+ok(agentTools("planner").includes(`${PFX}foundry_plan_commit`), "agents/planner names foundry_plan_commit");
+for (const t of ["foundry_summary_commit", "foundry_flight_archive", "foundry_pr_finalize"]) {
+  ok(agentTools("summarizer").includes(PFX + t), `agents/summarizer names ${t}`);
+}
+for (const name of agentNames) {
+  const fm = frontmatter(read(`agents/${name}.md`));
+  ok(read("README.md").includes(`\`${name}\` (${fm.model}, ${fm.effort})`), `README's agent defaults match agents/${name}.md`);
+}
 // A plugin-shipped MCP server's tools are exposed as
 // mcp__plugin_<plugin>_<server>__<tool> (verified with --plugin-dir), not as
 // the bare mcp__<server>__<tool> a project .mcp.json would give. The
@@ -190,7 +279,7 @@ for (const t of allowed.filter((a) => a.startsWith("mcp__"))) {
 }
 ok(
   allowed.every((a) => a === "Agent" || MCP_PREFIXES.some((p) => a.startsWith(p))),
-  "the flight controller is allowed nothing beyond Agent, the read-only foundry tools, agents_sync, run_halt and flight_options",
+  "the flight controller is allowed nothing beyond Agent, the read-only foundry tools, agents_sync, run_halt, flight_options and pr_finalize",
 );
 ok(
   // run_halt is a deliberate exception: it records a clean halt reason when
@@ -200,6 +289,10 @@ ok(
   !allowed.some((a) => /run_start|task_|run_finish|review_submit|summary_commit/.test(a)),
   "the flight controller cannot touch the tools that change project state",
 );
+like(goFlight, /resume: true/, "go-flight resumes a round-cap halt with foundry_flight_options (project-c F-13, F-18)");
+like(goFlight, /foundry_pr_finalize\(\{ resign: true \}\)/, "go-flight finishes a signing-blocked flight only with foundry_pr_finalize({ resign: true })");
+like(goFlight, /`flight=<slug>`/, "go-flight passes flight=<slug> to the planner");
+like(goFlight, /Flight slug: <slug>\./, "...as the sentence the planner skill looks for");
 for (const name of agentNames) like(goFlight, new RegExp(`foundry:${name}`), `go-flight names foundry:${name}`);
 like(goFlight, /notification/, "go-flight describes the loop as event-driven, not a blocking wait");
 like(goFlight, /do not poll/, "go-flight says not to poll while a stage is running");
@@ -251,9 +344,14 @@ const MD = [
 ];
 const PROSE = [...MD, ...skillNames.map((n) => `skills/${n}/SKILL.md`), ...agentNames.map((n) => `agents/${n}.md`), "templates/SPEC.md"];
 
+// These files describe a flight, and a flight's spec names tools it has not
+// built yet, so the tool/skill-name check cannot hold for them.
+const FLIGHT_ARTIFACTS = ["docs/SPEC.md", "docs/PLAN.md", "docs/PROGRESS.md", "docs/HANDOFF.md", "docs/REVIEW.md", "docs/SUMMARY.md"];
+
 let unknownTool = null;
 let unknownSkill = null;
 for (const file of PROSE) {
+  if (FLIGHT_ARTIFACTS.includes(file)) continue;
   const body = read(file);
   for (const m of body.matchAll(/\bfoundry_[a-z_]+/g)) {
     if (!toolNames.includes(m[0]) && !unknownTool) unknownTool = `${file}: ${m[0]}`;
@@ -269,7 +367,8 @@ eq(unknownSkill, null, "every foundry:* skill or agent named in prose exists");
 let brokenLink = null;
 for (const file of MD) {
   const dir = path.dirname(path.join(ROOT, file));
-  for (const m of read(file).matchAll(/\[[^\]]*\]\(([^)]+)\)/g)) {
+  // Inline code spans quote example link text (a PLAN task shows the line it will add elsewhere), so they are not links.
+  for (const m of read(file).replace(/`[^`\n]*`/g, "").matchAll(/\[[^\]]*\]\(([^)]+)\)/g)) {
     const target = m[1].split("#")[0];
     if (!target || /^(https?:|mailto:)/.test(target)) continue;
     if (!fs.existsSync(path.resolve(dir, target)) && !brokenLink) brokenLink = `${file} → ${m[1]}`;
@@ -340,6 +439,7 @@ for (const rule of constraintsTemplate) {
   ok(Array.isArray(rule.shouldMatch) && rule.shouldMatch.length, `${rule.id} has at least one shouldMatch fixture`);
   ok(Array.isArray(rule.shouldNotMatch) && rule.shouldNotMatch.length, `${rule.id} has at least one shouldNotMatch fixture`);
 }
+ok(constraintsTemplate.some((r) => r.from), "some constraints template rule carries from");
 ok(read("docs/operations.md").includes("templates/constraints.example.json"), "the constraints template is referenced from docs/operations.md");
 ok(read("skills/plan-build/SKILL.md").includes("templates/constraints.example.json"), "...and from the plan-build skill that would actually use it");
 
@@ -348,7 +448,7 @@ ok(read("skills/plan-build/SKILL.md").includes("templates/constraints.example.js
 // Every key cfg() actually returns has a row in operations.md's config
 // table — a knob nobody wrote down is a knob nobody will find.
 {
-  const cfgSrc = serverSrc.match(/function cfg\(\) \{[\s\S]*?\n\}/)[0];
+  const cfgSrc = serverSrc.match(/function cfgFrom\(c, planIds\) \{[\s\S]*?\n\}/)[0];
   const cfgKeys = Array.from(cfgSrc.matchAll(/^ {4}(\w+):/gm), (m) => m[1]);
   ok(cfgKeys.length >= 9, "cfg()'s top-level keys were actually extracted from the source");
   const opsDoc = read("docs/operations.md");
@@ -358,6 +458,13 @@ ok(read("skills/plan-build/SKILL.md").includes("templates/constraints.example.js
       ok(opsDoc.includes("`policies.push`"), "operations.md documents policies.push");
       ok(opsDoc.includes("`policies.pr`"), "operations.md documents policies.pr");
       ok(opsDoc.includes("`policies.feedback`"), "operations.md documents policies.feedback");
+      ok(opsDoc.includes("`policies.archive`"), "operations.md documents policies.archive");
+      ok(opsDoc.includes("`policies.finalize`"), "operations.md documents policies.finalize");
+      ok(opsDoc.includes("`policies.mergeMethod`"), "operations.md documents policies.mergeMethod");
+      continue;
+    }
+    if (key === "mutation") {
+      ok(opsDoc.includes("`mutation.targeted`"), "operations.md documents mutation.targeted");
       continue;
     }
     if (key === "parallel") {
@@ -426,5 +533,16 @@ like(read("skills/summarize/SKILL.md"), /feedbackCount/, "the summarize skill re
 like(read("skills/summarize/SKILL.md"), /\.foundry\/feedback\.jsonl/, "...and reads the feedback log itself for the entries");
 like(read("docs/feedback/README.md"), /foundry_feedback_log/, "docs/feedback/README.md documents the tool that produces the source log");
 like(read("docs/feedback/README.md"), /\/foundry:pull-feedback/, "...and the skill that pulls it back here");
+
+// R2-02: the fake-signer fixture is allowlisted narrowly, defaults kept.
+const gitleaks = read(".gitleaks.toml");
+const glPaths = [...gitleaks.matchAll(/^paths\s*=\s*\[(.*)\]\s*$/gm)].flatMap((m) => [...m[1].matchAll(/\x27\x27\x27(.*?)\x27\x27\x27/g)].map((x) => x[1]));
+ok(/useDefault\s*=\s*true/.test(gitleaks) && glPaths.length > 0 && glPaths.every((p) => p.startsWith("^test/")), ".gitleaks.toml keeps the default rules and allowlists only the test fixtures");
+ok(/condition\s*=\s*"AND"/.test(gitleaks) && /^regexes\s*=\s*\[\s*\x27\x27\x270123456789ABCDEF\x27\x27\x27\s*\]\s*$/m.test(gitleaks), ".gitleaks.toml allowlist is AND-scoped to the fixture value");
+const preCommit = read(".pre-commit-config.yaml");
+const glRev = /repo:\s*https:\/\/github\.com\/gitleaks\/gitleaks\s*\n\s*rev:\s*v?(\S+)/.exec(preCommit)?.[1];
+const scanYml = read(".github/workflows/secret-scan.yml");
+const glPin = /^\s*GITLEAKS_VERSION:\s*"?([^"\s#]+)"?/m.exec(scanYml)?.[1];
+ok(glRev && glPin === glRev, "secret-scan.yml pins GITLEAKS_VERSION to the pre-commit gitleaks rev");
 
 finish();

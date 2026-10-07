@@ -43,7 +43,11 @@ talk to each other.
 
 The exact commands for typecheck, lint, test, build, and any headless or
 smoke run. The planner copies these into `docs/foundry.json`; every one must
-exit non-zero on failure.
+exit non-zero on failure. If the test runner can run one class or file, give
+that command too with an unquoted `{filter}` placeholder where the class or
+path goes (for example `php artisan test --filter={filter}`), so the planner
+can fill `mutation.targeted` and the reviewer can mutation-test a file in
+seconds.
 
 ## 8. Phases
 

@@ -46,11 +46,15 @@ You need Node ≥ 22, git, and Claude Code. Nothing to `npm install`.
    the same instructions. It takes one option, the review depth:
    `/foundry:go-flight max review rounds 6`.
 
-4. **Read `docs/SUMMARY.md`, then merge the branch yourself.** Foundry never
-   merges.
+4. **Read `docs/SUMMARY.md`, then review the pull request.** Under
+   `policies.finalize: "auto"`, a flight whose commits are all signed and that
+   is not marked breaking has its pull request marked ready and set to
+   auto-merge once CI is green; a breaking flight, or one with an unsigned
+   commit, stays for you to merge or sign. Foundry never merges
+   synchronously: the only merge it ever asks for is GitHub's own `--auto`.
 
 > **Optional — run a stage on a different model or backend.** By default the
-> planner and reviewer use `fable` and the implementer uses `sonnet`, all on
+> planner, reviewer and summarizer use `opus` and the implementer uses `sonnet`, all on
 > your Anthropic account. To point any role somewhere else — `haiku`, a full
 > model id, or a local or hosted model through
 > [claude-code-router](https://github.com/musistudio/claude-code-router) —
@@ -64,8 +68,8 @@ You need Node ≥ 22, git, and Claude Code. Nothing to `npm install`.
 ## What's in the box
 
 - **Four stage agents**, each pinned to its own model and effort level by
-  default: `planner` (fable, high), `implementer` (sonnet, medium), `reviewer`
-  (fable, high), `summarizer` (fable, medium). Switching happens per stage,
+  default: `planner` (opus, high), `implementer` (sonnet, medium),
+  `reviewer` (opus, high), `summarizer` (opus, medium). Switching happens per stage,
   not per session, so the expensive model is only spent on the parts that
   need it.
 - **Per-role model routing** — a global config file, optional profiles, and
@@ -96,10 +100,10 @@ flowchart TD
     SPEC["docs/SPEC.md — you write this"] --> NEXT
 
     NEXT{{"foundry_next<br/>reads disk, picks a stage"}}
-    NEXT -->|"no plan"| PLAN["planner<br/>fable · high"]
+    NEXT -->|"no plan"| PLAN["planner<br/>opus · high"]
     NEXT -->|"open tasks"| IMPL["implementer<br/>sonnet · medium"]
-    NEXT -->|"implemented, unreviewed"| REV["reviewer<br/>fable · high"]
-    NEXT -->|"approved"| SUM["summarizer<br/>fable · medium"]
+    NEXT -->|"implemented, unreviewed"| REV["reviewer<br/>opus · high"]
+    NEXT -->|"approved"| SUM["summarizer<br/>opus · medium"]
     NEXT -->|"halted: rounds, or run_halt"| HALT["halt — a human decides"]
     NEXT -->|"summarized"| DONE["done — a human merges"]
 
@@ -274,10 +278,13 @@ Checkbox states in `PROGRESS.md`: `[ ]` todo · `[~]` in progress · `[x]` done 
 
 ## MCP tools
 
+The server exposes twenty-one tools.
+
 | Tool | Does |
 |---|---|
-| `foundry_status` | Everything on disk: docs present, counts, branch/base/head, lock, round, verdict, generated agents |
+| `foundry_status` | Everything on disk: docs present, counts, branch/base/head, lock, round, verdict, generated agents, where each flight artifact stands (`artifacts`, `strayArtifacts`) and the last `review:` commit |
 | `foundry_next` | The state machine. Returns `{stage, agent, agentFallback, fallbackAgent, restartRequired, model, agentModel, agentModelExact, round, reason, prompt, streams?}` |
+| `foundry_plan_commit` | Validate PLAN, PROGRESS, `foundry.json` and `CLAUDE.md` together, list every problem at once, and commit the plan; `renumber: true` rewrites split task ids |
 | `foundry_run_start` | Create or reuse `build/<date>`, record pre-existing untracked files and run policies, probe signing, arm the lock, stamp PROGRESS, commit. Idempotent. With `stream`, also create (or resume) that stream's worktree and run `parallel.setup` in it |
 | `foundry_task_next` | Pick first `[~]` else first `[ ]`, auto-skip dependency-blocked tasks, mark `[~]`, return PLAN text and dependency logs |
 | `foundry_task_done` | Requires `<ID>:` at HEAD and a clean tree; mark `[x]`, log with the sha, commit |
@@ -287,11 +294,13 @@ Checkbox states in `PROGRESS.md`: `[ ]` todo · `[~]` in progress · `[x]` done 
 | `foundry_stream_finish` | Finish one stream of a parallel wave: require no open tasks and a clean worktree, merge its branch into the build branch, remove the worktree and branch. A merge conflict aborts, keeps the stream, and halts |
 | `foundry_run_finish` | Requires zero open tasks and `HANDOFF.md`; commit, push, draft a PR against `baseBranch` (unless policies say otherwise), disarm the lock, report a whole-tree constraint scan |
 | `foundry_run_halt` | Record an operator-level reason the run cannot continue; disarm the lock; commit state; never resets or cleans the tree |
-| `foundry_flight_options` | Apply go-flight's options (`maxRounds`, `maxRoundsHard`) to `docs/foundry.json` and commit |
+| `foundry_flight_options` | Apply go-flight's options (`maxRounds`, `maxRoundsHard`) to `docs/foundry.json` and commit; with `resume: true`, also lift a round-cap halt |
 | `foundry_feedback_log` | Append one pipeline-friction entry to `.foundry/feedback.jsonl` and commit it immediately, so it survives a flight that never reaches summarize |
-| `foundry_mutate` | Mutation-test one file for the reviewer: apply one exact find/replace, run the verify commands that file triggers (optionally with a shorter `timeoutMs`), always restore it and undo any residue the commands left, commit nothing; reports whether the tests noticed |
+| `foundry_mutate` | Mutation-test one file for the reviewer: apply one exact find/replace, run the verify commands that file triggers (or a `targeted` command with a `filter`; optionally with a shorter `timeoutMs`), always restore it and undo any residue the commands left, commit nothing; reports whether the tests noticed and lists `failedCommands`, and with `confirmKill` re-runs a kill on the unmutated tree |
 | `foundry_review_submit` | `APPROVED` → commit. `CHANGES REQUESTED` → assign `R<N>-<nn>`, append to PLAN and PROGRESS, unblock (with skipped dependents), commit `review: round N` |
-| `foundry_summary_commit` | Commit `SUMMARY.md`, mark the flight complete, report reviews, fix rounds and the branch's PR |
+| `foundry_summary_commit` | Write `SUMMARY.md` from `content`, commit it, mark the flight complete, report reviews, fix rounds, the branch's PR and whether to archive |
+| `foundry_flight_archive` | Move a summarized flight's artifacts into `docs/flights/<slug>/` (the spec stays), write a fresh state, commit and push |
+| `foundry_pr_finalize` | End a flight: if every commit is signed, mark the draft PR ready and, unless `breaking`, enable auto-merge; otherwise keep it a draft and record `awaitingSigning`. `resign: true` is for a human |
 | `foundry_agents_sync` | Write `.claude/agents/foundry-<role>.md` from the merged routing config; only changed files are written |
 | `foundry_config_show` | The merged routing config with the source of every value. Read-only |
 

@@ -69,6 +69,17 @@ A test runner in watch mode, a linter that only warns, or a script that ends in
 suite is slow, that is what `extraVerify` is for — commands keyed by path
 prefix that only run when a task touches that area.
 
+If the runner can narrow to one test class or file, name that command too, with
+an unquoted `{filter}` placeholder where the class or path goes:
+
+```text
+php artisan test --filter={filter}
+```
+
+The planner copies it into `mutation.targeted` in `docs/foundry.json`, and the
+reviewer then mutation-tests a single file in seconds instead of running the
+whole suite.
+
 ### 3. Assumptions marked as assumptions
 
 Any number you are guessing at gets `⚠️ ASSUMPTION` and a config key:
@@ -124,6 +135,36 @@ feature. Say where the shared wiring lives (the registry, the routes table,
 the manifest): that is the part the planner will keep serial. And name any
 command that starts a port- or container-bound environment, so the plan can
 mark it exclusive and keep its tasks out of the parallel part.
+
+## Rules that become true at a task
+
+Some rules cannot hold from the first commit: "no `TODO` left in `src/`" is
+false until the cleanup task has run, and a script a later task creates cannot
+be checked before it exists. Say which task makes the rule true. The planner
+then gives the rule `from: "<that task's id>"` in `docs/foundry.json`: the rule
+stays inactive until that task is in progress, and still self-tests its own
+fixtures. The old idiom, wrapping a command in `test ! -f X || bash X`, is no
+longer needed, and it was a trap: it passed forever if `X` was never written.
+
+## Provenance logging
+
+If a spec needs Foundry's own activity logged or tagged (an audit trail, a
+provenance record), do not try to change Foundry's commit subjects or its
+clean-tree checks. Both are part of how the pipeline tracks itself. Ask for a
+`commit-msg` hook instead: `.githooks/commit-msg`, enabled with
+`git config core.hooksPath .githooks`, which appends a trailer derived from the
+subject. Keep a live log gitignored, and have a phase-end task snapshot it.
+
+```sh
+#!/bin/sh
+# Append a trailer from the commit subject: "<ID>: ..." gets Task: <ID>;
+# progress:, review:, plan: and chore: commits get Stage: foundry.
+subject=$(head -n 1 "$1")
+case "$subject" in
+  [PR][0-9]*-[0-9]*:*) printf '\nTask: %s\n' "${subject%%:*}" >> "$1" ;;
+  progress:*|review:*|plan:*|chore:*) printf '\nStage: foundry\n' >> "$1" ;;
+esac
+```
 
 ## A worked fragment
 

@@ -205,7 +205,9 @@ add other checkbox lines to this file.
   "branchPrefix": "build/",
   "maxRounds": 3,
   "maxRoundsHard": 6,
-  "parallel": { "maxStreams": 3, "setup": ["<command that makes a fresh checkout verifiable>"] }
+  "parallel": { "maxStreams": 3, "setup": ["<command that makes a fresh checkout verifiable>"] },
+  "flight": "<slug>",
+  "mutation": { "targeted": { "<name>": { "cmd": "<test command with one {filter} placeholder>" } } }
 }
 ```
 
@@ -229,6 +231,28 @@ as `verify`) that run once in each new stream worktree, and
 defaults unless SPEC says the review loop needs a different tolerance;
 `maxRounds` bounds review rounds that fail to converge, `maxRoundsHard` is
 an absolute ceiling regardless.
+
+Set `"flight"` to a slug naming this flight (lowercase letters, digits and
+`-`, at most 40 characters). Use the operator's slug when your prompt carries
+`Flight slug: <slug>.`; otherwise derive it from SPEC's title: lowercase it,
+turn every run of other characters into `-`, trim the `-` off both ends and
+cut it to 40 characters. `foundry_flight_archive` uses it as the archive's
+directory name.
+
+Fill `mutation.targeted` when SPEC section 7 names a test command that can be
+narrowed to one test class or file: write the command with a single
+`{filter}` placeholder, unquoted (the tool quotes it), for example
+`"vendor/bin/phpunit --filter {filter}"`. The reviewer uses it to mutation-test
+one file in seconds instead of running the whole suite. Leave `mutation` out
+when SPEC names no such command.
+
+When a constraint, or an `extraVerify` command, can only pass once a given
+task has landed (a script that task creates, a directory it adds), give it
+`"from": "<that task's id>"` (an object entry for a command:
+`{ "cmd": "...", "from": "P1-03" }`). The rule then stays inactive until the
+task is in progress, and still self-tests its fixtures. Never wrap such a
+command in a guard like `test ! -f X || bash X`: it passes forever when `X`
+is never written, and the guard hides that.
 
 Leave `policies` and `guardCap` out entirely unless SPEC's commands section
 says otherwise — every key defaults sensibly for an ordinary flight, and
@@ -262,7 +286,12 @@ Under fixed headings so the implementer and reviewer can find them:
   Interpretation / Measurement (if tuning) / Manual check.
 - A closing note that SPEC.md wins over PLAN.md wins over code comments.
 
-Keep it under 150 lines. Do not describe the Foundry workflow in CLAUDE.md.
+Keep a `CLAUDE.md` you create under 150 lines. When one already exists (an
+earlier flight wrote it), do not rewrite it: add or replace exactly one
+`## Flight <slug> notes` section of at most 60 lines for this flight, and
+merge only flight-agnostic facts into the shared sections (Constraints,
+Commands, Task protocols). Leave every other flight's section untouched.
+Do not describe the Foundry workflow in CLAUDE.md.
 
 ### `constraints` in `docs/foundry.json`
 
@@ -281,6 +310,12 @@ examples and [docs/operations.md](../../docs/operations.md#constraints).
 
 ## When you finish
 
+Call `foundry_status` before you write anything. If `strayArtifacts` is not
+empty, an earlier plan run was interrupted and left those files behind
+(`PLAN.md` is absent, but `foundry.json` or others are on disk and untracked):
+regenerate every one of them from SPEC, never trust their content, and name
+them in your report.
+
 Write `docs/PLAN.md`, `docs/PROGRESS.md`, `docs/foundry.json` and
 `CLAUDE.md` with the `Write` tool. If the harness refuses one (some builds
 tell subagents to return findings as text instead), write it with a shell
@@ -289,12 +324,20 @@ and do not return the file's content as text in your own reply (F-16).
 
 Set `docs/foundry.json`'s `baseBranch` to the branch you are actually on
 when you commit, and say so in your report — do not assume it is `main`.
-Commit PLAN.md, PROGRESS.md, foundry.json and CLAUDE.md as
-`plan: derive build plan from SPEC`.
+Then call `foundry_plan_commit`. It checks the four files together (task
+headings, numbering, dependencies, streams, config, `from` references) and,
+when they agree, commits them as `plan: derive build plan from SPEC`. If it
+refuses, it lists every problem at once: fix every one, then call it again.
+If you split a task mid-plan, give the new piece a temporary suffix id
+(`P1-02a`) and call `foundry_plan_commit({ renumber: true })` instead of
+renumbering by hand; it rewrites the ids everywhere. You never run `git
+commit` yourself.
 
 Report: number of tasks per phase, the decisions you made, and the spec
 issues you found. Quote `docs/foundry.json` verbatim from disk (`cat
-docs/foundry.json`, not from memory) in your report, and state the
+docs/foundry.json`, not from memory) in your report, except that you list the
+`constraints` entries by id with a fixture count instead of quoting their
+bodies, and state the
 `baseBranch` and `branchPrefix` it actually contains — a report that
 disagrees with the file it just wrote is worse than no report (F-06). Do
 not start implementation.

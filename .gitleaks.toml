@@ -1,0 +1,13 @@
+title = "foundry gitleaks config"
+
+[extend]
+useDefault = true
+
+# The fake signing-key id used by the test harness's fake signer. It is a
+# fixture, not a credential, and it lives in history, so allowlist it
+# narrowly: only these two files, only this value.
+[[allowlists]]
+description = "fake signer key id in test fixtures"
+condition = "AND"
+paths = ['''^test/(harness|review)\.mjs$''']
+regexes = ['''0123456789ABCDEF''']

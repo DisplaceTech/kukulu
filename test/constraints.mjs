@@ -183,13 +183,71 @@ for (const [bad, re, label] of [
 // ---------------------------------------------------------------- the shipped template
 
 {
+  // every template rule validates and passes its own fixtures
   const template = JSON.parse(fs.readFileSync(path.join(ROOT, "templates/constraints.example.json"), "utf8"));
-  ok(Array.isArray(template) && template.length >= 3, "the template ships at least three worked rules");
-  const repo = constraintRepo(template);
+  ok(Array.isArray(template) && template.length >= 4, "the template ships at least four worked rules");
+  ok(template.some((r) => r.from), "...one of them gated with from");
+  const needed = [...new Set(template.map((r) => r.from).filter(Boolean))];
+  const tasks = [
+    { id: "P0-01", title: "One" },
+    ...needed.map((id) => ({ id, title: `Task ${id}` })),
+  ];
+  const repo = plannedRepo({ config: { constraints: template }, tasks });
+  writeFile(repo, "src/.keep", "");
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-qm", "chore: src/"]);
   await withServer(repo, async ({ call }) => {
     const v = await call("foundry_verify");
-    eq(v.constraints.ok, true, "the shipped template passes its own self-test");
+    eq(v.constraints.ok, true, "every template rule validates and passes its own fixtures");
     for (const r of v.constraints.results) eq(r.fixture, null, `${r.id}'s fixtures agree with its pattern`);
+  });
+}
+
+// ---------------------------------------------------------------- from
+
+{
+  // from gates a constraint on its task
+  const repo = constraintRepo([{ ...RULE, from: "P0-02" }]);
+  writeFile(repo, "src/a.js", "console.log('x');\n");
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-qm", "chore: a hit"]);
+  await withServer(repo, async ({ call }) => {
+    for (const st of [" ", "!", "-"]) {
+      markTasks(repo, { "P0-01": "x", "P0-02": st, "P0-03": " " });
+      const v = await call("foundry_verify");
+      eq(v.ok, true, `from: P0-02 is inactive while the task is [${st}]`);
+      eq(v.constraints.results[0].inactive, "until P0-02", "...and the result says why");
+    }
+    for (const st of ["~", "x"]) {
+      markTasks(repo, { "P0-01": "x", "P0-02": st, "P0-03": " " });
+      const v = await call("foundry_verify");
+      eq(v.ok, false, `from: P0-02 is active while the task is [${st}]`);
+      eq(v.constraints.results[0].hits.length, 1, "...and reports the hit");
+    }
+    markTasks(repo, { "P0-01": "x", "P0-02": "!", "P0-03": "x" });
+    eq((await call("foundry_verify")).ok, false, "from is active once no task is open");
+  });
+}
+
+{
+  // an inactive rule still self-tests
+  const repo = constraintRepo([{ ...RULE, from: "P0-02", shouldMatch: ["nothing here"] }]);
+  await withServer(repo, async ({ call }) => {
+    const v = await call("foundry_verify");
+    eq(v.ok, false, "an inactive rule with a broken fixture fails");
+    like(v.constraints.results[0].fixture, /shouldMatch/, "...with the fixture set");
+  });
+}
+
+for (const [config, re, label] of [
+  [{ constraints: [{ ...RULE, from: "P9-09" }] }, /constraint 'no-console-log'\.from names P9-09, which is not a task in docs\/PLAN\.md/, "a from naming a task not in PLAN.md"],
+  [{ constraints: [{ ...RULE, from: "step 2" }] }, /from must be a task id such as P1-03/, "a malformed from"],
+  [{ build: [{ cmd: "true", from: "P0-01" }] }, /build\[0\]\.from is only valid on verify and extraVerify entries/, "from on a build entry"],
+  [{ parallel: { setup: [{ cmd: "true", from: "P0-01" }] } }, /parallel\.setup\[0\]\.from is only valid on verify and extraVerify entries/, "from on a parallel.setup entry"],
+]) {
+  const repo = plannedRepo({ config });
+  await withServer(repo, async ({ call }) => {
+    isError(await call("foundry_verify"), re, `refuses ${label}`);
   });
 }
 

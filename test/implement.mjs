@@ -4,7 +4,9 @@
 // lets a flight land somewhere nobody asked for.
 
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 import {
   finish, ok, eq, like, isError,
   mkDir, plannedRepo, withServer, readFile, writeFile, hasFile, subject,
@@ -435,6 +437,19 @@ for (const missing of ["docs/SPEC.md", "docs/PLAN.md", "docs/PROGRESS.md", "docs
 }
 
 {
+  // from gates an extraVerify command
+  const repo = plannedRepo({ config: { verify: ["true"], extraVerify: { "src/": [{ cmd: "false", from: "P0-02" }] } } });
+  await withServer(repo, async ({ call }) => {
+    let v = await call("foundry_verify", { files: ["src/a.js"] });
+    eq(v.ok, true, "an extraVerify command gated on an unstarted task does not fail verify");
+    ok(v.results.some((r) => r.cmd === "false" && r.skipped === "inactive until P0-02" && Object.keys(r).length === 2), "...and is reported as skipped in its place");
+    markTasks(repo, { "P0-01": "x", "P0-02": "~" });
+    v = await call("foundry_verify", { files: ["src/a.js"] });
+    eq(v.ok, false, "once the task is in progress, the command runs and fails verify");
+  });
+}
+
+{
   const repo = plannedRepo({
     config: { verify: [{ cmd: "sleep 2", timeoutMs: 200 }, "echo fast"], commandTimeoutMs: 60_000 },
   });
@@ -691,6 +706,7 @@ for (const [bad, re] of [
   await withServer(repo, async ({ call }) => {
     const r = await call("foundry_run_start");
     eq(r.signing, "off", "policies.signing: off records off without even probing");
+    ok(JSON.parse(readFile(repo, ".foundry/state.json")).signingOverride !== true, "an explicit off does not set signingOverride");
     eq(git(repo, ["config", "--local", "commit.gpgsign"]), "false", "...and disables signing locally");
     ok(!hasFile(repo, ".foundry/feedback.jsonl"), "an explicit off is the operator's own choice, not friction — no feedback entry");
   });
@@ -727,6 +743,7 @@ for (const [bad, re] of [
   await withServer(repo, async ({ call }) => {
     const r = await call("foundry_run_start");
     like(r.signing, /^off \(probe failed: /, "auto falls back to off and records why, rather than refusing");
+    eq(JSON.parse(readFile(repo, ".foundry/state.json")).signingOverride, true, "a failed probe sets signingOverride");
     eq(git(repo, ["config", "--local", "commit.gpgsign"]), "false", "...and disables signing locally so the first task commit does not hang");
 
     const lines = readFile(repo, ".foundry/feedback.jsonl").trim().split("\n");
@@ -873,6 +890,125 @@ for (const [bad, re] of [
     const r = await call("foundry_run_halt", { reason: "operator intervened" });
     eq(r.halted, "operator intervened", "the halt itself still works");
     ok(!hasFile(repo, ".foundry/feedback.jsonl"), "policies.feedback: false skips even the auto entry");
+  });
+}
+
+// ---------------------------------------------------------------- commit signing (S-02)
+
+function failingSignerRepo(config) {
+  const repo = plannedRepo({ config });
+  git(repo, ["config", "--local", "commit.gpgsign", "true"]);
+  git(repo, ["config", "--local", "gpg.format", "openpgp"]);
+  git(repo, ["config", "--local", "gpg.program", "/nonexistent-signing-agent"]);
+  return repo;
+}
+
+{
+  const repo = failingSignerRepo({ policies: { signing: "auto" } });
+  await withServer(repo, async ({ call }) => {
+    const r = await call("foundry_feedback_log", { stage: "plan", message: "something slow" });
+    eq(r.logged, true, "auto: the feedback entry is logged");
+    eq(subject(repo), "chore: pipeline friction (plan)", "auto: a Foundry commit whose signing fails is retried unsigned");
+    const st = JSON.parse(git(repo, ["show", "HEAD:.foundry/state.json"]));
+    like(st.signing, /^off \(commit signing failed: /, "...the committed state records why");
+    eq(st.signingOverride, true, "...and sets signingOverride");
+    eq(git(repo, ["config", "--local", "commit.gpgsign"]), "false", "...and signing is off locally");
+    const entries = git(repo, ["show", "HEAD:.foundry/feedback.jsonl"]).trim().split("\n").map((l) => JSON.parse(l));
+    eq(entries.filter((e) => e.category === "signing").length, 1, "...with exactly one signing entry");
+    ok(entries.some((e) => e.message === "something slow"), "...beside the logged entry");
+    eq(git(repo, ["status", "--porcelain"]), "", "...and the tree is clean");
+  });
+}
+
+{
+  const repo = failingSignerRepo({ policies: { signing: "required" } });
+  const head = git(repo, ["rev-parse", "HEAD"]);
+  await withServer(repo, async ({ call }) => {
+    isError(await call("foundry_flight_options", { maxRounds: 5 }), /'required'.*could not be signed/, "required: a Foundry commit whose signing fails throws");
+    eq(git(repo, ["rev-parse", "HEAD"]), head, "...and HEAD did not move");
+  });
+}
+
+{
+  const repo = failingSignerRepo({ policies: { signing: "auto" } });
+  const hook = path.join(repo, ".git", "hooks", "commit-msg");
+  fs.mkdirSync(path.dirname(hook), { recursive: true });
+  fs.writeFileSync(hook, '#!/bin/sh\nc="$(dirname "$0")/../hook-count"\nif [ -e "$c" ]; then echo "rejected by test hook" >&2; exit 1; fi\ntouch "$c"\nexit 0\n');
+  fs.chmodSync(hook, 0o755);
+  const rec = (f) => (hasFile(repo, f) ? readFile(repo, f) : null);
+  const files = ["docs/foundry.json", ".foundry/state.json", ".foundry/feedback.jsonl"];
+  const before = files.map(rec);
+  const head = git(repo, ["rev-parse", "HEAD"]);
+  await withServer(repo, async ({ call }) => {
+    isError(await call("foundry_flight_options", { maxRounds: 5 }), /failed even unsigned/, "auto: a failed unsigned retry leaves the tree as it found it: the call is an error");
+    files.forEach((f, i) => eq(rec(f), before[i], `...${f} is unchanged`));
+    eq(git(repo, ["diff", "--cached", "--name-only"]), "", "...nothing is staged");
+    eq(git(repo, ["rev-parse", "HEAD"]), head, "...HEAD did not move");
+    eq(git(repo, ["config", "--local", "commit.gpgsign"]), "true", "...and local signing is restored");
+  });
+}
+
+{
+  // R2-03: the undo path must --unset a local commit.gpgsign that was unset before the fallback.
+  const repo = failingSignerRepo({ policies: { signing: "auto" } });
+  git(repo, ["config", "--local", "--unset", "commit.gpgsign"]);
+  const globalCfg = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "foundry-gitcfg-")), "gitconfig");
+  fs.writeFileSync(globalCfg, "[commit]\n\tgpgsign = true\n[gpg]\n\tformat = openpgp\n[gpg \"openpgp\"]\n\tprogram = /nonexistent-signing-agent\n");
+  const hook = path.join(repo, ".git", "hooks", "commit-msg");
+  fs.mkdirSync(path.dirname(hook), { recursive: true });
+  fs.writeFileSync(hook, '#!/bin/sh\nc="$(dirname "$0")/../hook-count"\nif [ -e "$c" ]; then echo "rejected by test hook" >&2; exit 1; fi\ntouch "$c"\nexit 0\n');
+  fs.chmodSync(hook, 0o755);
+  const rec = (f) => (hasFile(repo, f) ? readFile(repo, f) : null);
+  const files = ["docs/foundry.json", ".foundry/state.json", ".foundry/feedback.jsonl"];
+  const before = files.map(rec);
+  const head = git(repo, ["rev-parse", "HEAD"]);
+  await withServer(repo, async ({ call }) => {
+    isError(await call("foundry_flight_options", { maxRounds: 5 }), /failed even unsigned/, "auto: a failed unsigned retry leaves an unset local commit.gpgsign unset: the call is an error");
+    files.forEach((f, i) => eq(rec(f), before[i], `...${f} is unchanged (unset case)`));
+    eq(git(repo, ["diff", "--cached", "--name-only"]), "", "...nothing is staged (unset case)");
+    eq(git(repo, ["rev-parse", "HEAD"]), head, "...HEAD did not move (unset case)");
+    const r = spawnSync("git", ["config", "--local", "--get", "commit.gpgsign"], { cwd: repo, encoding: "utf8" });
+    ok(r.status !== 0 && r.stdout === "", "...and local commit.gpgsign is unset again, not left at false");
+  }, { env: { GIT_CONFIG_GLOBAL: globalCfg } });
+}
+
+// ---------------------------------------------------------------- rollback
+
+function rejectCommitsStarting(repo, prefix) {
+  const hook = path.join(repo, ".git", "hooks", "commit-msg");
+  fs.mkdirSync(path.dirname(hook), { recursive: true });
+  fs.writeFileSync(hook, `#!/bin/sh\nif head -n1 "$1" | grep -q '^${prefix}'; then echo "rejected by test hook" >&2; exit 1; fi\n`);
+  fs.chmodSync(hook, 0o755);
+}
+
+{
+  // task_done rolls back when its progress commit fails
+  const repo = plannedRepo();
+  git(repo, ["checkout", "-q", "-b", `build/${TODAY}`]);
+  await withServer(repo, async ({ call }) => {
+    await call("foundry_run_start");
+    await call("foundry_task_next");
+    writeFile(repo, "hello.txt", "hi\n");
+    git(repo, ["add", "hello.txt"]);
+    git(repo, ["commit", "-qm", "P0-01: hello"]);
+    const head = git(repo, ["rev-parse", "HEAD"]);
+    const before = readFile(repo, "docs/PROGRESS.md");
+    rejectCommitsStarting(repo, "progress:");
+    isError(await call("foundry_task_done", { id: "P0-01", log: "done" }), /commit failed/, "task_done rolls back when its progress commit fails: the call is an error");
+    eq(readFile(repo, "docs/PROGRESS.md"), before, "...PROGRESS.md is byte-identical (still in progress)");
+    eq(git(repo, ["diff", "--cached", "--name-only"]), "", "...nothing is staged");
+    eq(git(repo, ["rev-parse", "HEAD"]), head, "...and HEAD is the task commit");
+  });
+}
+
+{
+  const repo = plannedRepo();
+  rejectCommitsStarting(repo, "chore: flight options");
+  const before = readFile(repo, "docs/foundry.json");
+  await withServer(repo, async ({ call }) => {
+    isError(await call("foundry_flight_options", { maxRounds: 7 }), /commit failed/, "flight_options rolls back when its commit fails: the call is an error");
+    eq(readFile(repo, "docs/foundry.json"), before, "...docs/foundry.json is byte-identical");
+    eq(git(repo, ["diff", "--cached", "--name-only"]), "", "...nothing is staged");
   });
 }
 

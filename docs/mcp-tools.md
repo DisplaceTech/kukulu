@@ -1,6 +1,6 @@
 # MCP tool reference
 
-Eighteen tools, served over stdio by `mcp/server.mjs` with no dependencies.
+Twenty-one tools, served over stdio by `mcp/server.mjs` with no dependencies.
 The server is launched by Claude Code from [`.mcp.json`](../.mcp.json) with
 `FOUNDRY_PROJECT_DIR` set to the project root; every path below is relative to
 that root.
@@ -12,13 +12,25 @@ allow rule and a `.git/info/exclude` line, never a task or a verdict; and
 `foundry_run_halt`, which it may call itself if it cannot even spawn a
 stage, so the next flight sees a clean halt instead of retrying blindly;
 and `foundry_flight_options`, which applies the operator's own go-flight
-options to the review-loop bounds. Everything else changes project state and belongs to a stage agent. (`foundry_mutate` changes a source file only for the length of one call and always restores it, and a stream's tools work in that stream's own worktree.)
+options to the review-loop bounds (and, with `resume`, lifts a round-cap
+halt); and `foundry_pr_finalize`, for the human-initiated re-sign only
+(`resign: true`, when the operator says signing is unlocked). Everything else changes project state and belongs to a stage agent. (`foundry_mutate` changes a source file only for the length of one call and always restores it, and a stream's tools work in that stream's own worktree.)
 
 `foundry_next`, `foundry_status`, `foundry_config_show` and
 `foundry_agents_sync` all resolve the merged routing config (see
 [routing.md](./routing.md)) as part of answering, so a malformed global
 config, profile or project override is a refusal from any of the four —
 deliberately: a flight must not run with a half-understood routing config.
+
+Every commit a tool makes runs with no terminal prompt and a 30-second bound,
+so a signing agent that wants a pinentry cannot hang the server. Under
+`policies.signing: "auto"` a commit that fails to sign is retried once
+unsigned, and `state.signing` and `state.signingOverride` record that signing
+was turned off for the run; under `"required"` the tool refuses instead.
+
+A tool that writes and then fails to commit leaves the tree as it found it:
+every file it wrote is restored byte for byte and nothing stays staged, so
+the same call can simply be made again.
 
 A tool that refuses returns a normal MCP result with `isError: true` and a
 plain-English message. It is not a transport error: the model is expected to
@@ -55,6 +67,9 @@ context.
 | `counts` | `{ todo, inProgress, done, blocked, skipped, total, open }`; `open = todo + inProgress` |
 | `blocked`, `skipped` | Task ids in those states |
 | `waves` | The plan's parallel waves, numbered from 1: `[{ index, streams: [{ stream, tasks, open }], valid, reason }]`. A wave is a maximal run of consecutive tasks that all carry a `{stream: <slug>}` tag on their `PROGRESS.md` line; `valid` is false, with a `reason`, when its partition cannot be proven safe (see [architecture.md](./architecture.md#parallel-workstreams)). `[]` for a plan with no streams |
+| `artifacts` | Where each of `docs/`'s `SPEC.md`, `PLAN.md`, `PROGRESS.md`, `HANDOFF.md`, `REVIEW.md`, `SUMMARY.md` and `foundry.json` stands: `"absent"`, `"untracked"` (on disk, not in git), `"modified"` (tracked, with uncommitted changes) or `"tracked"` |
+| `strayArtifacts` | The artifacts that are `"untracked"` while `PLAN.md` is `"absent"`: what an interrupted plan run leaves behind. `[]` otherwise |
+| `lastReviewCommit` | Short sha of the newest `review:` commit between `baseBranch` and `HEAD`; `null` when there is none |
 | `reviewVerdictInFile` | The verdict parsed out of `REVIEW.md`, if one exists |
 | `agentsGenerated` | Role names whose `.claude/agents/foundry-<role>.md` currently exists |
 | `agentsGeneratedThisSession` | Role names this MCP server process itself wrote — diagnostic only, for understanding why `foundry_next` reported `agentFallback` |
@@ -116,7 +131,14 @@ streams? }`.
   [architecture.md](./architecture.md#review-rounds)
 - `reason` — one sentence, written for a human reading the transcript. A
   `done` reason counts reviews and fix rounds separately: "flight complete
-  after 2 reviews (1 fix round); …" (cleanflate F-21)
+  after 2 reviews (1 fix round); …" (cleanflate F-21). After
+  [`foundry_flight_archive`](#foundry_flight_archive) it is `done` with the
+  reason "flight <slug> is archived in <dir>; edit docs/SPEC.md for the next
+  flight, then run /foundry:go-flight", until `docs/SPEC.md` differs from the
+  archived copy; then the stage is `plan` again. While
+  `foundry_pr_finalize` has recorded `state.awaitingSigning` the stage is
+  `done` with the reason "awaiting signing: <n> unsigned commit(s), oldest
+  <sha>." followed by the steps to take
 - `prompt` — the text to hand the subagent **verbatim**; the implement,
   review and summarize prompts each end with a sentence stating this run's
   policies (see `foundry_run_start`)
@@ -144,6 +166,57 @@ streams? }`.
   `stream-exclusive`.
 
 The full decision order is in [architecture.md](./architecture.md#the-stage-machine).
+
+---
+
+## `foundry_plan_commit`
+
+Validate the plan as a whole and commit it. The planner calls it last, in
+place of `git add` and `git commit`.
+
+**Arguments:** `{ renumber? }`, a boolean. `renumber: true` is for a planner
+that split a task and gave the new half a temporary suffix such as `P1-02a`:
+it renumbers every phase's `P` ids to `P<n>-01, P<n>-02, …` in document order,
+and rewrites each changed id everywhere it appears (all of `PLAN.md` and
+`PROGRESS.md` as whole words in one pass, never chained, plus the `"from"`
+values in `docs/foundry.json`), then validates the rewritten texts and commits.
+`R` ids are never renumbered. It is refused once a run has started (a
+`Started:` stamp in `PROGRESS.md`, or any task that is not `[ ]`), and when
+problems remain after the rewrite it writes nothing. Without `renumber`, a
+suffixed id is a `heading` problem whose message suggests it.
+
+**Does:** reads `docs/PLAN.md`, `docs/PROGRESS.md`, `docs/foundry.json` and
+`CLAUDE.md`, checks them together, and, only when nothing is wrong, commits
+them as `plan: derive build plan from SPEC` (through the same commit helper as
+every other tool, so an unsignable commit falls back to unsigned under
+`policies.signing: "auto"`). It writes nothing but that commit.
+
+The checks, by the name each problem carries in `check`:
+
+| `check` | Problem |
+|---|---|
+| `files` | `PLAN.md`, `PROGRESS.md` or `foundry.json` is missing |
+| `heading` | A line like a task heading (`## P0-02 …`, `### P0-02 - Title`) that is not exactly `### <ID>: <title>` |
+| `duplicate` | An id with two headings |
+| `sequence` | Within a phase, `P` ids are not `P<n>-01, P<n>-02, …` in document order with no gap (`R` ids are exempt) |
+| `depends` | A **Depends on** id with no heading, or whose heading comes later (a task depending on itself counts) |
+| `cycle` | A dependency cycle, reported once |
+| `progress` | `PROGRESS.md`'s task ids differ from `PLAN.md`'s as a set or in order |
+| `streams` | A malformed `**Stream:**` value, or any parallel wave judged invalid (`wave <n>: <reason>`) |
+| `config` | `docs/foundry.json` is not valid JSON or fails the same validation `cfg()` applies |
+| `from` | A `from` (on a constraint, `verify` or `extraVerify` entry) names an id with no heading |
+| `claude` | `CLAUDE.md` does not exist at the repository root |
+
+**Returns:** `{ commit, tasks, phases: [{ phase, tasks }], waves: [{ index,
+streams, valid }], renumbered }`. `commit` is `null` when everything is
+already committed; `renumbered` is the `{ old: new }` map of ids
+`renumber: true` changed, `{}` otherwise.
+
+**Refuses when:** any check fails. Every problem is listed at once, so one
+call shows the whole job: the message's first line counts them, then one
+numbered line each (`1. [heading] …`). The same list rides on the error reply
+as `structuredContent.problems`, `[{ check, id?, message }]`. Nothing is
+committed.
 
 ---
 
@@ -398,8 +471,11 @@ total is killed. Once the shell has exited, a leftover child still holding
 its output open gets two seconds before its group is killed. None of these
 can hang the server or take it down (cleanflate F-04, F-16).
 
-**Returns:** `{ ok, constraints: { ok, results: [{ id, ok, fixture, hits }] },
+**Returns:** `{ ok, constraints: { ok, results: [{ id, ok, fixture, hits, inactive? }] },
 results: [{ command, ok, exitCode, timedOut, timeoutMs, stdoutTail, stderrTail }] }`,
+where a rule with an unreached `from` carries `inactive: "until <id>"` and a
+command with one appears as exactly `{ cmd, skipped: "inactive until <id>" }`
+(neither is ever a failure),
 plus `recoveredMutation` (a path) when it first had to restore a file a
 crashed [`foundry_mutate`](#foundry_mutate) left edited.
 The tails are the last 60 lines of each stream, and never more than 4000
@@ -431,7 +507,7 @@ with `git checkout` — an in-tree edit the auto-mode classifier refuses for a
 reviewer told not to fix code, and one a scratch copy cannot replace for
 suites bound to the repo root (wp-env).
 
-**Arguments:** `{ file, find, replace, commands?, timeoutMs? }`.
+**Arguments:** `{ file, find, replace, commands?, timeoutMs?, targeted?, filter?, confirmKill? }`.
 
 - `file` — a repo-relative path to a tracked text file with no uncommitted
   changes
@@ -440,6 +516,18 @@ suites bound to the repo root (wp-env).
 - `replace` — the mutated text; `""` deletes the match
 - `commands` — optional: run only these commands, each spelled exactly as
   in `docs/foundry.json`'s `verify` or `extraVerify`
+- `targeted`, `filter` — optional, together: run the named
+  `mutation.targeted` command from `docs/foundry.json` instead of the file's
+  verify commands, with `{filter}` replaced by `filter` as one single-quoted
+  shell word. `filter` is 1 to 200 characters from letters, digits and
+  `_ . : / -`. Refused, before the file is touched, when only one of the two
+  is passed, when combined with `commands`, for an unknown name (the message
+  lists the configured names), or for a filter with any other character
+- `confirmKill` — optional boolean (anything else is refused). When the
+  mutant is killed, each failed command is re-run once on the restored,
+  unmutated tree. If every re-run passes the kill stands; if any fails again
+  the result is `killed: false`, `inconclusive: true` and a verdict of
+  `inconclusive: <cmd> also fails without the mutation`
 - `timeoutMs` — optional: cap every command's timeout for this call. It only
   ever shortens a configured timeout, never raises one; it is for a mutant you
   suspect makes a test hang (cleanflate F-06)
@@ -473,9 +561,13 @@ else and report the path as `recoveredMutation`, and log a
 `chore: pipeline friction (review)` so the tree is never left dirty. An unreadable sentinel is a refusal
 that tells you how to recover by hand.
 
-**Returns:** `{ file, killed, verdict, results, restored, removed, recoveredMutation }`.
+**Returns:** `{ file, killed, verdict, failedCommands, results, restored, removed, recoveredMutation }`,
+plus `confirm` (the re-run results, present only when `confirmKill` re-ran
+something) and `inconclusive: true` when a re-run failed again.
+`failedCommands` lists the command text of every failed result.
 `restored` and `removed` list the residue paths it put back or deleted.
-`killed` is true when at least one command failed — the tests noticed (a
+`killed` is true when at least one command failed (a command skipped as
+inactive until a `from` task never counts) — the tests noticed (a
 timeout counts). `verdict` is `"killed: the tests caught the mutation"` or
 `"survived: no command failed — the mechanic is untested"`; a survivor is a
 category-3 review finding. `results` has the same per-command shape as
@@ -561,7 +653,8 @@ End an implementation run and hand off to review.
    reports the result without refusing on it (cleanflate F-26).
 
 **Returns:** `{ branch, base, head, handoffCommit, stateCommit, push, pr, counts, round, constraints, readyLine }`.
-`constraints` is `{ ok, failing: [<rule ids>] }`; when any rule fails, the
+`constraints` is `{ ok, failing: [<rule ids>] }`, and a rule whose `from`
+task has not started is inactive there too; when any rule fails, the
 ready line ends with `; constraints failing: <ids>`.
 `push` is `"pushed"`, `"skipped: no origin remote"`, `"skipped: policy"`, or
 `"failed: <git's message>"` — a failed push does not fail the handoff,
@@ -608,21 +701,27 @@ it when `/foundry:go-flight` was given options such as "maximum review depth
 of 6 rounds", so the controller never hand-edits the config (cleanflate
 F-20).
 
-**Arguments:** `{ maxRounds?, maxRoundsHard? }` — positive integers, at
-least one. See [operations.md](./operations.md#configuration) for what each
+**Arguments:** `{ maxRounds?, maxRoundsHard?, resume? }` — positive integers, at
+least one; `resume` is a boolean. See [operations.md](./operations.md#configuration) for what each
 bounds.
 
 **Does:** sets the given keys in `docs/foundry.json`, leaving every other key
 as it was, and commits the file as
 `chore: flight options (maxRounds=6, maxRoundsHard=6)`. Applying the same
-values twice commits nothing. A flight already halted on a round cap stays
-halted; clearing that is still a hand edit.
+values twice commits nothing. A flight halted on a round cap stays halted
+unless `resume: true` is passed: then, if the bound passed lifts the cap that
+fired (`maxRoundsHard >= the round`, or `maxRounds` above the non-converging
+count), the same commit also clears `halted` and `haltCap` in state, subject
+`chore: flight options (<k=v>, resume)`.
 
-**Returns:** `{ before, after, commit }`. `before` and `after` are the
-effective bounds, defaults included.
+**Returns:** `{ before, after, commit }`, plus `resumed: true` after a resume.
+`before` and `after` are the effective bounds, defaults included.
 
 **Refuses when:** neither key is given; a value is not a positive integer;
-or `docs/foundry.json` does not exist yet (before the plan stage).
+`docs/foundry.json` does not exist yet (before the plan stage); or, with
+`resume`, the flight is not halted, the halt is not a round-cap halt (a
+stream-merge or operator halt is never cleared this way), or the bound passed
+would not lift the cap that fired.
 
 ---
 
@@ -671,7 +770,9 @@ list of what logs itself.
 
 ## `foundry_review_submit`
 
-Record a verdict. Call it exactly once per review.
+Record a verdict. Call it exactly once per review. It is all-or-nothing: if its
+commit fails, every file it wrote is restored, nothing stays staged, and
+calling it again is safe.
 
 **Arguments:**
 
@@ -737,21 +838,117 @@ task that does not exist or is not blocked or skipped.
 
 ## `foundry_summary_commit`
 
-**Arguments:** none.
+**Arguments:** `content` (optional string): the full text of `docs/SUMMARY.md`.
+This is the preferred form: the tool writes the file itself (adding a final
+newline), so the summarizer never needs `Write`. It must be non-empty and
+under 1 MiB. Without it the tool commits the file already on disk, as in 0.4.0.
 
 **Does:** marks the flight complete, commits `docs/SUMMARY.md` as
 `chore: build summary`, and pushes the branch per `policies.push` (F-18).
 
-**Returns:** `{ commit, branch, base, head, reviews, fixRounds, push, pr }`.
-`reviews` is how many reviews the flight took and `fixRounds` how many fix
+**Returns:** `{ commit, branch, base, head, reviews, fixRounds, push, pr, archive }`.
+`archive` is `policies.archive`, so the summarizer reads the policy from the
+result: when it is true, call [`foundry_flight_archive`](#foundry_flight_archive)
+next. `reviews` is how many reviews the flight took and `fixRounds` how many fix
 rounds came between them; after an approval, reviews = fixRounds + 1. `pr`
 is the branch's pull request from `gh pr view`, as `{ url, state, draft,
 base }`, with `expectedBase` added when it does not target `baseBranch`.
 Otherwise it is `"none"`, `"skipped: policy"` or `"unknown: <why>"` (`gh`
 missing or failing). This is never a refusal (cleanflate F-25).
 
-**Refuses when:** `SUMMARY.md` does not exist, or the recorded verdict is not
-`APPROVED`.
+**Refuses when:** the recorded verdict is not `APPROVED` (before anything is
+written); `content` is not a string, is empty after trimming, or is 1 MiB or
+more; or `content` is absent and `SUMMARY.md` does not exist.
+
+---
+
+## `foundry_flight_archive`
+
+Archive a summarized flight so the repository can run its next one.
+
+**Arguments:** `{ slug? }`, lowercase letters, digits and `-`, at most 40
+characters. It defaults to the `flight` key in `docs/foundry.json`; with
+neither, the tool refuses.
+
+**Does:** moves `docs/PLAN.md`, `docs/PROGRESS.md`, `docs/HANDOFF.md`,
+`docs/REVIEW.md`, `docs/SUMMARY.md`, `docs/foundry.json`,
+`.foundry/state.json` and `.foundry/feedback.jsonl` (each one that exists)
+into `docs/flights/<slug>/` (`git mv` for a tracked file, a plain rename for
+an untracked one), copies `docs/SPEC.md` there (the live spec stays), writes
+a fresh `.foundry/state.json` that records `archived: { slug, dir, at }` and
+carries `signingOverride` over, commits everything as `chore: archive flight
+<slug>`, and pushes the branch per the push policy. If the commit fails,
+every file is put back and the empty archive directory removed.
+
+After it, `foundry_next` reports `done` until `docs/SPEC.md` is edited, then
+`plan`.
+
+**Returns:** `{ slug, dir, moved, copied, commit, push }`.
+
+**Refuses when** (in this order, before anything moves): there is no slug;
+the slug is malformed; the flight is not summarized; the implement lock is
+armed; the working tree is dirty (apart from files that were untracked before
+the run started); or `docs/flights/<slug>/` already exists.
+
+---
+
+## `foundry_pr_finalize`
+
+End a flight: mark its draft pull request ready and, unless the flight is
+breaking, ask GitHub to merge it once its checks pass. Foundry never merges a
+pull request itself; the only `gh pr merge` it ever runs carries `--auto`.
+
+**Arguments:** `{ breaking, resign? }`, booleans. `breaking` is required on
+the first call; later calls reuse the remembered `state.breaking`. `resign` is
+human-initiated only: no agent passes it on its own (see below).
+
+**Refuses when** (before anything is written): the summary is not committed
+(`state.summarized`, or, after an archive, the archived `state.json`); `breaking` is
+not a boolean or was never given; or there is no merge base with `baseBranch`.
+After an archive it reads `docs/flights/<slug>/foundry.json` for the config.
+
+**`resign: true`** is for an operator who has unlocked the signing agent after
+an awaiting-signing result. After the preconditions and before the signed
+check it: refuses a dirty tree (apart from files untracked before the run) or
+being on `baseBranch`; unsets the local `commit.gpgsign` override a fallback
+left behind, then proves signing with the `required` probe (on failure the
+override goes back and the probe's refusal is returned); runs `git rebase -f
+--rebase-merges --gpg-sign <merge-base>` (no prompts, bounded by
+`commandTimeoutMs`; on failure it aborts the rebase, restores the override and
+refuses with git's first lines); re-runs the signed check and refuses, naming
+the count and oldest sha, if anything is still unsigned (the rewritten branch
+is left as it is); force-pushes with `--force-with-lease` per the push policy,
+reported as `resignPush`; clears `awaitingSigning` and `signingOverride`,
+records `signing: "on"`, and carries on into the all-signed path below.
+The result has `resigned: true`.
+
+**Signed check.** It runs `git log --format='%H %G?' <merge-base>..HEAD`. A
+commit whose `%G?` is `N` (none) or `B` (bad) is unsigned; anything else,
+`E` (the signature cannot be checked here) included, is signed. It judges the
+commits themselves, never `state.signing`.
+
+**Any unsigned commit.** The pull request stays a draft. It records
+`state.awaitingSigning = { unsigned, first, since }` (`since` is kept across
+calls), logs one `signing` feedback entry the first time, appends an
+`## Awaiting signing` section with the steps to the flight's `SUMMARY.md`
+(once), commits as `chore: awaiting signing`, and pushes per policy.
+`foundry_next` then reports `done` with the reason `awaiting signing: …`.
+Returns `{ signed, unsigned, ready: false, merge: "skipped: awaiting signing",
+breaking, awaitingSigning, resigned: false, push, pr, next }`; `next` is
+the instruction to unlock the signing agent and finalize again.
+
+**All signed.** It records `breaking`, clears `awaitingSigning`, (if signing was
+switched off for the run, unsets the local `commit.gpgsign` and records
+`signing: "on"`), commits `chore: finalize flight` (and takes the unsigned path
+if that very commit came out unsigned), pushes, and then, when `policies.pr` is
+`draft` and the pull request exists, follows `policies.finalize`: `"auto"` runs
+`gh pr ready` and then `gh pr merge --auto --<policies.mergeMethod>`;
+`"ready"` runs only `gh pr ready`; `"draft"` changes nothing.
+Returns `{ signed, unsigned: 0, ready, merge, breaking, awaitingSigning: null,
+resigned: false, push, pr }`. `ready` is true when the pull request ends up
+not a draft. `merge` is `"enabled"`, `"skipped: breaking"`, `"skipped: policy"`,
+`"skipped: no pull request"`, or `"unavailable: <gh's first stderr line>"`
+(the pull request is left ready).
 
 ---
 

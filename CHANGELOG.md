@@ -4,6 +4,113 @@ All notable changes to this plugin. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] — 2026-10-07
+
+The end of a flight, finished: three new tools, new config keys, and the fixes
+from the first flights on 0.4.0. **Breaking changes** are listed last.
+
+The 0.4.0 flights were two project-c batches and two project-d
+flights. Their friction is in
+[`docs/feedback/2026-10-07-project-c.md`](./docs/feedback/2026-10-07-project-c.md)
+and
+[`docs/feedback/2026-10-07-project-d.md`](./docs/feedback/2026-10-07-project-d.md),
+and every item is mapped to what closed it in Appendix A of
+[`docs/SPEC.md`](./docs/SPEC.md).
+
+This is a minor version and not a patch: the server goes from eighteen tools
+to twenty-one, `docs/foundry.json` gains keys (`flight`, `mutation.targeted`,
+`policies.archive`, `policies.finalize`, `policies.mergeMethod`, and `from` on
+constraints and commands), a flight now has an end-of-flight lifecycle
+(archive, finalize, awaiting signing), and the default model for three roles
+changes.
+
+### Added
+
+- **`foundry_plan_commit`** validates `PLAN.md`, `PROGRESS.md`, `foundry.json`
+  and `CLAUDE.md` together, lists every problem at once (also as
+  `structuredContent.problems`), and commits the plan; `renumber: true`
+  rewrites a split task's temporary id (`P1-02a`) everywhere. The planner no
+  longer runs `git commit` (project-d F-03, project-c F-07).
+- **`foundry_flight_archive`** moves a summarized flight into
+  `docs/flights/<slug>/`, keeps the live `SPEC.md`, and writes a fresh state,
+  so the repository can run its next flight; `foundry_next` stays `done` until
+  the spec is edited. `flight` names the flight and `policies.archive`
+  (a ⚠️ ASSUMPTION, default `false`) makes the summarizer call it
+  (project-c F-20, cleanflate F-12 and F-27).
+- **`foundry_pr_finalize`** ends a flight. It checks that every commit is
+  signed, from the commits and not from state (`%G?`: `N` and `B` are
+  unsigned, `E` is signed). A signed flight's draft PR is marked ready and, unless
+  `breaking`, set to auto-merge; an unsigned one stays a draft, records
+  `awaitingSigning`, and `foundry_next` reports `done` until a human unlocks
+  the signing agent and says so (`resign: true`, human-initiated only).
+  `policies.finalize` and `policies.mergeMethod` shape it (operator request;
+  project-d F-03).
+- **`foundry_summary_commit` takes `content`** and writes `docs/SUMMARY.md`
+  itself, and reports `archive` (project-c F-03, F-05, F-06, F-10, F-11,
+  F-14, F-15, F-19, F-23; project-d F-02, F-06).
+- **`from` on a constraint or a `verify`/`extraVerify` command** keeps it
+  inactive until a named task starts, and it still self-tests its fixtures
+  (project-d F-01, project-c F-21).
+- **`mutation.targeted`** names filterable test commands; `foundry_mutate`
+  takes `targeted` and `filter` and runs one instead of the whole suite
+  (project-c F-12, F-17, F-22).
+- **`foundry_mutate` names `failedCommands` and takes `confirmKill`**, which
+  re-runs a kill on the unmutated tree and reports a test that fails anyway as
+  `inconclusive` (project-c F-02).
+- **`foundry_status` reports `artifacts`, `strayArtifacts` and
+  `lastReviewCommit`** (project-c F-04, F-16).
+- **`foundry_flight_options({ ..., resume: true })`** lifts a round-cap halt
+  in one call; the halt message names it, with a correct ordinal
+  (project-c F-13, F-18).
+
+### Changed
+
+- **Every commit the server makes goes through one helper** that cannot hang on
+  a pinentry: no terminal prompt, a 30-second bound, and under
+  `policies.signing: "auto"` one retry unsigned, recorded in `state.signing`
+  and `state.signingOverride` (project-d F-03, F-05).
+- **A tool whose commit fails leaves the tree as it found it.**
+  `foundry_review_submit` in particular is now all-or-nothing and safe to call
+  again (project-d F-04).
+- **The reviewer prefers targeted mutants, confirms suspicious kills, and
+  scopes rounds after the first** to the diff since the last review, with
+  survivors outside it as advisory notes (project-c F-16).
+- **The summarizer lifts `## Codebase notes`** into the summary, and the
+  implementer keeps project lessons out of the feedback log (project-c
+  F-08, F-09).
+- **The planner edits one `## Flight <slug> notes` section** of an existing
+  `CLAUDE.md` instead of re-capping the file, and quotes `foundry.json` with
+  constraints listed by id (project-c F-01, F-20).
+- **The plugin's own checks skip flight artifacts**, so this repository's
+  `docs/SPEC.md` and `docs/PLAN.md` no longer fail `npm test` or
+  `pre-commit run --all-files`.
+- Documentation: the tool reference, README, operations (new "Running flight
+  after flight" and "Signing" sections), architecture, writing-specs
+  (rules that become true at a task, targeted test commands, provenance
+  logging with a `commit-msg` hook; cleanflate F-01) and the templates.
+
+### Fixed
+
+- A planner commit, or any server commit, whose signing agent wants a pinentry
+  no longer hangs the flight (project-d F-03).
+- `foundry_review_submit` no longer leaves PLAN, PROGRESS and state half
+  applied when its commit fails (project-d F-04).
+
+### Breaking changes
+
+- **The default planner, reviewer and summarizer are `opus`** (the implementer
+  stays `sonnet`), where 0.4.0 used `fable`. `fable` is still a legal alias in
+  any routing config. Operator request.
+- **The summarizer no longer writes `docs/SUMMARY.md` itself.** It passes the
+  text as `content` to `foundry_summary_commit`, and the skill forbids a
+  `Write` or heredoc. A custom summarize prompt that wrote the file still works
+  with a file on disk, but the shipped skill does not.
+- **`policies.finalize` defaults to `"auto"`: a signed, non-breaking flight's
+  pull request is now marked ready and set to auto-merge once CI is green.**
+  Foundry still never merges synchronously (`gh pr merge` only ever runs with
+  `--auto`). Set `policies.finalize` to `"ready"` or `"draft"`, or
+  `policies.pr` to `"none"`, to keep the 0.4.0 behavior. Operator request.
+
 ## [0.4.0] — 2026-09-30
 
 Parallel workstreams, the fixes from the first real flights on 0.3.2, and a

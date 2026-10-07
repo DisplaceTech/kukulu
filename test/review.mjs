@@ -2,10 +2,13 @@
 // foundry_summary_commit. This is where a judgment call becomes queued work,
 // so the tool is strict about what a finding must carry before it counts.
 
+import fs from "node:fs";
+import path from "node:path";
+import { spawnSync } from "node:child_process";
 import {
   finish, ok, eq, like, isError,
   plannedRepo, withServer, readFile, writeFile, subject, hasFile,
-  markTasks, setState, git, mkBareRemote,
+  markTasks, setState, git, mkBareRemote, mkFakeGhBin, mkFakeGpg, useFakeSigner,
 } from "./harness.mjs";
 
 const TODAY = new Date().toISOString().slice(0, 10);
@@ -265,6 +268,10 @@ async function driveRounds(call, repo, counts) {
     const r = await driveRounds(call, repo, [4, 4, 4]);
     like(r.halted, /non-converging/, "three rounds that never shrink halt on the third");
     like(r.halted, /reaching maxRounds=2/, "the message names the exceeded cap");
+    like(r.halted, /the 3rd non-converging round|the 2nd non-converging round/, "the message uses a correct ordinal");
+    like(r.halted, /foundry_flight_options\(\{ maxRounds: 3, resume: true \}\)/, "...and names the call that resumes the flight");
+    ok(!r.halted.includes("edit .foundry/state.json"), "...and no longer tells the operator to edit state by hand");
+    eq(JSON.stringify(JSON.parse(readFile(repo, ".foundry/state.json")).haltCap), JSON.stringify({ cap: "maxRounds", round: 3, nonConverging: 2 }), "...and state.haltCap records the cap");
     like(r.halted, /findings per round: 4 → 4 → 4/, "the message shows the trail of counts");
     const n = await call("foundry_next");
     eq(n.stage, "halt", "the flight now halts");
@@ -288,6 +295,8 @@ async function driveRounds(call, repo, counts) {
   await withServer(repo, async ({ call }) => {
     const r = await driveRounds(call, repo, [10, 5, 2]);
     like(r.halted, /hard cap maxRoundsHard=2/, "the hard cap fires on round 3 even while every round is converging, since maxRounds=100 would never trip");
+    like(r.halted, /foundry_flight_options\(\{ maxRoundsHard: 3, resume: true \}\)/, "the hard-cap halt names its resume call");
+    eq(JSON.stringify(JSON.parse(readFile(repo, ".foundry/state.json")).haltCap), JSON.stringify({ cap: "maxRoundsHard", round: 3 }), "...and records haltCap");
     const entry = JSON.parse(readFile(repo, ".foundry/feedback.jsonl").trim());
     eq(entry.category, "round-cap", "the hard-cap halt is logged the same way as a non-converging one");
   });
@@ -618,6 +627,492 @@ const untouched = (repo, head) => {
   writeFile(repo, ".foundry/mutation.json", "{not json");
   await withServer(repo, async ({ call }) => {
     isError(await call("foundry_verify"), /unreadable[\s\S]*git checkout HEAD -- <file>/, "an unreadable sentinel is loud, and says how to recover by hand");
+  });
+}
+
+{
+  const repo = reviewableRepo({ config: { maxRounds: 3 } });
+  await withServer(repo, async ({ call }) => {
+    const r = await driveRounds(call, repo, [4, 4, 4, 4]);
+    like(r.halted, /the 3rd non-converging round/, "a soft cap reached on the third non-converging round reads 3rd, not 3th");
+  });
+}
+
+{
+  // mutant (a): {filter} substituted without its single quotes
+  const repo = mutationRepo({ config: { mutation: { targeted: { unit: { cmd: "printf '%s\\n' {filter}" } } } } });
+  await withServer(repo, async ({ call }) => {
+    const r = await call("foundry_mutate", { file: "src/add.mjs", find: "a + b", replace: "a - b", targeted: "unit", filter: "tests\\Unit\\FooTest" });
+    like(r.results[0].stdoutTail, /tests\\Unit\\FooTest/, "a targeted filter is passed as one single-quoted word (backslashes arrive verbatim)");
+  });
+}
+
+{
+  // mutant (c): the 11th-13th ordinal special case
+  const repo = reviewableRepo({ config: { maxRounds: 11, maxRoundsHard: 100 } });
+  await withServer(repo, async ({ call }) => {
+    const r = await driveRounds(call, repo, Array(12).fill(4));
+    like(r.halted, /the 11th non-converging round/, "an 11th non-converging round reads 11th");
+    ok(!String(r.halted).includes("11st"), "...not 11st");
+  });
+}
+
+// ---------------------------------------------------------------- failedCommands and confirmKill
+
+{
+  const repo = mutationRepo();
+  await withServer(repo, async ({ call }) => {
+    const base = { file: "src/add.mjs", find: "a + b", replace: "a - b" };
+    let r = await call("foundry_mutate", base);
+    eq(r.failedCommands.join("|"), "node test/add.test.mjs", "failedCommands names what failed");
+    ok(r.confirm === undefined, "...and nothing is re-run without confirmKill");
+    r = await call("foundry_mutate", { ...base, confirmKill: true });
+    eq(r.killed, true, "a confirmed kill stands");
+    ok(r.confirm.length === 1 && r.confirm.every((c) => c.ok), "...with every confirm re-run ok");
+    r = await call("foundry_mutate", { ...base, find: "() => 1", replace: "() => 2", confirmKill: true });
+    eq(r.killed, false, "a survivor stays a survivor");
+    ok(r.confirm === undefined && r.failedCommands.length === 0, "confirmKill on a survivor re-runs nothing");
+    isError(await call("foundry_mutate", { ...base, confirmKill: "yes" }), /confirmKill must be a boolean/, "a non-boolean confirmKill is refused");
+  });
+}
+
+{
+  const repo = mutationRepo({ config: { verify: ["false"] } });
+  await withServer(repo, async ({ call }) => {
+    const r = await call("foundry_mutate", { file: "src/add.mjs", find: "a + b", replace: "a - b", confirmKill: true });
+    eq(r.killed, false, "a kill by a command that always fails is not a kill");
+    eq(r.inconclusive, true, "...it is inconclusive");
+    like(r.verdict, /^inconclusive: false also fails without the mutation/, "...and the verdict names the command");
+  });
+}
+
+// ---------------------------------------------------------------- targeted mutation commands
+
+{
+  const repo = mutationRepo({ config: { verify: ["false"], mutation: { targeted: { unit: { cmd: "echo FILTER={filter}" } } } } });
+  const head = git(repo, ["rev-parse", "HEAD"]);
+  await withServer(repo, async ({ call }) => {
+    const base = { file: "src/add.mjs", find: "a + b", replace: "a - b" };
+    const r = await call("foundry_mutate", { ...base, targeted: "unit", filter: "tests/Unit/FooTest.php" });
+    eq(r.killed, false, "a targeted command runs instead of verify (verify's false never ran)");
+    like(r.results[0].stdoutTail, /FILTER=tests\/Unit\/FooTest\.php/, "...and its stdout carries the substituted filter");
+    for (const [args, re, label] of [
+      [{ targeted: "unit" }, /targeted and filter must be passed together/, "targeted without filter"],
+      [{ filter: "x" }, /targeted and filter must be passed together/, "filter without targeted"],
+      [{ targeted: "unit", filter: "x", commands: ["false"] }, /cannot be combined with commands/, "targeted with commands"],
+      [{ targeted: "nope", filter: "x" }, /unknown targeted command "nope".*unit/, "an unknown name"],
+      [{ targeted: "unit", filter: "a;rm -rf x" }, /filter must be 1 to 200 characters/, "a shell-metacharacter filter"],
+    ]) {
+      isError(await call("foundry_mutate", { ...base, ...args }), re, `targeted: ${label} is refused`);
+      eq(readFile(repo, "src/add.mjs"), ADD_SRC, "...and the file is unchanged");
+    }
+    untouched(repo, head);
+  });
+}
+
+{
+  const repo = mutationRepo();
+  await withServer(repo, async ({ call }) => {
+    isError(await call("foundry_mutate", { file: "src/add.mjs", find: "a + b", replace: "a - b", targeted: "unit", filter: "x" }), /No targeted commands are configured/, "targeted with nothing configured says so");
+  });
+}
+
+for (const [mutation, re, label] of [
+  [{ targeted: { php: { cmd: "phpunit" } } }, /mutation\.targeted\.php\.cmd must contain \{filter\} exactly once/, "{filter} absent"],
+  [{ targeted: { php: { cmd: "phpunit {filter} {filter}" } } }, /exactly once/, "{filter} twice"],
+  [{ other: {} }, /mutation has an unknown key 'other'/, "an unknown key under mutation"],
+  [{ targeted: { php: { cmd: "x {filter}", extra: 1 } } }, /mutation\.targeted\.php has an unknown key 'extra'/, "an unknown key in an entry"],
+  [{ targeted: { php: { cmd: "x {filter}", timeoutMs: 1.5 } } }, /mutation\.targeted\.php\.timeoutMs must be a positive integer/, "a non-integer timeoutMs"],
+]) {
+  const repo = mutationRepo({ config: { mutation } });
+  await withServer(repo, async ({ call }) => {
+    isError(await call("foundry_mutate", { file: "src/add.mjs", find: "a + b", replace: "a - b" }), re, `mutation config refuses ${label}`);
+  });
+}
+
+// ---------------------------------------------------------------- flight_archive (S-07)
+
+const ARCHIVE_FILES = ["docs/PLAN.md", "docs/PROGRESS.md", "docs/HANDOFF.md", "docs/REVIEW.md", "docs/SUMMARY.md", "docs/foundry.json", ".foundry/state.json", ".foundry/feedback.jsonl"];
+
+/** A summarized flight on a build branch, every artifact committed. */
+function summarizedRepo({ config = { flight: "w1-share" }, state = {} } = {}) {
+  const repo = plannedRepo({ config });
+  git(repo, ["checkout", "-q", "-b", `build/${TODAY}`]);
+  markTasks(repo, ALL_DONE);
+  writeFile(repo, "docs/HANDOFF.md", "# handoff\n");
+  writeFile(repo, "docs/REVIEW.md", "# Review\nRound: 1\n**Verdict**: APPROVED\n");
+  writeFile(repo, "docs/SUMMARY.md", "# summary\n");
+  writeFile(repo, ".foundry/feedback.jsonl", '{"at":"x","stage":"implement","round":0,"category":"other","message":"m","source":"agent"}\n');
+  setState(repo, { round: 0, implemented: true, reviewed: true, verdict: "APPROVED", summarized: true, ...state });
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-qm", "chore: build summary"]);
+  return repo;
+}
+
+const snapshot = (repo) => Object.fromEntries(ARCHIVE_FILES.map((f) => [f, hasFile(repo, f) ? readFile(repo, f) : null]));
+
+{
+  const repo = summarizedRepo({ config: {} });
+  await withServer(repo, async ({ call }) => {
+    isError(await call("foundry_flight_archive"), /pass slug, or set "flight" in docs\/foundry\.json/, "archive refuses with no slug and no flight key");
+    isError(await call("foundry_flight_archive", { slug: "Bad_Slug" }), /slug must match/, "...and a malformed slug");
+    ok(hasFile(repo, "docs/PLAN.md") && !hasFile(repo, "docs/flights"), "...and nothing moved");
+  });
+}
+
+{
+  const repo = summarizedRepo({ state: { summarized: false } });
+  await withServer(repo, async ({ call }) => {
+    isError(await call("foundry_flight_archive"), /not summarized yet/, "archive refuses before the summary");
+    writeFile(repo, ".foundry/implement.lock", "0\n");
+    setState(repo, { summarized: true });
+    git(repo, ["add", "-A"]);
+    git(repo, ["commit", "-qm", "state"]);
+    isError(await call("foundry_flight_archive"), /implement\.lock exists/, "...and while the lock is armed");
+    fs.rmSync(path.join(repo, ".foundry/implement.lock"));
+    writeFile(repo, "docs/PLAN.md", readFile(repo, "docs/PLAN.md") + "edit\n");
+    isError(await call("foundry_flight_archive"), /working tree is not clean/, "...and with a modified tracked file");
+    git(repo, ["checkout", "--", "docs/PLAN.md"]);
+    writeFile(repo, "docs/flights/w1-share/x.txt", "x");
+    git(repo, ["add", "-A"]);
+    git(repo, ["commit", "-qm", "occupied"]);
+    isError(await call("foundry_flight_archive"), /docs\/flights\/w1-share already exists/, "...and when the destination exists");
+    ok(hasFile(repo, "docs/PLAN.md"), "...nothing moved in any refusal");
+  });
+}
+
+{
+  const repo = summarizedRepo({ state: { signingOverride: true } });
+  const before = snapshot(repo);
+  git(repo, ["remote", "add", "origin", mkBareRemote()]);
+  await withServer(repo, async ({ call }) => {
+    const r = await call("foundry_flight_archive");
+    eq(r.dir, "docs/flights/w1-share", "archive moves the flight: the directory");
+    eq(r.moved.length, 8, "...all eight files are moved");
+    for (const f of ARCHIVE_FILES) eq(readFile(repo, `docs/flights/w1-share/${path.basename(f)}`), before[f], `...${f} arrived byte-identical`);
+    eq(subject(repo), "chore: archive flight w1-share", "...in one commit");
+    ok(!hasFile(repo, "docs/PLAN.md") && !hasFile(repo, "docs/foundry.json"), "...docs/PLAN.md and foundry.json are gone");
+    eq(readFile(repo, "docs/SPEC.md"), readFile(repo, "docs/flights/w1-share/SPEC.md"), "...and docs/SPEC.md stays, with an identical copy");
+    const st = JSON.parse(readFile(repo, ".foundry/state.json"));
+    eq(st.archived.slug, "w1-share", "...the fresh state records the archive");
+    ok(st.summarized === false && st.round === 0 && st.verdict === null && st.rounds.length === 0, "...and is otherwise the default state");
+    eq(st.signingOverride, true, "signingOverride is carried over");
+    eq(git(repo, ["status", "--porcelain"]), "", "...the tree is clean");
+    eq(r.push, "pushed", "push follows policy");
+    eq(git(repo, ["rev-parse", `origin/build/${TODAY}`]), git(repo, ["rev-parse", "HEAD"]), "...and the remote has the archive commit");
+  });
+}
+
+{
+  const repo = summarizedRepo();
+  await withServer(repo, async ({ call }) => {
+    const r = await call("foundry_flight_archive", { slug: "other" });
+    eq(r.dir, "docs/flights/other", "a slug argument wins over flight");
+    like(subject(repo), /archive flight other/, "...and names the commit");
+  });
+}
+
+{
+  const repo = summarizedRepo();
+  git(repo, ["rm", "-q", "--cached", "docs/HANDOFF.md"]);
+  git(repo, ["commit", "-qm", "untrack handoff"]);
+  setState(repo, { preexistingUntracked: ["docs/HANDOFF.md"] });
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-qm", "state"]);
+  await withServer(repo, async ({ call }) => {
+    const r = await call("foundry_flight_archive");
+    ok(!r.error && hasFile(repo, "docs/flights/w1-share/HANDOFF.md") && !hasFile(repo, "docs/HANDOFF.md"), "a pre-existing untracked artifact is moved with mv");
+    eq(git(repo, ["status", "--porcelain"]), "", "...and the tree ends clean");
+  });
+}
+
+{
+  // a failed archive commit restores everything
+  const repo = summarizedRepo();
+  const hook = path.join(repo, ".git", "hooks", "commit-msg");
+  fs.mkdirSync(path.dirname(hook), { recursive: true });
+  fs.writeFileSync(hook, `#!/bin/sh\nif head -n1 "$1" | grep -q '^chore: archive'; then echo rejected >&2; exit 1; fi\n`);
+  fs.chmodSync(hook, 0o755);
+  const before = snapshot(repo);
+  const head = git(repo, ["rev-parse", "HEAD"]);
+  await withServer(repo, async ({ call }) => {
+    isError(await call("foundry_flight_archive"), /commit failed/, "a failed archive commit is an error");
+    const after = snapshot(repo);
+    ok(ARCHIVE_FILES.every((f) => after[f] === before[f]), "...and every source is back, byte-identical");
+    ok(!hasFile(repo, "docs/flights/w1-share"), "...the archive directory does not exist");
+    eq(git(repo, ["diff", "--cached", "--name-only"]), "", "...nothing is staged");
+    eq(git(repo, ["rev-parse", "HEAD"]), head, "...and HEAD did not move");
+  });
+}
+
+for (const [archive, want] of [[undefined, false], [true, true]]) {
+  const repo = reviewableRepo({ verdict: "APPROVED", config: archive === undefined ? {} : { policies: { archive } } });
+  await withServer(repo, async ({ call }) => {
+    await call("foundry_review_submit", { verdict: "APPROVED" });
+    const r = await call("foundry_summary_commit", { content: "# s\n" });
+    eq(r.archive, want, `summary_commit returns archive: ${want}`);
+  });
+}
+
+// ---------------------------------------------------------------- pr_finalize (S-14)
+
+const DRAFT_PR = '{"url":"https://github.invalid/pull/1","state":"OPEN","isDraft":true,"baseRefName":"main"}\n';
+
+/** A summarized build branch with a bare origin and a fake gh holding a draft PR. `signed` signs every commit on it. */
+function finalizeRepo({ signed = false, policies = {}, summarized = true } = {}) {
+  const repo = plannedRepo({ config: { policies } });
+  git(repo, ["checkout", "-q", "-b", "build/x"]);
+  if (signed) useFakeSigner(repo, mkFakeGpg());
+  writeFile(repo, "docs/SUMMARY.md", "# summary\n");
+  writeFile(repo, "hello.txt", "hi\n");
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-qm", "P0-01: hello"]);
+  setState(repo, { summarized, verdict: "APPROVED" });
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-qm", "chore: build summary"]);
+  git(repo, ["remote", "add", "origin", mkBareRemote()]);
+  const ghDir = mkFakeGhBin();
+  writeFile(ghDir, "pr.json", DRAFT_PR);
+  return { repo, ghDir, opts: { env: { PATH: `${ghDir}:${process.env.PATH}` } } };
+}
+
+const ghCalls = (ghDir) => readFile(ghDir, "calls.log").split("\n").filter(Boolean);
+
+{
+  const { repo, opts } = finalizeRepo({ summarized: false });
+  const before = readFile(repo, ".foundry/state.json");
+  await withServer(repo, async ({ call }) => {
+    isError(await call("foundry_pr_finalize", { breaking: false }), /summary is not committed yet/, "finalize is refused before the summary is committed");
+    setState(repo, { summarized: true });
+    isError(await call("foundry_pr_finalize", {}), /breaking is required on the first call/, "the first call without breaking is refused");
+    isError(await call("foundry_pr_finalize", { breaking: "no" }), /breaking must be a boolean/, "a non-boolean breaking is refused");
+    eq(JSON.parse(readFile(repo, ".foundry/state.json")).breaking, undefined, "...and state records no breaking");
+    ok(before.length > 0, "...state existed");
+  }, opts);
+}
+
+{
+  const { repo, opts } = finalizeRepo();
+  await withServer(repo, async ({ call }) => {
+    const r = await call("foundry_pr_finalize", { breaking: false });
+    ok(r.awaitingSigning && r.awaitingSigning.unsigned >= 1, "an unsigned commit keeps the PR draft: awaitingSigning counts it");
+    eq(r.ready, false, "...ready is false");
+    eq(r.merge, "skipped: awaiting signing", "...and merge is skipped");
+    like(r.next, /foundry_pr_finalize\(\{ resign: true \}\)/, "...next names the resign call");
+    like(r.next, /git rebase -f --rebase-merges --gpg-sign/, "...and the by-hand rebase");
+    const st = JSON.parse(readFile(repo, ".foundry/state.json"));
+    ok(st.awaitingSigning && st.breaking === false, "...state records awaitingSigning and breaking");
+    const signing = readFile(repo, ".foundry/feedback.jsonl").trim().split("\n").map((l) => JSON.parse(l)).filter((e) => e.category === "signing");
+    eq(signing.length, 1, "...exactly one signing feedback entry");
+    eq(readFile(repo, "docs/SUMMARY.md").split("## Awaiting signing").length - 1, 1, "...SUMMARY.md has the awaiting section once");
+    const n = await call("foundry_next");
+    eq(n.stage, "done", "foundry_next is done");
+    like(n.reason, /^awaiting signing:/, "...with an awaiting signing reason");
+    const since = st.awaitingSigning.since;
+    await call("foundry_pr_finalize", { breaking: false });
+    const again = JSON.parse(readFile(repo, ".foundry/state.json"));
+    eq(again.awaitingSigning.since, since, "a second call keeps since");
+    eq(readFile(repo, ".foundry/feedback.jsonl").trim().split("\n").length, 1, "...and adds no feedback entry");
+    eq(readFile(repo, "docs/SUMMARY.md").split("## Awaiting signing").length - 1, 1, "...nor a second section");
+    eq(ghCalls(opts.env.PATH.split(":")[0]).filter((c) => c.startsWith("pr ready") || c.startsWith("pr merge")).length, 0, "gh never marked it ready or merged");
+  }, opts);
+}
+
+for (const [label, args, policies, expect, mergeFails] of [
+  ["auto, not breaking", { breaking: false }, {}, { calls: ["pr ready", "pr merge --auto --merge"], merge: "enabled", ready: true }],
+  ["squash", { breaking: false }, { mergeMethod: "squash" }, { calls: ["pr ready", "pr merge --auto --squash"], merge: "enabled", ready: true }],
+  ["breaking", { breaking: true }, {}, { calls: ["pr ready"], merge: "skipped: breaking", ready: true }],
+  ["finalize ready", { breaking: false }, { finalize: "ready" }, { calls: ["pr ready"], merge: "skipped: policy", ready: true }],
+  ["finalize draft", { breaking: false }, { finalize: "draft" }, { calls: [], merge: "skipped: policy", ready: false }],
+  ["merge unavailable", { breaking: false }, {}, { calls: ["pr ready", "pr merge --auto --merge"], merge: "unavailable: auto-merge is not allowed", ready: true }, "auto-merge is not allowed\nsecond line\n"],
+]) {
+  const { repo, ghDir, opts } = finalizeRepo({ signed: true, policies });
+  if (mergeFails) writeFile(ghDir, "merge-fails", mergeFails);
+  await withServer(repo, async ({ call }) => {
+    const r = await call("foundry_pr_finalize", args);
+    eq(r.unsigned, 0, `all signed, ${label}: no unsigned commits`);
+    eq(r.merge, expect.merge, `...merge is ${expect.merge}`);
+    eq(r.ready, expect.ready, `...ready is ${expect.ready}`);
+    const calls = ghCalls(ghDir).filter((c) => c.startsWith("pr ready") || c.startsWith("pr merge"));
+    eq(calls.join("|"), expect.calls.join("|"), "...and the gh calls are exactly those");
+    ok(calls.every((c) => !c.startsWith("pr merge") || c.includes("--auto")), "...no merge without --auto");
+  }, opts);
+}
+
+for (const [verify, want] of [["err", 0], ["bad", 2]]) {
+  const { repo, opts } = finalizeRepo({ signed: true });
+  await withServer(repo, async ({ call }) => {
+    const r = await call("foundry_pr_finalize", { breaking: false });
+    if (want === 0) eq(r.unsigned, 0, "E counts as signed");
+    else ok(r.unsigned >= want, "B does not: every signed commit counts as unsigned");
+  }, { env: { ...opts.env, FAKE_GPG_VERIFY: verify } });
+}
+
+{
+  // mutant (d): the all-signed branch clearing the signing override
+  const { repo, opts } = finalizeRepo({ signed: true });
+  const gpg = mkFakeGpg();
+  setState(repo, { signingOverride: true, signing: "off (probe failed: x)" });
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-qm", "chore: override recorded"]);
+  git(repo, ["config", "--local", "commit.gpgsign", "false"]);
+  const env = { ...opts.env, GIT_CONFIG_GLOBAL: fakeSignerGlobal(gpg) };
+  await withServer(repo, async ({ call }) => {
+    await call("foundry_pr_finalize", { breaking: false });
+    const cfgv = spawnSync("git", ["config", "--local", "--get", "commit.gpgsign"], { cwd: repo, encoding: "utf8" });
+    eq(cfgv.stdout.trim(), "", "a manual re-sign then finalize clears the override: local commit.gpgsign is unset");
+    const st = JSON.parse(readFile(repo, ".foundry/state.json"));
+    eq(st.signing, "on", "...state.signing is 'on'");
+    eq(st.signingOverride, undefined, "...and signingOverride is gone");
+  }, { env });
+}
+
+/** Global git config holding a working fake signer, so the server (and nothing else) sees signing on. */
+function fakeSignerGlobal(gpg) {
+  const file = path.join(path.dirname(gpg), "gitconfig");
+  fs.writeFileSync(file, `[commit]\n\tgpgsign = true\n[gpg]\n\tformat = openpgp\n\tprogram = ${gpg}\n[user]\n\tsigningkey = 0123456789ABCDEF\n`);
+  return file;
+}
+
+/** An unsigned build/x branch with a --no-ff merge in it, summarized, awaiting signing. */
+function resignRepo({ extraState = {} } = {}) {
+  const f = finalizeRepo({ signed: false });
+  const { repo } = f;
+  git(repo, ["config", "--local", "commit.gpgsign", "false"]);
+  git(repo, ["checkout", "-q", "-b", "side"]);
+  writeFile(repo, "side.txt", "s\n");
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-qm", "P0-02: side"]);
+  git(repo, ["checkout", "-q", "build/x"]);
+  writeFile(repo, "main.txt", "m\n");
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-qm", "P0-03: main"]);
+  git(repo, ["merge", "-q", "--no-ff", "-m", "merge side", "side"]);
+  setState(repo, { awaitingSigning: { unsigned: 3, first: "abc1234", since: "2026-01-01T00:00:00Z" }, signingOverride: true, signing: "off (probe failed: x)", breaking: false, ...extraState });
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-qm", "chore: awaiting signing"]);
+  git(repo, ["push", "-q", "-u", "origin", "build/x"]);
+  return f;
+}
+
+{
+  // resign re-signs the branch and finalizes
+  const { repo, ghDir, opts } = resignRepo();
+  const gpg = mkFakeGpg();
+  const globalCfg = fakeSignerGlobal(gpg);
+  const mb = git(repo, ["merge-base", "main", "HEAD"]);
+  await withServer(repo, async ({ call }) => {
+    const r = await call("foundry_pr_finalize", { breaking: false, resign: true });
+    eq(r.resigned, true, "resign re-signs the branch and finalizes");
+    const log = git(repo, ["-c", `gpg.program=${gpg}`, "log", "--format=%G?", `${mb}..HEAD`]).split("\n").filter(Boolean);
+    ok(log.length > 0 && log.every((x) => x !== "N" && x !== "B"), "...every commit since the merge base is signed");
+    const merges = git(repo, ["log", "--merges", "--format=%P", `${mb}..HEAD`]).split("\n").filter(Boolean);
+    ok(merges.length === 1 && merges[0].split(" ").length === 2, "...the merge commit still has two parents");
+    eq(spawnSync("git", ["config", "--local", "commit.gpgsign"], { cwd: repo, encoding: "utf8" }).stdout.trim(), "", "...the local commit.gpgsign override is unset");
+    const st = JSON.parse(readFile(repo, ".foundry/state.json"));
+    ok(st.signing === "on" && st.awaitingSigning === undefined && st.signingOverride === undefined, "...state is signing on, with no awaiting or override");
+    eq(git(repo, ["rev-parse", "origin/build/x"]), git(repo, ["rev-parse", "HEAD"]), "...origin's branch equals local HEAD");
+    ok(ghCalls(ghDir).some((c) => c.startsWith("pr ready")), "...and the pull request was marked ready");
+  }, { env: { ...opts.env, GIT_CONFIG_GLOBAL: globalCfg } });
+}
+
+{
+  const { repo, opts } = resignRepo();
+  const gpg = mkFakeGpg();
+  const env = { ...opts.env, GIT_CONFIG_GLOBAL: fakeSignerGlobal(gpg) };
+  const head = git(repo, ["rev-parse", "HEAD"]);
+  const localCfg = () => spawnSync("git", ["config", "--local", "commit.gpgsign"], { cwd: repo, encoding: "utf8" }).stdout.trim();
+  await withServer(repo, async ({ call }) => {
+    writeFile(repo, "dirty.txt", "x");
+    isError(await call("foundry_pr_finalize", { breaking: false, resign: true }), /working tree is not clean/, "resign refuses a dirty tree");
+    fs.rmSync(path.join(repo, "dirty.txt"));
+    isError(await call("foundry_pr_finalize", { breaking: false, resign: "yes" }), /resign must be a boolean/, "...and a non-boolean resign");
+    git(repo, ["checkout", "-q", "-B", "main"]);
+    isError(await call("foundry_pr_finalize", { breaking: false, resign: true }), /on the base branch/, "...and the base branch");
+    git(repo, ["checkout", "-q", "build/x"]);
+    eq(git(repo, ["rev-parse", "HEAD"]), head, "refusals leave HEAD unchanged");
+    eq(localCfg(), "false", "...and the local config unchanged");
+  }, { env });
+}
+
+{
+  // a failing probe puts the override back
+  const { repo, opts } = resignRepo();
+  const gpg = mkFakeGpg();
+  const globalCfg = fakeSignerGlobal(gpg);
+  git(repo, ["config", "--local", "gpg.program", "/nonexistent-signing-agent"]);
+  await withServer(repo, async ({ call }) => {
+    isError(await call("foundry_pr_finalize", { breaking: false, resign: true }), /signing probe failed/, "a failing probe refuses resign");
+    eq(git(repo, ["config", "--local", "commit.gpgsign"]), "false", "...and puts the local override back");
+  }, { env: { ...opts.env, GIT_CONFIG_GLOBAL: globalCfg } });
+}
+
+{
+  // a failing rebase is aborted
+  const { repo, opts } = resignRepo();
+  const gpg = mkFakeGpg({ failAfter: 1 });
+  const globalCfg = fakeSignerGlobal(gpg);
+  const head = git(repo, ["rev-parse", "HEAD"]);
+  await withServer(repo, async ({ call }) => {
+    isError(await call("foundry_pr_finalize", { breaking: false, resign: true }), /re-signing failed/, "a failing rebase refuses resign");
+    ok(!hasFile(repo, ".git/rebase-merge") && !hasFile(repo, ".git/rebase-apply"), "...the rebase is aborted");
+    eq(git(repo, ["rev-parse", "HEAD"]), head, "...HEAD is unchanged");
+    eq(git(repo, ["config", "--local", "commit.gpgsign"]), "false", "...and the override is back");
+  }, { env: { ...opts.env, GIT_CONFIG_GLOBAL: globalCfg } });
+}
+
+{
+  // after an archive
+  const repo = summarizedRepo();
+  await withServer(repo, async ({ call }) => {
+    await call("foundry_flight_archive");
+    const r = await call("foundry_pr_finalize", { breaking: false });
+    ok(r.awaitingSigning, "after an archive, finalize reads the archived summarized state");
+    like(readFile(repo, "docs/flights/w1-share/SUMMARY.md"), /## Awaiting signing/, "...and appends the awaiting section to the archived SUMMARY.md");
+  });
+}
+
+// ---------------------------------------------------------------- summary from content
+
+{
+  const repo = reviewableRepo({ verdict: "APPROVED" });
+  await withServer(repo, async ({ call }) => {
+    isError(await call("foundry_summary_commit", { content: "# Summary\n" }), /only be committed after an APPROVED review/, "content is refused before APPROVED, and nothing is written");
+    ok(!hasFile(repo, "docs/SUMMARY.md"), "...no SUMMARY.md exists afterwards");
+    await call("foundry_review_submit", { verdict: "APPROVED" });
+    isError(await call("foundry_summary_commit", { content: "  \n" }), /content is empty/, "empty content is refused");
+    isError(await call("foundry_summary_commit", { content: "x".repeat(1024 * 1024) }), /bytes or more/, "content of 1 MiB or more is refused");
+    isError(await call("foundry_summary_commit", { content: 42 }), /content must be a string/, "non-string content is refused");
+    ok(!hasFile(repo, "docs/SUMMARY.md"), "...none of them wrote a file");
+    const r = await call("foundry_summary_commit", { content: "# Summary\nAll done." });
+    eq(subject(repo), "chore: build summary", "summary_commit writes SUMMARY.md from content and commits it");
+    eq(git(repo, ["show", "HEAD:docs/SUMMARY.md"]), "# Summary\nAll done.", "...with exactly that text");
+    eq(readFile(repo, "docs/SUMMARY.md"), "# Summary\nAll done.\n", "...plus a final newline on disk");
+    eq(r.reviews, 1, "the return shape is unchanged");
+  });
+}
+
+// ---------------------------------------------------------------- rollback
+
+{
+  // review_submit rolls back when its commit fails (project-d F-04)
+  const repo = reviewableRepo({ config: { policies: { signing: "required" } } });
+  git(repo, ["config", "--local", "commit.gpgsign", "true"]);
+  git(repo, ["config", "--local", "gpg.format", "openpgp"]);
+  git(repo, ["config", "--local", "gpg.program", "/nonexistent-signing-agent"]);
+  const before = {};
+  for (const f of ["docs/PLAN.md", "docs/PROGRESS.md", ".foundry/state.json", "docs/REVIEW.md"]) before[f] = readFile(repo, f);
+  const head = git(repo, ["rev-parse", "HEAD"]);
+  await withServer(repo, async ({ call }) => {
+    isError(await call("foundry_review_submit", { verdict: "CHANGES REQUESTED", tasks: [FIX] }), /could not be signed/, "review_submit rolls back when its commit fails: the call is an error");
+    for (const f of ["docs/PLAN.md", "docs/PROGRESS.md", ".foundry/state.json", "docs/REVIEW.md"]) eq(readFile(repo, f), before[f], `...${f} is byte-identical afterwards`);
+    eq(git(repo, ["diff", "--cached", "--name-only"]), "", "...nothing is staged");
+    eq(git(repo, ["rev-parse", "HEAD"]), head, "...and HEAD did not move");
+    git(repo, ["config", "commit.gpgsign", "false"]);
+    const r = await call("foundry_review_submit", { verdict: "CHANGES REQUESTED", tasks: [FIX] });
+    eq(r.verdict, "CHANGES REQUESTED", "the same submission then succeeds");
+    eq(readFile(repo, "docs/PLAN.md").split("## Review fixes (round 1)").length - 1, 1, "...PLAN.md holds the fix section exactly once");
+    eq(readFile(repo, "docs/PROGRESS.md").split("R1-01").length - 1, 1, "...and PROGRESS.md names R1-01 exactly once");
   });
 }
 

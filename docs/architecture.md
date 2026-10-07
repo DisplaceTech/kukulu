@@ -58,6 +58,8 @@ subagent's report, and the flight controller is told not to interpret one.
 stateDiagram-v2
     [*] --> halt_nospec: no docs/SPEC.md
     [*] --> plan: spec, no plan
+    [*] --> done_signing: state.awaitingSigning is set
+    [*] --> done_archived: flight archived, SPEC.md unchanged
 
     plan --> implement: PLAN + PROGRESS + foundry.json exist
     implement --> implement: open tasks remain
@@ -66,27 +68,36 @@ stateDiagram-v2
     review --> summarize: APPROVED
     review --> implement: CHANGES REQUESTED, R-tasks queued
     review --> halt_rounds: non-converging past maxRounds, or past maxRoundsHard
-    summarize --> done: SUMMARY.md committed
+    summarize --> done: SUMMARY.md committed, then foundry_pr_finalize
+    done_signing --> done: signed, then foundry_pr_finalize again
+    done_archived --> plan: SPEC.md edited for the next flight
 
     halt_nospec: halt — nothing to build from
     halt_rounds: halt — a human decides whether to continue
     halt_ops: halt — an operator-level problem the implementer could not resolve
-    done: done — a human merges the branch
+    done: done — a human merges the branch, or auto-merge does once CI is green
+    done_signing: done — awaiting signing, a human unlocks the agent
+    done_archived: done — edit docs/SPEC.md for the next flight
 ```
 
 The decision order, exactly as the server evaluates it:
 
 1. No `docs/SPEC.md` → **halt**.
 2. `state.halted` is set → **halt** with that reason.
-3. Any of `PLAN.md`, `PROGRESS.md`, `foundry.json` missing → **plan**.
-4. Open tasks → **implement**.
-5. Lock present (a run died before its handoff) → **implement**.
-6. Nothing recorded as implemented → **implement**.
-7. Not yet reviewed → **review**.
-8. Verdict `CHANGES REQUESTED` but nothing open → **halt** (an impossible
-   state; the tool that queues fix tasks failed).
-9. `APPROVED` and not summarized → **summarize**.
-10. Summarized → **done**.
+3. `state.awaitingSigning` is set (`foundry_pr_finalize` found an unsigned
+   commit) → **done**, "awaiting signing", with the steps to take.
+4. `state.archived` is set, `PLAN.md` is absent and `docs/SPEC.md` is
+   byte-identical to the archived copy → **done**, "flight archived". Once
+   the spec differs, decision 5 applies and the answer is **plan**.
+5. Any of `PLAN.md`, `PROGRESS.md`, `foundry.json` missing → **plan**.
+6. Open tasks → **implement**.
+7. Lock present (a run died before its handoff) → **implement**.
+8. Nothing recorded as implemented → **implement**.
+9. Not yet reviewed → **review**.
+10. Verdict `CHANGES REQUESTED` but nothing open → **halt** (an impossible
+    state; the tool that queues fix tasks failed).
+11. `APPROVED` and not summarized → **summarize**.
+12. Summarized → **done**.
 
 The round-cap decision belongs solely to `foundry_review_submit`: it is the
 one place that decides a round is non-converging past `maxRounds` or has
@@ -122,7 +133,19 @@ flowchart TD
     SUMMARIZER["summarizer"] -->|writes| SUMMARY["docs/SUMMARY.md"]
     MCP["foundry MCP"] -->|"sole writer"| PROG
     MCP -->|"sole writer"| ST[".foundry/state.json"]
+    MCP -->|"foundry_plan_commit validates, then commits"| PLAN
+    MCP -->|"foundry_flight_archive moves the flight into"| FLIGHTS["docs/flights/slug/"]
+    MCP -->|"foundry_pr_finalize readies the PR, notes awaiting signing in"| SUMMARY
 ```
+
+Three tools make the MCP the committer of a stage's own output.
+`foundry_plan_commit` validates the planner's four files together and commits
+them, so the planner never runs `git commit`. `foundry_flight_archive` moves a
+summarized flight's artifacts into `docs/flights/<slug>/` and writes a fresh
+state. `foundry_pr_finalize` is the last call of a flight: it checks the
+commits' signatures, marks the draft PR ready, and enables GitHub auto-merge
+(never a synchronous merge); when a commit is unsigned it leaves the PR a
+draft and appends an `## Awaiting signing` section to `docs/SUMMARY.md`.
 
 `docs/PROGRESS.md` has exactly one writer: the MCP. That is what makes the
 guard hook trustworthy — the file it counts open tasks in cannot be edited by
@@ -152,10 +175,15 @@ mutation is a finding, and the fix still goes through the fix-task loop.
 | Stage | Model | Effort | Why |
 |---|---|---|---|
 | go-flight | sonnet | low | Reads a JSON field, calls one tool. Any judgment here is a bug. |
-| planner | fable | high | The plan is the whole product. Everything downstream inherits its mistakes, and nothing downstream is empowered to fix a bad decomposition. |
+| planner | opus | high | The plan is the whole product. Everything downstream inherits its mistakes, and nothing downstream is empowered to fix a bad decomposition. |
 | implementer | sonnet | medium | Bounded, well-specified tasks with acceptance tests named up front. This is the stage that runs for hours, so it is the one worth making cheap. |
-| reviewer | fable | high | Reviews work it did not do, against a spec it must read in full, with the authority to reject. Weak review is worse than none. |
-| summarizer | fable | medium | Synthesis across plan, handoff and every review round, for a human who was not there. |
+| reviewer | opus | high | Reviews work it did not do, against a spec it must read in full, with the authority to reject. Weak review is worse than none. |
+| summarizer | opus | medium | Synthesis across plan, handoff and every review round, for a human who was not there. |
+
+Opus is the default for the planner, reviewer and summarizer because it has
+outperformed Fable on the plan, review and summary roles in the operator's own
+flights. The "why" column still holds: it describes what each role needs, not
+which model supplies it. `fable` remains a legal alias for anyone who prefers it.
 
 These are the plugin defaults, in `agents/*.md`; per-machine and per-project
 routing overrides them — see [routing.md](./routing.md). The stage skills
@@ -399,7 +427,8 @@ fix task is a task, and it goes through the same test-first loop as any other.
 
 | Path | Committed | Contents |
 |---|---|---|
-| `.foundry/state.json` | yes | `round`, `implemented`, `reviewed`, `verdict`, `summarized`, `halted`, `preexistingUntracked`, `policies`, `signing`, `rounds` |
+| `.foundry/state.json` | yes | `round`, `implemented`, `reviewed`, `verdict`, `summarized`, `halted`, `preexistingUntracked`, `policies`, `signing`, `rounds`; and, once they apply, `signingOverride` (a commit failed to sign and signing was switched off), `awaitingSigning` (`{ unsigned, first, since }`), `breaking`, `haltCap` (which round cap halted the flight, so `resume` knows what lifts it) and `archived` (`{ slug, dir, at }`) |
+| `docs/flights/<slug>/` | yes | an archived flight: its PLAN, PROGRESS, HANDOFF, REVIEW, SUMMARY, `foundry.json`, `state.json` and `feedback.jsonl`, plus a copy of `SPEC.md`; written by `foundry_flight_archive` |
 | `.foundry/feedback.jsonl` | yes | one JSON line per pipeline-friction entry — `at`, `stage`, `round`, `category`, `message`, `source`; see [mcp-tools.md](./mcp-tools.md#foundry_feedback_log) |
 | `.foundry/implement.lock` | no (gitignored) | JSON `{ count, armedAt, round }` — the guard's re-block counter (a legacy bare number still reads back correctly) |
 | `.foundry/worktrees/<stream>/` | no (`.gitignore`) | a parallel stream's git worktree, present from `foundry_run_start({ stream })` until `foundry_stream_finish` merges it back; `state.streams[<s>]` records its branch and the untracked paths `parallel.setup` left behind, and `state.serialWaves` the waves degraded to serial |

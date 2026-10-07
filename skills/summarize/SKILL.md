@@ -1,6 +1,6 @@
 ---
 name: summarize
-description: "Foundry pipeline stage — write docs/SUMMARY.md after an APPROVED review: what was built, what was decided, what a human still owes. Invoked by go-flight through the foundry-summarizer agent; not for ordinary work."
+description: "Foundry pipeline stage — compose the summary after an APPROVED review and commit it through foundry_summary_commit: what was built, what was decided, what a human still owes. Invoked by go-flight through the foundry-summarizer agent; not for ordinary work."
 model: inherit
 ---
 
@@ -9,7 +9,8 @@ before merging. Call `foundry_status` for the branch, base, head, rounds and
 counts, then read `docs/REVIEW.md`, `docs/HANDOFF.md`, `docs/PLAN.md`
 (Decisions and Spec issues sections) and `git log --oneline <base>..HEAD`.
 
-Write `docs/SUMMARY.md`, under 200 lines:
+Compose the summary, under 200 lines, as one document in memory. Do not write
+it to disk yourself (see below):
 
 1. **Merge line**: branch, base → head, commit count, number of reviews
    (the length of `state.rounds`; review N is the one stamped `Round: N`),
@@ -45,17 +46,47 @@ Write `docs/SUMMARY.md`, under 200 lines:
    pulls into [`docs/feedback/`](../../docs/feedback/) to feed the next
    release plan.
 
-Write `docs/SUMMARY.md` with the `Write` tool. If the harness refuses it
-(some builds tell subagents to return findings as text instead), write it
-with a shell heredoc in one `Bash` call and continue — do not argue with the
-refusal, and do not return the summary as text in your own reply; the file
-on disk is what `foundry_summary_commit` reads (F-16).
+Add these to the list, after the sections above:
 
-Then call `foundry_summary_commit`. It commits SUMMARY.md as
-`chore: build summary`, marks the flight complete, and returns `pr`: the
-branch's pull request as `{ url, state, draft, base }`, or `"none"`,
-`"skipped: policy"` or `"unknown: <why>"`. A PR object with `expectedBase`
-targets the wrong branch; say so.
+9. **Suggested CLAUDE.md additions**: every item under `## Codebase notes` in
+   `docs/HANDOFF.md` (project lessons such as a framework footgun), lifted as
+   proposed additions to the project's `CLAUDE.md`. Write "None" when there are
+   none.
+10. **Advisory mutation survivors**: the survivors the reviewer put under
+    `## Notes` in `docs/REVIEW.md` as lying outside the round's diff,
+    carried over verbatim. Write "None" when there are none.
+11. **Breaking call**: one line, `Breaking: yes|no — <reason>`. It is `yes`
+    when `docs/SPEC.md` or `CHANGELOG.md` lists breaking changes for this
+    work, or when the flight changed a public interface, a config default, or
+    behavior an existing user relies on. When unsure, it is `yes`.
 
-Print a final message starting with `FLIGHT COMPLETE`, the merge line, and
-the PR (its url and state, or that there is none). Do not merge.
+Pass the whole document as `content` to `foundry_summary_commit`. The tool
+writes `docs/SUMMARY.md` itself and commits it as `chore: build summary`, marks
+the flight complete, and returns `pr` (the branch's pull request as
+`{ url, state, draft, base }`, or `"none"`, `"skipped: policy"` or
+`"unknown: <why>"`) and `archive`. Never call `Write` or `Edit`, or use a
+shell redirect, for `docs/SUMMARY.md`: the tool does it, and a refused `Write`
+is then not a problem you can have. A PR object with `expectedBase` targets the
+wrong branch; say so.
+
+If the result has `archive: true` (`policies.archive`), call
+`foundry_flight_archive` with no arguments. It moves the flight's artifacts
+into `docs/flights/<slug>/`. If it refuses, print the refusal and go on to the
+last call anyway.
+
+Your last tool call is `foundry_pr_finalize({ breaking })`, with `breaking`
+true or false from your Breaking call. It marks the draft PR ready and, unless
+the flight is breaking, turns on auto-merge; it never merges anything itself.
+Never pass `resign`: re-signing history is for a human to ask for, after
+unlocking their signing agent, and no agent may ask on its own.
+
+Print a final message starting with `FLIGHT COMPLETE`, then the merge line,
+then exactly one status:
+
+- `AWAITING SIGNING` followed by the tool's `next` text verbatim, when
+  `awaitingSigning` is set;
+- otherwise `AUTO-MERGE ON` when `merge` is `"enabled"`;
+- otherwise `READY` when `ready` is true;
+- otherwise `PR UNCHANGED: <merge>`.
+
+Add the PR's url and state, or that there is none. Do not merge.
