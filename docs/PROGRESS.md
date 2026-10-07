@@ -29,7 +29,7 @@ Started: 2026-10-07T17:30:53.739Z
 - [x] P2-07 Phase 2 end: push and record the manual check
 - [x] P3-01 Tool reference and README for twenty-one tools
 - [x] P3-02 Operations: flight after flight, and signing
-- [ ] P3-03 Writing specs and templates: from, targeted mutation, provenance
+- [x] P3-03 Writing specs and templates: from, targeted mutation, provenance
 - [ ] P3-04 Architecture, contributing table, and feedback headers
 - [ ] P3-05 Version 0.5.0 and the CHANGELOG
 - [ ] P3-06 Phase 3 end: push for the draft PR and record the manual check
@@ -109,3 +109,6 @@ README: count sentence, rows for plan_commit/flight_archive/pr_finalize, updated
 
 ### P3-02 — 77667b2
 operations.md: new ## Running flight after flight and ## Signing sections, config example shows new policies/flight/mutation, what-the-flight-leaves-behind rewritten for S-14 (no synchronous merge; auto-merge only) and the three new commit kinds. All config rows present. plugin.mjs heading assertions.
+
+### P3-03 — a04b419
+writing-specs.md gains {filter} guidance, Rules that become true at a task, Provenance logging (commit-msg hook sh fence); templates/SPEC.md section 7 names {filter}; templates/constraints.example.json gains no-todo-in-src with from P2-01 (file reformatted, multi-line arrays). Tests: constraints.mjs template test now builds a plan containing the from task; plugin.mjs assertions.
