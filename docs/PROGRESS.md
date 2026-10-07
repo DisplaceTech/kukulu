@@ -13,7 +13,7 @@ Started: 2026-10-07T17:30:53.739Z
 - [x] P1-06 Targeted mutation commands
 - [x] P1-07 failedCommands and confirmKill in foundry_mutate
 - [x] P1-08 foundry_status reports artifacts, strayArtifacts and lastReviewCommit
-- [ ] P1-09 Resume a round-cap halt through foundry_flight_options
+- [x] P1-09 Resume a round-cap halt through foundry_flight_options
 - [ ] P1-10 foundry_plan_commit validates and commits the plan
 - [ ] P1-11 foundry_plan_commit renumbers split task ids
 - [ ] P1-12 The flight key, policies.archive and foundry_flight_archive
@@ -61,3 +61,6 @@ mutate returns failedCommands always; confirmKill (boolean, validated) re-runs f
 
 ### P1-08 — 700aa76
 status() gains artifacts (7 keys), strayArtifacts (untracked while PLAN.md absent) and lastReviewCommit (review: commits in baseBranch..HEAD; base falls back to main if cfg throws). Read-only. Tests in state.mjs; mcp-tools.md updated.
+
+### P1-09 — fa3a9a6
+reviewSubmit sets st.haltCap and new halt messages naming foundry_flight_options({... resume: true}); ordinal() helper. flightOptions resume validates everything before writes, commits config+state in one commit "chore: flight options (k=v, resume)" via withRollback, returns resumed:true. Interpretation: runHalt and stream-merge halts delete stale haltCap so they are never resumable; lifting-bound refusal text is my wording. Docs: mcp-tools, operations Halts.
