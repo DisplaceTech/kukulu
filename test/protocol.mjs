@@ -7,6 +7,7 @@ import { finish, ok, eq, like, mkRepo, startServer } from "./harness.mjs";
 const EXPECTED_TOOLS = [
   "foundry_status",
   "foundry_next",
+  "foundry_plan_commit",
   "foundry_run_start",
   "foundry_task_next",
   "foundry_task_done",
@@ -103,6 +104,11 @@ const toolFailure = await s.rpc("tools/call", { name: "foundry_task_next", argum
 ok(!toolFailure.error, "a failing tool is not reported as a transport error");
 eq(toolFailure.result.isError, true, "a failing tool sets isError on the result");
 like(toolFailure.result.content[0].text, /PROGRESS\.md/, "the tool error explains what is missing");
+ok(toolFailure.result.structuredContent === undefined, "an ordinary refusal carries no structuredContent");
+
+const planFailure = await s.rpc("tools/call", { name: "foundry_plan_commit", arguments: {} });
+eq(planFailure.result.isError, true, "plan_commit with no plan is a refusal");
+ok(Array.isArray(planFailure.result.structuredContent?.problems), "...carrying structuredContent.problems as an array");
 ok(!/\bat \S+:\d+:\d+/.test(toolFailure.result.content[0].text), "an expected tool error carries no stack trace");
 
 // -------------------------------------------------------------- framing

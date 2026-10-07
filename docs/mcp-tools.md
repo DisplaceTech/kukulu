@@ -1,6 +1,6 @@
 # MCP tool reference
 
-Eighteen tools, served over stdio by `mcp/server.mjs` with no dependencies.
+Nineteen tools, served over stdio by `mcp/server.mjs` with no dependencies.
 The server is launched by Claude Code from [`.mcp.json`](../.mcp.json) with
 `FOUNDRY_PROJECT_DIR` set to the project root; every path below is relative to
 that root.
@@ -157,6 +157,47 @@ streams? }`.
   `stream-exclusive`.
 
 The full decision order is in [architecture.md](./architecture.md#the-stage-machine).
+
+---
+
+## `foundry_plan_commit`
+
+Validate the plan as a whole and commit it. The planner calls it last, in
+place of `git add` and `git commit`.
+
+**Arguments:** none.
+
+**Does:** reads `docs/PLAN.md`, `docs/PROGRESS.md`, `docs/foundry.json` and
+`CLAUDE.md`, checks them together, and, only when nothing is wrong, commits
+them as `plan: derive build plan from SPEC` (through the same commit helper as
+every other tool, so an unsignable commit falls back to unsigned under
+`policies.signing: "auto"`). It writes nothing but that commit.
+
+The checks, by the name each problem carries in `check`:
+
+| `check` | Problem |
+|---|---|
+| `files` | `PLAN.md`, `PROGRESS.md` or `foundry.json` is missing |
+| `heading` | A line like a task heading (`## P0-02 …`, `### P0-02 - Title`) that is not exactly `### <ID>: <title>` |
+| `duplicate` | An id with two headings |
+| `sequence` | Within a phase, `P` ids are not `P<n>-01, P<n>-02, …` in document order with no gap (`R` ids are exempt) |
+| `depends` | A **Depends on** id with no heading, or whose heading comes later (a task depending on itself counts) |
+| `cycle` | A dependency cycle, reported once |
+| `progress` | `PROGRESS.md`'s task ids differ from `PLAN.md`'s as a set or in order |
+| `streams` | A malformed `**Stream:**` value, or any parallel wave judged invalid (`wave <n>: <reason>`) |
+| `config` | `docs/foundry.json` is not valid JSON or fails the same validation `cfg()` applies |
+| `from` | A `from` (on a constraint, `verify` or `extraVerify` entry) names an id with no heading |
+| `claude` | `CLAUDE.md` does not exist at the repository root |
+
+**Returns:** `{ commit, tasks, phases: [{ phase, tasks }], waves: [{ index,
+streams, valid }], renumbered }`. `commit` is `null` when everything is
+already committed; `renumbered` is `{}` (reserved).
+
+**Refuses when:** any check fails. Every problem is listed at once, so one
+call shows the whole job: the message's first line counts them, then one
+numbered line each (`1. [heading] …`). The same list rides on the error reply
+as `structuredContent.problems`, `[{ check, id?, message }]`. Nothing is
+committed.
 
 ---
 

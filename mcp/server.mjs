@@ -62,7 +62,13 @@ const STATE_NAMES = { " ": "todo", "~": "inProgress", x: "done", "!": "blocked",
 
 // ---------------------------------------------------------------- utilities
 
-class ToolError extends Error {}
+class ToolError extends Error {
+  /** `data`, when given, rides on the error reply as structuredContent (see handle()). */
+  constructor(message, data) {
+    super(message);
+    if (data !== undefined) this.data = data;
+  }
+}
 
 const exists = (p) => fs.existsSync(p);
 const read = (p) => fs.readFileSync(p, "utf8");
@@ -257,7 +263,7 @@ function validatePolicies(policies) {
  * everything else, and mark a port- or directory-bound command `exclusive`
  * so it only ever runs from the main checkout, never a stream's worktree.
  */
-function normalizeCommand(entry, defaultTimeoutMs, where, { allowFrom = false } = {}) {
+function normalizeCommand(entry, defaultTimeoutMs, where, { allowFrom = false, planIds = null } = {}) {
   if (typeof entry === "string") return { cmd: entry, timeoutMs: defaultTimeoutMs, exclusive: false, from: null };
   if (entry && typeof entry === "object" && !Array.isArray(entry)) {
     if (typeof entry.cmd !== "string" || !entry.cmd) throw new ToolError(`${where} is missing 'cmd'`);
@@ -265,19 +271,20 @@ function normalizeCommand(entry, defaultTimeoutMs, where, { allowFrom = false } 
     if (!Number.isInteger(timeoutMs) || timeoutMs <= 0) throw new ToolError(`${where}.timeoutMs must be a positive integer`);
     if (entry.exclusive !== undefined && typeof entry.exclusive !== "boolean") throw new ToolError(`${where}.exclusive must be a boolean`);
     if (entry.from !== undefined && !allowFrom) throw new ToolError(`${where}.from is only valid on verify and extraVerify entries`);
-    return { cmd: entry.cmd, timeoutMs, exclusive: entry.exclusive === true, from: entry.from === undefined ? null : validateFrom(entry.from, where) };
+    return { cmd: entry.cmd, timeoutMs, exclusive: entry.exclusive === true, from: entry.from === undefined ? null : validateFrom(entry.from, where, planIds) };
   }
   throw new ToolError(`${where} must be a command string or { cmd, timeoutMs }`);
 }
 
 /** A `from` value names the task that makes a rule true; it must be a task id that PLAN.md (when it exists) defines. */
-function validateFrom(from, where) {
+function validateFrom(from, where, planIds) {
   if (typeof from !== "string" || !/^[PR]\d+-\d+$/.test(from)) throw new ToolError(`${where}.from must be a task id such as P1-03`);
-  if (exists(P.plan) && !new RegExp(`^### ${from}:`, "m").test(read(P.plan))) {
-    throw new ToolError(`${where}.from names ${from}, which is not a task in docs/PLAN.md`);
-  }
+  if (planIds && !planIds.has(from)) throw new ToolError(`${where}.from names ${from}, which is not a task in docs/PLAN.md`);
   return from;
 }
+
+/** The task ids that have a `### <id>:` heading in PLAN.md text. */
+const planIdsOf = (planText) => new Set(Array.from(planText.matchAll(/^### ([PR]\d+-\d+):/gm), (m) => m[1]));
 
 /**
  * `null` when a rule gated by `from` is active, else the task id it waits
@@ -348,7 +355,7 @@ const CONSTRAINT_KEYS = ["id", "description", "paths", "exclude", "pattern", "fl
  * against real files — that is `checkConstraints`'s job at `foundry_verify`
  * time — only that the rule is well-formed.
  */
-function validateConstraints(constraints) {
+function validateConstraints(constraints, planIds = null) {
   if (constraints === undefined) return;
   if (!Array.isArray(constraints)) throw new ToolError("docs/foundry.json 'constraints' must be an array");
   const seen = new Set();
@@ -365,7 +372,7 @@ function validateConstraints(constraints) {
     if (c.exclude !== undefined && (!Array.isArray(c.exclude) || !c.exclude.every((p) => typeof p === "string" && p))) {
       throw new ToolError(`constraint '${c.id}'.exclude must be an array of strings`);
     }
-    if (c.from !== undefined) validateFrom(c.from, `constraint '${c.id}'`);
+    if (c.from !== undefined) validateFrom(c.from, `constraint '${c.id}'`, planIds);
     if (typeof c.pattern !== "string" || !c.pattern) throw new ToolError(`constraint '${c.id}' must have a non-empty 'pattern'`);
     if (c.flags !== undefined && typeof c.flags !== "string") throw new ToolError(`constraint '${c.id}'.flags must be a string`);
     try {
@@ -384,9 +391,13 @@ function validateConstraints(constraints) {
 }
 
 function cfg() {
-  const c = loadConfig() || {};
+  return cfgFrom(loadConfig() || {}, exists(P.plan) ? planIdsOf(read(P.plan)) : null);
+}
+
+/** The resolved config for parsed `docs/foundry.json` content; `planIds` (or null to skip the check) are the tasks a `from` may name. */
+function cfgFrom(c, planIds) {
   validatePolicies(c.policies);
-  validateConstraints(c.constraints);
+  validateConstraints(c.constraints, planIds);
   validateParallel(c.parallel);
   validateMutation(c.mutation);
   const commandTimeoutMs = c.commandTimeoutMs || 10 * 60 * 1000;
@@ -394,7 +405,7 @@ function cfg() {
     Object.entries(c.mutation?.targeted || {}).map(([name, e]) => [name, { cmd: e.cmd, timeoutMs: e.timeoutMs ?? commandTimeoutMs }]),
   );
   const norm = (entry, i, where, opts) => normalizeCommand(entry, commandTimeoutMs, `docs/foundry.json ${where}[${i}]`, opts);
-  const gated = { allowFrom: true };
+  const gated = { allowFrom: true, planIds };
   return {
     verify: (c.verify || []).map((e, i) => norm(e, i, "verify", gated)),
     extraVerify: Object.fromEntries(
@@ -845,7 +856,11 @@ function saveState(s) {
 
 function parseProgress() {
   if (!exists(P.progress)) throw new ToolError("docs/PROGRESS.md does not exist; run the plan stage first");
-  const lines = read(P.progress).split("\n");
+  return parseProgressText(read(P.progress));
+}
+
+function parseProgressText(text) {
+  const lines = text.split("\n");
   const tasks = [];
   let section = null;
   let tasksStart = -1, tasksEnd = -1, logStart = -1;
@@ -1066,7 +1081,7 @@ function validateWave(index, tasks, planLines, cc) {
 }
 
 /** Every wave in `pr`, in order, numbered from 1, each already judged. `[]` for a plan with no streams. */
-function computeWaves(pr, cc) {
+function computeWaves(pr, cc, planLines) {
   const groups = [];
   let cur = null;
   for (const t of pr.tasks) {
@@ -1078,8 +1093,8 @@ function computeWaves(pr, cc) {
     }
   }
   if (!groups.length) return [];
-  const planLines = exists(P.plan) ? read(P.plan).split("\n") : null;
-  return groups.map((tasks, i) => validateWave(i + 1, tasks, planLines, cc));
+  const lines = planLines !== undefined ? planLines : exists(P.plan) ? read(P.plan).split("\n") : null;
+  return groups.map((tasks, i) => validateWave(i + 1, tasks, lines, cc));
 }
 
 // ---------------------------------------------------------------- streams at run time
@@ -2740,6 +2755,194 @@ function summaryCommit({ content } = {}) {
   return { commit: sha, branch: g.branch, base: g.base, head: g.head, reviews: reviewCount(st), fixRounds: st.round, push, pr: prState(st.policies, cfg().baseBranch) };
 }
 
+// ---------------------------------------------------------------- plan validation and commit (S-06)
+
+/**
+ * Check a plan's four deliverables together and return every problem found,
+ * `[{ check, id?, message }]`. Pure: it reads no files, so a caller can run
+ * it on text it has not written yet. `allowSuffix` admits a headings such as
+ * `P1-02a`, which only a renumbering pass may hold.
+ */
+function validatePlanTexts({ planText, progressText, configRaw, configError, claudeExists, allowSuffix = false }) {
+  const problems = [];
+  const add = (check, message, id) => {
+    if (!problems.some((p) => p.message === message)) problems.push({ check, ...(id ? { id } : {}), message });
+  };
+  if (planText == null) add("files", "docs/PLAN.md is missing");
+  if (progressText == null) add("files", "docs/PROGRESS.md is missing");
+  if (configRaw == null && !configError) add("files", "docs/foundry.json is missing");
+  if (configError) add("config", configError);
+  if (!claudeExists) add("claude", "CLAUDE.md does not exist at the repository root; the implementer reads it first");
+
+  const planLines = planText == null ? null : planText.split("\n");
+  const ids = []; // task ids with a well-formed heading, in document order
+  if (planLines) {
+    const okHeading = allowSuffix ? /^### (?:P\d+-\d+[a-z]?|R\d+-\d+): \S/ : /^### [PR]\d+-\d+: \S/;
+    const seen = new Set();
+    for (const line of planLines) {
+      if (!/^#{2,4}\s*[PR]\d+-\d+/.test(line)) continue;
+      if (!okHeading.test(line)) {
+        add("heading", `heading ${JSON.stringify(line)} must be exactly "### <ID>: <title>" (for example "### P1-03: Add the parser")`);
+        continue;
+      }
+      const id = line.match(/^### ([PR]\d+-\d+[a-z]?):/)[1];
+      if (seen.has(id)) add("duplicate", `${id} has two headings in docs/PLAN.md`, id);
+      else {
+        seen.add(id);
+        ids.push(id);
+      }
+    }
+
+    // P ids count up from 01 inside each phase with no gap; R ids are exempt.
+    const byPhase = new Map();
+    for (const id of ids) {
+      const m = id.match(/^P(\d+)-(\d+)$/);
+      if (m) byPhase.set(m[1], [...(byPhase.get(m[1]) || []), Number(m[2])]);
+    }
+    for (const [phase, nums] of byPhase) {
+      if (nums.every((n, i) => n === i + 1)) continue;
+      const want = nums.map((_, i) => `P${phase}-${String(i + 1).padStart(2, "0")}`).join(", ");
+      const got = nums.map((n) => `P${phase}-${String(n).padStart(2, "0")}`).join(", ");
+      add("sequence", `phase ${phase}: tasks must be numbered ${want} in document order with no gap, but are ${got}`);
+    }
+
+    // Dependencies point backwards, and never in a circle.
+    const graph = new Map();
+    for (const id of ids) {
+      let deps = [];
+      try {
+        deps = planTaskFrom(planLines, id).depends;
+      } catch {
+        deps = [];
+      }
+      graph.set(id, deps);
+      deps.forEach((dep) => {
+        if (!seen.has(dep)) add("depends", `${id} depends on ${dep}, which has no heading in docs/PLAN.md`, id);
+        else if (ids.indexOf(dep) >= ids.indexOf(id)) {
+          add("depends", dep === id ? `${id} depends on itself` : `${id} depends on ${dep}, which comes later in docs/PLAN.md; a task may only depend on an earlier one`, id);
+        }
+      });
+    }
+    const state = new Map();
+    const stack = [];
+    const reported = new Set();
+    const visit = (id) => {
+      state.set(id, 1);
+      stack.push(id);
+      for (const dep of graph.get(id) || []) {
+        if (!graph.has(dep)) continue;
+        if (state.get(dep) === 1) {
+          const cyc = stack.slice(stack.indexOf(dep));
+          const start = cyc.indexOf([...cyc].sort()[0]);
+          const canon = [...cyc.slice(start), ...cyc.slice(0, start)];
+          if (!reported.has(canon.join(">"))) {
+            reported.add(canon.join(">"));
+            add("cycle", `dependency cycle: ${[...canon, canon[0]].join(" → ")}`);
+          }
+        } else if (!state.get(dep)) visit(dep);
+      }
+      stack.pop();
+      state.set(id, 2);
+    };
+    for (const id of ids) if (!state.get(id)) visit(id);
+
+    for (const id of ids) {
+      const { stream } = planTaskFrom(planLines, id);
+      if (stream !== null && !STREAM_SLUG.test(stream)) {
+        add("streams", `${id}: **Stream:** ${JSON.stringify(stream)} must be a lowercase slug (a-z, 0-9 and -, starting with a letter) or none`, id);
+      }
+    }
+  }
+
+  let pr = null;
+  if (progressText != null) {
+    try {
+      pr = parseProgressText(progressText);
+    } catch (e) {
+      add("progress", e.message);
+    }
+  }
+  if (pr && planLines) {
+    const a = ids.join(",");
+    const b = pr.tasks.map((t) => t.id).join(",");
+    if (a !== b) {
+      const missing = ids.filter((id) => !pr.tasks.some((t) => t.id === id));
+      const extra = pr.tasks.map((t) => t.id).filter((id) => !ids.includes(id));
+      const why = [
+        missing.length ? `missing from PROGRESS.md: ${missing.join(", ")}` : "",
+        extra.length ? `not in PLAN.md: ${extra.join(", ")}` : "",
+        !missing.length && !extra.length ? "the same tasks in a different order" : "",
+      ].filter(Boolean).join("; ");
+      add("progress", `docs/PROGRESS.md's tasks must match docs/PLAN.md's, in the same order (${why})`);
+    }
+  }
+
+  let cc = null;
+  if (configRaw != null && typeof configRaw === "object") {
+    try {
+      cc = cfgFrom(configRaw, null);
+    } catch (e) {
+      add("config", e.message);
+    }
+    const named = new Map(); // from id -> where it is used
+    const note = (from, where) => {
+      if (typeof from === "string") named.set(from, [...(named.get(from) || []), where]);
+    };
+    if (Array.isArray(configRaw.constraints)) configRaw.constraints.forEach((c) => c && note(c.from, `constraint '${c.id}'`));
+    const entries = (list, label) => Array.isArray(list) && list.forEach((e, i) => e && typeof e === "object" && note(e.from, `${label}[${i}]`));
+    entries(configRaw.verify, "verify");
+    if (configRaw.extraVerify && typeof configRaw.extraVerify === "object") {
+      for (const [prefix, list] of Object.entries(configRaw.extraVerify)) entries(list, `extraVerify['${prefix}']`);
+    }
+    if (planLines) {
+      for (const [from, where] of named) {
+        if (!ids.includes(from)) add("from", `from names ${from}, which has no heading in docs/PLAN.md (used by ${where.join(", ")})`, from);
+      }
+    }
+  }
+
+  if (pr && planLines && cc) {
+    for (const w of computeWaves(pr, cc, planLines)) if (!w.valid) add("streams", `wave ${w.index}: ${w.reason}`);
+  }
+  return problems;
+}
+
+function planCommit() {
+  const readOrNull = (p) => (exists(p) ? read(p) : null);
+  const planText = readOrNull(P.plan);
+  const progressText = readOrNull(P.progress);
+  let configRaw = null;
+  let configError = null;
+  if (exists(P.config)) {
+    try {
+      configRaw = JSON.parse(read(P.config));
+    } catch (e) {
+      configError = `docs/foundry.json is not valid JSON: ${e.message}`;
+    }
+  }
+  const claudePath = path.join(ROOT, "CLAUDE.md");
+  const problems = validatePlanTexts({ planText, progressText, configRaw, configError, claudeExists: exists(claudePath) });
+  if (problems.length) {
+    const head = `${problems.length} problem${problems.length === 1 ? "" : "s"} in the plan; fix every one, then call foundry_plan_commit again. Nothing was committed.`;
+    throw new ToolError(`${head}\n${problems.map((p, i) => `${i + 1}. [${p.check}] ${p.message}`).join("\n")}`, { problems });
+  }
+  const paths = [P.plan, P.progress, P.config, claudePath];
+  const commit = withRollback(paths, () => gitCommitIfChanged(paths, "plan: derive build plan from SPEC", { stage: "plan" }));
+  const pr = parseProgressText(progressText);
+  const phases = new Map();
+  for (const t of pr.tasks) {
+    const m = t.id.match(/^P(\d+)-/);
+    if (m) phases.set(Number(m[1]), (phases.get(Number(m[1])) || 0) + 1);
+  }
+  return {
+    commit,
+    tasks: pr.tasks.length,
+    phases: [...phases].map(([phase, tasks]) => ({ phase, tasks })),
+    waves: computeWaves(pr, cfg()).map((w) => ({ index: w.index, streams: Object.keys(w.streams), valid: w.valid })),
+    renumbered: {},
+  };
+}
+
 // ---------------------------------------------------------------- MCP plumbing
 
 // `required: []` is legal but trips stricter schema validators; omit it instead.
@@ -2752,6 +2955,7 @@ const S = (props, required = []) => ({
 const TOOLS = [
   { name: "foundry_status", description: "Everything the pipeline knows from disk: which docs exist, task counts by state, branch/base/head, lock, round, review verdict. Read-only.", inputSchema: S({}), fn: status },
   { name: "foundry_next", description: "Deterministic stage selection: returns { stage, agent, agentFallback, fallbackAgent, restartRequired, model, agentModel, agentModelExact, round, reason, prompt, streams? }. stage is plan | implement | review | summarize | done | halt. agentModel is the value to pass as the Agent tool's model when agentFallback is true (an alias, or null to pass none); agentModelExact is false when a full claude-* id was mapped to its family alias. restartRequired is true only when the routed model cannot be reached without relaunching the session. Read-only, except that when a parallel wave's partition is invalid it records once (state, one feedback entry, one commit, only on a build branch) that the wave runs serially. When streams is present, spawn one implementer per entry, all at once, and wait for all of them.", inputSchema: S({}), fn: next },
+  { name: "foundry_plan_commit", description: "Validate the plan as a whole and commit it: docs/PLAN.md, docs/PROGRESS.md, docs/foundry.json and CLAUDE.md must exist and agree (task headings, numbering, dependencies, streams, config, from references). Every problem is listed at once, as numbered lines and as structuredContent.problems [{ check, id?, message }]; nothing is committed while any remain. On success it commits 'plan: derive build plan from SPEC' and returns { commit, tasks, phases, waves, renumbered }. For the planner, as its last step.", inputSchema: S({}), fn: planCommit },
   { name: "foundry_run_start", description: "Begin (or resume) an implementation run: create/reuse the build branch, arm the implement guard lock, stamp Branch/Started in PROGRESS.md, commit. Idempotent. With stream, also create (or resume) that stream's git worktree for a parallel wave, run parallel.setup in it, and return its cwd: do all of that stream's work inside cwd.", inputSchema: S({ stream: { type: "string", description: "a stream of the current parallel wave, when foundry_next handed you one" } }), fn: runStart },
   { name: "foundry_task_next", description: "Select the next task (first [~], else first [ ]), auto-skip tasks whose dependencies are blocked, mark it [~], and return its PLAN.md text plus dependency log entries. Returns { done: true } when none remain.", inputSchema: S({ stream: { type: "string", description: "restrict to this stream's tasks (parallel waves only)" } }), fn: taskNext },
   { name: "foundry_task_done", description: "Mark a task [x] and append its log entry stamped with HEAD's sha. Requires HEAD's commit subject to start with '<id>:' and a clean tree. Commits PROGRESS.md.", inputSchema: S({ stream: { type: "string", description: "the stream this task belongs to, when working in a parallel wave" }, id: { type: "string" }, log: { type: "string", description: "Log entry body, under 15 lines" } }, ["id", "log"]), fn: taskDone },
@@ -2869,6 +3073,7 @@ function handle(req) {
         return reply({ content: [{ type: "text", text: JSON.stringify(result, null, 2) }] });
       } catch (e) {
         const text = e instanceof ToolError ? e.message : `${e.message}\n${e.stack}`;
+        if (e instanceof ToolError && e.data !== undefined) return reply({ content: [{ type: "text", text }], isError: true, structuredContent: e.data });
         return reply({ content: [{ type: "text", text }], isError: true });
       }
     }

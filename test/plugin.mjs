@@ -153,7 +153,10 @@ const goFlight = read("skills/go-flight/SKILL.md");
 const fmGo = frontmatter(goFlight);
 const allowed = String(fmGo["allowed-tools"]).split(",").map((s) => s.trim());
 const toolNames = Array.from(serverSrc.matchAll(/name: "(foundry_[a-z_]+)"/g), (m) => m[1]);
-eq(toolNames.length, 18, "the server defines eighteen tools");
+eq(toolNames.length, 19, "the server defines nineteen tools");
+
+const COUNT_WORDS = { 18: "Eighteen", 19: "Nineteen", 20: "Twenty", 21: "Twenty-one", 22: "Twenty-two", 23: "Twenty-three", 24: "Twenty-four", 25: "Twenty-five" };
+like(read("docs/mcp-tools.md").split("\n")[2], new RegExp(`^${COUNT_WORDS[toolNames.length]} tools,`), "docs/mcp-tools.md states the tool count in words");
 
 // Every stage agent's own tool set is explicit (F-16): no agent is left to
 // discover by trial and error what it is allowed to call.
@@ -355,7 +358,7 @@ ok(read("skills/plan-build/SKILL.md").includes("templates/constraints.example.js
 // Every key cfg() actually returns has a row in operations.md's config
 // table — a knob nobody wrote down is a knob nobody will find.
 {
-  const cfgSrc = serverSrc.match(/function cfg\(\) \{[\s\S]*?\n\}/)[0];
+  const cfgSrc = serverSrc.match(/function cfgFrom\(c, planIds\) \{[\s\S]*?\n\}/)[0];
   const cfgKeys = Array.from(cfgSrc.matchAll(/^ {4}(\w+):/gm), (m) => m[1]);
   ok(cfgKeys.length >= 9, "cfg()'s top-level keys were actually extracted from the source");
   const opsDoc = read("docs/operations.md");

@@ -473,4 +473,69 @@ await withServer(specRepo(), async ({ call }) => {
   });
 }
 
+// ---------------------------------------------------------------- plan_commit (S-06)
+
+{
+  const repo = specRepo();
+  const plan = plannedRepo(); // only for its generated texts
+  writeFile(repo, "docs/PLAN.md", readFile(plan, "docs/PLAN.md"));
+  writeFile(repo, "docs/PROGRESS.md", readFile(plan, "docs/PROGRESS.md"));
+  writeFile(repo, "docs/foundry.json", readFile(plan, "docs/foundry.json"));
+  writeFile(repo, "CLAUDE.md", "# rules\n");
+  await withServer(repo, async ({ call }) => {
+    const r = await call("foundry_plan_commit");
+    eq(r.tasks, 3, "a valid plan commits: three tasks");
+    eq(JSON.stringify(r.phases), JSON.stringify([{ phase: 0, tasks: 3 }]), "...in one phase");
+    eq(subject(repo), "plan: derive build plan from SPEC", "...as plan: derive build plan from SPEC");
+    eq((await call("foundry_plan_commit")).commit, null, "a second call commits nothing");
+  });
+}
+
+{
+  // every problem at once (project-c F-07)
+  const repo = specRepo();
+  const planText = [
+    "# Plan",
+    "",
+    "### P0-01: One",
+    "**Depends on:** P0-02",
+    "",
+    "### P0-02 - Title",
+    "**Depends on:** none",
+    "",
+    "### P0-03: Three",
+    "**Depends on:** P0-03",
+    "",
+    "### P0-03: Three again",
+    "**Depends on:** none",
+    "",
+    "### P0-05: Five",
+    "**Depends on:** none",
+    "",
+  ].join("\n");
+  writeFile(repo, "docs/PLAN.md", planText);
+  writeFile(repo, "docs/PROGRESS.md", ["# P", "Branch: (x)", "Started: (x)", "", "## Tasks", "- [ ] P0-05 Five", "- [ ] P0-03 Three", "- [ ] P0-01 One", "", "## Log", ""].join("\n"));
+  writeFile(repo, "docs/foundry.json", JSON.stringify({ verify: ["true"], constraints: [{ id: "c", paths: ["src/"], pattern: "x", shouldMatch: ["x"], shouldNotMatch: ["y"], from: "P9-01" }] }));
+  const head = git(repo, ["rev-parse", "HEAD"]);
+  await withServer(repo, async ({ rpc }) => {
+    const e = (await rpc("tools/call", { name: "foundry_plan_commit", arguments: {} })).result;
+    eq(e.isError, true, "a broken plan is refused");
+    const text = e.content[0].text;
+    like(text, /^\d+ problems? in the plan/, "...with a one-line count first");
+    const checks = new Set(e.structuredContent.problems.map((p) => p.check));
+    for (const c of ["heading", "duplicate", "sequence", "depends", "cycle", "progress", "from", "claude"]) ok(checks.has(c), `...and the list includes a ${c} problem`);
+    const numbered = text.split("\n").filter((l) => /^\d+\. /.test(l)).length;
+    eq(numbered, e.structuredContent.problems.length, "...with one numbered line per problem");
+    eq(git(repo, ["rev-parse", "HEAD"]), head, "...and nothing was committed");
+  });
+}
+
+{
+  const repo = plannedRepo({ config: { policies: { signing: "sometimes" } } });
+  await withServer(repo, async ({ rpc }) => {
+    const e = (await rpc("tools/call", { name: "foundry_plan_commit", arguments: {} })).result;
+    eq(e.structuredContent.problems.filter((p) => p.check === "config").length, 1, "a broken config is one config problem");
+  });
+}
+
 finish();
