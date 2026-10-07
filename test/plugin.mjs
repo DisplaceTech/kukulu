@@ -208,6 +208,15 @@ eq(toolNames.length, 21, "the server defines twenty-one tools");
 const COUNT_WORDS = { 18: "Eighteen", 19: "Nineteen", 20: "Twenty", 21: "Twenty-one", 22: "Twenty-two", 23: "Twenty-three", 24: "Twenty-four", 25: "Twenty-five" };
 like(read("docs/mcp-tools.md").split("\n")[2], new RegExp(`^${COUNT_WORDS[toolNames.length]} tools,`), "docs/mcp-tools.md states the tool count in words");
 
+{
+  const readme = read("README.md");
+  const tableRows = readme.slice(readme.indexOf("## MCP tools"), readme.indexOf("## The guard hook"));
+  const missing = toolNames.filter((t) => !tableRows.includes(`| \`${t}\` |`));
+  eq(missing.join(","), "", "README's tool table lists every server tool");
+  const WORDS = COUNT_WORDS[toolNames.length].toLowerCase();
+  like(readme, new RegExp(`exposes ${WORDS} tools`), "README states the tool count in words");
+}
+
 // Every stage agent's own tool set is explicit (F-16): no agent is left to
 // discover by trial and error what it is allowed to call.
 for (const name of agentNames) {
