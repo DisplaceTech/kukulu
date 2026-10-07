@@ -65,3 +65,21 @@ Branch build/2026-10-07, head 3f9578a before this handoff commit. 31 tasks: 31 d
 - R1-02: tests for four server.mjs mutants (filter quoting, strayArtifacts, 11th ordinal, finalize clearing the override). Each was confirmed to fail against its mutant. Interpretation: the 11th-ordinal test drives 12 equal-count rounds with maxRounds 11.
 - R1-03: plugin test pins planner and summarizer tool lists and README agent defaults. README and routing.md corrected (summarizer is opus).
 - Manual check: none. No new config keys.
+
+## Round 2
+
+Branch build/2026-10-07; 34 tasks done, 0 blocked, 0 skipped. Head before
+handoff: 22cb0f5.
+
+- R2-01: fake gh `pr ready` flips isDraft with sed to a temp file plus `mv`
+  (BSD-safe). New constraint `no-gnu-sed-inplace` in docs/foundry.json, listed
+  in CLAUDE.md. No Interpretation choices.
+- R2-02: root `.gitleaks.toml` (default rules, one AND allowlist for
+  `^test/(harness|review)\.mjs$` and `0123456789ABCDEF`). Both gitleaks scans
+  (range and full history) report no leaks. plugin.mjs assertion added.
+- R2-03: test in test/implement.mjs for the undoFallback `--unset` branch,
+  using an isolated GIT_CONFIG_GLOBAL. Fails against the mutant (verified in a
+  scratch edit; server.mjs restored, not modified).
+
+Human check: after push, PR checks `test (macos)` and `gitleaks` should pass
+(NOT VERIFIED, human).
