@@ -19,7 +19,7 @@ Started: 2026-10-07T17:30:53.739Z
 - [x] P1-12 The flight key, policies.archive and foundry_flight_archive
 - [x] P1-13 foundry_pr_finalize signed check, ready, auto-merge and awaiting signing
 - [x] P1-14 foundry_pr_finalize resign path
-- [ ] P1-15 Phase 1 end: push and record the manual check
+- [x] P1-15 Phase 1 end: push and record the manual check
 - [ ] P2-01 Summarize skill: content, archive, codebase notes, finalize
 - [ ] P2-02 Review-build skill: targeted mutants, confirmKill, converging rounds
 - [ ] P2-03 Plan-build skill: plan_commit, from, stray artifacts, per-flight CLAUDE.md
@@ -79,3 +79,6 @@ Added policies.finalize (auto) and policies.mergeMethod (merge), signedCheck, ne
 
 ### P1-14 — 57ef188
 resign (boolean, validated) added to foundry_pr_finalize: dirty/base-branch refusals, override unset + probeSigning("required") with restore, bounded prompt-free rebase -f --rebase-merges --gpg-sign with abort+restore, re-check, force-with-lease push (resignPush), then the all-signed path with resigned:true. Tests in review.mjs with isolated GIT_CONFIG_GLOBAL fake signer. Interpretation: refusal after step 4 leaves state.json's override flag (config already unset). Manual check: NOT VERIFIED (human): re-sign with a real signing agent.
+
+### P1-15 — 533bd35
+Push: pushed build/2026-10-07 to origin at phase end (full verify was green at P1-14). Manual check: NOT VERIFIED (human): run one real flight on a throwaway spec with the working-tree plugin (claude --plugin-dir .) and confirm the summarizer passes content and no Write refusal appears.
