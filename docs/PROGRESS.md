@@ -17,7 +17,7 @@ Started: 2026-10-07T17:30:53.739Z
 - [x] P1-10 foundry_plan_commit validates and commits the plan
 - [x] P1-11 foundry_plan_commit renumbers split task ids
 - [x] P1-12 The flight key, policies.archive and foundry_flight_archive
-- [ ] P1-13 foundry_pr_finalize signed check, ready, auto-merge and awaiting signing
+- [x] P1-13 foundry_pr_finalize signed check, ready, auto-merge and awaiting signing
 - [ ] P1-14 foundry_pr_finalize resign path
 - [ ] P1-15 Phase 1 end: push and record the manual check
 - [ ] P2-01 Summarize skill: content, archive, codebase notes, finalize
@@ -73,3 +73,6 @@ plan_commit gains renumber (boolean). renumberMap + single-pass SPLIT_ID rewrite
 
 ### P1-12 — 3fe6425
 Added flight key (FLIGHT_SLUG), policies.archive (default false, only in cfgFrom), summary_commit.archive field, foundry_flight_archive (after summary_commit; 20 tools), next() archived done. Archive commit adds only existing paths and commits pathspecs known to HEAD/disk; all inside withRollback with empty-dir cleanup on failure. Interpretation: baseBranch not read (unused). ASSUMPTION: policies.archive default false, not tuned. Tests in review/state/protocol/plugin; docs updated. Phase 1 complete; push deferred to run_finish.
+
+### P1-13 — 63ce643
+Added policies.finalize (auto) and policies.mergeMethod (merge), signedCheck, nextSteps, finalizeConfig, foundry_pr_finalize (after flight_archive; 21 tools), next() awaiting-signing done, PROMPTS.summarize sentence. Harness: fake gh pr ready/merge, mkFakeGpg, useFakeSigner. Interpretation: gh pr ready failure -> merge "unavailable: gh pr ready failed: <line>"; pr policy none + existing PR -> "skipped: policy". resign is P1-14. Tests in review/state/protocol/plugin; docs updated.
