@@ -20,6 +20,12 @@ options to the review-loop bounds. Everything else changes project state and bel
 config, profile or project override is a refusal from any of the four —
 deliberately: a flight must not run with a half-understood routing config.
 
+Every commit a tool makes runs with no terminal prompt and a 30-second bound,
+so a signing agent that wants a pinentry cannot hang the server. Under
+`policies.signing: "auto"` a commit that fails to sign is retried once
+unsigned, and `state.signing` and `state.signingOverride` record that signing
+was turned off for the run; under `"required"` the tool refuses instead.
+
 A tool that refuses returns a normal MCP result with `isError: true` and a
 plain-English message. It is not a transport error: the model is expected to
 read it, fix what it did, and try again.

@@ -691,6 +691,7 @@ for (const [bad, re] of [
   await withServer(repo, async ({ call }) => {
     const r = await call("foundry_run_start");
     eq(r.signing, "off", "policies.signing: off records off without even probing");
+    ok(JSON.parse(readFile(repo, ".foundry/state.json")).signingOverride !== true, "an explicit off does not set signingOverride");
     eq(git(repo, ["config", "--local", "commit.gpgsign"]), "false", "...and disables signing locally");
     ok(!hasFile(repo, ".foundry/feedback.jsonl"), "an explicit off is the operator's own choice, not friction — no feedback entry");
   });
@@ -727,6 +728,7 @@ for (const [bad, re] of [
   await withServer(repo, async ({ call }) => {
     const r = await call("foundry_run_start");
     like(r.signing, /^off \(probe failed: /, "auto falls back to off and records why, rather than refusing");
+    eq(JSON.parse(readFile(repo, ".foundry/state.json")).signingOverride, true, "a failed probe sets signingOverride");
     eq(git(repo, ["config", "--local", "commit.gpgsign"]), "false", "...and disables signing locally so the first task commit does not hang");
 
     const lines = readFile(repo, ".foundry/feedback.jsonl").trim().split("\n");
@@ -873,6 +875,42 @@ for (const [bad, re] of [
     const r = await call("foundry_run_halt", { reason: "operator intervened" });
     eq(r.halted, "operator intervened", "the halt itself still works");
     ok(!hasFile(repo, ".foundry/feedback.jsonl"), "policies.feedback: false skips even the auto entry");
+  });
+}
+
+// ---------------------------------------------------------------- commit signing (S-02)
+
+function failingSignerRepo(config) {
+  const repo = plannedRepo({ config });
+  git(repo, ["config", "--local", "commit.gpgsign", "true"]);
+  git(repo, ["config", "--local", "gpg.format", "openpgp"]);
+  git(repo, ["config", "--local", "gpg.program", "/nonexistent-signing-agent"]);
+  return repo;
+}
+
+{
+  const repo = failingSignerRepo({ policies: { signing: "auto" } });
+  await withServer(repo, async ({ call }) => {
+    const r = await call("foundry_feedback_log", { stage: "plan", message: "something slow" });
+    eq(r.logged, true, "auto: the feedback entry is logged");
+    eq(subject(repo), "chore: pipeline friction (plan)", "auto: a Foundry commit whose signing fails is retried unsigned");
+    const st = JSON.parse(git(repo, ["show", "HEAD:.foundry/state.json"]));
+    like(st.signing, /^off \(commit signing failed: /, "...the committed state records why");
+    eq(st.signingOverride, true, "...and sets signingOverride");
+    eq(git(repo, ["config", "--local", "commit.gpgsign"]), "false", "...and signing is off locally");
+    const entries = git(repo, ["show", "HEAD:.foundry/feedback.jsonl"]).trim().split("\n").map((l) => JSON.parse(l));
+    eq(entries.filter((e) => e.category === "signing").length, 1, "...with exactly one signing entry");
+    ok(entries.some((e) => e.message === "something slow"), "...beside the logged entry");
+    eq(git(repo, ["status", "--porcelain"]), "", "...and the tree is clean");
+  });
+}
+
+{
+  const repo = failingSignerRepo({ policies: { signing: "required" } });
+  const head = git(repo, ["rev-parse", "HEAD"]);
+  await withServer(repo, async ({ call }) => {
+    isError(await call("foundry_flight_options", { maxRounds: 5 }), /'required'.*could not be signed/, "required: a Foundry commit whose signing fails throws");
+    eq(git(repo, ["rev-parse", "HEAD"]), head, "...and HEAD did not move");
   });
 }
 

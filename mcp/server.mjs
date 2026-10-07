@@ -89,7 +89,56 @@ function git(args, { allowFail = false, cwd = ROOT } = {}) {
   return { ok: r.status === 0, out: (r.stdout || "").trim(), err: (r.stderr || "").trim() };
 }
 
-function gitCommitIfChanged(paths, message) {
+const SIGNING_TIMEOUT_MS = 30_000;
+const SIGNING_FAILURE = /gpg failed to sign|failed to sign|signing failed|cannot exec|pinentry|ssh-keygen|gpg:/i;
+
+/**
+ * The one place the server runs `git commit`. A signing agent that wants a
+ * pinentry would hang the server forever, so the commit is bounded and told
+ * never to prompt. Under policies.signing "auto" a signing failure turns
+ * signing off for the run and retries once, with the record of that decision
+ * in the same commit; under "required" it throws (S-02).
+ */
+function commitStaged(rels, message, { stage } = {}) {
+  const run = (args) =>
+    spawnSync("git", args, {
+      cwd: ROOT,
+      encoding: "utf8",
+      timeout: SIGNING_TIMEOUT_MS,
+      env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+    });
+  const r = run(["commit", "-q", "-m", message, "--", ...rels]);
+  if (r.status === 0 && !r.error) return;
+  const text = (r.stderr || r.stdout || "").trim();
+  const timedOut = r.error?.code === "ETIMEDOUT" || Boolean(r.signal);
+  if (!timedOut && !SIGNING_FAILURE.test(text)) {
+    throw new ToolError(`git commit failed: ${text || r.error?.message || "unknown error"}`);
+  }
+  const line = timedOut ? "timed out" : text.split("\n")[0];
+  let policy = "auto";
+  try {
+    policy = cfg().policies.signing;
+  } catch {
+    // a malformed config must not keep a commit from being made
+  }
+  if (policy === "required") {
+    throw new ToolError(`policies.signing is 'required' and the commit could not be signed: ${line}. Nothing was committed; fix the signing agent or set policies.signing to 'off', then call this tool again.`);
+  }
+  git(["config", "--local", "commit.gpgsign", "false"]);
+  const st = loadState();
+  st.signing = `off (commit signing failed: ${line})`;
+  st.signingOverride = true;
+  saveState(st);
+  if (feedbackEnabled()) appendFeedback(stage || "implement", `Signing disabled for this run: ${st.signing}`, "signing", "auto");
+  const all = [...new Set([...rels, rel(P.state), rel(P.feedback)])].filter((x) => exists(path.join(ROOT, x)));
+  git(["add", "-A", "--", ...all]);
+  const retry = run(["-c", "commit.gpgsign=false", "commit", "-q", "-m", message, "--", ...all]);
+  if (retry.status !== 0 || retry.error) {
+    throw new ToolError(`git commit failed even unsigned: ${(retry.stderr || retry.stdout || retry.error?.message || "").trim()}`);
+  }
+}
+
+function gitCommitIfChanged(paths, message, { stage } = {}) {
   // A path that neither exists on disk nor is tracked yet (e.g. a feedback
   // log nothing has written to this run) is not "nothing changed" to `git
   // add` — it is a pathspec error. Drop those before asking git about them.
@@ -98,7 +147,7 @@ function gitCommitIfChanged(paths, message) {
   git(["add", "-A", "--", ...rels]);
   const staged = git(["diff", "--cached", "--name-only", "--", ...rels]).out;
   if (!staged) return null;
-  git(["commit", "-q", "-m", message, "--", ...rels]);
+  commitStaged(rels, message, { stage });
   return git(["rev-parse", "--short", "HEAD"]).out;
 }
 
@@ -1189,7 +1238,7 @@ function countFeedback() {
 function feedbackLog({ stage, message, category }) {
   if (!cfg().policies.feedback) return { logged: false, reason: "disabled by policy" };
   appendFeedback(stage, message, category, "agent");
-  const commit = gitCommitIfChanged([P.feedback], `chore: pipeline friction (${stage})`);
+  const commit = gitCommitIfChanged([P.feedback], `chore: pipeline friction (${stage})`, { stage });
   return { logged: true, count: countFeedback(), commit };
 }
 
@@ -1449,7 +1498,7 @@ function probeSigning(signingPolicy) {
   const probe = spawnSync("git", ["commit-tree", "-S", "HEAD^{tree}", "-m", "foundry signing probe"], {
     cwd: ROOT,
     encoding: "utf8",
-    timeout: 30_000,
+    timeout: SIGNING_TIMEOUT_MS,
     env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
   });
   if (probe.status === 0 && !probe.error) return "on";
@@ -1520,6 +1569,7 @@ function startRun() {
   st.preexistingUntracked = preexistingUntracked;
   st.policies = c.policies;
   st.signing = probeSigning(c.policies.signing);
+  if (st.signing.startsWith("off (probe failed")) st.signingOverride = true;
   st.implemented = false; st.reviewed = false; st.verdict = null;
   saveState(st);
   // Only the auto fallback is friction — an explicit "off" or an
@@ -2353,7 +2403,7 @@ function reviewSubmit({ verdict, tasks = [], unblock = [] }) {
     st.reviewed = true; st.verdict = "APPROVED";
     st.rounds = [...st.rounds, { round: N, fixTasks: 0, unblocked: 0, verdict: "APPROVED", at: new Date().toISOString() }];
     saveState(st);
-    const sha = gitCommitIfChanged([P.review, P.state], `review: round ${N} approved`);
+    const sha = gitCommitIfChanged([P.review, P.state], `review: round ${N} approved`, { stage: "review" });
     const push = pushBranch(gitFacts().branch, st.policies.push);
     // `round` is the number this review was stamped with, as for CHANGES
     // REQUESTED — never the count of fix rounds (F-21).
@@ -2417,7 +2467,7 @@ function reviewSubmit({ verdict, tasks = [], unblock = [] }) {
   }
   if (st.halted && c.policies.feedback) appendFeedback("review", st.halted, "round-cap", "auto");
   saveState(st);
-  const sha = gitCommitIfChanged([P.review, P.plan, P.progress, P.state, P.feedback], `review: round ${N}`);
+  const sha = gitCommitIfChanged([P.review, P.plan, P.progress, P.state, P.feedback], `review: round ${N}`, { stage: "review" });
   const push = pushBranch(gitFacts().branch, st.policies.push);
   // Re-read rather than reuse `pr`: appendTaskLines edits pr.lines but not
   // pr.tasks, so counts(pr.tasks) would describe the file as it was before
@@ -2455,7 +2505,7 @@ function summaryCommit() {
   if (st.verdict !== "APPROVED") throw new ToolError("summary can only be committed after an APPROVED review");
   st.summarized = true;
   saveState(st);
-  const sha = gitCommitIfChanged([P.summary, P.state], "chore: build summary");
+  const sha = gitCommitIfChanged([P.summary, P.state], "chore: build summary", { stage: "summarize" });
   const g = gitFacts();
   const push = pushBranch(g.branch, st.policies.push);
   return { commit: sha, branch: g.branch, base: g.base, head: g.head, reviews: reviewCount(st), fixRounds: st.round, push, pr: prState(st.policies, cfg().baseBranch) };

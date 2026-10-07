@@ -252,7 +252,7 @@ parse. Edit it between stages, not during one.
 | `maxRoundsHard` | `6` | Absolute review-round ceiling, regardless of convergence; a review numbered above it halts |
 | `commandTimeoutMs` | `600000` | Per-command timeout for `foundry_verify`, `foundry_mutate` and `parallel.setup`; a timeout kills the command's whole process group |
 | `guardCap` | `60` | Re-blocks since the last task state change before the implement guard gives up; carried into `.foundry/implement.lock` at `foundry_run_start` and wins over `FOUNDRY_GUARD_CAP` |
-| `policies.signing` | `"auto"` | `"off"` disables commit signing for the run; `"required"` refuses to start unless a real signed commit succeeds; `"auto"` uses signing when it works and falls back to off, recording why, when it does not |
+| `policies.signing` | `"auto"` | `"off"` disables commit signing for the run; `"required"` refuses to start unless a real signed commit succeeds; `"auto"` uses signing when it works and falls back to off, recording why, when it does not; this includes any later commit whose signing fails or exceeds 30 seconds, which is retried once unsigned and recorded in `state.signing` and `state.signingOverride` (under `"required"` that commit refuses instead) |
 | `policies.push` | `true` | `false` skips every push `foundry_run_start`, `foundry_run_finish`, `foundry_review_submit` and `foundry_summary_commit` would otherwise make |
 | `policies.pr` | `"draft"` | `"none"` skips draft-PR creation in `foundry_run_finish` even when `gh` is available |
 | `policies.feedback` | `true` | `false` disables `foundry_feedback_log` (it returns `{ logged: false }` without writing) and every internal auto-log point |
