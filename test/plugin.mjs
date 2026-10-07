@@ -241,7 +241,7 @@ for (const t of allowed.filter((a) => a.startsWith("mcp__"))) {
 }
 ok(
   allowed.every((a) => a === "Agent" || MCP_PREFIXES.some((p) => a.startsWith(p))),
-  "the flight controller is allowed nothing beyond Agent, the read-only foundry tools, agents_sync, run_halt and flight_options",
+  "the flight controller is allowed nothing beyond Agent, the read-only foundry tools, agents_sync, run_halt, flight_options and pr_finalize",
 );
 ok(
   // run_halt is a deliberate exception: it records a clean halt reason when
@@ -251,6 +251,10 @@ ok(
   !allowed.some((a) => /run_start|task_|run_finish|review_submit|summary_commit/.test(a)),
   "the flight controller cannot touch the tools that change project state",
 );
+like(goFlight, /resume: true/, "go-flight resumes a round-cap halt with foundry_flight_options (project-c F-13, F-18)");
+like(goFlight, /foundry_pr_finalize\(\{ resign: true \}\)/, "go-flight finishes a signing-blocked flight only with foundry_pr_finalize({ resign: true })");
+like(goFlight, /`flight=<slug>`/, "go-flight passes flight=<slug> to the planner");
+like(goFlight, /Flight slug: <slug>\./, "...as the sentence the planner skill looks for");
 for (const name of agentNames) like(goFlight, new RegExp(`foundry:${name}`), `go-flight names foundry:${name}`);
 like(goFlight, /notification/, "go-flight describes the loop as event-driven, not a blocking wait");
 like(goFlight, /do not poll/, "go-flight says not to poll while a stage is running");

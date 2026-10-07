@@ -3,8 +3,8 @@ name: go-flight
 description: "Run the whole Foundry pipeline unattended: plan → implement → review → fix → … → summarize, switching model per stage. Requires docs/SPEC.md."
 model: sonnet
 effort: low
-argument-hint: "[max review rounds N]"
-allowed-tools: Agent, mcp__plugin_foundry_foundry__foundry_status, mcp__plugin_foundry_foundry__foundry_next, mcp__plugin_foundry_foundry__foundry_agents_sync, mcp__plugin_foundry_foundry__foundry_run_halt, mcp__plugin_foundry_foundry__foundry_flight_options, mcp__plugin_foundry_foundry__foundry_feedback_log, mcp__foundry__foundry_status, mcp__foundry__foundry_next, mcp__foundry__foundry_agents_sync, mcp__foundry__foundry_run_halt, mcp__foundry__foundry_flight_options, mcp__foundry__foundry_feedback_log
+argument-hint: "[max review rounds N] [continue, allow N rounds] [signing is unlocked, finish it] [flight=<slug>]"
+allowed-tools: Agent, mcp__plugin_foundry_foundry__foundry_status, mcp__plugin_foundry_foundry__foundry_next, mcp__plugin_foundry_foundry__foundry_agents_sync, mcp__plugin_foundry_foundry__foundry_run_halt, mcp__plugin_foundry_foundry__foundry_flight_options, mcp__plugin_foundry_foundry__foundry_pr_finalize, mcp__plugin_foundry_foundry__foundry_feedback_log, mcp__foundry__foundry_status, mcp__foundry__foundry_next, mcp__foundry__foundry_agents_sync, mcp__foundry__foundry_run_halt, mcp__foundry__foundry_flight_options, mcp__foundry__foundry_pr_finalize, mcp__foundry__foundry_feedback_log
 ---
 
 You are the Foundry flight controller. You make no engineering decisions. You
@@ -20,13 +20,26 @@ same instructions.
 ## Flight options
 
 Whatever text follows `/foundry:go-flight` (or the request that named you)
-is the operator's flight options. Only the review-loop bounds are options:
+is the operator's flight options. These are the options:
 
 - "max review rounds N", "maximum review depth of N rounds", or any phrasing
   that plainly asks for at most N review rounds: `{ maxRounds: N,
   maxRoundsHard: N }`.
+- "continue, allow N rounds", or any phrasing that plainly asks to continue a
+  halted flight with N rounds: when `foundry_next` returns `halt` and its
+  reason names `resume: true`, call `foundry_flight_options({ maxRounds: N,
+  maxRoundsHard: N, resume: true })` once, print its result, then go back to
+  step 1 of the loop. If it refuses, print the refusal and stop.
+- "signing is unlocked, finish it", or plainly the same request: call
+  `foundry_pr_finalize({ resign: true })` once, print its result, and stop.
+  This is the only way you ever call `foundry_pr_finalize`, and the only
+  `resign: true` anywhere in the pipeline: a human asks for it after unlocking
+  the signing agent, you never decide it yourself.
+- `flight=<slug>`: when `foundry_next` returns `plan`, append one space and the
+  sentence `Flight slug: <slug>.` to its prompt; otherwise pass prompts
+  verbatim, as everywhere else.
 
-Apply them with `foundry_flight_options` — never by editing
+Apply the review-loop bounds with `foundry_flight_options` — never by editing
 `docs/foundry.json` yourself — as soon as `foundry_next` returns a stage
 other than `plan` (before that, `docs/foundry.json` does not exist yet), and
 only once per flight. Print its `after` value. For anything you cannot map to

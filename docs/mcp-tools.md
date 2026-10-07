@@ -12,7 +12,9 @@ allow rule and a `.git/info/exclude` line, never a task or a verdict; and
 `foundry_run_halt`, which it may call itself if it cannot even spawn a
 stage, so the next flight sees a clean halt instead of retrying blindly;
 and `foundry_flight_options`, which applies the operator's own go-flight
-options to the review-loop bounds. Everything else changes project state and belongs to a stage agent. (`foundry_mutate` changes a source file only for the length of one call and always restores it, and a stream's tools work in that stream's own worktree.)
+options to the review-loop bounds (and, with `resume`, lifts a round-cap
+halt); and `foundry_pr_finalize`, for the human-initiated re-sign only
+(`resign: true`, when the operator says signing is unlocked). Everything else changes project state and belongs to a stage agent. (`foundry_mutate` changes a source file only for the length of one call and always restores it, and a stream's tools work in that stream's own worktree.)
 
 `foundry_next`, `foundry_status`, `foundry_config_show` and
 `foundry_agents_sync` all resolve the merged routing config (see
