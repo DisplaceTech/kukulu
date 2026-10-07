@@ -638,6 +638,25 @@ const untouched = (repo, head) => {
   });
 }
 
+{
+  // mutant (a): {filter} substituted without its single quotes
+  const repo = mutationRepo({ config: { mutation: { targeted: { unit: { cmd: "printf '%s\\n' {filter}" } } } } });
+  await withServer(repo, async ({ call }) => {
+    const r = await call("foundry_mutate", { file: "src/add.mjs", find: "a + b", replace: "a - b", targeted: "unit", filter: "tests\\Unit\\FooTest" });
+    like(r.results[0].stdoutTail, /tests\\Unit\\FooTest/, "a targeted filter is passed as one single-quoted word (backslashes arrive verbatim)");
+  });
+}
+
+{
+  // mutant (c): the 11th-13th ordinal special case
+  const repo = reviewableRepo({ config: { maxRounds: 11, maxRoundsHard: 100 } });
+  await withServer(repo, async ({ call }) => {
+    const r = await driveRounds(call, repo, Array(12).fill(4));
+    like(r.halted, /the 11th non-converging round/, "an 11th non-converging round reads 11th");
+    ok(!String(r.halted).includes("11st"), "...not 11st");
+  });
+}
+
 // ---------------------------------------------------------------- failedCommands and confirmKill
 
 {
@@ -927,6 +946,25 @@ for (const [verify, want] of [["err", 0], ["bad", 2]]) {
     if (want === 0) eq(r.unsigned, 0, "E counts as signed");
     else ok(r.unsigned >= want, "B does not: every signed commit counts as unsigned");
   }, { env: { ...opts.env, FAKE_GPG_VERIFY: verify } });
+}
+
+{
+  // mutant (d): the all-signed branch clearing the signing override
+  const { repo, opts } = finalizeRepo({ signed: true });
+  const gpg = mkFakeGpg();
+  setState(repo, { signingOverride: true, signing: "off (probe failed: x)" });
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-qm", "chore: override recorded"]);
+  git(repo, ["config", "--local", "commit.gpgsign", "false"]);
+  const env = { ...opts.env, GIT_CONFIG_GLOBAL: fakeSignerGlobal(gpg) };
+  await withServer(repo, async ({ call }) => {
+    await call("foundry_pr_finalize", { breaking: false });
+    const cfgv = spawnSync("git", ["config", "--local", "--get", "commit.gpgsign"], { cwd: repo, encoding: "utf8" });
+    eq(cfgv.stdout.trim(), "", "a manual re-sign then finalize clears the override: local commit.gpgsign is unset");
+    const st = JSON.parse(readFile(repo, ".foundry/state.json"));
+    eq(st.signing, "on", "...state.signing is 'on'");
+    eq(st.signingOverride, undefined, "...and signingOverride is gone");
+  }, { env });
 }
 
 /** Global git config holding a working fake signer, so the server (and nothing else) sees signing on. */

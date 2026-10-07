@@ -449,6 +449,17 @@ await withServer(specRepo(), async ({ call }) => {
 }
 
 {
+  // mutant (b): strayArtifacts only while PLAN.md is absent
+  const repo = plannedRepo();
+  writeFile(repo, "docs/HANDOFF.md", "# handoff\n");
+  await withServer(repo, async ({ call }) => {
+    const s = await call("foundry_status");
+    eq(s.artifacts["HANDOFF.md"], "untracked", "an untracked artifact beside a present plan is not stray: it is untracked");
+    eq(s.strayArtifacts.length, 0, "...and strayArtifacts is empty");
+  });
+}
+
+{
   const repo = plannedRepo();
   writeFile(repo, "docs/PLAN.md", readFile(repo, "docs/PLAN.md") + "\nedit\n");
   await withServer(repo, async ({ call }) => {
