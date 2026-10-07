@@ -20,7 +20,7 @@ Started: 2026-10-07T17:30:53.739Z
 - [x] P1-13 foundry_pr_finalize signed check, ready, auto-merge and awaiting signing
 - [x] P1-14 foundry_pr_finalize resign path
 - [x] P1-15 Phase 1 end: push and record the manual check
-- [ ] P2-01 Summarize skill: content, archive, codebase notes, finalize
+- [x] P2-01 Summarize skill: content, archive, codebase notes, finalize
 - [ ] P2-02 Review-build skill: targeted mutants, confirmKill, converging rounds
 - [ ] P2-03 Plan-build skill: plan_commit, from, stray artifacts, per-flight CLAUDE.md
 - [ ] P2-04 Implement skill: codebase notes stay out of the feedback log
@@ -82,3 +82,6 @@ resign (boolean, validated) added to foundry_pr_finalize: dirty/base-branch refu
 
 ### P1-15 — 533bd35
 Push: pushed build/2026-10-07 to origin at phase end (full verify was green at P1-14). Manual check: NOT VERIFIED (human): run one real flight on a throwaway spec with the working-tree plugin (claude --plugin-dir .) and confirm the summarizer passes content and no Write refusal appears.
+
+### P2-01 — d2ee0fd
+Summarize skill rewritten: composes the document, passes content to foundry_summary_commit (no Write/heredoc), adds sections 9-11 (Suggested CLAUDE.md additions, Advisory mutation survivors, Breaking call), archives when archive: true, ends with foundry_pr_finalize({ breaking }) and never resign; final message statuses AWAITING SIGNING / AUTO-MERGE ON / READY / PR UNCHANGED. plugin.mjs: summarize dropped from heredoc loop, new assertions.
