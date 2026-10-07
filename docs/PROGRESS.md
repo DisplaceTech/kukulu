@@ -18,7 +18,7 @@ Started: 2026-10-07T17:30:53.739Z
 - [x] P1-11 foundry_plan_commit renumbers split task ids
 - [x] P1-12 The flight key, policies.archive and foundry_flight_archive
 - [x] P1-13 foundry_pr_finalize signed check, ready, auto-merge and awaiting signing
-- [ ] P1-14 foundry_pr_finalize resign path
+- [x] P1-14 foundry_pr_finalize resign path
 - [ ] P1-15 Phase 1 end: push and record the manual check
 - [ ] P2-01 Summarize skill: content, archive, codebase notes, finalize
 - [ ] P2-02 Review-build skill: targeted mutants, confirmKill, converging rounds
@@ -76,3 +76,6 @@ Added flight key (FLIGHT_SLUG), policies.archive (default false, only in cfgFrom
 
 ### P1-13 — 63ce643
 Added policies.finalize (auto) and policies.mergeMethod (merge), signedCheck, nextSteps, finalizeConfig, foundry_pr_finalize (after flight_archive; 21 tools), next() awaiting-signing done, PROMPTS.summarize sentence. Harness: fake gh pr ready/merge, mkFakeGpg, useFakeSigner. Interpretation: gh pr ready failure -> merge "unavailable: gh pr ready failed: <line>"; pr policy none + existing PR -> "skipped: policy". resign is P1-14. Tests in review/state/protocol/plugin; docs updated.
+
+### P1-14 — 57ef188
+resign (boolean, validated) added to foundry_pr_finalize: dirty/base-branch refusals, override unset + probeSigning("required") with restore, bounded prompt-free rebase -f --rebase-merges --gpg-sign with abort+restore, re-check, force-with-lease push (resignPush), then the all-signed path with resigned:true. Tests in review.mjs with isolated GIT_CONFIG_GLOBAL fake signer. Interpretation: refusal after step 4 leaves state.json's override flag (config already unset). Manual check: NOT VERIFIED (human): re-sign with a real signing agent.
