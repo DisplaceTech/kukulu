@@ -28,7 +28,7 @@ Started: 2026-10-07T17:30:53.739Z
 - [x] P2-06 Pull-feedback skill reads archived flight logs
 - [x] P2-07 Phase 2 end: push and record the manual check
 - [x] P3-01 Tool reference and README for twenty-one tools
-- [ ] P3-02 Operations: flight after flight, and signing
+- [x] P3-02 Operations: flight after flight, and signing
 - [ ] P3-03 Writing specs and templates: from, targeted mutation, provenance
 - [ ] P3-04 Architecture, contributing table, and feedback headers
 - [ ] P3-05 Version 0.5.0 and the CHANGELOG
@@ -106,3 +106,6 @@ Push: pushed build/2026-10-07 to origin. Agent tools check: agents/planner.md na
 
 ### P3-01 — 2e5b296
 README: count sentence, rows for plan_commit/flight_archive/pr_finalize, updated status/flight_options/mutate/summary_commit rows, quickstart step 4 now describes auto-merge under policies.finalize and that Foundry never merges synchronously. docs/mcp-tools.md audited: complete already (each P1 task updated it), first line says Twenty-one. plugin.mjs: README table coverage and count words.
+
+### P3-02 — 77667b2
+operations.md: new ## Running flight after flight and ## Signing sections, config example shows new policies/flight/mutation, what-the-flight-leaves-behind rewritten for S-14 (no synchronous merge; auto-merge only) and the three new commit kinds. All config rows present. plugin.mjs heading assertions.
