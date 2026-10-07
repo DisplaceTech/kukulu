@@ -148,9 +148,12 @@ git log --oneline --grep '^review:'
 git show <sha>:docs/REVIEW.md
 ```
 
-To continue anyway: raise `maxRounds` (or `maxRoundsHard`, whichever
-tripped) in `docs/foundry.json` (or with `foundry_flight_options`), set
-`"halted": null` in `.foundry/state.json`, commit both, and re-run the
+To continue anyway, make the call the halt message names:
+`foundry_flight_options({ maxRounds: <k + 1>, resume: true })` for the soft
+cap, `foundry_flight_options({ maxRoundsHard: <N>, resume: true })` for the
+hard one. It raises the bound in `docs/foundry.json`, clears `halted` in
+`.foundry/state.json` and commits both; it refuses if the bound would not lift
+the cap that fired, and it never clears any other halt. Then re-run the
 flight.
 
 **Missing spec.** No `docs/SPEC.md` means there is nothing to build from. Write

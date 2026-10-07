@@ -265,6 +265,10 @@ async function driveRounds(call, repo, counts) {
     const r = await driveRounds(call, repo, [4, 4, 4]);
     like(r.halted, /non-converging/, "three rounds that never shrink halt on the third");
     like(r.halted, /reaching maxRounds=2/, "the message names the exceeded cap");
+    like(r.halted, /the 3rd non-converging round|the 2nd non-converging round/, "the message uses a correct ordinal");
+    like(r.halted, /foundry_flight_options\(\{ maxRounds: 3, resume: true \}\)/, "...and names the call that resumes the flight");
+    ok(!r.halted.includes("edit .foundry/state.json"), "...and no longer tells the operator to edit state by hand");
+    eq(JSON.stringify(JSON.parse(readFile(repo, ".foundry/state.json")).haltCap), JSON.stringify({ cap: "maxRounds", round: 3, nonConverging: 2 }), "...and state.haltCap records the cap");
     like(r.halted, /findings per round: 4 → 4 → 4/, "the message shows the trail of counts");
     const n = await call("foundry_next");
     eq(n.stage, "halt", "the flight now halts");
@@ -288,6 +292,8 @@ async function driveRounds(call, repo, counts) {
   await withServer(repo, async ({ call }) => {
     const r = await driveRounds(call, repo, [10, 5, 2]);
     like(r.halted, /hard cap maxRoundsHard=2/, "the hard cap fires on round 3 even while every round is converging, since maxRounds=100 would never trip");
+    like(r.halted, /foundry_flight_options\(\{ maxRoundsHard: 3, resume: true \}\)/, "the hard-cap halt names its resume call");
+    eq(JSON.stringify(JSON.parse(readFile(repo, ".foundry/state.json")).haltCap), JSON.stringify({ cap: "maxRoundsHard", round: 3 }), "...and records haltCap");
     const entry = JSON.parse(readFile(repo, ".foundry/feedback.jsonl").trim());
     eq(entry.category, "round-cap", "the hard-cap halt is logged the same way as a non-converging one");
   });
@@ -618,6 +624,14 @@ const untouched = (repo, head) => {
   writeFile(repo, ".foundry/mutation.json", "{not json");
   await withServer(repo, async ({ call }) => {
     isError(await call("foundry_verify"), /unreadable[\s\S]*git checkout HEAD -- <file>/, "an unreadable sentinel is loud, and says how to recover by hand");
+  });
+}
+
+{
+  const repo = reviewableRepo({ config: { maxRounds: 3 } });
+  await withServer(repo, async ({ call }) => {
+    const r = await driveRounds(call, repo, [4, 4, 4, 4]);
+    like(r.halted, /the 3rd non-converging round/, "a soft cap reached on the third non-converging round reads 3rd, not 3th");
   });
 }
 

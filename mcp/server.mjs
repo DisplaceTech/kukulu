@@ -1812,6 +1812,7 @@ function streamFinish({ stream } = {}) {
     const halted = `merging stream '${stream}' (branch ${streamBranch}) into ${g.branch} ${what}; the stream's branch and worktree ${rel(dir)} are kept. A human must resolve it: from the main checkout run \`git merge --no-ff ${streamBranch}\`, fix what it reports and commit, then \`git worktree remove --force ${rel(dir)}\` and clear 'halted' in .foundry/state.json.`;
     const cur = loadState();
     cur.halted = halted;
+    delete cur.haltCap;
     saveState(cur);
     if (cc.policies.feedback) appendFeedback("implement", halted, "stream-merge", "auto");
     gitCommitIfChanged([P.state, P.feedback], `chore: run halted (stream ${stream} merge conflict)`);
@@ -2495,21 +2496,42 @@ const FLIGHT_OPTION_KEYS = ["maxRounds", "maxRoundsHard"];
  * has written docs/foundry.json.
  */
 function flightOptions(args = {}) {
+  if (args.resume !== undefined && typeof args.resume !== "boolean") throw new ToolError("resume must be a boolean");
   const given = FLIGHT_OPTION_KEYS.filter((k) => args[k] !== undefined);
   if (!given.length) throw new ToolError(`pass at least one of ${FLIGHT_OPTION_KEYS.join(", ")}`);
   for (const k of given) {
     if (!Number.isInteger(args[k]) || args[k] <= 0) throw new ToolError(`${k} must be a positive integer`);
   }
   if (!exists(P.config)) throw new ToolError("docs/foundry.json does not exist yet; set flight options once the plan stage has written it");
+  const resume = args.resume === true;
+  const st = loadState();
+  if (resume) {
+    if (!st.halted) throw new ToolError("the flight is not halted; there is nothing to resume");
+    if (!st.haltCap) throw new ToolError(`this halt is not a round-cap halt, so resume cannot clear it: ${st.halted}`);
+    const { cap, round, nonConverging } = st.haltCap;
+    if (cap === "maxRoundsHard" && !(args.maxRoundsHard >= round)) {
+      throw new ToolError(`the halt came from maxRoundsHard at round ${round}; pass maxRoundsHard: ${round} or more with resume, which is what would lift it`);
+    }
+    if (cap === "maxRounds" && !(args.maxRounds > nonConverging)) {
+      throw new ToolError(`the halt came from maxRounds with ${nonConverging} non-converging rounds; pass maxRounds: ${nonConverging + 1} or more with resume, which is what would lift it`);
+    }
+  }
   const raw = loadConfig();
   const was = cfg();
   const before = Object.fromEntries(FLIGHT_OPTION_KEYS.map((k) => [k, was[k]]));
   for (const k of given) raw[k] = args[k];
-  return withRollback([P.config], () => {
+  const paths = resume ? [P.config, P.state] : [P.config];
+  return withRollback(paths, () => {
     write(P.config, `${JSON.stringify(raw, null, 2)}\n`);
+    if (resume) {
+      st.halted = null;
+      delete st.haltCap;
+      saveState(st);
+    }
     const after = Object.fromEntries(FLIGHT_OPTION_KEYS.map((k) => [k, cfg()[k]]));
-    const commit = gitCommitIfChanged([P.config], `chore: flight options (${given.map((k) => `${k}=${args[k]}`).join(", ")})`);
-    return { before, after, commit };
+    const label = `${given.map((k) => `${k}=${args[k]}`).join(", ")}${resume ? ", resume" : ""}`;
+    const commit = gitCommitIfChanged(paths, `chore: flight options (${label})`);
+    return { before, after, commit, ...(resume ? { resumed: true } : {}) };
   });
 }
 
@@ -2524,6 +2546,7 @@ function runHalt({ reason }) {
   if (!reason) throw new ToolError("reason is required");
   const st = loadState();
   st.halted = reason;
+  delete st.haltCap; // only a round-cap halt is resumable through foundry_flight_options
   const commit = withRollback([P.state, P.progress, P.feedback], () => {
     saveState(st);
     if (exists(P.lock)) fs.unlinkSync(P.lock);
@@ -2553,6 +2576,13 @@ function formatTask(id, t) {
 function reviewMdRound() {
   const m = read(P.review).match(/^Round:\s*(\d+)\s*$/m);
   return m ? Number(m[1]) : null;
+}
+
+/** 1st, 2nd, 3rd, 4th, 11th, 12th, 13th, 21st, 101st, 111th. */
+function ordinal(n) {
+  const mod100 = n % 100;
+  if (mod100 >= 11 && mod100 <= 13) return `${n}th`;
+  return `${n}${{ 1: "st", 2: "nd", 3: "rd" }[n % 10] || "th"}`;
 }
 
 function reviewSubmit({ verdict, tasks = [], unblock = [] }) {
@@ -2642,9 +2672,11 @@ function reviewSubmit({ verdict, tasks = [], unblock = [] }) {
 
     st.round = N; st.implemented = false; st.reviewed = true; st.verdict = "CHANGES REQUESTED";
     if (N > c.maxRoundsHard) {
-      st.halted = `review round ${N} exceeds the hard cap maxRoundsHard=${c.maxRoundsHard} (findings per round: ${trail}); a human must decide whether to continue (edit .foundry/state.json to clear 'halted' and raise maxRoundsHard in docs/foundry.json)`;
+      st.halted = `review round ${N} exceeds the hard cap maxRoundsHard=${c.maxRoundsHard} (findings per round: ${trail}); a human must decide whether to continue: call foundry_flight_options({ maxRoundsHard: ${N}, resume: true })`;
+      st.haltCap = { cap: "maxRoundsHard", round: N };
     } else if (nonConvergingSoFar >= c.maxRounds) {
-      st.halted = `round ${N} is non-converging (findings per round: ${trail}), the ${nonConvergingSoFar}th non-converging round, reaching maxRounds=${c.maxRounds}; a human must decide whether to continue (edit .foundry/state.json to clear 'halted' and raise maxRounds in docs/foundry.json)`;
+      st.halted = `round ${N} is non-converging (findings per round: ${trail}), the ${ordinal(nonConvergingSoFar)} non-converging round, reaching maxRounds=${c.maxRounds}; a human must decide whether to continue: call foundry_flight_options({ maxRounds: ${nonConvergingSoFar + 1}, resume: true })`;
+      st.haltCap = { cap: "maxRounds", round: N, nonConverging: nonConvergingSoFar };
     }
     if (st.halted && c.policies.feedback) appendFeedback("review", st.halted, "round-cap", "auto");
     saveState(st);
@@ -2741,10 +2773,11 @@ const TOOLS = [
   },
   {
     name: "foundry_flight_options",
-    description: "Apply an operator's flight options to docs/foundry.json and commit them: maxRounds (non-converging review rounds tolerated) and maxRoundsHard (absolute ceiling on review rounds). For the flight controller, when /foundry:go-flight was given options such as a maximum review depth. Refused before the plan stage has written docs/foundry.json. Returns { before, after, commit }.",
+    description: "Apply an operator's flight options to docs/foundry.json and commit them: maxRounds (non-converging review rounds tolerated) and maxRoundsHard (absolute ceiling on review rounds). For the flight controller, when /foundry:go-flight was given options such as a maximum review depth. Refused before the plan stage has written docs/foundry.json. With resume: true it also clears a round-cap halt, provided the bound passed lifts the cap that fired. Returns { before, after, commit } (plus resumed: true).",
     inputSchema: S({
       maxRounds: { type: "integer", minimum: 1, description: "non-converging review rounds tolerated before the flight halts" },
       maxRoundsHard: { type: "integer", minimum: 1, description: "a review numbered above this halts the flight, converging or not" },
+      resume: { type: "boolean", description: "clear a round-cap halt (the call the halt message names); the bound passed must lift the cap that fired. Any other halt is refused" },
     }),
     fn: flightOptions,
   },

@@ -7,7 +7,7 @@ import path from "node:path";
 import {
   finish, ok, eq, like, isError,
   mkDir, specRepo, plannedRepo, withServer,
-  writeFile, readFile, setState, markTasks, git,
+  writeFile, readFile, setState, markTasks, git, subject,
 } from "./harness.mjs";
 
 const ALL_DONE = { "P0-01": "x", "P0-02": "x", "P0-03": "x" };
@@ -309,6 +309,52 @@ for (const [body, expected, label] of [
     eq(JSON.stringify(c.verify), JSON.stringify(["true"]), "...and keeps everything else");
     const again = await call("foundry_flight_options", { maxRounds: 6 });
     eq(again.commit, null, "applying the same options twice commits nothing");
+  });
+}
+
+// ---------------------------------------------------------------- resume (S-09)
+
+{
+  const repo = plannedRepo();
+  const halted = "round 4 is non-converging, the 3rd non-converging round";
+  setState(repo, { halted, haltCap: { cap: "maxRounds", round: 4, nonConverging: 3 } });
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-qm", "chore: halted"]);
+  await withServer(repo, async ({ call }) => {
+    const cfgBefore = readFile(repo, "docs/foundry.json");
+    const stateBefore = readFile(repo, ".foundry/state.json");
+    isError(await call("foundry_flight_options", { maxRounds: 3, resume: true }), /pass maxRounds: 4 or more/, "resume with a bound that does not lift the cap is refused, naming 4");
+    eq(readFile(repo, "docs/foundry.json"), cfgBefore, "...docs/foundry.json is unchanged");
+    eq(readFile(repo, ".foundry/state.json"), stateBefore, "...and so is state");
+    isError(await call("foundry_flight_options", { resume: true }), /pass at least one of/, "resume alone is refused");
+    isError(await call("foundry_flight_options", { maxRounds: 4, resume: "yes" }), /resume must be a boolean/, "a non-boolean resume is refused");
+    const head = git(repo, ["rev-list", "--count", "HEAD"]);
+    const r = await call("foundry_flight_options", { maxRounds: 4, resume: true });
+    eq(r.resumed, true, "a lifting resume succeeds");
+    eq(Number(git(repo, ["rev-list", "--count", "HEAD"])) - Number(head), 1, "...in one commit");
+    eq(subject(repo), "chore: flight options (maxRounds=4, resume)", "...with the resume subject");
+    const st = JSON.parse(readFile(repo, ".foundry/state.json"));
+    ok(st.halted === null && st.haltCap === undefined, "...and halted and haltCap are cleared");
+    eq((await call("foundry_next")).stage, "implement", "the flight goes on to implement");
+    isError(await call("foundry_flight_options", { maxRounds: 5, resume: true }), /not halted; there is nothing to resume/, "resume when not halted is refused");
+  });
+}
+
+{
+  const repo = plannedRepo();
+  setState(repo, { halted: "stopped by hand" });
+  await withServer(repo, async ({ call }) => {
+    isError(await call("foundry_flight_options", { maxRounds: 9, resume: true }), /not a round-cap halt.*stopped by hand/, "an operator halt is never cleared by resume, and the refusal names the reason");
+  });
+}
+
+{
+  const repo = plannedRepo();
+  setState(repo, { halted: "hard", haltCap: { cap: "maxRoundsHard", round: 4 } });
+  await withServer(repo, async ({ call }) => {
+    isError(await call("foundry_flight_options", { maxRoundsHard: 3, resume: true }), /maxRoundsHard: 4 or more/, "a hard cap needs maxRoundsHard >= the round");
+    const r = await call("foundry_flight_options", { maxRoundsHard: 4, resume: true });
+    eq(r.resumed, true, "maxRoundsHard: 4 lifts a hard cap at round 4");
   });
 }
 

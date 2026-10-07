@@ -641,21 +641,27 @@ it when `/foundry:go-flight` was given options such as "maximum review depth
 of 6 rounds", so the controller never hand-edits the config (cleanflate
 F-20).
 
-**Arguments:** `{ maxRounds?, maxRoundsHard? }` — positive integers, at
-least one. See [operations.md](./operations.md#configuration) for what each
+**Arguments:** `{ maxRounds?, maxRoundsHard?, resume? }` — positive integers, at
+least one; `resume` is a boolean. See [operations.md](./operations.md#configuration) for what each
 bounds.
 
 **Does:** sets the given keys in `docs/foundry.json`, leaving every other key
 as it was, and commits the file as
 `chore: flight options (maxRounds=6, maxRoundsHard=6)`. Applying the same
-values twice commits nothing. A flight already halted on a round cap stays
-halted; clearing that is still a hand edit.
+values twice commits nothing. A flight halted on a round cap stays halted
+unless `resume: true` is passed: then, if the bound passed lifts the cap that
+fired (`maxRoundsHard >= the round`, or `maxRounds` above the non-converging
+count), the same commit also clears `halted` and `haltCap` in state, subject
+`chore: flight options (<k=v>, resume)`.
 
-**Returns:** `{ before, after, commit }`. `before` and `after` are the
-effective bounds, defaults included.
+**Returns:** `{ before, after, commit }`, plus `resumed: true` after a resume.
+`before` and `after` are the effective bounds, defaults included.
 
 **Refuses when:** neither key is given; a value is not a positive integer;
-or `docs/foundry.json` does not exist yet (before the plan stage).
+`docs/foundry.json` does not exist yet (before the plan stage); or, with
+`resume`, the flight is not halted, the halt is not a round-cap halt (a
+stream-merge or operator halt is never cleared this way), or the bound passed
+would not lift the cap that fired.
 
 ---
 
