@@ -24,7 +24,7 @@ Started: 2026-10-07T17:30:53.739Z
 - [x] P2-02 Review-build skill: targeted mutants, confirmKill, converging rounds
 - [x] P2-03 Plan-build skill: plan_commit, from, stray artifacts, per-flight CLAUDE.md
 - [x] P2-04 Implement skill: codebase notes stay out of the feedback log
-- [ ] P2-05 Go-flight skill: resume, signing unlocked, flight slug
+- [x] P2-05 Go-flight skill: resume, signing unlocked, flight slug
 - [ ] P2-06 Pull-feedback skill reads archived flight logs
 - [ ] P2-07 Phase 2 end: push and record the manual check
 - [ ] P3-01 Tool reference and README for twenty-one tools
@@ -94,3 +94,6 @@ plan-build skill: foundry_plan_commit replaces the manual commit (with renumber:
 
 ### P2-04 — 21d1127
 implement skill: project lessons are not Foundry friction (log entry + HANDOFF ## Codebase notes, never foundry_feedback_log); HANDOFF list gains ## Codebase notes. Heredoc fallback kept. plugin.mjs assertions added.
+
+### P2-05 — d48a6d5
+go-flight skill: three new options (continue allow N rounds -> flight_options resume; signing unlocked -> pr_finalize resign, the only resign in the pipeline; flight=<slug> -> planner prompt sentence), allowed-tools and argument-hint updated; plugin.mjs assertions; mcp-tools intro lists pr_finalize for the human-initiated re-sign.
