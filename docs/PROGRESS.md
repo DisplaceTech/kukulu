@@ -32,7 +32,7 @@ Started: 2026-10-07T17:30:53.739Z
 - [x] P3-03 Writing specs and templates: from, targeted mutation, provenance
 - [x] P3-04 Architecture, contributing table, and feedback headers
 - [x] P3-05 Version 0.5.0 and the CHANGELOG
-- [ ] P3-06 Phase 3 end: push for the draft PR and record the manual check
+- [x] P3-06 Phase 3 end: push for the draft PR and record the manual check
 
 ## Log
 
@@ -118,3 +118,6 @@ architecture.md: stateDiagram gains done_signing/done_archived, decision list re
 
 ### P3-05 — 6d6c97b
 Version 0.5.0 in package.json, plugin.json and server VERSION only. CHANGELOG [0.5.0] with Added/Changed/Fixed/Breaking changes (opus defaults, summarizer no longer writes the file, policies.finalize auto). plugin.mjs assertion that the newest changelog heading equals the package version. No tag, release or merge.
+
+### P3-06 — 7e72b78
+Push: pushed build/2026-10-07 to origin; foundry_run_finish opens the draft PR. Not merged, tagged or released. Manual check: NOT VERIFIED (human): CI is green on the PR.
