@@ -1,0 +1,55 @@
+{
+  "verify": [
+    "npm run lint",
+    "pre-commit run --all-files",
+    { "cmd": "npm test", "timeoutMs": 600000 }
+  ],
+  "extraVerify": {},
+  "build": [],
+  "baseBranch": "main",
+  "branchPrefix": "build/",
+  "maxRounds": 3,
+  "maxRoundsHard": 6,
+  "constraints": [
+    {
+      "id": "server-synchronous",
+      "description": "No async/await in mcp/server.mjs: every tool handler is synchronous.",
+      "paths": ["mcp/server.mjs"],
+      "pattern": "\\b(async|await)\\b",
+      "shouldMatch": ["async function f() {}", "  const r = await run();", "const g = async () => 1;"],
+      "shouldNotMatch": ["function f() {}", "// handlers stay synchronous", "const asynchronous = false;"]
+    },
+    {
+      "id": "no-dependencies",
+      "description": "package.json declares no dependencies or devDependencies.",
+      "paths": ["package.json"],
+      "pattern": "\"(dependencies|devDependencies)\"\\s*:",
+      "shouldMatch": ["  \"dependencies\": {", "\"devDependencies\":{}"],
+      "shouldNotMatch": ["  \"engines\": {", "  \"description\": \"no dependencies\","]
+    },
+    {
+      "id": "no-fable-default",
+      "description": "No plugin agent defaults to fable (S-10).",
+      "paths": ["agents/"],
+      "pattern": "^model:\\s*fable\\b",
+      "shouldMatch": ["model: fable", "model:fable"],
+      "shouldNotMatch": ["model: opus", "  model: fable is no longer the default"]
+    },
+    {
+      "id": "no-sync-merge",
+      "description": "Foundry never runs gh pr merge without --auto (SPEC section 2 non-goal, S-14): write the gh pr merge arguments as one inline array literal that includes --auto.",
+      "paths": ["mcp/server.mjs"],
+      "pattern": "\\[\\s*[\"']pr[\"'],\\s*[\"']merge[\"'](?![^\\]]*[\"']--auto[\"'])",
+      "shouldMatch": [
+        "const r = spawnSync(\"gh\", [\"pr\", \"merge\", \"--squash\"], { cwd: ROOT });",
+        "const args = ['pr', 'merge', '--merge'];",
+        "gh([\"pr\",\"merge\"]);"
+      ],
+      "shouldNotMatch": [
+        "const r = spawnSync(\"gh\", [\"pr\", \"merge\", \"--auto\", `--${method}`], { cwd: ROOT });",
+        "git([\"merge\", \"--no-ff\", \"-m\", msg, branch]);",
+        "spawnSync(\"gh\", [\"pr\", \"ready\"], { cwd: ROOT });"
+      ]
+    }
+  ]
+}
