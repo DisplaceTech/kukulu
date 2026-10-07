@@ -34,7 +34,7 @@ Started: 2026-10-07T17:30:53.739Z
 - [x] P3-05 Version 0.5.0 and the CHANGELOG
 - [x] P3-06 Phase 3 end: push for the draft PR and record the manual check
 - [x] R1-01 commitStaged rolls back its own signing fallback when the unsigned retry fails
-- [ ] R1-02 Tests for four mcp/server.mjs mechanics that survive mutation
+- [x] R1-02 Tests for four mcp/server.mjs mechanics that survive mutation
 - [ ] R1-03 Agent tool contracts and README routing defaults are asserted
 
 ## Log
@@ -127,3 +127,6 @@ Push: pushed build/2026-10-07 to origin; foundry_run_finish opens the draft PR. 
 
 ### R1-01 — 7686bdc
 commitStaged snapshots state.json, feedback.jsonl and local commit.gpgsign before fallback; restores all (and unstages) if the unsigned retry fails. Test added in implement.mjs (counter hook). No interpretation choices.
+
+### R1-02 — 8640e32
+Added tests for mutants (a)-(d) in test/review.mjs and test/state.mjs; each confirmed failing against its mutant, server.mjs restored. Interpretation: (c) drives 12 equal-count rounds with maxRounds 11 (rounds 2-12 non-converging). (d) uses a global fake-signer config so the finalize commit is signed.
