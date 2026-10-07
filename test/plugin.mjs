@@ -122,6 +122,8 @@ for (const name of ["plan-build", "implement"]) {
   like(read(`skills/${name}/SKILL.md`), /heredoc/, `skills/${name} states the shell-heredoc fallback for a refused Write`);
 }
 
+like(read("docs/operations.md"), /^## Running flight after flight$/m, "operations.md explains running flight after flight");
+like(read("docs/operations.md"), /^## Signing$/m, "operations.md has a signing section");
 like(read("skills/pull-feedback/SKILL.md"), /docs\/flights\/\*\/feedback\.jsonl/, "pull-feedback reads archived flight logs too");
 like(read("skills/pull-feedback/SKILL.md"), /how many items came from each/, "...and its header names every source log with its count");
 
