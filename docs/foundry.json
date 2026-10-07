@@ -50,6 +50,28 @@
         "git([\"merge\", \"--no-ff\", \"-m\", msg, branch]);",
         "spawnSync(\"gh\", [\"pr\", \"ready\"], { cwd: ROOT });"
       ]
+    },
+    {
+      "id": "no-gnu-sed-inplace",
+      "description": "No GNU-only sed -i in test/, scripts/ or mcp/ (BSD sed on macOS rejects it).",
+      "paths": [
+        "test/",
+        "scripts/",
+        "mcp/"
+      ],
+      "pattern": "\\bsed\\s+(-[A-Za-z]+\\s+)*-[A-Za-z]*i",
+      "shouldMatch": [
+        "sed -i 's/a/b/' f",
+        "sed -E -i 's/a/b/' f",
+        "sed -ri 's/a/b/' f",
+        "sed -i.bak 's/a/b/' f",
+        "  if [ -f \"$dir/pr.json\" ]; then sed -i 's/\"isDraft\":true/\"isDraft\":false/' \"$dir/pr.json\"; fi"
+      ],
+      "shouldNotMatch": [
+        "  if [ -f \"$dir/pr.json\" ]; then sed 's/\"isDraft\":true/\"isDraft\":false/' \"$dir/pr.json\" > \"$dir/pr.json.tmp\" && mv \"$dir/pr.json.tmp\" \"$dir/pr.json\"; fi",
+        "sed -n 1p file",
+        "sed -e 's/i/j/' f"
+      ]
     }
   ]
 }

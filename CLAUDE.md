@@ -58,6 +58,8 @@ Mechanical rules are in `docs/foundry.json` `constraints` and run on every
 - `no-fable-default`: no `agents/*.md` frontmatter line reads `model: fable`.
 - `no-sync-merge`: `gh pr merge` only ever runs with `--auto`, written as one
   inline argument array in `mcp/server.mjs`.
+- `no-gnu-sed-inplace`: no `sed -i` in `test/`, `scripts/` or `mcp/`; BSD sed
+  on macOS rejects it. Write to a temp file and `mv`.
 
 The reviewer checks these by reading, because no line pattern can express them:
 

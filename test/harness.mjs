@@ -151,7 +151,7 @@ if [ "$1 $2" = "pr create" ]; then
   exit 0
 fi
 if [ "$1 $2" = "pr ready" ]; then
-  if [ -f "$dir/pr.json" ]; then sed -i 's/"isDraft":true/"isDraft":false/' "$dir/pr.json"; fi
+  if [ -f "$dir/pr.json" ]; then sed 's/"isDraft":true/"isDraft":false/' "$dir/pr.json" > "$dir/pr.json.tmp" && mv "$dir/pr.json.tmp" "$dir/pr.json"; fi
   exit 0
 fi
 if [ "$1 $2" = "pr merge" ]; then
