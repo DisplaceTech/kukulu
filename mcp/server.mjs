@@ -130,6 +130,17 @@ function commitStaged(rels, message, { stage } = {}) {
   if (policy === "required") {
     throw new ToolError(`policies.signing is 'required' and the commit could not be signed: ${line}. Nothing was committed; fix the signing agent or set policies.signing to 'off', then call this tool again.`);
   }
+  const snapFiles = [P.state, P.feedback].map((f) => [f, exists(f) ? fs.readFileSync(f) : null]);
+  const prevSign = git(["config", "--local", "--get", "commit.gpgsign"], { allowFail: true }).out;
+  const undoFallback = () => {
+    for (const [f, bytes] of snapFiles) {
+      if (bytes === null) fs.rmSync(f, { force: true });
+      else fs.writeFileSync(f, bytes);
+    }
+    git(["reset", "-q", "--", rel(P.state), rel(P.feedback)], { allowFail: true });
+    if (prevSign) git(["config", "--local", "commit.gpgsign", prevSign], { allowFail: true });
+    else git(["config", "--local", "--unset", "commit.gpgsign"], { allowFail: true });
+  };
   git(["config", "--local", "commit.gpgsign", "false"]);
   const st = loadState();
   st.signing = `off (commit signing failed: ${line})`;
@@ -137,9 +148,16 @@ function commitStaged(rels, message, { stage } = {}) {
   saveState(st);
   if (feedbackEnabled()) appendFeedback(stage || "implement", `Signing disabled for this run: ${st.signing}`, "signing", "auto");
   const all = [...new Set([...rels, rel(P.state), rel(P.feedback)])].filter((x) => exists(path.join(ROOT, x)));
-  git(["add", "-A", "--", ...all]);
-  const retry = run(["-c", "commit.gpgsign=false", "commit", "-q", "-m", message, "--", ...all]);
+  let retry;
+  try {
+    git(["add", "-A", "--", ...all]);
+    retry = run(["-c", "commit.gpgsign=false", "commit", "-q", "-m", message, "--", ...all]);
+  } catch (e) {
+    undoFallback();
+    throw e;
+  }
   if (retry.status !== 0 || retry.error) {
+    undoFallback();
     throw new ToolError(`git commit failed even unsigned: ${(retry.stderr || retry.stdout || retry.error?.message || "").trim()}`);
   }
 }

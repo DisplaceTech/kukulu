@@ -927,6 +927,25 @@ function failingSignerRepo(config) {
   });
 }
 
+{
+  const repo = failingSignerRepo({ policies: { signing: "auto" } });
+  const hook = path.join(repo, ".git", "hooks", "commit-msg");
+  fs.mkdirSync(path.dirname(hook), { recursive: true });
+  fs.writeFileSync(hook, '#!/bin/sh\nc="$(dirname "$0")/../hook-count"\nif [ -e "$c" ]; then echo "rejected by test hook" >&2; exit 1; fi\ntouch "$c"\nexit 0\n');
+  fs.chmodSync(hook, 0o755);
+  const rec = (f) => (hasFile(repo, f) ? readFile(repo, f) : null);
+  const files = ["docs/foundry.json", ".foundry/state.json", ".foundry/feedback.jsonl"];
+  const before = files.map(rec);
+  const head = git(repo, ["rev-parse", "HEAD"]);
+  await withServer(repo, async ({ call }) => {
+    isError(await call("foundry_flight_options", { maxRounds: 5 }), /failed even unsigned/, "auto: a failed unsigned retry leaves the tree as it found it: the call is an error");
+    files.forEach((f, i) => eq(rec(f), before[i], `...${f} is unchanged`));
+    eq(git(repo, ["diff", "--cached", "--name-only"]), "", "...nothing is staged");
+    eq(git(repo, ["rev-parse", "HEAD"]), head, "...HEAD did not move");
+    eq(git(repo, ["config", "--local", "commit.gpgsign"]), "true", "...and local signing is restored");
+  });
+}
+
 // ---------------------------------------------------------------- rollback
 
 function rejectCommitsStarting(repo, prefix) {
