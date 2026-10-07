@@ -538,5 +538,11 @@ like(read("docs/feedback/README.md"), /\/foundry:pull-feedback/, "...and the ski
 const gitleaks = read(".gitleaks.toml");
 const glPaths = [...gitleaks.matchAll(/^paths\s*=\s*\[(.*)\]\s*$/gm)].flatMap((m) => [...m[1].matchAll(/\x27\x27\x27(.*?)\x27\x27\x27/g)].map((x) => x[1]));
 ok(/useDefault\s*=\s*true/.test(gitleaks) && glPaths.length > 0 && glPaths.every((p) => p.startsWith("^test/")), ".gitleaks.toml keeps the default rules and allowlists only the test fixtures");
+ok(/condition\s*=\s*"AND"/.test(gitleaks) && /^regexes\s*=\s*\[\s*\x27\x27\x270123456789ABCDEF\x27\x27\x27\s*\]\s*$/m.test(gitleaks), ".gitleaks.toml allowlist is AND-scoped to the fixture value");
+const preCommit = read(".pre-commit-config.yaml");
+const glRev = /repo:\s*https:\/\/github\.com\/gitleaks\/gitleaks\s*\n\s*rev:\s*v?(\S+)/.exec(preCommit)?.[1];
+const scanYml = read(".github/workflows/secret-scan.yml");
+const glPin = /^\s*GITLEAKS_VERSION:\s*"?([^"\s#]+)"?/m.exec(scanYml)?.[1];
+ok(glRev && glPin === glRev, "secret-scan.yml pins GITLEAKS_VERSION to the pre-commit gitleaks rev");
 
 finish();
