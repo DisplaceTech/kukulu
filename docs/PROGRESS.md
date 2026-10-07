@@ -36,6 +36,9 @@ Started: 2026-10-07T17:30:53.739Z
 - [x] R1-01 commitStaged rolls back its own signing fallback when the unsigned retry fails
 - [x] R1-02 Tests for four mcp/server.mjs mechanics that survive mutation
 - [x] R1-03 Agent tool contracts and README routing defaults are asserted
+- [ ] R2-01 The fake gh's pr ready works on BSD sed, and a constraint forbids sed -i
+- [ ] R2-02 A scoped .gitleaks.toml allowlist clears the fake-signer fixture findings
+- [ ] R2-03 Test that a failed unsigned retry unsets a commit.gpgsign that was unset locally
 
 ## Log
 

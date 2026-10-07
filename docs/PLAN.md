@@ -915,3 +915,32 @@ printf -- '-----BEGIN PGP SIGNATURE-----\n\nZmFrZQ==\n-----END PGP SIGNATURE----
 **Out of scope:** Server changes; skill prose; changing any agent's tools or model.
 **Verification:** foundry_verify. grep -n 'fable' README.md prints nothing.
 **Depends on:** none
+
+## Review fixes (round 2)
+
+### R2-01: The fake gh's pr ready works on BSD sed, and a constraint forbids sed -i
+**Goal:** test (macos) passes: the fake gh in test/harness.mjs flips isDraft portably, and a docs/foundry.json constraint stops GNU-only `sed -i` from returning to test/, scripts/ or mcp/ (REVIEW round 2 finding 1).
+**Files touched:** test/harness.mjs, docs/foundry.json, CLAUDE.md
+**Design constraints:** No dependencies; tests stay node + POSIX sh. In mkFakeGhBin's `pr ready` branch (test/harness.mjs:154) replace `sed -i 's/"isDraft":true/"isDraft":false/' "$dir/pr.json"` with a portable form, e.g. `sed 's/"isDraft":true/"isDraft":false/' "$dir/pr.json" > "$dir/pr.json.tmp" && mv "$dir/pr.json.tmp" "$dir/pr.json"`. Add a constraint to docs/foundry.json `constraints` with only the keys the running 0.4.0 server accepts (id, description, paths, pattern, shouldMatch, shouldNotMatch; no `from`): id `no-gnu-sed-inplace`, paths ["test/", "scripts/", "mcp/"], a pattern such as `\bsed\s+(-[A-Za-z]+\s+)*-[A-Za-z]*i` that matches `sed -i`, `sed -E -i`, `sed -ri` and `sed -i.bak`. shouldMatch must include the original harness line verbatim (`  if [ -f "$dir/pr.json" ]; then sed -i 's/"isDraft":true/"isDraft":false/' "$dir/pr.json"; fi`). shouldNotMatch must include the portable replacement line, `sed -n 1p file` and `sed -e 's/i/j/' f`. List the new rule under CLAUDE.md `## Constraints` with the other mechanical rules.
+**Acceptance tests:** The new constraint's fixture self-test (it runs in every foundry_verify), and its scan: it reports a hit against the current test/harness.mjs:154 before the fix and none after. The existing review-suite assertions `...ready is true` (foundry_pr_finalize all-signed cases) still pass on Linux.
+**Out of scope:** Any server change; other harness fakes; CI workflow changes; rewriting history.
+**Verification:** foundry_verify is green, and the new constraint shows ok with no hits. After push, the PR's `test (macos)` check passes (gh pr checks 7).
+**Depends on:** none
+
+### R2-02: A scoped .gitleaks.toml allowlist clears the fake-signer fixture findings
+**Goal:** The secret-scan workflow's gitleaks job passes on the PR without rewriting history, by allowlisting the fake signing-key id `0123456789ABCDEF` only in test/harness.mjs and test/review.mjs (REVIEW round 2 finding 2).
+**Files touched:** .gitleaks.toml, test/plugin.mjs
+**Design constraints:** Do not rewrite or amend history. Do not use `gitleaks:allow` inline comments as the fix: the reviewer verified in a scratch clone that a new commit adding them still yields 2 leaks, because the findings live in commits 63ce643 and 57ef188. Create a root `.gitleaks.toml` that keeps the default rules (`[extend] useDefault = true`) and adds one `[[allowlists]]` entry with condition "AND", `paths = ['''^test/(harness|review)\.mjs$''']` and `regexes = ['''0123456789ABCDEF''']`. Do not allowlist whole files, whole rules or commits. Do not set GITLEAKS_CONFIG and do not edit .github/workflows/secret-scan.yml: gitleaks loads `.gitleaks.toml` from the scanned root by default.
+**Acceptance tests:** `gitleaks git --no-banner --log-opts="a91777982208..HEAD"` exits 0 with `no leaks found`. Before the fix it reports 2 leaks (test/review.mjs:935 in 57ef188, test/harness.mjs:209 in 63ce643). `gitleaks git --no-banner` over the full history also exits 0. Add a test/plugin.mjs assertion, ".gitleaks.toml keeps the default rules and allowlists only the test fixtures": the file contains `useDefault = true`, and every `paths` entry under its allowlists is anchored under `^test/`.
+**Out of scope:** Changing the fixture value in the test files (the findings are in history either way); CI workflow edits; any other secret-scan tuning.
+**Verification:** foundry_verify is green; the two gitleaks commands above exit 0 locally; after push, the PR's `gitleaks` check passes (gh pr checks 7).
+**Depends on:** none
+
+### R2-03: Test that a failed unsigned retry unsets a commit.gpgsign that was unset locally
+**Goal:** commitStaged's undoFallback branch that `--unset`s a local commit.gpgsign which was unset before the fallback is covered by a test (REVIEW round 2 finding 3; SPEC S-02, principle 6).
+**Files touched:** test/implement.mjs
+**Design constraints:** Test only. Do not change mcp/server.mjs. Follow CLAUDE.md's Signing tests protocol: because this test relies on an unset local commit.gpgsign, give the server an isolated global config (startServer/withServer env GIT_CONFIG_GLOBAL pointing at a temp file holding `[commit] gpgsign = true`, `[gpg] format = openpgp`, `program = /nonexistent-signing-agent`). Follow the Commit-failure tests protocol for the counter-based commit-msg hook, as R1-01's test does.
+**Acceptance tests:** test/implement.mjs, in the 'commit signing (S-02)' section next to R1-01's block, a new block "auto: a failed unsigned retry leaves an unset local commit.gpgsign unset": failingSignerRepo with policies.signing "auto", then `git config --local --unset commit.gpgsign` so signing comes only from the isolated global config, plus the same counter hook (first commit-msg passes, later ones exit 1). foundry_flight_options({ maxRounds: 5 }) is an error matching /failed even unsigned/; afterwards `git config --local --get commit.gpgsign` prints nothing and exits non-zero, docs/foundry.json, .foundry/state.json and .foundry/feedback.jsonl are byte-identical (or still absent), nothing is staged, and HEAD did not move. This test must fail when the `else git(["config", "--local", "--unset", "commit.gpgsign"], { allowFail: true });` line in commitStaged's undoFallback is deleted, which the round-2 mutant showed survives today (local value would read 'false').
+**Out of scope:** Any server change; other signing paths.
+**Verification:** foundry_verify is green. Confirm by hand-applied reasoning or a scratch copy that the new block fails against the mutant; never leave server.mjs modified.
+**Depends on:** none
