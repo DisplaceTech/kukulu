@@ -13,11 +13,17 @@ appropriate.
 
 ## Steps
 
-1. Read `<path>/.foundry/feedback.jsonl`. If it does not exist or is empty,
-   say so and stop — there is nothing to pull. Never write to, delete, or
-   modify anything under `<path>`; that project is not this run's to touch.
-2. Parse every line as JSON. Skip any line that doesn't parse, and mention
-   how many you skipped.
+1. Read `<path>/.foundry/feedback.jsonl` and every
+   `<path>/docs/flights/*/feedback.jsonl` (a flight that was archived moved
+   its log there, so a project that has run several flights holds friction in
+   more than one file). Stop only when all of them are missing or empty — then
+   say so; there is nothing to pull. Never write to, delete, or modify
+   anything under `<path>`; that project is not this run's to touch.
+2. Parse every line of every log as JSON. Skip any line that doesn't parse,
+   and mention how many you skipped. Reading both the live log and the
+   archived ones is safe: an entry present in two logs has the same exact
+   `at`, so keep one copy of any `at` that appears twice, and the dedupe in
+   step 4 handles repeats from earlier pulls.
 3. Determine the project name from `<path>`'s basename. If the path is `.`,
    ends in a generic name (e.g. `src`, `repo`, `app`), or is otherwise
    ambiguous, ask the user for a project name instead of guessing. Take
@@ -46,7 +52,9 @@ appropriate.
    entry doesn't contain.
 7. Write or append the file using the header shape
    [`docs/feedback/README.md`](../../docs/feedback/README.md) documents:
-   name the plugin version the flight ran against (read it from the other
+   name every source log and how many items came from each (for example
+   "`.foundry/feedback.jsonl` (2 items) and
+   `docs/flights/w1-share/feedback.jsonl` (4 items)"), name the plugin version the flight ran against (read it from the other
    project's installed plugin if you can determine it, otherwise write
    "version not determined" rather than guessing), and no "addressed in"
    line, since no release plan addresses it yet.
