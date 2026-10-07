@@ -36,7 +36,7 @@ Started: 2026-10-07T17:30:53.739Z
 - [x] R1-01 commitStaged rolls back its own signing fallback when the unsigned retry fails
 - [x] R1-02 Tests for four mcp/server.mjs mechanics that survive mutation
 - [x] R1-03 Agent tool contracts and README routing defaults are asserted
-- [ ] R2-01 The fake gh's pr ready works on BSD sed, and a constraint forbids sed -i
+- [x] R2-01 The fake gh's pr ready works on BSD sed, and a constraint forbids sed -i
 - [ ] R2-02 A scoped .gitleaks.toml allowlist clears the fake-signer fixture findings
 - [ ] R2-03 Test that a failed unsigned retry unsets a commit.gpgsign that was unset locally
 
@@ -136,3 +136,6 @@ Added tests for mutants (a)-(d) in test/review.mjs and test/state.mjs; each conf
 
 ### R1-03 — 2f95667
 test/plugin.mjs asserts planner/summarizer MCP tools and README agent defaults (model, effort) vs agents/*.md. README lines fixed (opus summarizer; reflowed so patterns match on one line); routing.md "(unchanged)" became "(the default)".
+
+### R2-01 — a2fb767
+Replaced sed -i in fake gh pr ready with tmp+mv. Added no-gnu-sed-inplace constraint (fixture passes, no hits) and CLAUDE.md entry. verify green. macos CI check NOT VERIFIED (human).
