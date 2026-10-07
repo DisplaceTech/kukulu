@@ -66,9 +66,9 @@ npm install --no-save mermaid jsdom && node scripts/check-diagrams.mjs
 |---|---|
 | `plugin` | Manifests, agent and skill frontmatter, hook wiring, cross-references, documentation links, diagram style, CI pinning |
 | `protocol` | JSON-RPC framing, handshake, tool discovery, error mapping |
-| `state` | `foundry_status` and every branch of the `foundry_next` decision table |
-| `implement` | `run_start`, `task_next`, `task_done`, `task_block`, `verify`, `run_finish` |
-| `review` | `review_submit` and `summary_commit`, including every refusal |
+| `state` | `foundry_status` and every branch of the `foundry_next` decision table; `foundry_plan_commit` (every check, `renumber`) |
+| `implement` | `run_start`, `task_next`, `task_done`, `task_block`, `verify`, `run_finish`; the commit helper's signing fallback |
+| `review` | `review_submit` and `summary_commit`, including every refusal and rollback on a failed commit; `foundry_flight_archive`; `foundry_pr_finalize` |
 | `routing` | Config merge and precedence, `foundry_agents_sync`, `foundry_config_show`, every refusal |
 | `constraints` | `docs/foundry.json` constraints, fixture self-tests, the scan, every refusal |
 | `feedback` | `foundry_feedback_log`, `.foundry/feedback.jsonl`, and the `policies.feedback` opt-out |

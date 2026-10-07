@@ -129,6 +129,9 @@ for (const name of ["plan-build", "implement"]) {
   like(ws, /commit-msg/, "writing-specs.md shows a commit-msg hook for provenance logging");
   like(read("templates/SPEC.md"), /\{filter\}/, "templates/SPEC.md names the {filter} placeholder");
 }
+for (const f of ["2026-10-07-project-c", "2026-10-07-project-d"]) {
+  like(read(`docs/feedback/${f}.md`), /addressed in\s+\[`docs\/SPEC\.md`\]\(\.\.\/SPEC\.md\) \(Foundry 0\.5\.0\)/, `the 2026-10-07 feedback files name the spec that addressed them: ${f}`);
+}
 like(read("docs/operations.md"), /^## Running flight after flight$/m, "operations.md explains running flight after flight");
 like(read("docs/operations.md"), /^## Signing$/m, "operations.md has a signing section");
 like(read("skills/pull-feedback/SKILL.md"), /docs\/flights\/\*\/feedback\.jsonl/, "pull-feedback reads archived flight logs too");
