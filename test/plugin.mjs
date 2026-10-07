@@ -123,6 +123,19 @@ for (const name of ["plan-build", "implement"]) {
 }
 
 {
+  const rb = read("skills/review-build/SKILL.md");
+  like(rb, /targeted: <name>/, "review-build prefers targeted mutation commands (project-c F-12)");
+  like(rb, /mutation\.targeted/, "...when the config has them");
+  like(rb, /confirmKill: true/, "review-build confirms suspicious kills (project-c F-02)");
+  like(rb, /failedCommands/, "...by reading failedCommands");
+  like(rb, /inconclusive/, "...and treating an inconclusive result as a survivor");
+  like(rb, /lastReviewCommit/, "review-build scopes later rounds to the diff since lastReviewCommit (project-c F-16)");
+  like(rb, /at least three/, "...sweeps a surviving file with at least three further mutations");
+  like(rb, /one R-task per file/, "...and queues one R-task per file");
+  like(rb, /## Notes/, "...putting out-of-diff survivors under ## Notes");
+}
+
+{
   const sum = read("skills/summarize/SKILL.md");
   ok(!/heredoc/i.test(sum), "the summarize skill passes content and never writes SUMMARY.md itself (project-c F-03): no heredoc");
   for (const word of ["content", "foundry_summary_commit"]) like(sum, new RegExp(word), `...it names ${word}`);

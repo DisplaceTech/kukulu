@@ -69,6 +69,29 @@ Never edit source in the working tree yourself, not even temporarily — you
 are not to fix code, and the tool restores the file where you cannot
 guarantee you would.
 
+**Targeted mutants.** When `docs/foundry.json` has `mutation.targeted`, prefer
+`foundry_mutate({ file, find, replace, targeted: <name>, filter: <the test
+class or path that covers the file> })` over the full verify set: it runs
+only the tests that matter, in seconds instead of minutes.
+
+**Confirm suspicious kills.** Read `failedCommands` and the failure tails of
+every kill. Pass `confirmKill: true` whenever a kill's failure tail does not
+name the test you expected to catch it; with a targeted command the re-run is
+cheap, so you may always pass it. An `inconclusive` result is not a kill: the
+command fails even without the mutation, so treat it as a survivor to examine.
+
+**Round 1** (`reviewRound` is 1): sample as above. When a mutant survives,
+sweep the same file with at least three further mutations of neighbouring
+mechanics, then queue one R-task per file, listing every survivor found there,
+instead of one task per survivor.
+
+**Round 2 and later**: read `lastReviewCommit` from `foundry_status` and
+mutate only the files in `git diff --name-only <lastReviewCommit>..HEAD`. A
+survivor outside that diff is not a fix task: put it under `## Notes` in
+`docs/REVIEW.md` as advisory, and the summarizer carries it into SUMMARY.md.
+When a round that queues tasks does so on mutation results alone, cite this
+rule in REVIEW.md. The rest of the fix loop is unchanged.
+
 ## Output
 
 Write `docs/REVIEW.md` with:
