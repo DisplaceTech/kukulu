@@ -10,7 +10,7 @@ Started: 2026-10-07T17:30:53.739Z
 - [x] P1-03 Snapshot and restore around every writing tool
 - [x] P1-04 foundry_summary_commit writes SUMMARY.md from content
 - [x] P1-05 from: constraints and commands that activate at a task
-- [ ] P1-06 Targeted mutation commands
+- [x] P1-06 Targeted mutation commands
 - [ ] P1-07 failedCommands and confirmKill in foundry_mutate
 - [ ] P1-08 foundry_status reports artifacts, strayArtifacts and lastReviewCommit
 - [ ] P1-09 Resume a round-cap halt through foundry_flight_options
@@ -52,3 +52,6 @@ summary_commit takes optional content (SUMMARY_MAX_BYTES 1 MiB), validates befor
 
 ### P1-05 — b22a1c0
 Added validateFrom, inactiveUntil(from, pr); CONSTRAINT_KEYS gains from; normalizeCommand returns from (null default) with allowFrom flag (build/parallel.setup refuse). checkConstraints, verify, mutate and run_finish's scan honour it. Interpretation: mutate's killed ignores skipped entries. Skipped command shape is exactly {cmd, skipped}. Tests in constraints.mjs and implement.mjs; docs updated.
+
+### P1-06 — a4f7a0c
+validateMutation + cfg().mutation.targeted (timeoutMs defaults to commandTimeoutMs); mutate takes targeted/filter (MUTATION_FILTER constant), validated before the file is touched. Interpretation: filter regex literal from plan (admits backslash, no quotes). Tests in review.mjs; plugin.mjs config-key loop has a mutation branch; docs updated.
