@@ -83,3 +83,12 @@ handoff: 22cb0f5.
 
 Human check: after push, PR checks `test (macos)` and `gitleaks` should pass
 (NOT VERIFIED, human).
+
+## Round 3
+
+Branch build/2026-10-07, head a11651b. 35 tasks: 35 done, 0 blocked, 0 skipped.
+
+- R3-01: `.github/workflows/secret-scan.yml` now sets `GITLEAKS_VERSION: "8.28.0"` on the gitleaks-action step, equal to the pre-commit rev. `test/plugin.mjs` asserts the pin matches the pre-commit rev, and that `.gitleaks.toml` keeps `condition = "AND"` and `regexes` of exactly `0123456789ABCDEF`. Deleting the regexes line fails the suite.
+- Interpretation: none.
+- Checked with the official gitleaks 8.28.0 binary: both the PR range and full history report no leaks.
+- Human check: NOT VERIFIED (human). `gh pr checks 7` should show gitleaks passing, with `gitleaks version: 8.28.0` in the run log.
