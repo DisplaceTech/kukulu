@@ -621,6 +621,35 @@ const untouched = (repo, head) => {
   });
 }
 
+// ---------------------------------------------------------------- failedCommands and confirmKill
+
+{
+  const repo = mutationRepo();
+  await withServer(repo, async ({ call }) => {
+    const base = { file: "src/add.mjs", find: "a + b", replace: "a - b" };
+    let r = await call("foundry_mutate", base);
+    eq(r.failedCommands.join("|"), "node test/add.test.mjs", "failedCommands names what failed");
+    ok(r.confirm === undefined, "...and nothing is re-run without confirmKill");
+    r = await call("foundry_mutate", { ...base, confirmKill: true });
+    eq(r.killed, true, "a confirmed kill stands");
+    ok(r.confirm.length === 1 && r.confirm.every((c) => c.ok), "...with every confirm re-run ok");
+    r = await call("foundry_mutate", { ...base, find: "() => 1", replace: "() => 2", confirmKill: true });
+    eq(r.killed, false, "a survivor stays a survivor");
+    ok(r.confirm === undefined && r.failedCommands.length === 0, "confirmKill on a survivor re-runs nothing");
+    isError(await call("foundry_mutate", { ...base, confirmKill: "yes" }), /confirmKill must be a boolean/, "a non-boolean confirmKill is refused");
+  });
+}
+
+{
+  const repo = mutationRepo({ config: { verify: ["false"] } });
+  await withServer(repo, async ({ call }) => {
+    const r = await call("foundry_mutate", { file: "src/add.mjs", find: "a + b", replace: "a - b", confirmKill: true });
+    eq(r.killed, false, "a kill by a command that always fails is not a kill");
+    eq(r.inconclusive, true, "...it is inconclusive");
+    like(r.verdict, /^inconclusive: false also fails without the mutation/, "...and the verdict names the command");
+  });
+}
+
 // ---------------------------------------------------------------- targeted mutation commands
 
 {

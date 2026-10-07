@@ -2254,7 +2254,7 @@ function undoMutationResidue(before) {
   return { restored, removed };
 }
 
-function mutate({ file, find, replace, commands, timeoutMs, targeted, filter } = {}) {
+function mutate({ file, find, replace, commands, timeoutMs, targeted, filter, confirmKill } = {}) {
   if (typeof file !== "string" || !file) throw new ToolError("file is required: a repo-relative path to a tracked source file");
   if (typeof find !== "string" || !find) throw new ToolError("find is required and must be a non-empty string: the exact text to replace");
   if (typeof replace !== "string") throw new ToolError('replace is required and must be a string (use "" to delete the matched text)');
@@ -2268,6 +2268,7 @@ function mutate({ file, find, replace, commands, timeoutMs, targeted, filter } =
   if (!gitFacts().inRepo) throw new ToolError("not a git repository");
   if (!loadConfig()) throw new ToolError("docs/foundry.json is missing; the plan stage must write it");
   const cc = cfg();
+  if (confirmKill !== undefined && typeof confirmKill !== "boolean") throw new ToolError("confirmKill must be a boolean");
   if ((targeted === undefined) !== (filter === undefined)) throw new ToolError("targeted and filter must be passed together");
   if (targeted !== undefined) {
     if (commands !== undefined) throw new ToolError("targeted cannot be combined with commands; pass one or the other");
@@ -2347,11 +2348,31 @@ function mutate({ file, find, replace, commands, timeoutMs, targeted, filter } =
   fs.rmSync(P.mutation, { force: true });
   const residue = undoMutationResidue(before);
 
-  const killed = results.some((r) => !r.skipped && !r.ok);
+  const failedIdx = results.map((r, i) => (!r.skipped && !r.ok ? i : -1)).filter((i) => i >= 0);
+  const failedCommands = failedIdx.map((i) => cmds[i].cmd);
+  let killed = failedIdx.length > 0;
+  let verdict = killed ? "killed: the tests caught the mutation" : "survived: no command failed — the mechanic is untested";
+  let confirm;
+  let inconclusive;
+  if (killed && confirmKill) {
+    // A command that fails on the unmutated tree proves nothing about the
+    // mutation, so each failure is re-run once where nothing is mutated.
+    confirm = failedIdx.map((i) => runShell(cmds[i].cmd, cmds[i].timeoutMs));
+    undoMutationResidue(before);
+    const stillFailing = confirm.findIndex((r) => !r.ok);
+    if (stillFailing >= 0) {
+      killed = false;
+      inconclusive = true;
+      verdict = `inconclusive: ${failedCommands[stillFailing]} also fails without the mutation`;
+    }
+  }
   return {
     file: relPath,
     killed,
-    verdict: killed ? "killed: the tests caught the mutation" : "survived: no command failed — the mechanic is untested",
+    ...(inconclusive ? { inconclusive } : {}),
+    verdict,
+    failedCommands,
+    ...(confirm ? { confirm } : {}),
     results,
     restored: residue.restored,
     removed: residue.removed,
@@ -2719,6 +2740,7 @@ const TOOLS = [
         targeted: { type: "string", description: "optional: the name of a docs/foundry.json mutation.targeted command to run instead of the verify commands; pass with filter, never with commands" },
         filter: { type: "string", description: "with targeted: the test name or path substituted for {filter} (letters, digits and _ . : / - only)" },
         timeoutMs: { type: "integer", minimum: 1, description: "optional: cap every command's timeout for this call (never raises a configured one), for a mutant you suspect hangs" },
+        confirmKill: { type: "boolean", description: "optional: when the mutant is killed, re-run each failed command once on the unmutated tree; a command that fails there too makes the result inconclusive, not a kill" },
       },
       ["file", "find", "replace"],
     ),

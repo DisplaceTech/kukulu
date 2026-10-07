@@ -444,7 +444,7 @@ with `git checkout` — an in-tree edit the auto-mode classifier refuses for a
 reviewer told not to fix code, and one a scratch copy cannot replace for
 suites bound to the repo root (wp-env).
 
-**Arguments:** `{ file, find, replace, commands?, timeoutMs?, targeted?, filter? }`.
+**Arguments:** `{ file, find, replace, commands?, timeoutMs?, targeted?, filter?, confirmKill? }`.
 
 - `file` — a repo-relative path to a tracked text file with no uncommitted
   changes
@@ -460,6 +460,11 @@ suites bound to the repo root (wp-env).
   `_ . : / -`. Refused, before the file is touched, when only one of the two
   is passed, when combined with `commands`, for an unknown name (the message
   lists the configured names), or for a filter with any other character
+- `confirmKill` — optional boolean (anything else is refused). When the
+  mutant is killed, each failed command is re-run once on the restored,
+  unmutated tree. If every re-run passes the kill stands; if any fails again
+  the result is `killed: false`, `inconclusive: true` and a verdict of
+  `inconclusive: <cmd> also fails without the mutation`
 - `timeoutMs` — optional: cap every command's timeout for this call. It only
   ever shortens a configured timeout, never raises one; it is for a mutant you
   suspect makes a test hang (cleanflate F-06)
@@ -493,7 +498,10 @@ else and report the path as `recoveredMutation`, and log a
 `chore: pipeline friction (review)` so the tree is never left dirty. An unreadable sentinel is a refusal
 that tells you how to recover by hand.
 
-**Returns:** `{ file, killed, verdict, results, restored, removed, recoveredMutation }`.
+**Returns:** `{ file, killed, verdict, failedCommands, results, restored, removed, recoveredMutation }`,
+plus `confirm` (the re-run results, present only when `confirmKill` re-ran
+something) and `inconclusive: true` when a re-run failed again.
+`failedCommands` lists the command text of every failed result.
 `restored` and `removed` list the residue paths it put back or deleted.
 `killed` is true when at least one command failed (a command skipped as
 inactive until a `from` task never counts) — the tests noticed (a
