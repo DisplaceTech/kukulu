@@ -258,6 +258,8 @@ parse. Edit it between stages, not during one.
 | `policies.signing` | `"auto"` | `"off"` disables commit signing for the run; `"required"` refuses to start unless a real signed commit succeeds; `"auto"` uses signing when it works and falls back to off, recording why, when it does not; this includes any later commit whose signing fails or exceeds 30 seconds, which is retried once unsigned and recorded in `state.signing` and `state.signingOverride` (under `"required"` that commit refuses instead) |
 | `policies.push` | `true` | `false` skips every push `foundry_run_start`, `foundry_run_finish`, `foundry_review_submit` and `foundry_summary_commit` would otherwise make |
 | `policies.pr` | `"draft"` | `"none"` skips draft-PR creation in `foundry_run_finish` even when `gh` is available |
+| `policies.archive` | `false` | ⚠️ ASSUMPTION. `true` makes the summarizer call `foundry_flight_archive` after the summary, moving the finished flight into `docs/flights/<flight>/` so the repository can run another. Off until it has been proven in real flights |
+| `flight` | absent | A slug (`^[a-z0-9][a-z0-9-]{0,39}$`) naming this flight; the default `slug` for `foundry_flight_archive` |
 | `policies.feedback` | `true` | `false` disables `foundry_feedback_log` (it returns `{ logged: false }` without writing) and every internal auto-log point |
 | `parallel.maxStreams` | `3` | The most streams of one wave handed to implementers at once; `1` runs every wave serially, silently |
 | `parallel.setup` | `[]` | Commands (same entries as `verify`) run once in each newly created stream worktree, before its implementer starts — the dependency install a fresh checkout needs (`npm ci`, `composer install`) |

@@ -473,6 +473,34 @@ await withServer(specRepo(), async ({ call }) => {
   });
 }
 
+// ---------------------------------------------------------------- archive (S-07)
+
+{
+  const repo = plannedRepo({ config: { flight: "w1" } });
+  setState(repo, { summarized: true, verdict: "APPROVED", reviewed: true, implemented: true });
+  git(repo, ["checkout", "-q", "-b", "build/2020-01-01"]);
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-qm", "chore: build summary"]);
+  await withServer(repo, async ({ call }) => {
+    await call("foundry_flight_archive");
+    const n = await call("foundry_next");
+    eq(n.stage, "done", "after an archive, foundry_next is done");
+    like(n.reason, /flight w1 is archived in docs\/flights\/w1/, "...and the reason names the slug");
+    writeFile(repo, "docs/SPEC.md", "# Next spec\n");
+    eq((await call("foundry_next")).stage, "plan", "once SPEC.md changes, the stage is plan");
+  });
+}
+
+for (const [config, re, label] of [
+  [{ flight: "Bad" }, /flight must be a slug/, "flight: Bad"],
+  [{ policies: { archive: "yes" } }, /policies\.archive must be a boolean/, "policies.archive: yes"],
+]) {
+  const repo = plannedRepo({ config });
+  await withServer(repo, async ({ call }) => {
+    isError(await call("foundry_status"), re, `${label} is refused`);
+  });
+}
+
 // ---------------------------------------------------------------- plan_commit (S-06)
 
 {

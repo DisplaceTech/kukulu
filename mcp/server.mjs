@@ -228,7 +228,8 @@ function loadConfig() {
 
 const SIGNING_POLICIES = ["auto", "off", "required"];
 const PR_POLICIES = ["draft", "none"];
-const POLICY_KEYS = ["signing", "push", "pr", "feedback"];
+const POLICY_KEYS = ["signing", "push", "pr", "feedback", "archive"];
+const FLIGHT_SLUG = /^[a-z0-9][a-z0-9-]{0,39}$/;
 
 /** Validate `docs/foundry.json`'s `policies` block; throws, never defaults a bad value away. */
 function validatePolicies(policies) {
@@ -250,6 +251,9 @@ function validatePolicies(policies) {
   }
   if (policies.feedback !== undefined && typeof policies.feedback !== "boolean") {
     throw new ToolError("docs/foundry.json policies.feedback must be a boolean");
+  }
+  if (policies.archive !== undefined && typeof policies.archive !== "boolean") {
+    throw new ToolError("docs/foundry.json policies.archive must be a boolean");
   }
 }
 
@@ -397,6 +401,9 @@ function cfg() {
 /** The resolved config for parsed `docs/foundry.json` content; `planIds` (or null to skip the check) are the tasks a `from` may name. */
 function cfgFrom(c, planIds) {
   validatePolicies(c.policies);
+  if (c.flight !== undefined && (typeof c.flight !== "string" || !FLIGHT_SLUG.test(c.flight))) {
+    throw new ToolError(`docs/foundry.json flight must be a slug matching ${FLIGHT_SLUG} (lowercase letters, digits and -, at most 40 characters)`);
+  }
   validateConstraints(c.constraints, planIds);
   validateParallel(c.parallel);
   validateMutation(c.mutation);
@@ -423,12 +430,15 @@ function cfgFrom(c, planIds) {
     commandTimeoutMs,
     guardCap: Number.isInteger(c.guardCap) ? c.guardCap : 60,
     constraints: c.constraints || [],
+    flight: c.flight ?? null,
     mutation: { targeted },
     policies: {
       signing: c.policies?.signing ?? "auto",
       push: c.policies?.push ?? true,
       pr: c.policies?.pr ?? "draft",
       feedback: c.policies?.feedback ?? true,
+      // ⚠️ ASSUMPTION: archiving a finished flight is opt-in until it has been proven in real flights.
+      archive: c.policies?.archive ?? false,
     },
   };
 }
@@ -1571,6 +1581,9 @@ function next() {
 
   if (!s.specPresent) return stage("halt", "docs/SPEC.md is missing; nothing to build from");
   if (st.halted) return stage("halt", st.halted);
+  if (st.archived && !s.planPresent && exists(path.join(ROOT, st.archived.dir, "SPEC.md")) && read(P.spec) === read(path.join(ROOT, st.archived.dir, "SPEC.md"))) {
+    return stage("done", `flight ${st.archived.slug} is archived in ${st.archived.dir}; edit docs/SPEC.md for the next flight, then run /foundry:go-flight`);
+  }
   if (!s.planPresent || !s.progressPresent || !s.configPresent) {
     return stage("plan", "no plan on disk (docs/PLAN.md, docs/PROGRESS.md and docs/foundry.json are all required)");
   }
@@ -2752,7 +2765,69 @@ function summaryCommit({ content } = {}) {
   });
   const g = gitFacts();
   const push = pushBranch(g.branch, st.policies.push);
-  return { commit: sha, branch: g.branch, base: g.base, head: g.head, reviews: reviewCount(st), fixRounds: st.round, push, pr: prState(st.policies, cfg().baseBranch) };
+  return { commit: sha, branch: g.branch, base: g.base, head: g.head, reviews: reviewCount(st), fixRounds: st.round, push, pr: prState(st.policies, cfg().baseBranch), archive: cfg().policies.archive };
+}
+
+const ARCHIVED = [
+  [P.plan, "docs/PLAN.md"], [P.progress, "docs/PROGRESS.md"], [P.handoff, "docs/HANDOFF.md"], [P.review, "docs/REVIEW.md"],
+  [P.summary, "docs/SUMMARY.md"], [P.config, "docs/foundry.json"], [P.state, ".foundry/state.json"], [P.feedback, ".foundry/feedback.jsonl"],
+];
+
+/**
+ * Move a summarized flight's artifacts into docs/flights/<slug>/ so the
+ * repository can run its next flight (S-07). The live SPEC.md stays, copied
+ * alongside. All-or-nothing: if the commit fails, every file is put back.
+ */
+function flightArchive({ slug } = {}) {
+  const c0 = cfg();
+  slug = slug === undefined ? c0.flight : slug;
+  if (slug === null || slug === undefined) throw new ToolError('pass slug, or set "flight" in docs/foundry.json');
+  if (typeof slug !== "string" || !FLIGHT_SLUG.test(slug)) throw new ToolError(`slug must match ${FLIGHT_SLUG} (lowercase letters, digits and -, at most 40 characters), not ${JSON.stringify(slug)}`);
+  const old = loadState();
+  if (!old.summarized) throw new ToolError("the flight is not summarized yet; archive only after foundry_summary_commit has run");
+  if (exists(P.lock)) throw new ToolError("an implementation run is armed (.foundry/implement.lock exists); finish or halt the run before archiving");
+  const dirty = porcelainExcludingPreexisting(old.preexistingUntracked);
+  if (dirty.length) throw new ToolError(`the working tree is not clean:\n${dirty.join("\n")}\nCommit or discard these before archiving.`);
+  const relDir = `docs/flights/${slug}`;
+  const dir = path.join(ROOT, relDir);
+  if (exists(dir)) throw new ToolError(`${relDir} already exists; choose another slug, or remove the old archive`);
+  // Everything that needs docs/foundry.json is read before it moves.
+  const pushAllowed = c0.policies.push;
+
+  const sources = ARCHIVED.filter(([abs]) => exists(abs));
+  const copyDest = path.join(dir, "SPEC.md");
+  const touched = [...sources.map(([abs]) => abs), ...sources.map(([abs]) => path.join(dir, path.basename(abs))), copyDest, P.state, P.feedback];
+  const all = [...new Set(touched)];
+  const flightsDirExisted = exists(path.join(ROOT, "docs", "flights"));
+  let commit;
+  try {
+    commit = withRollback(all, () => {
+      fs.mkdirSync(dir, { recursive: true });
+      for (const [abs] of sources) {
+        const dest = path.join(dir, path.basename(abs));
+        const tracked = git(["ls-files", "--error-unmatch", "--", rel(abs)], { allowFail: true }).ok;
+        if (tracked) git(["mv", rel(abs), rel(dest)]);
+        else fs.renameSync(abs, dest);
+      }
+      fs.copyFileSync(P.spec, copyDest);
+      saveState({ ...DEFAULT_STATE, archived: { slug, dir: relDir, at: new Date().toISOString() }, ...(old.signingOverride ? { signingOverride: true } : {}) });
+      const rels = all.map(rel);
+      // Old paths are already staged as deletions by git mv (or were never
+      // tracked), and git add rejects a pathspec that matches nothing, so
+      // only what exists now is added.
+      git(["add", "-A", "--", ...rels.filter((r) => exists(path.join(ROOT, r)))]);
+      const known = rels.filter((r) => exists(path.join(ROOT, r)) || git(["cat-file", "-e", `HEAD:${r}`], { allowFail: true }).ok);
+      commitStaged(known, `chore: archive flight ${slug}`, { stage: "summarize" });
+      return git(["rev-parse", "--short", "HEAD"]).out;
+    });
+  } catch (e) {
+    if (exists(dir) && !fs.readdirSync(dir).length) fs.rmdirSync(dir);
+    const flights = path.join(ROOT, "docs", "flights");
+    if (!flightsDirExisted && exists(flights) && !fs.readdirSync(flights).length) fs.rmdirSync(flights);
+    throw e;
+  }
+  const push = pushBranch(gitFacts().branch, pushAllowed);
+  return { slug, dir: relDir, moved: sources.map(([, r]) => r), copied: ["docs/SPEC.md"], commit, push };
 }
 
 // ---------------------------------------------------------------- plan validation and commit (S-06)
@@ -3072,7 +3147,8 @@ const TOOLS = [
     }, ["verdict"]),
     fn: reviewSubmit,
   },
-  { name: "foundry_summary_commit", description: "Write docs/SUMMARY.md from `content` (preferred) or commit the file already on disk, and mark the flight complete. Only valid after an APPROVED review. Returns { commit, branch, base, head, reviews, fixRounds, push, pr }; pr is the branch's pull request ({ url, state, draft, base }) or \"none\", \"skipped: policy\" or \"unknown: <why>\".", inputSchema: S({ content: { type: "string", description: "the full text of docs/SUMMARY.md; the tool writes the file itself, so never Write it yourself" } }), fn: summaryCommit },
+  { name: "foundry_summary_commit", description: "Write docs/SUMMARY.md from `content` (preferred) or commit the file already on disk, and mark the flight complete. Only valid after an APPROVED review. Returns { commit, branch, base, head, reviews, fixRounds, push, pr, archive }; archive is the policies.archive setting (true means call foundry_flight_archive next); pr is the branch's pull request ({ url, state, draft, base }) or \"none\", \"skipped: policy\" or \"unknown: <why>\".", inputSchema: S({ content: { type: "string", description: "the full text of docs/SUMMARY.md; the tool writes the file itself, so never Write it yourself" } }), fn: summaryCommit },
+  { name: "foundry_flight_archive", description: "Archive a summarized flight so the repository can run its next flight: move PLAN, PROGRESS, HANDOFF, REVIEW, SUMMARY, foundry.json, .foundry/state.json and .foundry/feedback.jsonl into docs/flights/<slug>/ (copying SPEC.md, which stays), write a fresh state.json, commit 'chore: archive flight <slug>' and push per policy. slug defaults to the 'flight' key in docs/foundry.json. Refused unless the flight is summarized, no run is armed, and the tree is clean. All-or-nothing. Returns { slug, dir, moved, copied, commit, push }.", inputSchema: S({ slug: { type: "string", description: "lowercase letters, digits and - (at most 40 characters); defaults to docs/foundry.json's flight" } }), fn: flightArchive },
   {
     name: "foundry_agents_sync",
     description: "Generate .claude/agents/foundry-<role>.md from the merged routing config (plugin defaults < global file < profile < docs/foundry.json roles). Writes only files whose content changed, excludes them from git, and returns the resolved per-role table. `restartRequired` is true only when this is the directory's first population and a changed role's model cannot be named directly by the Agent tool. Also ensures the MCP allow rule in .claude/settings.local.json (`permissions` in the result), without which a subagent's first foundry_status call is denied under any permission mode.",

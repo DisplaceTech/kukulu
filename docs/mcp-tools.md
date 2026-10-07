@@ -1,6 +1,6 @@
 # MCP tool reference
 
-Nineteen tools, served over stdio by `mcp/server.mjs` with no dependencies.
+Twenty tools, served over stdio by `mcp/server.mjs` with no dependencies.
 The server is launched by Claude Code from [`.mcp.json`](../.mcp.json) with
 `FOUNDRY_PROJECT_DIR` set to the project root; every path below is relative to
 that root.
@@ -129,7 +129,11 @@ streams? }`.
   [architecture.md](./architecture.md#review-rounds)
 - `reason` — one sentence, written for a human reading the transcript. A
   `done` reason counts reviews and fix rounds separately: "flight complete
-  after 2 reviews (1 fix round); …" (cleanflate F-21)
+  after 2 reviews (1 fix round); …" (cleanflate F-21). After
+  [`foundry_flight_archive`](#foundry_flight_archive) it is `done` with the
+  reason "flight <slug> is archived in <dir>; edit docs/SPEC.md for the next
+  flight, then run /foundry:go-flight", until `docs/SPEC.md` differs from the
+  archived copy; then the stage is `plan` again
 - `prompt` — the text to hand the subagent **verbatim**; the implement,
   review and summarize prompts each end with a sentence stating this run's
   policies (see `foundry_run_start`)
@@ -837,8 +841,10 @@ under 1 MiB. Without it the tool commits the file already on disk, as in 0.4.0.
 **Does:** marks the flight complete, commits `docs/SUMMARY.md` as
 `chore: build summary`, and pushes the branch per `policies.push` (F-18).
 
-**Returns:** `{ commit, branch, base, head, reviews, fixRounds, push, pr }`.
-`reviews` is how many reviews the flight took and `fixRounds` how many fix
+**Returns:** `{ commit, branch, base, head, reviews, fixRounds, push, pr, archive }`.
+`archive` is `policies.archive`, so the summarizer reads the policy from the
+result: when it is true, call [`foundry_flight_archive`](#foundry_flight_archive)
+next. `reviews` is how many reviews the flight took and `fixRounds` how many fix
 rounds came between them; after an approval, reviews = fixRounds + 1. `pr`
 is the branch's pull request from `gh pr view`, as `{ url, state, draft,
 base }`, with `expectedBase` added when it does not target `baseBranch`.
@@ -848,6 +854,36 @@ missing or failing). This is never a refusal (cleanflate F-25).
 **Refuses when:** the recorded verdict is not `APPROVED` (before anything is
 written); `content` is not a string, is empty after trimming, or is 1 MiB or
 more; or `content` is absent and `SUMMARY.md` does not exist.
+
+---
+
+## `foundry_flight_archive`
+
+Archive a summarized flight so the repository can run its next one.
+
+**Arguments:** `{ slug? }`, lowercase letters, digits and `-`, at most 40
+characters. It defaults to the `flight` key in `docs/foundry.json`; with
+neither, the tool refuses.
+
+**Does:** moves `docs/PLAN.md`, `docs/PROGRESS.md`, `docs/HANDOFF.md`,
+`docs/REVIEW.md`, `docs/SUMMARY.md`, `docs/foundry.json`,
+`.foundry/state.json` and `.foundry/feedback.jsonl` (each one that exists)
+into `docs/flights/<slug>/` (`git mv` for a tracked file, a plain rename for
+an untracked one), copies `docs/SPEC.md` there (the live spec stays), writes
+a fresh `.foundry/state.json` that records `archived: { slug, dir, at }` and
+carries `signingOverride` over, commits everything as `chore: archive flight
+<slug>`, and pushes the branch per the push policy. If the commit fails,
+every file is put back and the empty archive directory removed.
+
+After it, `foundry_next` reports `done` until `docs/SPEC.md` is edited, then
+`plan`.
+
+**Returns:** `{ slug, dir, moved, copied, commit, push }`.
+
+**Refuses when** (in this order, before anything moves): there is no slug;
+the slug is malformed; the flight is not summarized; the implement lock is
+armed; the working tree is dirty (apart from files that were untracked before
+the run started); or `docs/flights/<slug>/` already exists.
 
 ---
 

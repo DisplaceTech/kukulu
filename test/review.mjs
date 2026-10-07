@@ -2,6 +2,8 @@
 // foundry_summary_commit. This is where a judgment call becomes queued work,
 // so the tool is strict about what a finding must carry before it counts.
 
+import fs from "node:fs";
+import path from "node:path";
 import {
   finish, ok, eq, like, isError,
   plannedRepo, withServer, readFile, writeFile, subject, hasFile,
@@ -705,6 +707,130 @@ for (const [mutation, re, label] of [
   const repo = mutationRepo({ config: { mutation } });
   await withServer(repo, async ({ call }) => {
     isError(await call("foundry_mutate", { file: "src/add.mjs", find: "a + b", replace: "a - b" }), re, `mutation config refuses ${label}`);
+  });
+}
+
+// ---------------------------------------------------------------- flight_archive (S-07)
+
+const ARCHIVE_FILES = ["docs/PLAN.md", "docs/PROGRESS.md", "docs/HANDOFF.md", "docs/REVIEW.md", "docs/SUMMARY.md", "docs/foundry.json", ".foundry/state.json", ".foundry/feedback.jsonl"];
+
+/** A summarized flight on a build branch, every artifact committed. */
+function summarizedRepo({ config = { flight: "w1-share" }, state = {} } = {}) {
+  const repo = plannedRepo({ config });
+  git(repo, ["checkout", "-q", "-b", `build/${TODAY}`]);
+  markTasks(repo, ALL_DONE);
+  writeFile(repo, "docs/HANDOFF.md", "# handoff\n");
+  writeFile(repo, "docs/REVIEW.md", "# Review\nRound: 1\n**Verdict**: APPROVED\n");
+  writeFile(repo, "docs/SUMMARY.md", "# summary\n");
+  writeFile(repo, ".foundry/feedback.jsonl", '{"at":"x","stage":"implement","round":0,"category":"other","message":"m","source":"agent"}\n');
+  setState(repo, { round: 0, implemented: true, reviewed: true, verdict: "APPROVED", summarized: true, ...state });
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-qm", "chore: build summary"]);
+  return repo;
+}
+
+const snapshot = (repo) => Object.fromEntries(ARCHIVE_FILES.map((f) => [f, hasFile(repo, f) ? readFile(repo, f) : null]));
+
+{
+  const repo = summarizedRepo({ config: {} });
+  await withServer(repo, async ({ call }) => {
+    isError(await call("foundry_flight_archive"), /pass slug, or set "flight" in docs\/foundry\.json/, "archive refuses with no slug and no flight key");
+    isError(await call("foundry_flight_archive", { slug: "Bad_Slug" }), /slug must match/, "...and a malformed slug");
+    ok(hasFile(repo, "docs/PLAN.md") && !hasFile(repo, "docs/flights"), "...and nothing moved");
+  });
+}
+
+{
+  const repo = summarizedRepo({ state: { summarized: false } });
+  await withServer(repo, async ({ call }) => {
+    isError(await call("foundry_flight_archive"), /not summarized yet/, "archive refuses before the summary");
+    writeFile(repo, ".foundry/implement.lock", "0\n");
+    setState(repo, { summarized: true });
+    git(repo, ["add", "-A"]);
+    git(repo, ["commit", "-qm", "state"]);
+    isError(await call("foundry_flight_archive"), /implement\.lock exists/, "...and while the lock is armed");
+    fs.rmSync(path.join(repo, ".foundry/implement.lock"));
+    writeFile(repo, "docs/PLAN.md", readFile(repo, "docs/PLAN.md") + "edit\n");
+    isError(await call("foundry_flight_archive"), /working tree is not clean/, "...and with a modified tracked file");
+    git(repo, ["checkout", "--", "docs/PLAN.md"]);
+    writeFile(repo, "docs/flights/w1-share/x.txt", "x");
+    git(repo, ["add", "-A"]);
+    git(repo, ["commit", "-qm", "occupied"]);
+    isError(await call("foundry_flight_archive"), /docs\/flights\/w1-share already exists/, "...and when the destination exists");
+    ok(hasFile(repo, "docs/PLAN.md"), "...nothing moved in any refusal");
+  });
+}
+
+{
+  const repo = summarizedRepo({ state: { signingOverride: true } });
+  const before = snapshot(repo);
+  git(repo, ["remote", "add", "origin", mkBareRemote()]);
+  await withServer(repo, async ({ call }) => {
+    const r = await call("foundry_flight_archive");
+    eq(r.dir, "docs/flights/w1-share", "archive moves the flight: the directory");
+    eq(r.moved.length, 8, "...all eight files are moved");
+    for (const f of ARCHIVE_FILES) eq(readFile(repo, `docs/flights/w1-share/${path.basename(f)}`), before[f], `...${f} arrived byte-identical`);
+    eq(subject(repo), "chore: archive flight w1-share", "...in one commit");
+    ok(!hasFile(repo, "docs/PLAN.md") && !hasFile(repo, "docs/foundry.json"), "...docs/PLAN.md and foundry.json are gone");
+    eq(readFile(repo, "docs/SPEC.md"), readFile(repo, "docs/flights/w1-share/SPEC.md"), "...and docs/SPEC.md stays, with an identical copy");
+    const st = JSON.parse(readFile(repo, ".foundry/state.json"));
+    eq(st.archived.slug, "w1-share", "...the fresh state records the archive");
+    ok(st.summarized === false && st.round === 0 && st.verdict === null && st.rounds.length === 0, "...and is otherwise the default state");
+    eq(st.signingOverride, true, "signingOverride is carried over");
+    eq(git(repo, ["status", "--porcelain"]), "", "...the tree is clean");
+    eq(r.push, "pushed", "push follows policy");
+    eq(git(repo, ["rev-parse", `origin/build/${TODAY}`]), git(repo, ["rev-parse", "HEAD"]), "...and the remote has the archive commit");
+  });
+}
+
+{
+  const repo = summarizedRepo();
+  await withServer(repo, async ({ call }) => {
+    const r = await call("foundry_flight_archive", { slug: "other" });
+    eq(r.dir, "docs/flights/other", "a slug argument wins over flight");
+    like(subject(repo), /archive flight other/, "...and names the commit");
+  });
+}
+
+{
+  const repo = summarizedRepo();
+  git(repo, ["rm", "-q", "--cached", "docs/HANDOFF.md"]);
+  git(repo, ["commit", "-qm", "untrack handoff"]);
+  setState(repo, { preexistingUntracked: ["docs/HANDOFF.md"] });
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-qm", "state"]);
+  await withServer(repo, async ({ call }) => {
+    const r = await call("foundry_flight_archive");
+    ok(!r.error && hasFile(repo, "docs/flights/w1-share/HANDOFF.md") && !hasFile(repo, "docs/HANDOFF.md"), "a pre-existing untracked artifact is moved with mv");
+    eq(git(repo, ["status", "--porcelain"]), "", "...and the tree ends clean");
+  });
+}
+
+{
+  // a failed archive commit restores everything
+  const repo = summarizedRepo();
+  const hook = path.join(repo, ".git", "hooks", "commit-msg");
+  fs.mkdirSync(path.dirname(hook), { recursive: true });
+  fs.writeFileSync(hook, `#!/bin/sh\nif head -n1 "$1" | grep -q '^chore: archive'; then echo rejected >&2; exit 1; fi\n`);
+  fs.chmodSync(hook, 0o755);
+  const before = snapshot(repo);
+  const head = git(repo, ["rev-parse", "HEAD"]);
+  await withServer(repo, async ({ call }) => {
+    isError(await call("foundry_flight_archive"), /commit failed/, "a failed archive commit is an error");
+    const after = snapshot(repo);
+    ok(ARCHIVE_FILES.every((f) => after[f] === before[f]), "...and every source is back, byte-identical");
+    ok(!hasFile(repo, "docs/flights/w1-share"), "...the archive directory does not exist");
+    eq(git(repo, ["diff", "--cached", "--name-only"]), "", "...nothing is staged");
+    eq(git(repo, ["rev-parse", "HEAD"]), head, "...and HEAD did not move");
+  });
+}
+
+for (const [archive, want] of [[undefined, false], [true, true]]) {
+  const repo = reviewableRepo({ verdict: "APPROVED", config: archive === undefined ? {} : { policies: { archive } } });
+  await withServer(repo, async ({ call }) => {
+    await call("foundry_review_submit", { verdict: "APPROVED" });
+    const r = await call("foundry_summary_commit", { content: "# s\n" });
+    eq(r.archive, want, `summary_commit returns archive: ${want}`);
   });
 }
 
