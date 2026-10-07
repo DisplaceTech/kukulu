@@ -56,3 +56,12 @@ None.
 - The version is 0.5.0 in `package.json`, `.claude-plugin/plugin.json` and the server; CHANGELOG.md has the release entry. Nothing was tagged or released.
 - The three skills the summarize flow now depends on (`foundry_summary_commit` with `content`, `foundry_flight_archive`, `foundry_pr_finalize`) are exercised only against a fake `gh` and a fake gpg in the tests.
 - No friction was logged against Foundry itself during this build beyond the two entries the plan stage left in `.foundry/feedback.jsonl`.
+
+## Round 1
+
+Branch build/2026-10-07, head 3f9578a before this handoff commit. 31 tasks: 31 done, 0 blocked, 0 skipped.
+
+- R1-01: commitStaged now snapshots state.json, feedback.jsonl and local commit.gpgsign before the unsigned fallback, and restores all of them (and unstages) if the unsigned retry fails. Test uses a counter-based commit-msg hook.
+- R1-02: tests for four server.mjs mutants (filter quoting, strayArtifacts, 11th ordinal, finalize clearing the override). Each was confirmed to fail against its mutant. Interpretation: the 11th-ordinal test drives 12 equal-count rounds with maxRounds 11.
+- R1-03: plugin test pins planner and summarizer tool lists and README agent defaults. README and routing.md corrected (summarizer is opus).
+- Manual check: none. No new config keys.
