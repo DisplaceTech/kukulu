@@ -5,7 +5,7 @@ Started: 2026-10-07T17:30:53.739Z
 
 ## Tasks
 
-- [ ] P1-01 Opus routing defaults, and flight artifacts out of the plugin's own checks
+- [x] P1-01 Opus routing defaults, and flight artifacts out of the plugin's own checks
 - [ ] P1-02 One commit helper with a bounded, prompt-free unsigned fallback
 - [ ] P1-03 Snapshot and restore around every writing tool
 - [ ] P1-04 foundry_summary_commit writes SUMMARY.md from content
@@ -37,3 +37,6 @@ Started: 2026-10-07T17:30:53.739Z
 ## Log
 
 (one entry per task, appended by implement)
+
+### P1-01 — 0427851
+Agents/template/README/docs now opus for planner, reviewer, summarizer. Tests: routing defaults block, plugin per-agent no-fable, FLIGHT_ARTIFACTS skipped in tool-name check. Interpretation: link check ignores inline code spans (PLAN.md quotes an example link in backticks). pre-commit markdownlint excludes MCP-written artifacts and docs/flights/. All verify green.
