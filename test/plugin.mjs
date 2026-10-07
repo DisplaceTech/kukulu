@@ -118,8 +118,21 @@ for (const name of skillNames.filter((n) => n !== "pull-feedback")) {
 // A Write refusal should never cost a turn or a returned-as-text file
 // (F-16): every skill that writes a deliverable file states the heredoc
 // fallback.
-for (const name of ["summarize", "plan-build", "implement"]) {
+for (const name of ["plan-build", "implement"]) {
   like(read(`skills/${name}/SKILL.md`), /heredoc/, `skills/${name} states the shell-heredoc fallback for a refused Write`);
+}
+
+{
+  const sum = read("skills/summarize/SKILL.md");
+  ok(!/heredoc/i.test(sum), "the summarize skill passes content and never writes SUMMARY.md itself (project-c F-03): no heredoc");
+  for (const word of ["content", "foundry_summary_commit"]) like(sum, new RegExp(word), `...it names ${word}`);
+  like(sum, /Never call `Write`/, "...and forbids writing the file itself");
+  like(sum, /foundry_flight_archive/, "the summarize skill archives when policies.archive is true");
+  like(sum, /archive: true/, "...keyed on the archive field of the summary result");
+  like(sum, /foundry_pr_finalize\(\{ breaking \}\)/, "the summarize skill ends with foundry_pr_finalize");
+  like(sum, /Never pass `resign`/, "...and never passes resign");
+  for (const status of ["AWAITING SIGNING", "AUTO-MERGE ON", "READY"]) like(sum, new RegExp(status), `...its final message can say ${status}`);
+  like(sum, /Codebase notes/, "the summarize skill lifts Codebase notes");
 }
 
 for (const name of agentNames) {
