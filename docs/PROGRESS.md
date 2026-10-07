@@ -9,7 +9,7 @@ Started: 2026-10-07T17:30:53.739Z
 - [x] P1-02 One commit helper with a bounded, prompt-free unsigned fallback
 - [x] P1-03 Snapshot and restore around every writing tool
 - [x] P1-04 foundry_summary_commit writes SUMMARY.md from content
-- [ ] P1-05 from: constraints and commands that activate at a task
+- [x] P1-05 from: constraints and commands that activate at a task
 - [ ] P1-06 Targeted mutation commands
 - [ ] P1-07 failedCommands and confirmKill in foundry_mutate
 - [ ] P1-08 foundry_status reports artifacts, strayArtifacts and lastReviewCommit
@@ -49,3 +49,6 @@ withRollback(paths, fn) added; wraps startRun, taskDone, taskBlock (progress wri
 
 ### P1-04 — bd1573f
 summary_commit takes optional content (SUMMARY_MAX_BYTES 1 MiB), validates before writing, writes inside withRollback over SUMMARY/state/feedback. Interpretation: with content, verdict check first; without content, does-not-exist check stays first (existing test order). PROMPTS.summarize updated. Tests in review.mjs; docs/mcp-tools.md updated.
+
+### P1-05 — b22a1c0
+Added validateFrom, inactiveUntil(from, pr); CONSTRAINT_KEYS gains from; normalizeCommand returns from (null default) with allowFrom flag (build/parallel.setup refuse). checkConstraints, verify, mutate and run_finish's scan honour it. Interpretation: mutate's killed ignores skipped entries. Skipped command shape is exactly {cmd, skipped}. Tests in constraints.mjs and implement.mjs; docs updated.
