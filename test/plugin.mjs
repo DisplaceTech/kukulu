@@ -31,6 +31,10 @@ ok(Array.isArray(plugin.keywords) && plugin.keywords.length >= 3, "the plugin ca
 eq(pkg.version, plugin.version, "package.json and plugin.json agree on the version");
 const serverVersion = read("mcp/server.mjs").match(/const VERSION = "([^"]+)"/)[1];
 eq(serverVersion, plugin.version, "the MCP server reports the plugin's version");
+{
+  const newest = read("CHANGELOG.md").match(/^## \[(\d+\.\d+\.\d+)\]/m)[1];
+  eq(newest, plugin.version, "CHANGELOG.md's newest entry is the package version");
+}
 eq(pkg.type, "module", "package.json declares ES modules");
 ok(pkg.scripts.test && pkg.scripts.lint, "package.json exposes test and lint");
 like(pkg.engines.node, /^>=\d+$/, "package.json states a Node floor");
