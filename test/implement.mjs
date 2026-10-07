@@ -435,6 +435,19 @@ for (const missing of ["docs/SPEC.md", "docs/PLAN.md", "docs/PROGRESS.md", "docs
 }
 
 {
+  // from gates an extraVerify command
+  const repo = plannedRepo({ config: { verify: ["true"], extraVerify: { "src/": [{ cmd: "false", from: "P0-02" }] } } });
+  await withServer(repo, async ({ call }) => {
+    let v = await call("foundry_verify", { files: ["src/a.js"] });
+    eq(v.ok, true, "an extraVerify command gated on an unstarted task does not fail verify");
+    ok(v.results.some((r) => r.cmd === "false" && r.skipped === "inactive until P0-02" && Object.keys(r).length === 2), "...and is reported as skipped in its place");
+    markTasks(repo, { "P0-01": "x", "P0-02": "~" });
+    v = await call("foundry_verify", { files: ["src/a.js"] });
+    eq(v.ok, false, "once the task is in progress, the command runs and fails verify");
+  });
+}
+
+{
   const repo = plannedRepo({
     config: { verify: [{ cmd: "sleep 2", timeoutMs: 200 }, "echo fast"], commandTimeoutMs: 60_000 },
   });

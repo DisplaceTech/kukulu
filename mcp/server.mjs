@@ -257,16 +257,41 @@ function validatePolicies(policies) {
  * everything else, and mark a port- or directory-bound command `exclusive`
  * so it only ever runs from the main checkout, never a stream's worktree.
  */
-function normalizeCommand(entry, defaultTimeoutMs, where) {
-  if (typeof entry === "string") return { cmd: entry, timeoutMs: defaultTimeoutMs, exclusive: false };
+function normalizeCommand(entry, defaultTimeoutMs, where, { allowFrom = false } = {}) {
+  if (typeof entry === "string") return { cmd: entry, timeoutMs: defaultTimeoutMs, exclusive: false, from: null };
   if (entry && typeof entry === "object" && !Array.isArray(entry)) {
     if (typeof entry.cmd !== "string" || !entry.cmd) throw new ToolError(`${where} is missing 'cmd'`);
     const timeoutMs = entry.timeoutMs === undefined ? defaultTimeoutMs : entry.timeoutMs;
     if (!Number.isInteger(timeoutMs) || timeoutMs <= 0) throw new ToolError(`${where}.timeoutMs must be a positive integer`);
     if (entry.exclusive !== undefined && typeof entry.exclusive !== "boolean") throw new ToolError(`${where}.exclusive must be a boolean`);
-    return { cmd: entry.cmd, timeoutMs, exclusive: entry.exclusive === true };
+    if (entry.from !== undefined && !allowFrom) throw new ToolError(`${where}.from is only valid on verify and extraVerify entries`);
+    return { cmd: entry.cmd, timeoutMs, exclusive: entry.exclusive === true, from: entry.from === undefined ? null : validateFrom(entry.from, where) };
   }
   throw new ToolError(`${where} must be a command string or { cmd, timeoutMs }`);
+}
+
+/** A `from` value names the task that makes a rule true; it must be a task id that PLAN.md (when it exists) defines. */
+function validateFrom(from, where) {
+  if (typeof from !== "string" || !/^[PR]\d+-\d+$/.test(from)) throw new ToolError(`${where}.from must be a task id such as P1-03`);
+  if (exists(P.plan) && !new RegExp(`^### ${from}:`, "m").test(read(P.plan))) {
+    throw new ToolError(`${where}.from names ${from}, which is not a task in docs/PLAN.md`);
+  }
+  return from;
+}
+
+/**
+ * `null` when a rule gated by `from` is active, else the task id it waits
+ * for. Active when ungated, when there is no PROGRESS.md, when no task is
+ * open (the flight is over, so everything applies), when the task is not in
+ * PROGRESS.md, or when the task has started or finished. Inactive while the
+ * task is todo, blocked or skipped.
+ */
+function inactiveUntil(from, pr) {
+  if (!from || !pr) return null;
+  if (counts(pr.tasks).open === 0) return null;
+  const t = pr.tasks.find((x) => x.id === from);
+  if (!t) return null;
+  return t.state === "~" || t.state === "x" ? null : from;
 }
 
 const PARALLEL_KEYS = ["maxStreams", "setup"];
@@ -288,7 +313,7 @@ function validateParallel(parallel) {
   }
 }
 
-const CONSTRAINT_KEYS = ["id", "description", "paths", "exclude", "pattern", "flags", "shouldMatch", "shouldNotMatch"];
+const CONSTRAINT_KEYS = ["id", "description", "paths", "exclude", "pattern", "flags", "shouldMatch", "shouldNotMatch", "from"];
 
 /**
  * Validate `docs/foundry.json`'s `constraints` array: every rule must carry
@@ -314,6 +339,7 @@ function validateConstraints(constraints) {
     if (c.exclude !== undefined && (!Array.isArray(c.exclude) || !c.exclude.every((p) => typeof p === "string" && p))) {
       throw new ToolError(`constraint '${c.id}'.exclude must be an array of strings`);
     }
+    if (c.from !== undefined) validateFrom(c.from, `constraint '${c.id}'`);
     if (typeof c.pattern !== "string" || !c.pattern) throw new ToolError(`constraint '${c.id}' must have a non-empty 'pattern'`);
     if (c.flags !== undefined && typeof c.flags !== "string") throw new ToolError(`constraint '${c.id}'.flags must be a string`);
     try {
@@ -337,11 +363,12 @@ function cfg() {
   validateConstraints(c.constraints);
   validateParallel(c.parallel);
   const commandTimeoutMs = c.commandTimeoutMs || 10 * 60 * 1000;
-  const norm = (entry, i, where) => normalizeCommand(entry, commandTimeoutMs, `docs/foundry.json ${where}[${i}]`);
+  const norm = (entry, i, where, opts) => normalizeCommand(entry, commandTimeoutMs, `docs/foundry.json ${where}[${i}]`, opts);
+  const gated = { allowFrom: true };
   return {
-    verify: (c.verify || []).map((e, i) => norm(e, i, "verify")),
+    verify: (c.verify || []).map((e, i) => norm(e, i, "verify", gated)),
     extraVerify: Object.fromEntries(
-      Object.entries(c.extraVerify || {}).map(([prefix, arr]) => [prefix, (arr || []).map((e, i) => norm(e, i, `extraVerify['${prefix}']`))]),
+      Object.entries(c.extraVerify || {}).map(([prefix, arr]) => [prefix, (arr || []).map((e, i) => norm(e, i, `extraVerify['${prefix}']`, gated))]),
     ),
     build: (c.build || []).map((e, i) => norm(e, i, "build")),
     parallel: {
@@ -2037,6 +2064,7 @@ const pathUnder = (file, p) => file === p || file.startsWith(p.endsWith("/") ? p
  */
 function checkConstraints(constraints, cwd = ROOT, ignore = []) {
   const skip = new Set(ignore);
+  const progress = exists(P.progress) ? parseProgress() : null;
   const testLine = (c, line) => new RegExp(c.pattern, c.flags || "").test(line);
   const results = constraints.map((c) => {
     for (const line of c.shouldMatch) {
@@ -2045,6 +2073,8 @@ function checkConstraints(constraints, cwd = ROOT, ignore = []) {
     for (const line of c.shouldNotMatch) {
       if (testLine(c, line)) return { id: c.id, ok: false, fixture: `shouldNotMatch ${JSON.stringify(line)} matched`, hits: [] };
     }
+    const waiting = inactiveUntil(c.from, progress);
+    if (waiting) return { id: c.id, ok: true, inactive: `until ${waiting}`, fixture: null, hits: [] };
     const listed = git(["ls-files", "--cached", "--others", "--exclude-standard", "--", ...c.paths], { allowFail: true, cwd });
     const files = listed.ok ? [...new Set(listed.out.split("\n").filter(Boolean))].filter((f) => !skip.has(f)) : [];
     const excluded = c.exclude || [];
@@ -2106,8 +2136,12 @@ function verify({ files = [], stream } = {}) {
   // Constraints are whole-repo, always — `files` narrows which shell
   // commands' extras run, never what a constraint scans.
   const constraints = checkConstraints(cc.constraints, cwd, ignore);
-  const results = cmds.map((c2) => runShell(c2.cmd, c2.timeoutMs, cwd));
-  return { ok: constraints.ok && results.every((r) => r.ok), constraints, results, ...(recovered ? { recoveredMutation: recovered } : {}) };
+  const progress = exists(P.progress) ? parseProgress() : null;
+  const results = cmds.map((c2) => {
+    const waiting = inactiveUntil(c2.from, progress);
+    return waiting ? { cmd: c2.cmd, skipped: `inactive until ${waiting}` } : runShell(c2.cmd, c2.timeoutMs, cwd);
+  });
+  return { ok: constraints.ok && results.every((r) => r.skipped || r.ok), constraints, results, ...(recovered ? { recoveredMutation: recovered } : {}) };
 }
 
 // ---------------------------------------------------------------- mutation testing
@@ -2253,7 +2287,11 @@ function mutate({ file, find, replace, commands, timeoutMs } = {}) {
   let results;
   try {
     fs.writeFileSync(abs, original.slice(0, first) + replace + original.slice(first + find.length));
-    results = cmds.map((c2) => runShell(c2.cmd, c2.timeoutMs));
+    const progress = exists(P.progress) ? parseProgress() : null;
+    results = cmds.map((c2) => {
+      const waiting = inactiveUntil(c2.from, progress);
+      return waiting ? { cmd: c2.cmd, skipped: `inactive until ${waiting}` } : runShell(c2.cmd, c2.timeoutMs);
+    });
   } finally {
     // Restore unconditionally. If git cannot, write the bytes back ourselves.
     if (!git(["checkout", "-q", "HEAD", "--", relPath], { allowFail: true }).ok) fs.writeFileSync(abs, original);
@@ -2265,7 +2303,7 @@ function mutate({ file, find, replace, commands, timeoutMs } = {}) {
   fs.rmSync(P.mutation, { force: true });
   const residue = undoMutationResidue(before);
 
-  const killed = results.some((r) => !r.ok);
+  const killed = results.some((r) => !r.skipped && !r.ok);
   return {
     file: relPath,
     killed,

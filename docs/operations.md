@@ -243,8 +243,8 @@ parse. Edit it between stages, not during one.
 
 | Key | Default | Effect |
 |---|---|---|
-| `verify` | `[]` | Commands run after every task. At least one is required. Each entry is a string, or `{ cmd, timeoutMs, exclusive }`: `timeoutMs` overrides `commandTimeoutMs` for that one command, and `exclusive: true` marks a command that starts a port-, container- or directory-keyed environment (wp-env, docker compose) so it only ever runs from the main checkout, never a parallel stream's worktree. |
-| `extraVerify` | `{}` | Path prefix → extra commands (same entries as `verify`), run when a task touches that prefix |
+| `verify` | `[]` | Commands run after every task. At least one is required. Each entry is a string, or `{ cmd, timeoutMs, exclusive, from }`: `from` names a task id (such as `P1-03`) and keeps the command inactive until that task is in progress or done; `timeoutMs` overrides `commandTimeoutMs` for that one command, and `exclusive: true` marks a command that starts a port-, container- or directory-keyed environment (wp-env, docker compose) so it only ever runs from the main checkout, never a parallel stream's worktree. |
+| `extraVerify` | `{}` | Path prefix → extra commands (same entries as `verify`, including `from`), run when a task touches that prefix |
 | `build` | `[]` | Recorded for the plan's use; the MCP does not run it |
 | `baseBranch` | `main` | Branch runs start from, and the merge-base reported as `base` |
 | `branchPrefix` | `build/` | Prefix for run branches (`build/2026-09-18`, `-2`, …) |
@@ -346,6 +346,7 @@ check works:
 | `flags` | no | `RegExp` flags, e.g. `"i"` |
 | `shouldMatch` | yes, ≥ 1 | Lines the pattern must catch |
 | `shouldNotMatch` | yes, ≥ 1 | Lines it must not |
+| `from` | no | A task id such as `P1-03`. The rule stays inactive (reported `inactive: "until P1-03"`, no scan) while that task is todo, blocked or skipped, and applies once it is in progress or done, or once no task is open. Its fixtures are self-tested either way. Use it for a rule that only becomes true when a task has run |
 
 `foundry_verify` runs constraints before any shell command, always against
 the whole repo regardless of the `files` argument: first it self-tests every

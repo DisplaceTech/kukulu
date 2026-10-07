@@ -408,8 +408,11 @@ total is killed. Once the shell has exited, a leftover child still holding
 its output open gets two seconds before its group is killed. None of these
 can hang the server or take it down (cleanflate F-04, F-16).
 
-**Returns:** `{ ok, constraints: { ok, results: [{ id, ok, fixture, hits }] },
+**Returns:** `{ ok, constraints: { ok, results: [{ id, ok, fixture, hits, inactive? }] },
 results: [{ command, ok, exitCode, timedOut, timeoutMs, stdoutTail, stderrTail }] }`,
+where a rule with an unreached `from` carries `inactive: "until <id>"` and a
+command with one appears as exactly `{ cmd, skipped: "inactive until <id>" }`
+(neither is ever a failure),
 plus `recoveredMutation` (a path) when it first had to restore a file a
 crashed [`foundry_mutate`](#foundry_mutate) left edited.
 The tails are the last 60 lines of each stream, and never more than 4000
@@ -485,7 +488,8 @@ that tells you how to recover by hand.
 
 **Returns:** `{ file, killed, verdict, results, restored, removed, recoveredMutation }`.
 `restored` and `removed` list the residue paths it put back or deleted.
-`killed` is true when at least one command failed — the tests noticed (a
+`killed` is true when at least one command failed (a command skipped as
+inactive until a `from` task never counts) — the tests noticed (a
 timeout counts). `verdict` is `"killed: the tests caught the mutation"` or
 `"survived: no command failed — the mechanic is untested"`; a survivor is a
 category-3 review finding. `results` has the same per-command shape as
@@ -571,7 +575,8 @@ End an implementation run and hand off to review.
    reports the result without refusing on it (cleanflate F-26).
 
 **Returns:** `{ branch, base, head, handoffCommit, stateCommit, push, pr, counts, round, constraints, readyLine }`.
-`constraints` is `{ ok, failing: [<rule ids>] }`; when any rule fails, the
+`constraints` is `{ ok, failing: [<rule ids>] }`, and a rule whose `from`
+task has not started is inactive there too; when any rule fails, the
 ready line ends with `; constraints failing: <ids>`.
 `push` is `"pushed"`, `"skipped: no origin remote"`, `"skipped: policy"`, or
 `"failed: <git's message>"` — a failed push does not fail the handoff,
