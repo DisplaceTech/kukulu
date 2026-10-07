@@ -4,3 +4,4 @@ node_modules/
 
 # Claude Code local session settings
 .claude/settings.local.json
+.foundry/implement.lock
