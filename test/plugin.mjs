@@ -123,6 +123,13 @@ for (const name of ["plan-build", "implement"]) {
 }
 
 {
+  const im = read("skills/implement/SKILL.md");
+  like(im, /## Codebase notes/, "the implement skill keeps project lessons out of the feedback log (project-c F-08, F-09): it names ## Codebase notes");
+  like(im, /never in `foundry_feedback_log`/, "...and says project lessons never go to foundry_feedback_log");
+  like(im, /heredoc/, "...and keeps the heredoc fallback");
+}
+
+{
   const pb = read("skills/plan-build/SKILL.md");
   like(pb, /foundry_plan_commit/, "plan-build commits through foundry_plan_commit (project-d F-03)");
   ok(!pb.includes("Commit PLAN.md, PROGRESS.md, foundry.json and CLAUDE.md as"), "...and no longer tells the planner to commit by hand");

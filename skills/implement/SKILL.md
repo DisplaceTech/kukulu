@@ -127,6 +127,11 @@ workaround — call `foundry_feedback_log` with `stage: "implement"` right
 then. Do not save it up for `docs/HANDOFF.md`: this entry has to survive a
 run that never reaches `foundry_run_finish`.
 
+A lesson about the project is not Foundry friction: a framework footgun, a
+confusing library behavior, a test that needs a particular fixture. Put it in
+the task's log entry and under a `## Codebase notes` heading in
+`docs/HANDOFF.md`, and never in `foundry_feedback_log`.
+
 ## Stream mode
 
 Your prompt may instead name one **stream** of a parallel wave ("Run the
@@ -198,6 +203,9 @@ When `foundry_task_next` returns `{ done: true }` *without* `paused`:
    - Every `⚠️ ASSUMPTION` config key with its current default and whether it
      was tuned.
    - What a human must check by hand, per phase.
+   - `## Codebase notes`: every project lesson from this run's log entries
+     (a framework footgun and the like), for the summarizer to lift into
+     SUMMARY.md.
    - Anything you would tell a reviewer who has not seen this code.
    If this is a review-fix round, rewrite only the `## Round N` section of
    HANDOFF.md rather than the whole file. Write it with the `Write` tool; if
