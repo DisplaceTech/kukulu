@@ -25,7 +25,7 @@ Started: 2026-10-07T17:30:53.739Z
 - [x] P2-03 Plan-build skill: plan_commit, from, stray artifacts, per-flight CLAUDE.md
 - [x] P2-04 Implement skill: codebase notes stay out of the feedback log
 - [x] P2-05 Go-flight skill: resume, signing unlocked, flight slug
-- [ ] P2-06 Pull-feedback skill reads archived flight logs
+- [x] P2-06 Pull-feedback skill reads archived flight logs
 - [ ] P2-07 Phase 2 end: push and record the manual check
 - [ ] P3-01 Tool reference and README for twenty-one tools
 - [ ] P3-02 Operations: flight after flight, and signing
@@ -97,3 +97,6 @@ implement skill: project lessons are not Foundry friction (log entry + HANDOFF #
 
 ### P2-05 — d48a6d5
 go-flight skill: three new options (continue allow N rounds -> flight_options resume; signing unlocked -> pr_finalize resign, the only resign in the pipeline; flight=<slug> -> planner prompt sentence), allowed-tools and argument-hint updated; plugin.mjs assertions; mcp-tools intro lists pr_finalize for the human-initiated re-sign.
+
+### P2-06 — ef4733b
+pull-feedback skill now reads .foundry/feedback.jsonl plus every docs/flights/*/feedback.jsonl, stops only when all are missing/empty, header names each source log with its item count. Interpretation: duplicates within one pull keep one copy by exact at. plugin.mjs assertions. Phase 2 push deferred to run_finish.
