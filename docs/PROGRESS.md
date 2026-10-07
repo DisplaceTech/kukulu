@@ -6,7 +6,7 @@ Started: 2026-10-07T17:30:53.739Z
 ## Tasks
 
 - [x] P1-01 Opus routing defaults, and flight artifacts out of the plugin's own checks
-- [ ] P1-02 One commit helper with a bounded, prompt-free unsigned fallback
+- [x] P1-02 One commit helper with a bounded, prompt-free unsigned fallback
 - [ ] P1-03 Snapshot and restore around every writing tool
 - [ ] P1-04 foundry_summary_commit writes SUMMARY.md from content
 - [ ] P1-05 from: constraints and commands that activate at a task
@@ -40,3 +40,6 @@ Started: 2026-10-07T17:30:53.739Z
 
 ### P1-01 — 0427851
 Agents/template/README/docs now opus for planner, reviewer, summarizer. Tests: routing defaults block, plugin per-agent no-fable, FLIGHT_ARTIFACTS skipped in tool-name check. Interpretation: link check ignores inline code spans (PLAN.md quotes an example link in backticks). pre-commit markdownlint excludes MCP-written artifacts and docs/flights/. All verify green.
+
+### P1-02 — bba9c9b
+Added commitStaged + SIGNING_TIMEOUT_MS in server.mjs; gitCommitIfChanged takes {stage}. Auto: sets local gpgsign false, state.signing/signingOverride, one "signing" feedback entry, retries unsigned in the same commit. Required: ToolError. startRun sets signingOverride on failed probe only. Tests in test/implement.mjs (S-02 section). Docs updated (mcp-tools intro, operations signing row).
