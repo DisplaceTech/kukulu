@@ -145,13 +145,13 @@ like(read("skills/pull-feedback/SKILL.md"), /how many items came from each/, "..
 {
   const im = read("skills/implement/SKILL.md");
   like(im, /## Codebase notes/, "the implement skill keeps project lessons out of the feedback log (project-c F-08, F-09): it names ## Codebase notes");
-  like(im, /never in `foundry_feedback_log`/, "...and says project lessons never go to foundry_feedback_log");
+  like(im, /never in `kukulu_feedback_log`/, "...and says project lessons never go to kukulu_feedback_log");
   like(im, /heredoc/, "...and keeps the heredoc fallback");
 }
 
 {
   const pb = read("skills/plan-build/SKILL.md");
-  like(pb, /foundry_plan_commit/, "plan-build commits through foundry_plan_commit (project-d F-03)");
+  like(pb, /kukulu_plan_commit/, "plan-build commits through kukulu_plan_commit (project-d F-03)");
   ok(!pb.includes("Commit PLAN.md, PROGRESS.md, foundry.json and CLAUDE.md as"), "...and no longer tells the planner to commit by hand");
   like(pb, /renumber: true/, "plan-build renumbers with renumber: true (project-c F-07)");
   like(pb, /"from": "<that task's id>"/, "plan-build gates late rules with from (project-d F-01)");
@@ -179,11 +179,11 @@ like(read("skills/pull-feedback/SKILL.md"), /how many items came from each/, "..
 {
   const sum = read("skills/summarize/SKILL.md");
   ok(!/heredoc/i.test(sum), "the summarize skill passes content and never writes SUMMARY.md itself (project-c F-03): no heredoc");
-  for (const word of ["content", "foundry_summary_commit"]) like(sum, new RegExp(word), `...it names ${word}`);
+  for (const word of ["content", "kukulu_summary_commit"]) like(sum, new RegExp(word), `...it names ${word}`);
   like(sum, /Never call `Write`/, "...and forbids writing the file itself");
-  like(sum, /foundry_flight_archive/, "the summarize skill archives when policies.archive is true");
+  like(sum, /kukulu_flight_archive/, "the summarize skill archives when policies.archive is true");
   like(sum, /archive: true/, "...keyed on the archive field of the summary result");
-  like(sum, /foundry_pr_finalize\(\{ breaking \}\)/, "the summarize skill ends with foundry_pr_finalize");
+  like(sum, /kukulu_pr_finalize\(\{ breaking \}\)/, "the summarize skill ends with kukulu_pr_finalize");
   like(sum, /Never pass `resign`/, "...and never passes resign");
   for (const status of ["AWAITING SIGNING", "AUTO-MERGE ON", "READY"]) like(sum, new RegExp(status), `...its final message can say ${status}`);
   like(sum, /Codebase notes/, "the summarize skill lifts Codebase notes");
@@ -219,7 +219,7 @@ eq((AGENT_MAP.match(/kukulu:/g) || []).length, agentNames.length, "the stage tab
 const goFlight = read("skills/go-flight/SKILL.md");
 const fmGo = frontmatter(goFlight);
 const allowed = String(fmGo["allowed-tools"]).split(",").map((s) => s.trim());
-const toolNames = Array.from(serverSrc.matchAll(/name: "(foundry_[a-z_]+)"/g), (m) => m[1]);
+const toolNames = Array.from(serverSrc.matchAll(/name: "(kukulu_[a-z_]+)"/g), (m) => m[1]);
 eq(toolNames.length, 21, "the server defines twenty-one tools");
 
 const COUNT_WORDS = { 18: "Eighteen", 19: "Nineteen", 20: "Twenty", 21: "Twenty-one", 22: "Twenty-two", 23: "Twenty-three", 24: "Twenty-four", 25: "Twenty-five" };
@@ -250,13 +250,13 @@ for (const name of agentNames) {
     ok(t.startsWith("mcp__plugin_kukulu_kukulu__"), `agents/${name}'s MCP tool ${t} uses the plugin-prefixed form`);
     ok(toolNames.includes(t.replace("mcp__plugin_kukulu_kukulu__", "")), `agents/${name}'s MCP tool ${t} actually exists`);
   }
-  ok(mcpTools.some((t) => t.endsWith("foundry_status")), `agents/${name} can call foundry_status to re-orient itself`);
-  ok(tools.includes("mcp__plugin_kukulu_kukulu__foundry_feedback_log"), `agents/${name} can log pipeline friction the moment it happens`);
+  ok(mcpTools.some((t) => t.endsWith("kukulu_status")), `agents/${name} can call kukulu_status to re-orient itself`);
+  ok(tools.includes("mcp__plugin_kukulu_kukulu__kukulu_feedback_log"), `agents/${name} can log pipeline friction the moment it happens`);
 }
 const agentTools = (n) => frontmatter(read(`agents/${n}.md`)).tools.split(",").map((t) => t.trim());
 const PFX = "mcp__plugin_kukulu_kukulu__";
-ok(agentTools("planner").includes(`${PFX}foundry_plan_commit`), "agents/planner names foundry_plan_commit");
-for (const t of ["foundry_summary_commit", "foundry_flight_archive", "foundry_pr_finalize"]) {
+ok(agentTools("planner").includes(`${PFX}kukulu_plan_commit`), "agents/planner names kukulu_plan_commit");
+for (const t of ["kukulu_summary_commit", "kukulu_flight_archive", "kukulu_pr_finalize"]) {
   ok(agentTools("summarizer").includes(PFX + t), `agents/summarizer names ${t}`);
 }
 for (const name of agentNames) {
@@ -268,10 +268,10 @@ for (const name of agentNames) {
 // the bare mcp__<server>__<tool> a project .mcp.json would give. The
 // controller lists both, so it is allowed its tools whichever way the server
 // was loaded.
-const MCP_PREFIXES = ["mcp__plugin_kukulu_kukulu__", "mcp__foundry__"];
+const MCP_PREFIXES = ["mcp__plugin_kukulu_kukulu__", "mcp__kukulu__"];
 const bareTool = (t) => MCP_PREFIXES.reduce((s, p) => s.replace(p, ""), t);
 ok(allowed.includes("Agent"), "the flight controller may spawn agents");
-for (const t of ["foundry_status", "foundry_next", "foundry_agents_sync", "foundry_run_halt", "foundry_feedback_log"]) {
+for (const t of ["kukulu_status", "kukulu_next", "kukulu_agents_sync", "kukulu_run_halt", "kukulu_feedback_log"]) {
   for (const p of MCP_PREFIXES) ok(allowed.includes(p + t), `the flight controller may call ${p}${t}`);
 }
 for (const t of allowed.filter((a) => a.startsWith("mcp__"))) {
@@ -290,18 +290,18 @@ ok(
   !allowed.some((a) => /run_start|task_|run_finish|review_submit|summary_commit/.test(a)),
   "the flight controller cannot touch the tools that change project state",
 );
-like(goFlight, /resume: true/, "go-flight resumes a round-cap halt with foundry_flight_options (project-c F-13, F-18)");
-like(goFlight, /foundry_pr_finalize\(\{ resign: true \}\)/, "go-flight finishes a signing-blocked flight only with foundry_pr_finalize({ resign: true })");
+like(goFlight, /resume: true/, "go-flight resumes a round-cap halt with kukulu_flight_options (project-c F-13, F-18)");
+like(goFlight, /kukulu_pr_finalize\(\{ resign: true \}\)/, "go-flight finishes a signing-blocked flight only with kukulu_pr_finalize({ resign: true })");
 like(goFlight, /`flight=<slug>`/, "go-flight passes flight=<slug> to the planner");
 like(goFlight, /Flight slug: <slug>\./, "...as the sentence the planner skill looks for");
 for (const name of agentNames) like(goFlight, new RegExp(`kukulu:${name}`), `go-flight names kukulu:${name}`);
 like(goFlight, /notification/, "go-flight describes the loop as event-driven, not a blocking wait");
 like(goFlight, /do not poll/, "go-flight says not to poll while a stage is running");
 // F-04: the reviewer mutation-tests through the MCP, never by hand-editing source.
-ok(String(frontmatter(read("agents/reviewer.md")).tools).includes("mcp__plugin_kukulu_kukulu__foundry_mutate"), "agents/reviewer can call foundry_mutate");
+ok(String(frontmatter(read("agents/reviewer.md")).tools).includes("mcp__plugin_kukulu_kukulu__kukulu_mutate"), "agents/reviewer can call kukulu_mutate");
 {
   const reviewSkill = read("skills/review-build/SKILL.md");
-  like(reviewSkill, /foundry_mutate/, "review-build tells the reviewer to mutation-test with foundry_mutate");
+  like(reviewSkill, /kukulu_mutate/, "review-build tells the reviewer to mutation-test with kukulu_mutate");
   ok(!reviewSkill.includes("git checkout -- <file>"), "review-build no longer tells the reviewer to hand-edit source and git checkout it");
 }
 // V4-06: the planner carves streams, and only where they are safe.
@@ -322,12 +322,12 @@ ok(String(frontmatter(read("agents/reviewer.md")).tools).includes("mcp__plugin_k
 // V4-04: parallel waves.
 like(goFlight, /streams/, "go-flight describes the streams a parallel wave returns");
 like(goFlight, /in a single message/, "go-flight spawns a wave's streams in a single message so they run concurrently");
-like(goFlight, /every\*\* spawned stream has finished|all of\s+them have returned/, "go-flight waits for every stream before calling foundry_next again");
-like(goFlight, /Exactly one `foundry_next` result is in\s+flight at a time/, "go-flight's one-at-a-time rule is restated per foundry_next result");
+like(goFlight, /every\*\* spawned stream has finished|all of\s+them have returned/, "go-flight waits for every stream before calling kukulu_next again");
+like(goFlight, /Exactly one `kukulu_next` result is in\s+flight at a time/, "go-flight's one-at-a-time rule is restated per kukulu_next result");
 {
   const implSkill = read("skills/implement/SKILL.md");
   like(implSkill, /## Stream mode/, "the implement skill has a Stream mode section");
-  like(implSkill, /foundry_stream_finish/, "...naming foundry_stream_finish");
+  like(implSkill, /kukulu_stream_finish/, "...naming kukulu_stream_finish");
   like(implSkill, /STREAM NOT\s+STARTED/, "...and telling a stream implementer to stop, not retry, when run_start refuses");
   like(implSkill, /never `cd` out of `cwd`|`cd <cwd> &&`/, "...and telling the implementer to work only inside its cwd");
   like(implSkill, /docs\/PROGRESS\.md`,\s+`docs\/PLAN\.md`,\s+`docs\/HANDOFF\.md`/, "...and to leave the shared files to the MCP");
@@ -354,14 +354,14 @@ let unknownSkill = null;
 for (const file of PROSE) {
   if (FLIGHT_ARTIFACTS.includes(file)) continue;
   const body = read(file);
-  for (const m of body.matchAll(/\bfoundry_[a-z_]+/g)) {
+  for (const m of body.matchAll(/\bkukulu_[a-z_]+/g)) {
     if (!toolNames.includes(m[0]) && !unknownTool) unknownTool = `${file}: ${m[0]}`;
   }
   for (const m of body.matchAll(/\bfoundry:([a-z-]+)/g)) {
     if (!skillNames.includes(m[1]) && !agentNames.includes(m[1]) && !unknownSkill) unknownSkill = `${file}: ${m[0]}`;
   }
 }
-eq(unknownTool, null, "every foundry_* tool named in prose exists on the server");
+eq(unknownTool, null, "every kukulu_* tool named in prose exists on the server");
 eq(unknownSkill, null, "every kukulu:* skill or agent named in prose exists");
 
 // Documentation links have to land somewhere.
@@ -523,13 +523,13 @@ ok(exists("docs/plans"), "docs/plans/ exists");
 ok(readme.includes("docs/feedback/"), "docs/feedback/ is linked from the README");
 ok(readme.includes("docs/plans/"), "docs/plans/ is linked from the README");
 // V3.1-03: the old "write a heading and hope the summarizer reads it"
-// convention is retired in favor of calling foundry_feedback_log the
+// convention is retired in favor of calling kukulu_feedback_log the
 // moment friction happens, so it survives a flight that never summarizes.
 ok(!read("skills/implement/SKILL.md").includes("## Pipeline friction"), "the implement skill no longer collects friction into a HANDOFF.md heading");
 ok(!read("skills/review-build/SKILL.md").includes("## Pipeline friction"), "the review-build skill no longer collects friction into a REVIEW.md heading");
-like(read("skills/implement/SKILL.md"), /foundry_feedback_log/, "the implement skill calls foundry_feedback_log directly");
-like(read("skills/review-build/SKILL.md"), /foundry_feedback_log/, "the review-build skill calls foundry_feedback_log directly");
-like(read("skills/plan-build/SKILL.md"), /foundry_feedback_log/, "the plan-build skill calls foundry_feedback_log directly");
+like(read("skills/implement/SKILL.md"), /kukulu_feedback_log/, "the implement skill calls kukulu_feedback_log directly");
+like(read("skills/review-build/SKILL.md"), /kukulu_feedback_log/, "the review-build skill calls kukulu_feedback_log directly");
+like(read("skills/plan-build/SKILL.md"), /kukulu_feedback_log/, "the plan-build skill calls kukulu_feedback_log directly");
 like(read("skills/summarize/SKILL.md"), /feedbackCount/, "the summarize skill reads feedbackCount rather than scanning headings");
 like(read("skills/summarize/SKILL.md"), /\.foundry\/feedback\.jsonl/, "...and reads the feedback log itself for the entries");
 like(read("docs/feedback/README.md"), /foundry_feedback_log/, "docs/feedback/README.md documents the tool that produces the source log");

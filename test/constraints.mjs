@@ -1,6 +1,6 @@
 // Constraints (F-14): a CLAUDE.md rule expressed as data, with fixtures that
 // prove the pattern actually catches what it claims to, checked by
-// foundry_verify before any shell command runs. A grep with a blind spot
+// kukulu_verify before any shell command runs. A grep with a blind spot
 // fails its own fixture here instead of passing silently for three review
 // rounds.
 
@@ -42,21 +42,21 @@ for (const [bad, re, label] of [
 ]) {
   const repo = constraintRepo([bad]);
   await withServer(repo, async ({ call }) => {
-    isError(await call("foundry_verify"), re, `constraints refuse: ${label}`);
+    isError(await call("kukulu_verify"), re, `constraints refuse: ${label}`);
   });
 }
 
 {
   const repo = constraintRepo([RULE, { ...RULE, id: "no-console-log" }]);
   await withServer(repo, async ({ call }) => {
-    isError(await call("foundry_verify"), /'no-console-log' is defined more than once/, "a duplicate id is refused");
+    isError(await call("kukulu_verify"), /'no-console-log' is defined more than once/, "a duplicate id is refused");
   });
 }
 
 {
   const repo = plannedRepo({ config: { constraints: "not an array" } });
   await withServer(repo, async ({ call }) => {
-    isError(await call("foundry_verify"), /'constraints' must be an array/, "a non-array constraints value is refused");
+    isError(await call("kukulu_verify"), /'constraints' must be an array/, "a non-array constraints value is refused");
   });
 }
 
@@ -65,12 +65,12 @@ for (const [bad, re, label] of [
 {
   const repo = constraintRepo([RULE]);
   await withServer(repo, async ({ call }) => {
-    const v = await call("foundry_verify");
+    const v = await call("kukulu_verify");
     eq(v.constraints.ok, true, "a rule whose fixtures agree with its pattern self-tests clean");
     eq(v.constraints.results[0].id, "no-console-log", "the result is keyed by the rule's id");
     eq(v.constraints.results[0].fixture, null, "no fixture failure to report");
     eq(v.constraints.results[0].hits.length, 0, "no real hits in an otherwise-empty src/");
-    eq(v.ok, true, "a clean constraint set does not fail foundry_verify on its own");
+    eq(v.ok, true, "a clean constraint set does not fail kukulu_verify on its own");
   });
 }
 
@@ -82,9 +82,9 @@ for (const [bad, re, label] of [
   git(repo, ["add", "-A"]);
   git(repo, ["commit", "-qm", "add a real hit"]);
   await withServer(repo, async ({ call }) => {
-    const v = await call("foundry_verify");
+    const v = await call("kukulu_verify");
     eq(v.constraints.ok, false, "a broken fixture fails the constraint");
-    eq(v.ok, false, "...and fails foundry_verify overall");
+    eq(v.ok, false, "...and fails kukulu_verify overall");
     like(v.constraints.results[0].fixture, /shouldNotMatch "console\.log\(x\);" matched/, "the fixture failure names the offending line");
     eq(v.constraints.results[0].hits.length, 0, "no hits are reported for a rule that failed its own self-test");
   });
@@ -93,7 +93,7 @@ for (const [bad, re, label] of [
 {
   const repo = constraintRepo([{ ...RULE, shouldMatch: ["logger.debug(x);"] }]);
   await withServer(repo, async ({ call }) => {
-    const v = await call("foundry_verify");
+    const v = await call("kukulu_verify");
     eq(v.constraints.results[0].fixture, 'shouldMatch "logger.debug(x);" did not match', "a shouldMatch fixture that does not match names itself in the failure");
     eq(v.constraints.results[0].ok, false, "...and the rule is not ok");
   });
@@ -107,9 +107,9 @@ for (const [bad, re, label] of [
   git(repo, ["add", "-A"]);
   git(repo, ["commit", "-qm", "add a hit"]);
   await withServer(repo, async ({ call }) => {
-    const v = await call("foundry_verify");
+    const v = await call("kukulu_verify");
     eq(v.constraints.ok, false, "a real hit fails the constraint");
-    eq(v.ok, false, "...and fails foundry_verify overall, even if every shell command passes");
+    eq(v.ok, false, "...and fails kukulu_verify overall, even if every shell command passes");
     const hit = v.constraints.results[0].hits[0];
     eq(hit.file, "src/a.js", "the hit names the file");
     eq(hit.line, 2, "...and the 1-indexed line number");
@@ -124,7 +124,7 @@ for (const [bad, re, label] of [
   git(repo, ["add", "-A"]);
   git(repo, ["commit", "-qm", "one excluded, one not"]);
   await withServer(repo, async ({ call }) => {
-    const v = await call("foundry_verify");
+    const v = await call("kukulu_verify");
     eq(v.constraints.results[0].hits.length, 1, "exclude removes the whole directory from the scan");
     eq(v.constraints.results[0].hits[0].file, "src/a.js", "only the non-excluded file is reported");
   });
@@ -141,10 +141,10 @@ for (const [bad, re, label] of [
   setState(repo, { preexistingUntracked: ["src/operator.js"] });
   writeFile(repo, "src/generated/out.js", "console.log('ignored');\n");
   await withServer(repo, async ({ call }) => {
-    const clean = await call("foundry_verify");
+    const clean = await call("kukulu_verify");
     eq(clean.constraints.ok, true, "a pre-existing untracked file and an ignored file are never scanned");
     writeFile(repo, "src/new.js", "console.log('not committed yet');\n");
-    const v = await call("foundry_verify");
+    const v = await call("kukulu_verify");
     eq(v.constraints.ok, false, "a new, uncommitted file under paths is scanned");
     eq(v.constraints.results[0].hits.map((h) => h.file).join(","), "src/new.js", "...and only it is reported");
   });
@@ -157,7 +157,7 @@ for (const [bad, re, label] of [
   git(repo, ["add", "-A"]);
   git(repo, ["commit", "-qm", "add a hit"]);
   await withServer(repo, async ({ call }) => {
-    const v = await call("foundry_verify", { files: ["docs/unrelated.md"] });
+    const v = await call("kukulu_verify", { files: ["docs/unrelated.md"] });
     eq(v.constraints.ok, false, "the constraint scan runs whole-repo regardless of which files the call names");
   });
 }
@@ -169,11 +169,11 @@ for (const [bad, re, label] of [
   git(repo, ["add", "-A"]);
   git(repo, ["commit", "-qm", "a regression"]);
   await withServer(repo, async ({ call }) => {
-    await call("foundry_run_start");
+    await call("kukulu_run_start");
     markTasks(repo, { "P0-01": "x", "P0-02": "x", "P0-03": "x" });
     git(repo, ["commit", "-qam", "progress: by hand"]);
     writeFile(repo, "docs/HANDOFF.md", "# handoff\n");
-    const r = await call("foundry_run_finish");
+    const r = await call("kukulu_run_finish");
     eq(JSON.stringify(r.constraints), JSON.stringify({ ok: false, failing: ["no-console-log"] }), "run_finish reports the failing constraint");
     like(r.readyLine, /; constraints failing: no-console-log$/, "...in the ready line too");
     ok(r.head, "...but still hands off");
@@ -197,7 +197,7 @@ for (const [bad, re, label] of [
   git(repo, ["add", "-A"]);
   git(repo, ["commit", "-qm", "chore: src/"]);
   await withServer(repo, async ({ call }) => {
-    const v = await call("foundry_verify");
+    const v = await call("kukulu_verify");
     eq(v.constraints.ok, true, "every template rule validates and passes its own fixtures");
     for (const r of v.constraints.results) eq(r.fixture, null, `${r.id}'s fixtures agree with its pattern`);
   });
@@ -214,18 +214,18 @@ for (const [bad, re, label] of [
   await withServer(repo, async ({ call }) => {
     for (const st of [" ", "!", "-"]) {
       markTasks(repo, { "P0-01": "x", "P0-02": st, "P0-03": " " });
-      const v = await call("foundry_verify");
+      const v = await call("kukulu_verify");
       eq(v.ok, true, `from: P0-02 is inactive while the task is [${st}]`);
       eq(v.constraints.results[0].inactive, "until P0-02", "...and the result says why");
     }
     for (const st of ["~", "x"]) {
       markTasks(repo, { "P0-01": "x", "P0-02": st, "P0-03": " " });
-      const v = await call("foundry_verify");
+      const v = await call("kukulu_verify");
       eq(v.ok, false, `from: P0-02 is active while the task is [${st}]`);
       eq(v.constraints.results[0].hits.length, 1, "...and reports the hit");
     }
     markTasks(repo, { "P0-01": "x", "P0-02": "!", "P0-03": "x" });
-    eq((await call("foundry_verify")).ok, false, "from is active once no task is open");
+    eq((await call("kukulu_verify")).ok, false, "from is active once no task is open");
   });
 }
 
@@ -233,7 +233,7 @@ for (const [bad, re, label] of [
   // an inactive rule still self-tests
   const repo = constraintRepo([{ ...RULE, from: "P0-02", shouldMatch: ["nothing here"] }]);
   await withServer(repo, async ({ call }) => {
-    const v = await call("foundry_verify");
+    const v = await call("kukulu_verify");
     eq(v.ok, false, "an inactive rule with a broken fixture fails");
     like(v.constraints.results[0].fixture, /shouldMatch/, "...with the fixture set");
   });
@@ -247,7 +247,7 @@ for (const [config, re, label] of [
 ]) {
   const repo = plannedRepo({ config });
   await withServer(repo, async ({ call }) => {
-    isError(await call("foundry_verify"), re, `refuses ${label}`);
+    isError(await call("kukulu_verify"), re, `refuses ${label}`);
   });
 }
 

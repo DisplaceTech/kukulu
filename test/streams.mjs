@@ -26,7 +26,7 @@ const WAVE_PLAN = [
 
 const wavesOf = async (repo, config) => {
   let waves;
-  await withServer(repo, async ({ call }) => { waves = (await call("foundry_status")).waves; });
+  await withServer(repo, async ({ call }) => { waves = (await call("kukulu_status")).waves; });
   return waves;
 };
 
@@ -150,7 +150,7 @@ for (const [da, db] of [["src/lib/", "src/lib/x.txt"], ["src/lib/x.txt", "src/li
   const repo = plannedRepo({ tasks });
   like(readFile(repo, "docs/PROGRESS.md"), /- \[ \] P0-01 Task P0-01 \{stream: only\}\n/, "PROGRESS.md carries the tag");
   await withServer(repo, async ({ call }) => {
-    const t = await call("foundry_task_next");
+    const t = await call("kukulu_task_next");
     eq(t.id, "P0-01", "the tagged task is picked");
     like(readFile(repo, "docs/PROGRESS.md"), /- \[~\] P0-01 Task P0-01 \{stream: only\}\n/, "marking it in progress keeps the tag, once, and the title clean");
     like(readFile(repo, "docs/PROGRESS.md"), /- \[ \] P0-02 Task P0-02 \{stream: only\}\n/, "an untouched tagged line is unchanged");
@@ -162,7 +162,7 @@ for (const [da, db] of [["src/lib/", "src/lib/x.txt"], ["src/lib/x.txt", "src/li
   const repo = plannedRepo({ tasks: [T("P0-01", ["a"], { stream: "only" }), T("P0-02", ["b"], { stream: "only" })] });
   fs.writeFileSync(path.join(repo, "docs/PROGRESS.md"), readFile(repo, "docs/PROGRESS.md").replace("{stream: only}", "{stream:only}"));
   await withServer(repo, async ({ call }) => {
-    await call("foundry_task_next");
+    await call("kukulu_task_next");
     like(readFile(repo, "docs/PROGRESS.md"), /- \[~\] P0-01 Task P0-01 \{stream:only\}\n/, "the tag is preserved byte for byte, not normalised");
   });
 }
@@ -176,11 +176,11 @@ for (const [bad, re, label] of [
   [{ setup: [{ cmd: "x", exclusive: "yes" }] }, /parallel\.setup\[0\]\.exclusive must be a boolean/, "a non-boolean exclusive"],
 ]) {
   await withServer(plannedRepo({ config: { parallel: bad } }), async ({ call }) => {
-    isError(await call("foundry_status"), re, `${label} refuses`);
+    isError(await call("kukulu_status"), re, `${label} refuses`);
   });
 }
 await withServer(plannedRepo({ config: { verify: [{ cmd: "true", exclusive: "yes" }] } }), async ({ call }) => {
-  isError(await call("foundry_status"), /verify\[0\]\.exclusive must be a boolean/, "exclusive on a verify command must be a boolean");
+  isError(await call("kukulu_status"), /verify\[0\]\.exclusive must be a boolean/, "exclusive on a verify command must be a boolean");
 });
 
 
@@ -200,7 +200,7 @@ const stateOf = (repo) => JSON.parse(readFile(repo, ".foundry/state.json"));
 {
   const repo = waveRepo();
   await withServer(repo, async ({ call }) => {
-    const r = await call("foundry_run_start", { stream: "api" });
+    const r = await call("kukulu_run_start", { stream: "api" });
     eq(r.stream, "api", "run_start echoes the stream");
     eq(r.wave, 1, "...and the wave");
     ok(path.isAbsolute(r.cwd), "it returns an absolute worktree path");
@@ -212,7 +212,7 @@ const stateOf = (repo) => JSON.parse(readFile(repo, ".foundry/state.json"));
     like(readFile(repo, ".gitignore"), /^\.foundry\/worktrees\/$/m, "the run's .gitignore gains the worktrees line");
     eq(git(repo, ["status", "--porcelain", "--untracked-files=all"]).split("\n").filter((l) => l.includes("worktrees")).length, 0, "the worktree does not show up as untracked in the main checkout");
 
-    const again = await call("foundry_run_start", { stream: "api" });
+    const again = await call("kukulu_run_start", { stream: "api" });
     eq(again.cwd, r.cwd, "run_start is idempotent: same cwd");
     eq(again.created, false, "...and nothing is created twice");
     eq(again.alreadyStarted, true, "...on top of an already-started run");
@@ -223,41 +223,41 @@ const stateOf = (repo) => JSON.parse(readFile(repo, ".foundry/state.json"));
 {
   const repo = waveRepo();
   await withServer(repo, async ({ call }) => {
-    isError(await call("foundry_run_start", { stream: "nope" }), /stream 'nope' is not available in the current wave \(wave 1\); legal streams: api, ui/, "an unknown stream lists the legal ones");
-    isError(await call("foundry_run_start", { stream: "Bad Name" }), /must be a lowercase slug/, "a malformed stream name is refused");
-    isError(await call("foundry_task_next", { stream: "nope" }), /legal streams: api, ui/, "task_next refuses an unknown stream too");
+    isError(await call("kukulu_run_start", { stream: "nope" }), /stream 'nope' is not available in the current wave \(wave 1\); legal streams: api, ui/, "an unknown stream lists the legal ones");
+    isError(await call("kukulu_run_start", { stream: "Bad Name" }), /must be a lowercase slug/, "a malformed stream name is refused");
+    isError(await call("kukulu_task_next", { stream: "nope" }), /legal streams: api, ui/, "task_next refuses an unknown stream too");
   });
   const plain = plannedRepo({ tasks: [T("P0-01", ["a"]), T("P0-02", ["b"])] });
   await withServer(plain, async ({ call }) => {
-    isError(await call("foundry_run_start", { stream: "api" }), /no parallel streams; omit the stream argument/, "a stream argument on a plan without streams is refused");
+    isError(await call("kukulu_run_start", { stream: "api" }), /no parallel streams; omit the stream argument/, "a stream argument on a plan without streams is refused");
   });
   // The wave is not current while a serial task before it is still open.
   const early = plannedRepo({ tasks: WAVE_PLAN });
   await withServer(early, async ({ call }) => {
-    isError(await call("foundry_run_start", { stream: "api" }), /no parallel wave is current/, "a wave behind an open serial task is not current");
+    isError(await call("kukulu_run_start", { stream: "api" }), /no parallel wave is current/, "a wave behind an open serial task is not current");
   });
 }
 
 {
   const repo = waveRepo();
   await withServer(repo, async ({ call }) => {
-    const a = await call("foundry_run_start", { stream: "api" });
-    const b = await call("foundry_run_start", { stream: "ui" });
-    const ta = await call("foundry_task_next", { stream: "api" });
+    const a = await call("kukulu_run_start", { stream: "api" });
+    const b = await call("kukulu_run_start", { stream: "ui" });
+    const ta = await call("kukulu_task_next", { stream: "api" });
     eq(ta.id, "P1-01", "task_next({stream: api}) returns api's first task");
     eq(ta.stream, "api", "...echoing the stream");
-    const tb = await call("foundry_task_next", { stream: "ui" });
+    const tb = await call("kukulu_task_next", { stream: "ui" });
     eq(tb.id, "P1-03", "task_next({stream: ui}) returns ui's first task, never an api one");
     like(progressOf(repo), /- \[~\] P1-01 Task P1-01 \{stream: api\}\n/, "both are in progress at once, tags intact");
     like(progressOf(repo), /- \[~\] P1-03 Task P1-03 \{stream: ui\}\n/, "...in one PROGRESS.md");
 
     // A serial call may not reach into a parallel wave.
-    isError(await call("foundry_task_next"), /belongs to parallel wave 1 \(streams: api, ui\).*foundry_next/, "a stream-less task_next refuses while the wave runs parallel");
+    isError(await call("kukulu_task_next"), /belongs to parallel wave 1 \(streams: api, ui\).*kukulu_next/, "a stream-less task_next refuses while the wave runs parallel");
 
     // Commit in the worktree, then task_done from the stream.
     commitTask(a.cwd, "P1-01", "Task P1-01", { "src/api/a.txt": "a\n" });
     const buildBranch = git(repo, ["rev-parse", "--abbrev-ref", "HEAD"]);
-    const d = await call("foundry_task_done", { stream: "api", id: "P1-01", log: "did a" });
+    const d = await call("kukulu_task_done", { stream: "api", id: "P1-01", log: "did a" });
     eq(d.stream, "api", "task_done echoes the stream");
     like(progressOf(repo), /- \[x\] P1-01 Task P1-01 \{stream: api\}\n/, "the task is done in the main checkout's PROGRESS.md, tag intact");
     like(progressOf(repo), /### P1-01 — [0-9a-f]+\ndid a/, "its log entry carries the worktree commit's sha");
@@ -267,27 +267,27 @@ const stateOf = (repo) => JSON.parse(readFile(repo, ".foundry/state.json"));
     ok(!hasFile(repo, "src/api/a.txt"), "the task's file is in the worktree, not the main checkout");
 
     // task_done refuses another stream's task, and a stream without a matching HEAD commit.
-    isError(await call("foundry_task_done", { stream: "api", id: "P1-03", log: "x" }), /task P1-03 belongs to stream 'ui', not 'api'/, "task_done refuses another stream's task");
-    isError(await call("foundry_task_done", { stream: "ui", id: "P1-03", log: "x" }), /HEAD commit .* is not this task's commit/, "the HEAD check runs in the stream's worktree");
+    isError(await call("kukulu_task_done", { stream: "api", id: "P1-03", log: "x" }), /task P1-03 belongs to stream 'ui', not 'api'/, "task_done refuses another stream's task");
+    isError(await call("kukulu_task_done", { stream: "ui", id: "P1-03", log: "x" }), /HEAD commit .* is not this task's commit/, "the HEAD check runs in the stream's worktree");
 
     // Interleave: b commits and finishes while a moves on.
     commitTask(b.cwd, "P1-03", "Task P1-03", { "src/ui/a.txt": "u\n" });
-    await call("foundry_task_done", { stream: "ui", id: "P1-03", log: "did u" });
-    const ta2 = await call("foundry_task_next", { stream: "api" });
+    await call("kukulu_task_done", { stream: "ui", id: "P1-03", log: "did u" });
+    const ta2 = await call("kukulu_task_next", { stream: "api" });
     eq(ta2.id, "P1-02", "a's next task follows a's own order");
-    const tb2 = await call("foundry_task_next", { stream: "ui" });
+    const tb2 = await call("kukulu_task_next", { stream: "ui" });
     eq(tb2.id, "P1-04", "and b's follows b's");
     commitTask(b.cwd, "P1-04", "Task P1-04", { "src/ui/b.txt": "u2\n" });
     commitTask(a.cwd, "P1-02", "Task P1-02", { "src/api/b.txt": "a2\n" });
-    await call("foundry_task_done", { stream: "api", id: "P1-02", log: "did a2" });
-    await call("foundry_task_done", { stream: "ui", id: "P1-04", log: "did u2" });
+    await call("kukulu_task_done", { stream: "api", id: "P1-02", log: "did a2" });
+    await call("kukulu_task_done", { stream: "ui", id: "P1-04", log: "did u2" });
     const prog = progressOf(repo);
     for (const id of ["P1-01", "P1-02", "P1-03", "P1-04"]) {
       eq((prog.match(new RegExp(`^- \\[x\\] ${id} `, "m")) || []).length, 1, `${id} is done exactly once after interleaved calls`);
       eq((prog.match(new RegExp(`^### ${id} — `, "gm")) || []).length, 1, `${id} has exactly one log entry`);
     }
-    eq((await call("foundry_task_next", { stream: "api" })).done, true, "a stream with nothing left reports done, even though its wave is over and the next open task is serial");
-    isError(await call("foundry_task_next"), /stream worktree\(s\) still exist \(api, ui\); merge each back with foundry_stream_finish/, "serial work is refused while finished streams are still unmerged");
+    eq((await call("kukulu_task_next", { stream: "api" })).done, true, "a stream with nothing left reports done, even though its wave is over and the next open task is serial");
+    isError(await call("kukulu_task_next"), /stream worktree\(s\) still exist \(api, ui\); merge each back with kukulu_stream_finish/, "serial work is refused while finished streams are still unmerged");
     eq(git(repo, ["status", "--porcelain", "--untracked-files=no"]), "", "the main checkout ends with a clean tracked tree");
   });
 }
@@ -296,21 +296,21 @@ const stateOf = (repo) => JSON.parse(readFile(repo, ".foundry/state.json"));
 {
   const repo = waveRepo();
   await withServer(repo, async ({ call }) => {
-    const a = await call("foundry_run_start", { stream: "api" });
-    await call("foundry_run_start", { stream: "ui" });
-    await call("foundry_task_next", { stream: "api" });
-    const tb = await call("foundry_task_next", { stream: "ui" });
+    const a = await call("kukulu_run_start", { stream: "api" });
+    await call("kukulu_run_start", { stream: "ui" });
+    await call("kukulu_task_next", { stream: "api" });
+    const tb = await call("kukulu_task_next", { stream: "ui" });
     writeFile(a.cwd, "src/api/half.txt", "half-done\n");
     fs.writeFileSync(path.join(a.cwd, "package.json.bak"), "x");
     writeFile(repo, "precious.txt", "keep me\n"); // untracked in the main checkout
-    const b = await call("foundry_task_block", { stream: "api", id: "P1-01", reason: "cannot" });
+    const b = await call("kukulu_task_block", { stream: "api", id: "P1-01", reason: "cannot" });
     eq(b.stream, "api", "task_block echoes the stream");
     ok(!hasFile(a.cwd, "src/api/half.txt"), "the worktree's uncommitted files are discarded");
     ok(hasFile(repo, "precious.txt"), "an untracked file in the main checkout is untouched");
     like(progressOf(repo), /- \[!\] P1-01 Task P1-01 \{stream: api\}\n/, "the task is blocked, tag intact");
     like(progressOf(repo), new RegExp(`- \\[~\\] ${tb.id} `), "another stream's in-progress mark survives the block");
     like(progressOf(repo), /### P1-01 — blocked\nBLOCKED: cannot/, "the block is logged");
-    const next = await call("foundry_task_next", { stream: "api" });
+    const next = await call("kukulu_task_next", { stream: "api" });
     eq(next.skipped.map((x) => x.id).join(","), "P1-02", "a blocked task's dependent in the same stream is skipped");
   });
 }
@@ -319,13 +319,13 @@ const stateOf = (repo) => JSON.parse(readFile(repo, ".foundry/state.json"));
 {
   const repo = waveRepo({ config: { verify: ["pwd > .cwd-proof"], extraVerify: { "tests/integration/": [{ cmd: "true", exclusive: true }] } } });
   await withServer(repo, async ({ call }) => {
-    const a = await call("foundry_run_start", { stream: "api" });
-    const v = await call("foundry_verify", { stream: "api" });
+    const a = await call("kukulu_run_start", { stream: "api" });
+    const v = await call("kukulu_verify", { stream: "api" });
     eq(v.ok, true, "verify runs in the stream");
     eq(readFile(a.cwd, ".cwd-proof").trim(), fs.realpathSync(a.cwd), "...from the worktree, not the main checkout");
     ok(!hasFile(repo, ".cwd-proof"), "nothing ran in the main checkout");
-    isError(await call("foundry_verify", { stream: "api", files: ["tests/integration/t.php"] }), /"true" is exclusive: it only runs from the main checkout/, "a selection that includes an exclusive command refuses");
-    const main = await call("foundry_verify", { files: ["tests/integration/t.php"] });
+    isError(await call("kukulu_verify", { stream: "api", files: ["tests/integration/t.php"] }), /"true" is exclusive: it only runs from the main checkout/, "a selection that includes an exclusive command refuses");
+    const main = await call("kukulu_verify", { files: ["tests/integration/t.php"] });
     eq(main.ok, true, "...while the same call without stream runs it from the main checkout");
     eq(readFile(repo, ".cwd-proof").trim(), fs.realpathSync(repo), "which is where it ran");
   });
@@ -335,15 +335,15 @@ const stateOf = (repo) => JSON.parse(readFile(repo, ".foundry/state.json"));
 {
   const repo = waveRepo();
   await withServer(repo, async ({ call }) => {
-    await call("foundry_run_start"); // the ordinary start, on the build branch
+    await call("kukulu_run_start"); // the ordinary start, on the build branch
     setState(repo, { serialWaves: [{ wave: 1, category: "stream-partition", reason: "test" }] });
-    isError(await call("foundry_run_start", { stream: "api" }), /legal streams: none/, "a degraded wave no longer hands out streams");
-    const t = await call("foundry_task_next");
+    isError(await call("kukulu_run_start", { stream: "api" }), /legal streams: none/, "a degraded wave no longer hands out streams");
+    const t = await call("kukulu_task_next");
     eq(t.id, "P1-01", "...and is served serially by a stream-less task_next");
   });
   const one = waveRepo({ config: { parallel: { maxStreams: 1 } } });
   await withServer(one, async ({ call }) => {
-    eq((await call("foundry_task_next")).id, "P1-01", "maxStreams 1 serves every wave serially");
+    eq((await call("kukulu_task_next")).id, "P1-01", "maxStreams 1 serves every wave serially");
   });
 }
 
@@ -351,22 +351,22 @@ const stateOf = (repo) => JSON.parse(readFile(repo, ".foundry/state.json"));
 {
   const repo = waveRepo({ config: { parallel: { setup: ["echo x >> .setup-ran"] } } });
   await withServer(repo, async ({ call }) => {
-    const a = await call("foundry_run_start", { stream: "api" });
+    const a = await call("kukulu_run_start", { stream: "api" });
     eq(a.setup.length, 1, "run_start reports the setup results");
     eq(readFile(a.cwd, ".setup-ran"), "x\n", "setup ran in the new worktree");
-    await call("foundry_run_start", { stream: "api" });
+    await call("kukulu_run_start", { stream: "api" });
     eq(readFile(a.cwd, ".setup-ran"), "x\n", "and does not run again on resume");
     like(JSON.stringify(stateOf(repo).streams.api.preexistingUntracked), /\.setup-ran/, "what setup left untracked is recorded, so it is not mistaken for the task's changes");
     commitTask(a.cwd, "P1-01", "Task P1-01", { "src/api/a.txt": "a\n" });
-    await call("foundry_task_next", { stream: "api" });
-    const d = await call("foundry_task_done", { stream: "api", id: "P1-01", log: "ok" });
+    await call("kukulu_task_next", { stream: "api" });
+    const d = await call("kukulu_task_done", { stream: "api", id: "P1-01", log: "ok" });
     ok(d.taskCommit, "task_done ignores the untracked files setup left behind");
   });
 }
 {
   const repo = waveRepo({ config: { parallel: { setup: ["echo boom >&2; exit 3"] } } });
   await withServer(repo, async ({ call }) => {
-    isError(await call("foundry_run_start", { stream: "api" }), /setup command "echo boom >&2; exit 3" failed for stream api: boom\. Wave 1 now runs serially/, "a failing setup command refuses, saying the wave now runs serially");
+    isError(await call("kukulu_run_start", { stream: "api" }), /setup command "echo boom >&2; exit 3" failed for stream api: boom\. Wave 1 now runs serially/, "a failing setup command refuses, saying the wave now runs serially");
     ok(!hasFile(repo, ".foundry/worktrees/api"), "the worktree is removed");
     eq(git(repo, ["branch", "--list", "*--api"]), "", "...and so is the stream branch");
     eq(stateOf(repo).serialWaves.map((w) => `${w.wave}:${w.category}`).join(","), "1:stream-setup", "the wave is recorded in serialWaves");
@@ -375,8 +375,8 @@ const stateOf = (repo) => JSON.parse(readFile(repo, ".foundry/state.json"));
     eq(fb[0].category, "stream-setup", "...of category stream-setup");
     eq(fb[0].source, "auto", "...written by the MCP itself");
     eq(subject(repo), "chore: wave 1 runs serially", "committed together with the state change");
-    isError(await call("foundry_run_start", { stream: "ui" }), /legal streams: none/, "no other stream of that wave is handed out afterwards");
-    eq((await call("foundry_task_next")).id, "P1-01", "and the wave is now served serially");
+    isError(await call("kukulu_run_start", { stream: "ui" }), /legal streams: none/, "no other stream of that wave is handed out afterwards");
+    eq((await call("kukulu_task_next")).id, "P1-01", "and the wave is now served serially");
   });
 }
 
@@ -385,12 +385,12 @@ const stateOf = (repo) => JSON.parse(readFile(repo, ".foundry/state.json"));
 
 /** Work one stream's tasks start to finish: run_start, then task_next / commit / task_done per task. */
 async function workStream(call, stream, work) {
-  const started = await call("foundry_run_start", { stream });
+  const started = await call("kukulu_run_start", { stream });
   for (const [id, file, body] of work) {
-    const t = await call("foundry_task_next", { stream });
+    const t = await call("kukulu_task_next", { stream });
     eq(t.id, id, `${stream}: task_next hands out ${id}`);
     commitTask(started.cwd, id, `Task ${id}`, { [file]: body });
-    await call("foundry_task_done", { stream, id, log: `did ${id}` });
+    await call("kukulu_task_done", { stream, id, log: `did ${id}` });
   }
   return started;
 }
@@ -404,7 +404,7 @@ const UI = [["P1-03", "src/ui/a.txt", "u\n"], ["P1-04", "src/ui/b.txt", "v\n"]];
     const u = await workStream(call, "ui", UI);
     const build = git(repo, ["rev-parse", "--abbrev-ref", "HEAD"]);
 
-    const f1 = await call("foundry_stream_finish", { stream: "api" });
+    const f1 = await call("kukulu_stream_finish", { stream: "api" });
     eq(f1.merged, true, "the first stream merges");
     ok(f1.mergeCommit, "and reports its merge commit");
     eq(f1.remainingStreams.join(","), "ui", "remainingStreams names the other stream");
@@ -414,7 +414,7 @@ const UI = [["P1-03", "src/ui/a.txt", "u\n"], ["P1-04", "src/ui/b.txt", "v\n"]];
     eq(readFile(repo, "src/api/a.txt"), "a\n", "the stream's files are in the main checkout");
     ok(!hasFile(repo, "src/ui/a.txt"), "the other stream's are not, yet");
 
-    const f2 = await call("foundry_stream_finish", { stream: "ui" });
+    const f2 = await call("kukulu_stream_finish", { stream: "ui" });
     eq(f2.merged, true, "the second stream merges");
     eq(f2.remainingStreams.length, 0, "nothing remains");
     eq(git(repo, ["log", "--merges", "--format=%s", `${git(repo, ["merge-base", "main", "HEAD"])}..HEAD`]).split("\n").filter((l) => l.startsWith("merge stream")).length, 2, "two merge commits, one per stream");
@@ -423,7 +423,7 @@ const UI = [["P1-03", "src/ui/a.txt", "u\n"], ["P1-04", "src/ui/b.txt", "v\n"]];
     eq(git(repo, ["worktree", "list"]).split("\n").length, 1, "no worktrees remain");
     eq(git(repo, ["status", "--porcelain", "--untracked-files=no"]), "", "the main checkout is clean");
     eq(git(repo, ["rev-parse", "--abbrev-ref", "HEAD"]), build, "still on the build branch");
-    const t = await call("foundry_task_next");
+    const t = await call("kukulu_task_next");
     eq(t.id, "P2-01", "serial work resumes once every stream is merged");
     void u;
   });
@@ -433,11 +433,11 @@ const UI = [["P1-03", "src/ui/a.txt", "u\n"], ["P1-04", "src/ui/b.txt", "v\n"]];
 {
   const repo = waveRepo();
   await withServer(repo, async ({ call }) => {
-    await call("foundry_run_start", { stream: "api" });
-    await call("foundry_task_next", { stream: "api" });
-    await call("foundry_task_block", { stream: "api", id: "P1-01", reason: "cannot" });
-    await call("foundry_task_next", { stream: "api" }); // skips P1-02, which depends on the blocked task
-    const f = await call("foundry_stream_finish", { stream: "api" });
+    await call("kukulu_run_start", { stream: "api" });
+    await call("kukulu_task_next", { stream: "api" });
+    await call("kukulu_task_block", { stream: "api", id: "P1-01", reason: "cannot" });
+    await call("kukulu_task_next", { stream: "api" }); // skips P1-02, which depends on the blocked task
+    const f = await call("kukulu_stream_finish", { stream: "api" });
     eq(f.merged, true, "a wholly blocked stream still finishes");
     eq(f.mergeCommit, null, "with no merge commit, since it had nothing to merge");
     ok(!hasFile(repo, ".foundry/worktrees/api"), "and its worktree is cleaned up");
@@ -448,20 +448,20 @@ const UI = [["P1-03", "src/ui/a.txt", "u\n"], ["P1-04", "src/ui/b.txt", "v\n"]];
 {
   const repo = waveRepo();
   await withServer(repo, async ({ call }) => {
-    isError(await call("foundry_stream_finish", { stream: "api" }), /legal streams: api, ui|has no worktree/, "a stream that was never started cannot be finished");
-    const a = await call("foundry_run_start", { stream: "api" });
-    await call("foundry_task_next", { stream: "api" });
-    isError(await call("foundry_stream_finish", { stream: "api" }), /stream 'api' still has open tasks: P1-01, P1-02/, "open tasks refuse, naming them");
+    isError(await call("kukulu_stream_finish", { stream: "api" }), /legal streams: api, ui|has no worktree/, "a stream that was never started cannot be finished");
+    const a = await call("kukulu_run_start", { stream: "api" });
+    await call("kukulu_task_next", { stream: "api" });
+    isError(await call("kukulu_stream_finish", { stream: "api" }), /stream 'api' still has open tasks: P1-01, P1-02/, "open tasks refuse, naming them");
     commitTask(a.cwd, "P1-01", "Task P1-01", { "src/api/a.txt": "a\n" });
-    await call("foundry_task_done", { stream: "api", id: "P1-01", log: "ok" });
-    await call("foundry_task_next", { stream: "api" });
+    await call("kukulu_task_done", { stream: "api", id: "P1-01", log: "ok" });
+    await call("kukulu_task_next", { stream: "api" });
     commitTask(a.cwd, "P1-02", "Task P1-02", { "src/api/b.txt": "b\n" });
-    await call("foundry_task_done", { stream: "api", id: "P1-02", log: "ok" });
+    await call("kukulu_task_done", { stream: "api", id: "P1-02", log: "ok" });
     writeFile(a.cwd, "src/api/stray.txt", "left over\n");
-    isError(await call("foundry_stream_finish", { stream: "api" }), /uncommitted changes in its worktree:\n\?\? src\/api\/stray\.txt/, "a dirty worktree refuses, listing the files");
+    isError(await call("kukulu_stream_finish", { stream: "api" }), /uncommitted changes in its worktree:\n\?\? src\/api\/stray\.txt/, "a dirty worktree refuses, listing the files");
     ok(hasFile(a.cwd, "src/api/stray.txt"), "...and leaves it alone");
     fs.rmSync(path.join(a.cwd, "src/api/stray.txt"));
-    eq((await call("foundry_stream_finish", { stream: "api" })).merged, true, "once clean it merges");
+    eq((await call("kukulu_stream_finish", { stream: "api" })).merged, true, "once clean it merges");
   });
 }
 
@@ -472,10 +472,10 @@ const UI = [["P1-03", "src/ui/a.txt", "u\n"], ["P1-04", "src/ui/b.txt", "v\n"]];
     await workStream(call, "api", API);
     await workStream(call, "ui", UI);
     writeFile(repo, "docs/HANDOFF.md", "# handoff\n");
-    isError(await call("foundry_run_finish"), /stream worktree\(s\) still exist \(api, ui\); merge each back with foundry_stream_finish/, "run_finish refuses with unmerged worktrees, naming them");
-    await call("foundry_stream_finish", { stream: "api" });
-    await call("foundry_stream_finish", { stream: "ui" });
-    const r = await call("foundry_run_finish");
+    isError(await call("kukulu_run_finish"), /stream worktree\(s\) still exist \(api, ui\); merge each back with kukulu_stream_finish/, "run_finish refuses with unmerged worktrees, naming them");
+    await call("kukulu_stream_finish", { stream: "api" });
+    await call("kukulu_stream_finish", { stream: "ui" });
+    const r = await call("kukulu_run_finish");
     ok(r.commit || r.branch, "run_finish succeeds once every stream is merged");
   });
 }
@@ -484,19 +484,19 @@ const UI = [["P1-03", "src/ui/a.txt", "u\n"], ["P1-04", "src/ui/b.txt", "v\n"]];
 {
   const repo = waveRepo();
   await withServer(repo, async ({ call }) => {
-    const a = await call("foundry_run_start", { stream: "api" });
-    const u = await call("foundry_run_start", { stream: "ui" });
+    const a = await call("kukulu_run_start", { stream: "api" });
+    const u = await call("kukulu_run_start", { stream: "ui" });
     for (const [stream, cwd, first, second, marker] of [["api", a.cwd, "P1-01", "P1-02", "from api"], ["ui", u.cwd, "P1-03", "P1-04", "from ui"]]) {
-      await call("foundry_task_next", { stream });
+      await call("kukulu_task_next", { stream });
       commitTask(cwd, first, `Task ${first}`, { "shared.txt": `${marker}\n` });
-      await call("foundry_task_done", { stream, id: first, log: "ok" });
-      await call("foundry_task_next", { stream });
+      await call("kukulu_task_done", { stream, id: first, log: "ok" });
+      await call("kukulu_task_next", { stream });
       commitTask(cwd, second, `Task ${second}`, { [`${stream}-only.txt`]: "x\n" });
-      await call("foundry_task_done", { stream, id: second, log: "ok" });
+      await call("kukulu_task_done", { stream, id: second, log: "ok" });
     }
-    const first = await call("foundry_stream_finish", { stream: "api" });
+    const first = await call("kukulu_stream_finish", { stream: "api" });
     eq(first.merged, true, "the first stream merges cleanly");
-    const second = await call("foundry_stream_finish", { stream: "ui" });
+    const second = await call("kukulu_stream_finish", { stream: "ui" });
     eq(second.merged, false, "the second conflicts");
     like(second.halted, /merging stream 'ui' .* conflicted in shared\.txt/, "the halt reason names the stream and the conflicting path");
     like(second.halted, /git merge --no-ff .*--ui.*git worktree remove --force \.foundry\/worktrees\/ui.*clear 'halted'/, "and the manual steps");
@@ -506,8 +506,8 @@ const UI = [["P1-03", "src/ui/a.txt", "u\n"], ["P1-04", "src/ui/b.txt", "v\n"]];
     ok(hasFile(u.cwd, "shared.txt"), "the stream's worktree is kept");
     like(git(repo, ["branch", "--list", u.streamBranch]), /--ui/, "and so is its branch");
     eq(readFile(repo, "shared.txt"), "from api\n", "the build branch still holds the first stream's version");
-    const n = await call("foundry_next");
-    eq(n.stage, "halt", "foundry_next now says halt");
+    const n = await call("kukulu_next");
+    eq(n.stage, "halt", "kukulu_next now says halt");
     like(n.reason, /conflicted/, "with the reason");
     const fb = readFile(repo, ".foundry/feedback.jsonl").trim().split("\n").map((l) => JSON.parse(l));
     eq(fb.filter((e) => e.category === "stream-merge").length, 1, "exactly one stream-merge feedback entry");
@@ -525,28 +525,28 @@ const UI = [["P1-03", "src/ui/a.txt", "u\n"], ["P1-04", "src/ui/b.txt", "v\n"]];
   await withServer(repo, async ({ call }) => {
     await workStream(call, "api", API);
     writeFile(repo, "src/api/a.txt", "an operator's untracked file\n");
-    const f = await call("foundry_stream_finish", { stream: "api" });
+    const f = await call("kukulu_stream_finish", { stream: "api" });
     eq(f.merged, false, "the merge does not happen");
     eq(f.conflicts.length, 0, "there are no conflict paths");
     like(f.halted, /failed: .*untracked working tree files would be overwritten by merge.*src\/api\/a\.txt/, "the halt reason carries git's message and the path");
     eq(readFile(repo, "src/api/a.txt"), "an operator's untracked file\n", "the operator's file is untouched");
-    eq((await call("foundry_next")).stage, "halt", "and the flight halts for a human");
+    eq((await call("kukulu_next")).stage, "halt", "and the flight halts for a human");
   });
 }
 
-// ---------------------------------------------------------------- V4-04: foundry_next hands out waves
+// ---------------------------------------------------------------- V4-04: kukulu_next hands out waves
 
 const feedbackOf = (repo) => (hasFile(repo, ".foundry/feedback.jsonl") ? readFile(repo, ".foundry/feedback.jsonl").trim().split("\n").map((l) => JSON.parse(l)) : []);
 
 {
   const repo = waveRepo();
   await withServer(repo, async ({ call }) => {
-    const n = await call("foundry_next");
+    const n = await call("kukulu_next");
     eq(n.stage, "implement", "a current wave is an implement stage");
     eq(n.streams.length, 2, "a valid two-stream wave returns both streams");
     eq(n.streams.map((x) => x.stream).join(","), "api,ui", "in plan order");
     ok(n.streams[0].prompt !== n.streams[1].prompt, "with distinct prompts");
-    like(n.streams[0].prompt, /stream `api` of wave 1.*foundry_run_start with stream: "api".*cwd.*foundry_stream_finish with stream: "api".*do not call foundry_run_finish/, "each prompt names its stream and the whole loop");
+    like(n.streams[0].prompt, /stream `api` of wave 1.*kukulu_run_start with stream: "api".*cwd.*kukulu_stream_finish with stream: "api".*do not call kukulu_run_finish/, "each prompt names its stream and the whole loop");
     like(n.streams[1].prompt, /stream `ui`/, "the second names its own");
     like(n.streams[0].prompt, /Run policies: signing=/, "and ends with the run policies");
     eq(n.streams[0].agent, n.agent, "each entry carries the stage's agent");
@@ -560,8 +560,8 @@ const feedbackOf = (repo) => (hasFile(repo, ".foundry/feedback.jsonl") ? readFil
 {
   const repo = waveRepo({ config: { parallel: { maxStreams: 1 } } });
   await withServer(repo, async ({ call }) => {
-    await call("foundry_run_start");
-    const n = await call("foundry_next");
+    await call("kukulu_run_start");
+    const n = await call("kukulu_next");
     eq(n.stage, "implement", "still an implement stage");
     ok(!("streams" in n), "maxStreams 1 returns no streams");
     eq(feedbackOf(repo).length, 0, "and logs nothing: it is the operator's choice");
@@ -579,21 +579,21 @@ const feedbackOf = (repo) => (hasFile(repo, ".foundry/feedback.jsonl") ? readFil
   git(repo, ["add", "-A"]);
   git(repo, ["commit", "-qm", "serial done"]);
   await withServer(repo, async ({ call }) => {
-    const n = await call("foundry_next");
+    const n = await call("kukulu_next");
     eq(n.streams.map((x) => x.stream).join(","), "a,b", "the first maxStreams streams go out");
     await workStream(call, "a", [["P1-01", "src/a.txt", "a\n"]]);
     await workStream(call, "b", [["P1-02", "src/b.txt", "b\n"]]);
-    const mid = await call("foundry_next");
+    const mid = await call("kukulu_next");
     eq(mid.streams.map((x) => x.stream).join(","), "a,b", "finished-but-unmerged streams are offered first, so they get merged");
-    await call("foundry_stream_finish", { stream: "a" });
-    await call("foundry_stream_finish", { stream: "b" });
-    const after = await call("foundry_next");
-    eq(after.streams.map((x) => x.stream).join(","), "c", "the third goes out on the next foundry_next");
+    await call("kukulu_stream_finish", { stream: "a" });
+    await call("kukulu_stream_finish", { stream: "b" });
+    const after = await call("kukulu_next");
+    eq(after.streams.map((x) => x.stream).join(","), "c", "the third goes out on the next kukulu_next");
     await workStream(call, "c", [["P1-03", "src/c.txt", "c\n"]]);
-    const last = await call("foundry_next");
+    const last = await call("kukulu_next");
     eq(last.streams.map((x) => x.stream).join(","), "c", "and is offered until it is merged, though the plan has no open tasks left");
-    await call("foundry_stream_finish", { stream: "c" });
-    const done = await call("foundry_next");
+    await call("kukulu_stream_finish", { stream: "c" });
+    const done = await call("kukulu_next");
     ok(!("streams" in done), "once every stream is merged, no streams are offered");
     like(done.reason, /lock present but no open tasks|no handoff/, "the flight falls through to the ordinary handoff");
   });
@@ -603,13 +603,13 @@ const feedbackOf = (repo) => (hasFile(repo, ".foundry/feedback.jsonl") ? readFil
 {
   const repo = waveRepo();
   await withServer(repo, async ({ call }) => {
-    await call("foundry_run_start", { stream: "api" });
-    await call("foundry_task_next", { stream: "api" });
-    const n = await call("foundry_next");
+    await call("kukulu_run_start", { stream: "api" });
+    await call("kukulu_task_next", { stream: "api" });
+    const n = await call("kukulu_next");
     eq(n.streams.map((x) => x.stream).join(","), "api,ui", "an in-flight stream comes first and is re-handed out");
-    const again = await call("foundry_run_start", { stream: "api" });
+    const again = await call("kukulu_run_start", { stream: "api" });
     eq(again.created, false, "run_start resumes its worktree");
-    const t = await call("foundry_task_next", { stream: "api" });
+    const t = await call("kukulu_task_next", { stream: "api" });
     eq(t.resumed, true, "and task_next resumes the in-progress task");
   });
 }
@@ -619,25 +619,25 @@ const feedbackOf = (repo) => (hasFile(repo, ".foundry/feedback.jsonl") ? readFil
   const tasks = [T("P0-01", ["shared.txt"], { stream: "a" }), T("P0-02", ["shared.txt"], { stream: "b" })];
   const repo = plannedRepo({ tasks });
   await withServer(repo, async ({ call }) => {
-    const before = await call("foundry_next");
+    const before = await call("kukulu_next");
     ok(!("streams" in before), "an invalid wave offers no streams");
     eq(feedbackOf(repo).length, 0, "before a run starts on a build branch, nothing is recorded on the base branch");
     eq(git(repo, ["log", "--format=%s", "-1"]), "plan: derive build plan from SPEC", "no commit landed on the base branch");
 
-    await call("foundry_run_start");
+    await call("kukulu_run_start");
     for (let i = 0; i < 3; i++) {
-      const n = await call("foundry_next");
+      const n = await call("kukulu_next");
       eq(n.stage, "implement", `call ${i + 1}: the flight is not halted`);
       ok(!("streams" in n), `call ${i + 1}: still serial`);
     }
     const fb = feedbackOf(repo);
-    eq(fb.length, 1, "exactly one feedback entry across three foundry_next calls");
+    eq(fb.length, 1, "exactly one feedback entry across three kukulu_next calls");
     eq(fb[0].category, "stream-partition", "of category stream-partition");
     eq(fb[0].stage, "plan", "against the plan stage, since a bad partition is a planning defect");
     like(fb[0].message, /Wave 1 runs serially: .*both touch `shared\.txt`/, "naming the conflict");
     eq(git(repo, ["log", "--format=%s"]).split("\n").filter((l) => l === "chore: wave 1 runs serially").length, 1, "and exactly one 'wave 1 runs serially' commit");
     eq(stateOf(repo).serialWaves.length, 1, "state records the wave once");
-    const t = await call("foundry_task_next");
+    const t = await call("kukulu_task_next");
     eq(t.id, "P0-01", "the wave's tasks are served serially");
   });
 }
@@ -651,12 +651,12 @@ const feedbackOf = (repo) => (hasFile(repo, ".foundry/feedback.jsonl") ? readFil
   ];
   const repo = plannedRepo({ tasks, config: { verify: [{ cmd: "true", exclusive: true }] } });
   await withServer(repo, async ({ call }) => {
-    await call("foundry_run_start");
-    await call("foundry_next");
+    await call("kukulu_run_start");
+    await call("kukulu_next");
     eq(feedbackOf(repo).length, 1, "one stream-exclusive entry for the first wave");
     eq(feedbackOf(repo)[0].category, "stream-exclusive", "of category stream-exclusive");
     markTasks(repo, { "P0-01": "x", "P0-02": "x", "P0-03": "x" });
-    await call("foundry_next");
+    await call("kukulu_next");
     eq(stateOf(repo).serialWaves.map((w) => w.wave).join(","), "1,2", "the second wave is recorded serial too");
     eq(feedbackOf(repo).length, 1, "but the flight-wide cause is logged only once");
   });
@@ -670,31 +670,31 @@ const feedbackOf = (repo) => (hasFile(repo, ".foundry/feedback.jsonl") ? readFil
 {
   const repo = plannedRepo({ tasks: WAVE_PLAN });
   await withServer(repo, async ({ call }) => {
-    await call("foundry_run_start");
+    await call("kukulu_run_start");
     const stopInput = { hook_event_name: "SubagentStop", agent_type: "foundry-implementer", cwd: repo };
     for (const [id, file] of [["P0-01", "package.json"], ["P0-02", "docs/notes.md"]]) {
-      const t = await call("foundry_task_next");
+      const t = await call("kukulu_task_next");
       eq(t.id, id, `the serial implementer gets ${id}`);
       commitTask(repo, id, `Task ${id}`, { [file]: "x\n" });
-      await call("foundry_task_done", { id, log: "ok" });
+      await call("kukulu_task_done", { id, log: "ok" });
     }
-    const p = await call("foundry_task_next");
+    const p = await call("kukulu_task_next");
     eq(p.done, true, "at the boundary task_next reports done");
     eq(p.paused, true, "...and paused");
     eq(p.wave, 1, "naming the wave");
     eq(p.streams.join(","), "api,ui", "and its streams");
-    like(p.message, /P1-01.*wave 1.*Stop now\. Do NOT write docs\/HANDOFF\.md and do NOT call foundry_run_finish/, "with an unmistakable instruction not to finish the run");
+    like(p.message, /P1-01.*wave 1.*Stop now\. Do NOT write docs\/HANDOFF\.md and do NOT call kukulu_run_finish/, "with an unmistakable instruction not to finish the run");
     eq(p.counts.open, 5, "the plan's open tasks are still open");
     eq(JSON.parse(readFile(repo, ".foundry/implement.lock")).paused, 1, "the lock is flagged paused");
     eq(runGuard(repo, stopInput), "", "so the guard lets the serial implementer stop with tasks open");
-    isError(await call("foundry_run_finish"), /open task|foundry_task_next|HANDOFF/i, "and run_finish is refused anyway, the safety net if the instruction is ignored");
+    isError(await call("kukulu_run_finish"), /open task|kukulu_task_next|HANDOFF/i, "and run_finish is refused anyway, the safety net if the instruction is ignored");
 
-    const n = await call("foundry_next");
-    eq(n.streams.length, 2, "the controller's next foundry_next hands out the wave");
-    const a = await call("foundry_run_start", { stream: "api" });
-    await call("foundry_task_next", { stream: "api" });
+    const n = await call("kukulu_next");
+    eq(n.streams.length, 2, "the controller's next kukulu_next hands out the wave");
+    const a = await call("kukulu_run_start", { stream: "api" });
+    await call("kukulu_task_next", { stream: "api" });
     commitTask(a.cwd, "P1-01", "Task P1-01", { "src/api/a.txt": "a\n" });
-    await call("foundry_task_done", { stream: "api", id: "P1-01", log: "ok" });
+    await call("kukulu_task_done", { stream: "api", id: "P1-01", log: "ok" });
     ok(!("paused" in JSON.parse(readFile(repo, ".foundry/implement.lock"))), "any task state change clears the flag");
   });
 }
@@ -703,8 +703,8 @@ const feedbackOf = (repo) => (hasFile(repo, ".foundry/feedback.jsonl") ? readFil
 {
   const repo = waveRepo({ config: { parallel: { maxStreams: 1 } } });
   await withServer(repo, async ({ call }) => {
-    await call("foundry_run_start");
-    const t = await call("foundry_task_next");
+    await call("kukulu_run_start");
+    const t = await call("kukulu_task_next");
     eq(t.id, "P1-01", "a wave that runs serially is worked by the serial implementer");
     ok(!("paused" in t), "with no pause");
     ok(!("paused" in JSON.parse(readFile(repo, ".foundry/implement.lock"))), "and no flag on the lock");
@@ -720,10 +720,10 @@ const feedbackOf = (repo) => (hasFile(repo, ".foundry/feedback.jsonl") ? readFil
   ];
   const repo = plannedRepo({ tasks });
   await withServer(repo, async ({ call }) => {
-    await call("foundry_run_start");
-    await call("foundry_task_next");
-    await call("foundry_task_block", { id: "P0-01", reason: "cannot" });
-    const p = await call("foundry_task_next");
+    await call("kukulu_run_start");
+    await call("kukulu_task_next");
+    await call("kukulu_task_block", { id: "P0-01", reason: "cannot" });
+    const p = await call("kukulu_task_next");
     eq(p.paused, true, "after a block and a dependency skip the boundary is still reported");
     eq(p.skipped.map((x) => x.id).join(","), "P0-02", "with the skip reported");
     eq(subject(repo), "progress: skip P0-02", "and the skip committed");
@@ -735,7 +735,7 @@ const feedbackOf = (repo) => (hasFile(repo, ".foundry/feedback.jsonl") ? readFil
 
 {
   await withServer(plannedRepo({ config: { verify: ["true"] } }), async ({ call }) => {
-    eq((await call("foundry_status")).longestCommandTimeoutMs, 600000, "the default command timeout when nothing overrides it");
+    eq((await call("kukulu_status")).longestCommandTimeoutMs, 600000, "the default command timeout when nothing overrides it");
   });
   const config = {
     verify: [{ cmd: "true", timeoutMs: 1000 }],
@@ -743,10 +743,10 @@ const feedbackOf = (repo) => (hasFile(repo, ".foundry/feedback.jsonl") ? readFil
     parallel: { setup: [{ cmd: "true", timeoutMs: 1200000 }] },
   };
   await withServer(plannedRepo({ config }), async ({ call }) => {
-    eq((await call("foundry_status")).longestCommandTimeoutMs, 1200000, "the longest of verify, extraVerify and parallel.setup wins");
+    eq((await call("kukulu_status")).longestCommandTimeoutMs, 1200000, "the longest of verify, extraVerify and parallel.setup wins");
   });
   await withServer(plannedRepo({ config: { verify: [] } }), async ({ call }) => {
-    eq((await call("foundry_status")).longestCommandTimeoutMs, null, "null with no commands");
+    eq((await call("kukulu_status")).longestCommandTimeoutMs, null, "null with no commands");
   });
 }
 

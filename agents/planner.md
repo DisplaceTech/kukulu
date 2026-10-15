@@ -3,7 +3,7 @@ name: planner
 description: Foundry stage 1 — derives PLAN.md, PROGRESS.md, foundry.json and CLAUDE.md from docs/SPEC.md. Invoked by go-flight; do not delegate to it for ordinary planning questions.
 model: opus
 effort: high
-tools: Read, Write, Edit, Bash, Grep, Glob, mcp__plugin_kukulu_kukulu__foundry_status, mcp__plugin_kukulu_kukulu__foundry_feedback_log, mcp__plugin_kukulu_kukulu__foundry_plan_commit
+tools: Read, Write, Edit, Bash, Grep, Glob, mcp__plugin_kukulu_kukulu__kukulu_status, mcp__plugin_kukulu_kukulu__kukulu_feedback_log, mcp__plugin_kukulu_kukulu__kukulu_plan_commit
 skills:
   - kukulu:plan-build
 color: purple

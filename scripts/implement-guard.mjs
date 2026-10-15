@@ -21,14 +21,14 @@
 //      `kukulu:implementer`). Any other named agent is allowed outright.
 //      A missing `agent_type` falls back to rule 3's transcript check.
 //   3. `hook_event_name` is `Stop`: block only when *this session's own
-//      transcript* holds a `tool_use` of `foundry_run_start` — i.e. the
+//      transcript* holds a `tool_use` of `kukulu_run_start` — i.e. the
 //      implement stage is running directly in the main session
 //      (`/kukulu:implement` by hand, or `claude -p`), not a flight this
 //      session is merely waiting on in the background. The check parses
 //      the transcript and looks for the call itself; the bare text
-//      "foundry_run_start" proves nothing, because a go-flight controller's
+//      "kukulu_run_start" proves nothing, because a go-flight controller's
 //      transcript always contains it (the implement prompt it relays
-//      says "Call foundry_run_start") and was blocked on every turn end
+//      says "Call kukulu_run_start") and was blocked on every turn end
 //      (0.3.1 flight feedback F-01).
 //   4. Any other event, unreadable or empty input, or an unreadable
 //      transcript: allow. A guard that cannot identify the stopping party
@@ -37,21 +37,21 @@
 // Parallel streams (0.4.0) refine the block decision for the implementer:
 //
 //   5. `paused` in the lock: a serial implementer whose next open task belongs
-//      to a parallel wave was told, by foundry_task_next, to stop and let the
+//      to a parallel wave was told, by kukulu_task_next, to stop and let the
 //      flight controller hand the wave out. The MCP set the flag; the guard
 //      just honours it and allows the stop.
 //   6. A SubagentStop for the implementer whose *own* transcript
 //      (`agent_transcript_path` — never the parent's `transcript_path`, where
 //      sibling streams' calls can appear inline) shows a *last*
-//      `foundry_run_start` call that passed a `stream` is one stream's
+//      `kukulu_run_start` call that passed a `stream` is one stream's
 //      implementer: block only while *that stream* has open tasks
 //      (`{stream: <s>}` tags on the PROGRESS.md lines), never because another
 //      stream's tasks are open — a finished stream must not be held hostage
 //      by its siblings.
 //   7. If the stream cannot be determined (no agent transcript, no
-//      `foundry_run_start` call in it, or an unreadable one) and stream
+//      `kukulu_run_start` call in it, or an unreadable one) and stream
 //      worktrees exist, a wave is
-//      in flight: allow. The controller's next foundry_next re-hands out any
+//      in flight: allow. The controller's next kukulu_next re-hands out any
 //      stream that stopped early, so this is an optimisation, not the only
 //      safety net. With no worktrees, the rules above apply unchanged.
 //
@@ -85,10 +85,10 @@ function parseInput(raw) {
   }
 }
 
-const RUN_START_TOOL = /^(?:mcp__.+__)?foundry_run_start$/;
+const RUN_START_TOOL = /^(?:mcp__.+__)?(?:kukulu|foundry)_run_start$/;
 
 /**
- * The `input` of every assistant `tool_use` of foundry_run_start in the
+ * The `input` of every assistant `tool_use` of kukulu_run_start in the
  * transcript at `transcriptPath`, in order. The transcript is JSONL; a line
  * that does not parse is skipped, and an unreadable file yields none.
  * `includeSidechain` says whether entries logged inline for a subagent
@@ -141,7 +141,7 @@ const projectRoot = (input) => process.env.CLAUDE_PROJECT_DIR || input?.cwd || p
 
 /**
  * Read the lock's re-block counter, tolerating both the legacy bare-number
- * form and the JSON object form foundry_run_start writes from 0.3.0. `json`
+ * form and the JSON object form kukulu_run_start writes from 0.3.0. `json`
  * is the parsed object to preserve on rewrite, or null for the legacy form.
  */
 function readLock(lockPath) {
@@ -224,7 +224,7 @@ function main() {
   if (!isImplementerStop(input)) return;
 
   const lock = readLock(lockPath);
-  // Rule 5: parked at a wave boundary by foundry_task_next.
+  // Rule 5: parked at a wave boundary by kukulu_task_next.
   if (lock.json?.paused) return;
 
   // Rules 6 and 7: a stream's implementer answers only for its own stream.
@@ -232,7 +232,7 @@ function main() {
   if (input.hook_event_name === "SubagentStop") {
     // Only the subagent's *own* transcript can say which stream it runs.
     // `transcript_path` may be the parent's, where every stream's calls can
-    // appear inline, so its last foundry_run_start may be a sibling's — and
+    // appear inline, so its last kukulu_run_start may be a sibling's — and
     // blocking on a sibling's behalf would send a second implementer into the
     // same stream. Without an agent transcript, no stream is attributed.
     const calls = input.agent_transcript_path ? runStartCalls(input.agent_transcript_path, { includeSidechain: true }) : [];
@@ -250,7 +250,7 @@ function main() {
     scope = { open: mine.open, next: mine.inProgress || mine.todo, stalled: mine.inProgress, label: ` stream '${stream}'` };
   }
   // The effective cap bounds re-blocks *since the last task state change*
-  // (foundry_task_done / foundry_task_block / foundry_run_start all reset
+  // (kukulu_task_done / kukulu_task_block / kukulu_run_start all reset
   // the counter to zero), not the whole run — so a per-run cap set in
   // docs/foundry.json's guardCap, carried in the lock, wins over the
   // process-wide FOUNDRY_GUARD_CAP env var, which wins over the default.
@@ -263,7 +263,7 @@ function main() {
     // sees it. Name the stalled task, if there is one in progress, so a
     // human knows exactly where to look.
     const stuckOn = scope.stalled ? ` stuck on ${scope.stalled}` : "";
-    const recover = "block it by hand with foundry_task_block, or resume the flight and it will pick up where it stalled";
+    const recover = "block it by hand with kukulu_task_block, or resume the flight and it will pick up where it stalled";
     process.stdout.write(
       `${JSON.stringify({ systemMessage: `foundry: implement guard cap (${cap}) reached with ${scope.open} open tasks${scope.label}${stuckOn}; run halted — ${recover}` })}\n`,
     );
@@ -272,9 +272,9 @@ function main() {
 
   const reason = stream
     ? `foundry: stream '${stream}' is not finished — ${scope.open} task(s) of its still open in docs/PROGRESS.md (next: ${scope.next}). ` +
-      `Do not stop. Call foundry_task_next with stream: "${stream}" and continue; call foundry_stream_finish only when it reports done.`
+      `Do not stop. Call kukulu_task_next with stream: "${stream}" and continue; call kukulu_stream_finish only when it reports done.`
     : `foundry: implementation run is not finished — ${scope.open} task(s) still open in docs/PROGRESS.md (next: ${scope.next}). ` +
-      "Do not stop. Call foundry_task_next and continue; call foundry_run_finish only when foundry_status reports zero open tasks.";
+      "Do not stop. Call kukulu_task_next and continue; call kukulu_run_finish only when kukulu_status reports zero open tasks.";
   process.stdout.write(`${JSON.stringify({ decision: "block", reason })}\n`);
 }
 

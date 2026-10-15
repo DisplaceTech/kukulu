@@ -29,13 +29,13 @@ writeFile(repo, "FOUNDRY_FEEDBACK.md", "pipeline feedback notes, unrelated to th
 await withServer(repo, async ({ call }) => {
   // ---------------------------------------------------------------- routing
 
-  const sync = await call("foundry_agents_sync");
+  const sync = await call("kukulu_agents_sync");
   eq(sync.changed.length, 4, "the flight starts by generating all four role agents");
   eq(sync.exclude, "added", "the exclude pattern is added before any run starts");
 
   // ---------------------------------------------------------------- plan
 
-  let n = await call("foundry_next");
+  let n = await call("kukulu_next");
   eq(n.stage, "plan", "a repo with only a spec needs a plan");
   // This is the project's first flight: the sync above created the agents
   // directory, which loads only in the next session, so every stage names
@@ -54,7 +54,7 @@ await withServer(repo, async ({ call }) => {
   git(repo, ["add", "--", "docs/PLAN.md", "docs/PROGRESS.md", "docs/foundry.json", "CLAUDE.md"]);
   git(repo, ["commit", "-qm", "plan: derive build plan from SPEC"]);
 
-  n = await call("foundry_next");
+  n = await call("kukulu_next");
   eq(n.stage, "implement", "a plan on disk means it is time to build");
   eq(n.round, 0, "the first build is round 0");
   eq(n.agent, "kukulu:implementer", "the plugin implementer agent is named");
@@ -62,36 +62,36 @@ await withServer(repo, async ({ call }) => {
 
   // ---------------------------------------------------------------- build
 
-  let r = await call("foundry_run_start");
+  let r = await call("kukulu_run_start");
   like(r.branch, /^build\/\d{4}-\d\d-\d\d/, `the run gets its own branch (${r.branch})`);
   ok(hasFile(repo, ".foundry/implement.lock"), "the Stop-hook lock is armed for the whole run");
 
-  let t = await call("foundry_task_next");
+  let t = await call("kukulu_task_next");
   eq(t.id, "P0-01", "the first task comes off the top of the plan");
 
-  let v = await call("foundry_verify", { files: ["hello.txt"] });
+  let v = await call("kukulu_verify", { files: ["hello.txt"] });
   eq(v.ok, false, "verification fails before the work is done");
 
-  isError(await call("foundry_task_done", { id: "P0-01", log: "x" }), /HEAD commit/, "a task cannot be marked done without its commit");
+  isError(await call("kukulu_task_done", { id: "P0-01", log: "x" }), /HEAD commit/, "a task cannot be marked done without its commit");
 
   commitTask(repo, "P0-01", "Create hello", { "hello.txt": "hi\n" });
-  v = await call("foundry_verify", { files: ["hello.txt", "src/a.js"] });
+  v = await call("kukulu_verify", { files: ["hello.txt", "src/a.js"] });
   eq(v.ok, true, "verification passes once the work is committed");
   eq(v.results[1].command, "echo extra", "a touched path prefix pulls in its extra verification");
 
-  r = await call("foundry_task_done", { id: "P0-01", log: "Added hello.txt.\nInterpretation: greeting is lowercase." });
+  r = await call("kukulu_task_done", { id: "P0-01", log: "Added hello.txt.\nInterpretation: greeting is lowercase." });
   eq(r.counts.done, 1, "the first task is recorded as done");
 
-  t = await call("foundry_task_next");
+  t = await call("kukulu_task_next");
   eq(t.id, "P0-02", "the loop moves on");
   like(t.dependencyLogs["P0-01"], /greeting is lowercase/, "the next task inherits what the last one learned");
 
   writeFile(repo, "junk.txt", "half-finished\n");
-  r = await call("foundry_task_block", { id: "P0-02", reason: "tried A / fails B / fix C" });
+  r = await call("kukulu_task_block", { id: "P0-02", reason: "tried A / fails B / fix C" });
   ok(!hasFile(repo, "junk.txt"), "blocking a task throws away its debris");
   ok(hasFile(repo, ".foundry/implement.lock"), "blocking a task does not end the run");
 
-  t = await call("foundry_task_next");
+  t = await call("kukulu_task_next");
   eq(t.done, true, "no work is left");
   eq(t.skipped[0].id, "P0-03", "the dependent of a blocked task is skipped, not attempted");
   eq(t.counts.open, 0, "nothing is open");
@@ -105,14 +105,14 @@ await withServer(repo, async ({ call }) => {
 
   // ---------------------------------------------------------------- handoff
 
-  isError(await call("foundry_run_finish"), /HANDOFF/, "the run cannot end without a handoff");
+  isError(await call("kukulu_run_finish"), /HANDOFF/, "the run cannot end without a handoff");
   writeFile(repo, "docs/HANDOFF.md", "# handoff\n## Round 0\nP0-02 blocked, P0-03 skipped.\n");
-  r = await call("foundry_run_finish");
+  r = await call("kukulu_run_finish");
   like(r.readyLine, /^READY FOR REVIEW/, r.readyLine);
   ok(!hasFile(repo, ".foundry/implement.lock"), "the lock is disarmed at the handoff");
   eq(runGuard(repo), "", "and the guard stands down");
 
-  n = await call("foundry_next");
+  n = await call("kukulu_next");
   eq(n.stage, "review", "a handoff means it is the reviewer's turn");
   eq(n.agent, "kukulu:reviewer", "the plugin reviewer agent is named");
   ok(n.model, "a resolved model is reported for the review stage");
@@ -120,7 +120,7 @@ await withServer(repo, async ({ call }) => {
   // ---------------------------------------------------------------- review
 
   writeFile(repo, "docs/REVIEW.md", "# Review\nRound: 1\n**Verdict**: CHANGES REQUESTED\n");
-  r = await call("foundry_review_submit", {
+  r = await call("kukulu_review_submit", {
     verdict: "CHANGES REQUESTED",
     tasks: [{
       title: "Fix hello", goal: "hello must actually greet", files: ["hello.txt"],
@@ -135,60 +135,60 @@ await withServer(repo, async ({ call }) => {
   like(readFile(repo, "docs/PLAN.md"), /## Review fixes \(round 1\)\n\n### R1-01: Fix hello/, "the fix task is written into the plan");
   like(readFile(repo, "docs/PROGRESS.md"), /- \[ \] R1-01 Fix hello\n\n## Log/, "and onto the end of the task list");
 
-  n = await call("foundry_next");
+  n = await call("kukulu_next");
   eq(n.stage, "implement", "changes requested sends the flight back to the implementer");
   eq(n.round, 1, "on round 1");
   eq(n.agent, "kukulu:implementer", "still the plugin implementer agent, on the fix round");
 
   // ---------------------------------------------------------------- fix round
 
-  r = await call("foundry_run_start");
+  r = await call("kukulu_run_start");
   eq(subject(repo), "chore: start review-fix round 1", "the fix round announces itself");
 
-  t = await call("foundry_task_next");
+  t = await call("kukulu_task_next");
   eq(t.id, "P0-02", "the unblocked task is first in line");
   commitTask(repo, "P0-02", "Impossible task", { "nope.txt": "possible after all\n" });
-  await call("foundry_task_done", { id: "P0-02", log: "Turned out to be possible." });
+  await call("kukulu_task_done", { id: "P0-02", log: "Turned out to be possible." });
 
-  t = await call("foundry_task_next");
+  t = await call("kukulu_task_next");
   eq(t.id, "P0-03", "then its reopened dependent");
   commitTask(repo, "P0-03", "Depends on the impossible one", { "x": "x\n" });
-  await call("foundry_task_done", { id: "P0-03", log: "Ran once its dependency landed." });
+  await call("kukulu_task_done", { id: "P0-03", log: "Ran once its dependency landed." });
 
-  t = await call("foundry_task_next");
+  t = await call("kukulu_task_next");
   eq(t.id, "R1-01", "then the reviewer's fix task");
   like(t.text, /hello must actually greet/, "which reads back exactly as the reviewer wrote it");
   commitTask(repo, "R1-01", "Fix hello", { "hello.txt": "hello\n" });
-  await call("foundry_task_done", { id: "R1-01", log: "hello.txt now greets." });
+  await call("kukulu_task_done", { id: "R1-01", log: "hello.txt now greets." });
 
-  eq((await call("foundry_task_next")).done, true, "the fix round is complete");
+  eq((await call("kukulu_task_next")).done, true, "the fix round is complete");
   writeFile(repo, "docs/HANDOFF.md", "# handoff\n## Round 1\nAll three tasks landed.\n");
-  r = await call("foundry_run_finish");
+  r = await call("kukulu_run_finish");
   eq(r.round, 1, "the handoff belongs to round 1");
 
   // ---------------------------------------------------------------- approval
 
-  n = await call("foundry_next");
+  n = await call("kukulu_next");
   eq(n.stage, "review", "round 1 goes back for review");
   eq(n.agent, "kukulu:reviewer", "still the plugin reviewer agent, on round 1");
 
   writeFile(repo, "docs/REVIEW.md", "# Review\nRound: 2\n**Verdict**: APPROVED\n");
-  isError(await call("foundry_summary_commit"), /docs\/SUMMARY\.md does not exist/, "there is no summary to commit yet");
-  r = await call("foundry_review_submit", { verdict: "APPROVED" });
+  isError(await call("kukulu_summary_commit"), /docs\/SUMMARY\.md does not exist/, "there is no summary to commit yet");
+  r = await call("kukulu_review_submit", { verdict: "APPROVED" });
   eq(r.round, 2, "the approval reports round 2, the number REVIEW.md carries");
   eq(subject(repo), "review: round 2 approved", "the approval is committed");
 
-  n = await call("foundry_next");
+  n = await call("kukulu_next");
   eq(n.stage, "summarize", "an approved branch needs its summary");
   eq(n.agent, "kukulu:summarizer", "the plugin summarizer agent is named");
   ok(n.model, "a resolved model is reported for the summarize stage");
 
   writeFile(repo, "docs/SUMMARY.md", "# summary\nMerge build/... into main.\n");
-  r = await call("foundry_summary_commit");
+  r = await call("kukulu_summary_commit");
   eq(r.reviews, 2, "the flight took two reviews");
   eq(r.fixRounds, 1, "...and one fix round between them");
 
-  n = await call("foundry_next");
+  n = await call("kukulu_next");
   eq(n.stage, "done", "and the flight is done");
   eq(n.agent, null, "done still has no agent to delegate to");
   like(n.reason, /ready for a human to merge/, n.reason);
@@ -196,7 +196,7 @@ await withServer(repo, async ({ call }) => {
 
   // ---------------------------------------------------------------- the record
 
-  // foundry_agents_sync never commits anything (the generated files are
+  // kukulu_agents_sync never commits anything (the generated files are
   // excluded via .git/info/exclude, not tracked), so the branch's commit
   // history is exactly what it would have been without routing at all.
   // The only untracked thing left standing is the operator file the flight
@@ -227,10 +227,10 @@ await withServer(repo, async ({ call }) => {
 {
   const fresh = plannedRepo();
   await withServer(fresh, async ({ call }) => {
-    await call("foundry_agents_sync");
+    await call("kukulu_agents_sync");
   });
   await withServer(fresh, async ({ call }) => {
-    const n = await call("foundry_next");
+    const n = await call("kukulu_next");
     eq(n.agentFallback, false, "a fresh process against an already-synced repo trusts the generated agent immediately");
     eq(n.agent, "foundry-implementer", "...and names it directly");
   });
@@ -238,7 +238,7 @@ await withServer(repo, async ({ call }) => {
 
 // ---------------------------------------------------------------- parallel flights (0.4.0)
 //
-// The same loop go-flight runs, driven by hand: foundry_next, then a simulated
+// The same loop go-flight runs, driven by hand: kukulu_next, then a simulated
 // implementer per result. Stream implementers are simulated by calling the
 // stream-scoped tools *interleaved* across streams (a's next, b's next, a's
 // commit, b's commit …), not one stream to completion before the other, so
@@ -255,18 +255,18 @@ const fileFor = (t) => {
 
 /** A serial implementer: run_start, work until done. Returns "paused" at a wave boundary, else finishes the run. */
 async function serialImplementer(call, repo) {
-  await call("foundry_run_start");
+  await call("kukulu_run_start");
   for (;;) {
-    const t = await call("foundry_task_next");
+    const t = await call("kukulu_task_next");
     if (t.done) {
       if (t.paused) return "paused";
       break;
     }
     commitTask(repo, t.id, t.title, { [fileFor(t)]: `${t.id}\n` });
-    await call("foundry_task_done", { id: t.id, log: `did ${t.id}` });
+    await call("kukulu_task_done", { id: t.id, log: `did ${t.id}` });
   }
   writeFile(repo, "docs/HANDOFF.md", "# handoff\n");
-  await call("foundry_run_finish");
+  await call("kukulu_run_finish");
   return "finished";
 }
 
@@ -277,10 +277,10 @@ async function streamImplementers(call, names) {
   while (Object.values(st).some((x) => x.phase !== "finished")) {
     for (const [name, x] of Object.entries(st)) {
       if (x.phase === "start") {
-        x.cwd = (await call("foundry_run_start", { stream: name })).cwd;
+        x.cwd = (await call("kukulu_run_start", { stream: name })).cwd;
         x.phase = "next";
       } else if (x.phase === "next") {
-        const t = await call("foundry_task_next", { stream: name });
+        const t = await call("kukulu_task_next", { stream: name });
         if (t.done) x.phase = "finish";
         else {
           commitTask(x.cwd, t.id, t.title, { [fileFor(t)]: `${t.id}\n` });
@@ -288,10 +288,10 @@ async function streamImplementers(call, names) {
           x.phase = "record";
         }
       } else if (x.phase === "record") {
-        await call("foundry_task_done", { stream: name, id: x.pending, log: `did ${x.pending}` });
+        await call("kukulu_task_done", { stream: name, id: x.pending, log: `did ${x.pending}` });
         x.phase = "next";
       } else if (x.phase === "finish") {
-        const f = await call("foundry_stream_finish", { stream: name });
+        const f = await call("kukulu_stream_finish", { stream: name });
         if (!f.merged) conflict = f;
         x.phase = "finished";
       }
@@ -304,7 +304,7 @@ async function streamImplementers(call, names) {
 async function fly(call, repo) {
   const events = [];
   for (let i = 0; i < 12; i++) {
-    const n = await call("foundry_next");
+    const n = await call("kukulu_next");
     events.push(n.streams ? `${n.stage}[${n.streams.map((x) => x.stream).join("+")}]` : n.stage);
     if (n.stage === "done" || n.stage === "halt") return events;
     if (n.stage === "implement") {
@@ -314,10 +314,10 @@ async function fly(call, repo) {
       } else await serialImplementer(call, repo);
     } else if (n.stage === "review") {
       writeFile(repo, "docs/REVIEW.md", `# Review\nRound: ${n.reviewRound}\n**Verdict**: APPROVED\n`);
-      await call("foundry_review_submit", { verdict: "APPROVED" });
+      await call("kukulu_review_submit", { verdict: "APPROVED" });
     } else if (n.stage === "summarize") {
       writeFile(repo, "docs/SUMMARY.md", "# summary\n");
-      await call("foundry_summary_commit");
+      await call("kukulu_summary_commit");
     }
   }
   throw new Error(`the flight did not finish: ${events.join(" → ")}`);
@@ -413,17 +413,17 @@ const ALL_IDS = PARALLEL_PLAN.map((t) => t.id);
   await withServer(repo, async ({ call }) => {
     // Round 0 by hand: serial, then the wave with api's first task blocked (its dependent skipped), then serial.
     await serialImplementer(call, repo);
-    const a = await call("foundry_run_start", { stream: "api" });
-    await call("foundry_task_next", { stream: "api" });
-    await call("foundry_task_block", { stream: "api", id: "P1-01", reason: "needs an API that looks missing" });
-    eq((await call("foundry_task_next", { stream: "api" })).skipped.map((x) => x.id).join(","), "P1-02", "api's dependent is skipped");
-    await call("foundry_stream_finish", { stream: "api" });
+    const a = await call("kukulu_run_start", { stream: "api" });
+    await call("kukulu_task_next", { stream: "api" });
+    await call("kukulu_task_block", { stream: "api", id: "P1-01", reason: "needs an API that looks missing" });
+    eq((await call("kukulu_task_next", { stream: "api" })).skipped.map((x) => x.id).join(","), "P1-02", "api's dependent is skipped");
+    await call("kukulu_stream_finish", { stream: "api" });
     await streamImplementers(call, ["ui"]);
     eq(await serialImplementer(call, repo), "finished", "round 0 finishes");
     void a;
 
     writeFile(repo, "docs/REVIEW.md", "# Review\nRound: 1\n**Verdict**: CHANGES REQUESTED\n");
-    await call("foundry_review_submit", {
+    await call("kukulu_review_submit", {
       verdict: "CHANGES REQUESTED",
       tasks: [{ title: "Tidy readme", goal: "tidy", files: ["README.md"], tests: "none", dependsOn: [] }],
       unblock: [{ id: "P1-01", reason: "the API exists" }, { id: "P1-02", reason: "follows P1-01" }],

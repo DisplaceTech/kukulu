@@ -49,7 +49,7 @@ hold the judgment. These rules apply to every change in this repository.
 ## Constraints
 
 Mechanical rules are in `docs/foundry.json` `constraints` and run on every
-`foundry_verify`:
+`kukulu_verify`:
 
 - `server-synchronous`: no `async` or `await` anywhere in `mcp/server.mjs`,
   including comments and strings. Long work uses `spawnSync`.
@@ -66,7 +66,7 @@ The reviewer checks these by reading, because no line pattern can express them:
 - Refusals before writes; rollback on a failed commit (principle 3).
 - `fable` stays a legal alias (`ANTHROPIC_ALIASES`, `AGENT_TOOL_ALIASES`).
 - `TASK_ID`, `TASK_LINE` and the guard's regexes are unchanged; only
-  `foundry_plan_commit`'s renumber mode accepts a suffix such as `P1-02a`.
+  `kukulu_plan_commit`'s renumber mode accepts a suffix such as `P1-02a`.
 - Nothing under `docs/plans/` changes; under `docs/feedback/` only the
   "addressed in" header lines (P3-04). Never edit `docs/SPEC.md`, and never
   edit `docs/PLAN.md` or `docs/PROGRESS.md` by hand.
@@ -78,7 +78,7 @@ The reviewer checks these by reading, because no line pattern can express them:
 
 **Adding a tool.** Insert its `TOOLS` entry at the position the task names,
 and the name at the same position in `test/protocol.mjs`'s `EXPECTED_TOOLS`.
-Set the count in `test/plugin.mjs` to the number of `name: "foundry_` entries
+Set the count in `test/plugin.mjs` to the number of `name: "kukulu_` entries
 in `TOOLS`, and spell the same number in words on the first line of
 `docs/mcp-tools.md` ("Nineteen tools", "Twenty tools", "Twenty-one tools").
 Append `mcp__plugin_kukulu_kukulu__<tool>` to the `tools:` line of the agent
@@ -104,7 +104,7 @@ starts with the subject under test (for example `progress:`). Assert that
 every file the tool wrote is byte-identical afterwards, that `git diff
 --cached --name-only` is empty, and that HEAD did not move.
 
-**HANDOFF.md for this flight.** `foundry_run_finish` uses
+**HANDOFF.md for this flight.** `kukulu_run_finish` uses
 `docs/HANDOFF.md` as the draft PR's body, so its first line must be:
 `**Not to be merged** until a human has run one 0.5.0 flight from the
 working tree (claude --plugin-dir .). Do not merge, tag or release.`

@@ -21,14 +21,14 @@ Precedence, highest first:
 
 A profile or a project override is a *partial* overlay: it can set a role's
 `model` without touching its `effort`, or vice versa. The merge happens per
-role, per key — `foundry_config_show` reports, for every field, which of the
+role, per key — `kukulu_config_show` reports, for every field, which of the
 four layers it actually came from (`default`, `global`, `profile:<name>`, or
 `project`).
 
-Calling `foundry_agents_sync` (which `/kukulu:go-flight` does automatically,
+Calling `kukulu_agents_sync` (which `/kukulu:go-flight` does automatically,
 before its loop) turns the merged result into
 `.claude/agents/foundry-<role>.md` — a project-level Claude Code subagent
-file, one per role. `foundry_next` then names that generated agent instead of
+file, one per role. `kukulu_next` then names that generated agent instead of
 the plugin's own `kukulu:<role>` agent, whenever it exists. Project-level
 agents accept any `model:` string, including a router-specific
 `provider,model` or `provider/model` form, and they accept `permissionMode`,
@@ -36,11 +36,11 @@ which every generated file sets (default `acceptEdits`) — this is what
 removes the need to launch a session with `--permission-mode acceptEdits`
 for the implementer's file edits once agents have been generated at least
 once. It does not cover MCP tool calls: verified directly, a generated
-agent's `foundry_status` call is denied under both `acceptEdits` and
+agent's `kukulu_status` call is denied under both `acceptEdits` and
 `bypassPermissions` unless the session carries an allow rule, and the rule
 that works (and reaches subagents) is the scoped server name
 `mcp__plugin_kukulu_kukulu` in `permissions.allow` —
-`foundry_agents_sync` writes it for you; see
+`kukulu_agents_sync` writes it for you; see
 [operations.md](./operations.md#running-a-flight). Plugin-shipped agents cannot
 do either of these things: [Claude Code's plugin
 reference](https://code.claude.com/docs/en/plugins-reference) states that
@@ -67,14 +67,14 @@ contrast, is picked up live — this plugin relied on the stricter,
 conservative assumption through 0.2.0 and confirmed the actual behaviour for
 0.3.0.
 
-So the only case `foundry_agents_sync` cannot make immediately usable is a
+So the only case `kukulu_agents_sync` cannot make immediately usable is a
 project's very first sync, and only when the routed model is not one the
 `Agent` tool can name (a family alias, or a `claude-<family>-…` id that maps
-to one) — for any such model, `foundry_next` falls back to the plugin's own
+to one) — for any such model, `kukulu_next` falls back to the plugin's own
 `kukulu:<role>` agent with the resolved model until this session's next
-launch, and the flight proceeds without stopping. `foundry_next` reports
-this per stage as `agentFallback` and `fallbackAgent`; `foundry_agents_sync`
-and `foundry_next` both report the one case that truly needs a restart as
+launch, and the flight proceeds without stopping. `kukulu_next` reports
+this per stage as `agentFallback` and `fallbackAgent`; `kukulu_agents_sync`
+and `kukulu_next` both report the one case that truly needs a restart as
 `restartRequired`. `/kukulu:go-flight` checks it before the loop and, when
 true, prints the table and this line, then stops:
 
@@ -93,7 +93,7 @@ While `agentFallback` is in effect, the controller spawns the plugin's own
 `model` argument. The tool takes only the aliases `sonnet`, `opus`, `haiku`
 and `fable`, so a role routed to a full id such as `claude-opus-5-5` is
 handed `opus` — the latest of that family, which may not be the pinned
-version; `foundry_next` reports that as `agentModelExact: false` and the
+version; `kukulu_next` reports that as `agentModelExact: false` and the
 controller prints a one-line note. Full ids are fine in routing config, and
 are exact once the generated agent loads: only this first-population
 fallback is approximated. `effort` is lost on the fallback path too: it
@@ -161,7 +161,7 @@ A project can still override any role for itself, in `docs/foundry.json`:
 ```
 
 Only the keys you name change; everything else keeps coming from the
-profile or the defaults. Run `foundry_config_show` in any Foundry-enabled
+profile or the defaults. Run `kukulu_config_show` in any Foundry-enabled
 session to see the fully resolved table and where each value came from.
 
 ## Routing through claude-code-router (v3)
@@ -308,7 +308,7 @@ Modelfile) — the client side of the connection does not control it.
 
 Each stage also runs on its own, outside `/kukulu:go-flight`, by delegating
 to its agent: `foundry-planner`, `foundry-implementer`, `foundry-reviewer`,
-`foundry-summarizer` once `foundry_agents_sync` has run, or
+`foundry-summarizer` once `kukulu_agents_sync` has run, or
 `kukulu:planner` and so on before it has. That keeps whatever model routing
 assigned that role. Invoking `/kukulu:plan-build`, `/kukulu:implement`,
 `/kukulu:review-build` or `/kukulu:summarize` directly, instead of through

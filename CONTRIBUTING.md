@@ -84,13 +84,13 @@ npm install --no-save mermaid jsdom && node scripts/check-diagrams.mjs
 |---|---|
 | `plugin` | Manifests, agent and skill frontmatter, hook wiring, cross-references, documentation links, diagram style, CI pinning |
 | `protocol` | JSON-RPC framing, handshake, tool discovery, error mapping |
-| `state` | `foundry_status` and every branch of the `foundry_next` decision table; `foundry_plan_commit` (every check, `renumber`) |
+| `state` | `kukulu_status` and every branch of the `kukulu_next` decision table; `kukulu_plan_commit` (every check, `renumber`) |
 | `implement` | `run_start`, `task_next`, `task_done`, `task_block`, `verify`, `run_finish`; the commit helper's signing fallback |
-| `review` | `review_submit` and `summary_commit`, including every refusal and rollback on a failed commit; `foundry_flight_archive`; `foundry_pr_finalize` |
-| `routing` | Config merge and precedence, `foundry_agents_sync`, `foundry_config_show`, every refusal |
+| `review` | `review_submit` and `summary_commit`, including every refusal and rollback on a failed commit; `kukulu_flight_archive`; `kukulu_pr_finalize` |
+| `routing` | Config merge and precedence, `kukulu_agents_sync`, `kukulu_config_show`, every refusal |
 | `constraints` | `docs/foundry.json` constraints, fixture self-tests, the scan, every refusal |
-| `feedback` | `foundry_feedback_log`, `.foundry/feedback.jsonl`, and the `policies.feedback` opt-out |
-| `streams` | Parallel workstreams: stream tags, waves, partition validation, stream-scoped tools, worktrees, `foundry_stream_finish`, `foundry_next`'s `streams`, pausing at a wave |
+| `feedback` | `kukulu_feedback_log`, `.foundry/feedback.jsonl`, and the `policies.feedback` opt-out |
+| `streams` | Parallel workstreams: stream tags, waves, partition validation, stream-scoped tools, worktrees, `kukulu_stream_finish`, `kukulu_next`'s `streams`, pausing at a wave |
 | `guard` | The Stop / SubagentStop hook: scoping, blocking, counting, giving up, environment handling |
 | `drive` | Complete flights end to end over real stdio: one serial, and parallel ones (a wave, `maxStreams: 1`, an overlapping partition) |
 
@@ -120,7 +120,7 @@ is set per-repo.
 Three workflows, all of which must be green:
 
 - **ci** — the suite on Node 22, 24 and 26; again on macOS; again with the
-  GitHub CLI removed, since `foundry_run_finish` treats `gh` as optional.
+  GitHub CLI removed, since `kukulu_run_finish` treats `gh` as optional.
   EOL Node lines are not tested and not supported; the floor in
   `package.json` moves up as they age out.
 - **lint** — `pre-commit` (yamllint, shellcheck, markdownlint, gitleaks, JSON

@@ -2,7 +2,7 @@
 
 Running a flight, resuming one, and unsticking one. Everything Foundry knows is
 on disk and committed, so there is no hidden state to reason about: when
-something looks wrong, `foundry_status` is the whole truth.
+something looks wrong, `kukulu_status` is the whole truth.
 
 ## Running a flight
 
@@ -32,7 +32,7 @@ Text after the command is the flight's options:
 The review-loop bounds are the only options. "max review rounds N" (or
 "maximum review depth of N rounds", or any phrasing that plainly asks for at
 most N reviews) sets both `maxRounds` and `maxRoundsHard` to N. The
-controller applies the options with `foundry_flight_options` as soon as
+controller applies the options with `kukulu_flight_options` as soon as
 `docs/foundry.json` exists, that is, right after the plan stage. The tool
 commits them as `chore: flight options (…)`. Anything the controller cannot
 map, it prints as `ignored flight option: …` and carries on. It never asks.
@@ -43,7 +43,7 @@ On a project's first flight, every stage runs on the plugin's own
 `kukulu:<role>` agent, with the routed model passed as an alias. The
 generated `foundry-<role>` agents land in a `.claude/agents` directory this
 session created, and Claude Code loads a new agents directory only in the
-next session. `foundry_next` names the plugin agent outright, so this is
+next session. `kukulu_next` names the plugin agent outright, so this is
 quiet. One difference matters: plugin agents ignore `permissionMode`, so the
 first flight's stages run under your session's own permission mode. Start
 the session in `acceptEdits` mode, or a stage may be refused the `Write` tool
@@ -62,7 +62,7 @@ not cover them:
 { "permissions": { "allow": ["mcp__plugin_kukulu_kukulu"] } }
 ```
 
-`foundry_agents_sync` — which `/kukulu:go-flight` calls before its loop —
+`kukulu_agents_sync` — which `/kukulu:go-flight` calls before its loop —
 writes this itself into the project's `.claude/settings.local.json` (F-03),
 read-merge-write, unless it is already covered there or in the committed
 `.claude/settings.json`. It never touches `~/.claude/settings.json`; put the
@@ -70,14 +70,14 @@ rule there yourself if you want it to apply to every project instead of one.
 Its result's `permissions` field is `"added"`, `"present"`, or
 `"failed: <why>"` — a `settings.local.json` that fails to parse is reported,
 never overwritten. Without the rule, the first stage's first
-`foundry_status` call is denied and the flight stalls silently.
+`kukulu_status` call is denied and the flight stalls silently.
 
 ## Checking on a run
 
 From any Claude Code session in the project:
 
 ```text
-> use foundry_status
+> use kukulu_status
 ```
 
 Or straight from a shell, without a session:
@@ -101,7 +101,7 @@ There is one command:
 > /kukulu:go-flight
 ```
 
-`foundry_next` re-reads disk and continues from wherever the flight stopped —
+`kukulu_next` re-reads disk and continues from wherever the flight stopped —
 mid-task, mid-round, or between stages. A task left `[~]` by a crashed run is
 handed back with `resumed: true`; a run that died before its handoff is
 detected by its leftover lock and sent back to the implementer to finish.
@@ -113,32 +113,32 @@ session, and a subagent that errored out. It is not the answer to a halt.
 
 A task blocks on something outside the flight's control, such as a download
 the sandbox could not reach or a missing credential. When that is fixed, put
-the task back with `foundry_task_reopen` from any session in the project:
+the task back with `kukulu_task_reopen` from any session in the project:
 
 ```text
-> use foundry_task_reopen with id P0-08 and reason "corpus file supplied at data/cantrbry.tar.gz"
+> use kukulu_task_reopen with id P0-08 and reason "corpus file supplied at data/cantrbry.tar.gz"
 ```
 
 Every task that was skipped because of it comes back too, transitively. A
 dependent that still waits on a different blocked task is just skipped
-again. The next `foundry_task_next` picks the reopened task up. If the run
+again. The next `kukulu_task_next` picks the reopened task up. If the run
 had already finished, the next `/kukulu:go-flight` hands out an implement
 stage for the same round. Inside a flight, the reviewer does the same thing
-through `foundry_review_submit`'s `unblock`. Do not flip checkboxes in
+through `kukulu_review_submit`'s `unblock`. Do not flip checkboxes in
 `docs/PROGRESS.md` by hand (cleanflate F-03, F-18).
 
 ## Halts
 
 Four things halt a flight on purpose.
 
-**Round cap.** `foundry_review_submit` writes a `halted` reason under either
+**Round cap.** `kukulu_review_submit` writes a `halted` reason under either
 of two conditions (F-13, F-15): the round count reaches `maxRoundsHard`
 (default 6) regardless of how well the rounds are going, or the number of
 *non-converging* rounds — a round whose fix-task count did not shrink from
 the one before it — reaches `maxRounds` (default 3). A flight whose findings
 go 15 → 3 → 2 → 1 never trips the soft cap, however many rounds that takes;
 one that goes 4 → 4 → 4 does, on the third round, because none of them
-improved on the last. `foundry_status`'s `state.rounds` has the count for
+improved on the last. `kukulu_status`'s `state.rounds` has the count for
 every round so far, and the halt message includes the trail.
 
 ```bash
@@ -149,8 +149,8 @@ git show <sha>:docs/REVIEW.md
 ```
 
 To continue anyway, make the call the halt message names:
-`foundry_flight_options({ maxRounds: <k + 1>, resume: true })` for the soft
-cap, `foundry_flight_options({ maxRoundsHard: <N>, resume: true })` for the
+`kukulu_flight_options({ maxRounds: <k + 1>, resume: true })` for the soft
+cap, `kukulu_flight_options({ maxRoundsHard: <N>, resume: true })` for the
 hard one. It raises the bound in `docs/foundry.json`, clears `halted` in
 `.foundry/state.json` and commits both; it refuses if the bound would not lift
 the cap that fired, and it never clears any other halt. Then re-run the
@@ -159,7 +159,7 @@ flight.
 **Missing spec.** No `docs/SPEC.md` means there is nothing to build from. Write
 one; see [writing-specs.md](./writing-specs.md).
 
-**An operator-level problem.** `foundry_run_halt` records a reason when the
+**An operator-level problem.** `kukulu_run_halt` records a reason when the
 implementer hits something no task-level retry fixes: a signing agent that
 died, a full disk, a `verify` command that cannot even run, a vanished base
 branch (F-05). Nothing is reset or cleaned — read the branch exactly as the
@@ -169,7 +169,7 @@ To continue anyway, after fixing the actual problem: set `"halted": null` in
 `.foundry/state.json`, commit it, and re-run the flight.
 
 **A stream merge conflict.** When a parallel stream's branch conflicts on
-merge, `foundry_stream_finish` aborts the merge, keeps the stream's branch
+merge, `kukulu_stream_finish` aborts the merge, keeps the stream's branch
 and worktree, and halts with the conflicting paths in the reason — Foundry
 cannot guess a merge. See [Parallel streams](#parallel-streams) for the
 recovery.
@@ -180,27 +180,27 @@ recovery.
 |---|---|---|
 | Controller stops immediately with `halt` | Read the `reason` — missing spec, or `halted` in state | Fix the named cause, re-run |
 | The controller session itself gets blocked from stopping | Should not happen after 0.3.0 (F-07) — the guard only considers a stop it can attribute to the implementer | Check `hooks/hooks.json`'s `SubagentStop` matcher is intact and that no project override replaced it; file it as a bug otherwise |
-| Implementer stops with tasks open mid-task | The guard blocked and the agent still stopped, or the per-task stall cap tripped | Check `foundry_status`'s `lockCounter` against the effective cap (`guardCap`, else `FOUNDRY_GUARD_CAP`, else 60); at the cap, something is genuinely wedged on one task — read its log and block it by hand |
+| Implementer stops with tasks open mid-task | The guard blocked and the agent still stopped, or the per-task stall cap tripped | Check `kukulu_status`'s `lockCounter` against the effective cap (`guardCap`, else `FOUNDRY_GUARD_CAP`, else 60); at the cap, something is genuinely wedged on one task — read its log and block it by hand |
 | Every task blocks with the same error | The plan assumes something that is not there | Stop the flight. Fix `SPEC.md`, re-plan; do not let it grind through 40 blocked tasks |
-| `foundry_task_done` keeps refusing | The implementer is not committing with `<ID>:` as the subject, or is leaving files uncommitted | The commit template lives in `CLAUDE.md`; check the planner wrote one |
-| `foundry_verify` fails on a clean checkout | The commands in `docs/foundry.json` are wrong | Fix them there — they came from `SPEC.md` §7, so fix that too |
+| `kukulu_task_done` keeps refusing | The implementer is not committing with `<ID>:` as the subject, or is leaving files uncommitted | The commit template lives in `CLAUDE.md`; check the planner wrote one |
+| `kukulu_verify` fails on a clean checkout | The commands in `docs/foundry.json` are wrong | Fix them there — they came from `SPEC.md` §7, so fix that too |
 | Run finishes but nothing was pushed | No `origin`, or the push failed | `push` in the handoff output says which; the branch is local and reviewable either way |
 | No draft PR | `gh` is not installed or not authenticated | Optional by design; open one yourself |
 | Reviewer approves work that is wrong | `CLAUDE.md` `## Constraints` are unverifiable | Tighten `SPEC.md` §3 so each rule is a grep, then re-plan |
 | Controller prints `FOUNDRY: RESTART REQUIRED` and stops | The agents directory was populated for the first time in this project, and a changed role routes to a model the `Agent` tool cannot name directly | Expected, and rare after 0.3.0 — only the first sync of a router-routed role hits this. Run `/kukulu:go-flight` again in a new session |
 | `Agent` call fails with `Agent type 'foundry-<role>' not found` | Same cause as above, hit mid-flight instead of at the start | Same fix: relaunch and re-run |
-| Flight stops immediately with a routing config error | The global file, a profile, or `docs/foundry.json`'s `roles`/`permissionMode` is malformed | Run `foundry_config_show` to see exactly what and where; fix it and re-run |
-| `foundry_run_start` refuses with a signing message | `policies.signing` is `"required"` and either signing is not configured or a real signed commit failed | Fix the signing agent, or set `policies.signing` to `"off"` in `docs/foundry.json` |
-| Flight halts with a reason naming a dead tool or agent | `foundry_run_halt` was called | Read the reason, fix the actual problem, clear `halted` in `.foundry/state.json`, re-run |
-| Flight halts with "non-converging" or "hard cap" in the reason | Review findings stopped shrinking for `maxRounds` rounds, or the round count reached `maxRoundsHard` | Read `foundry_status`'s `state.rounds` for the trail of counts; if the reviewer is genuinely still converging, raise `maxRounds`/`maxRoundsHard`; otherwise a human needs to look at why findings keep recurring |
-| `foundry_review_submit` refuses over the `Round:` line | `docs/REVIEW.md`'s `Round:` line is missing or does not equal `reviewRound` | The error names the expected value; `foundry_status`'s `reviewRound` always has it too |
-| `foundry_next` keeps handing out the same stream | A stream's implementer stops before `foundry_stream_finish` (the guard cap, a crash, a refused call) | Expected: `foundry_run_start({ stream })` resumes its worktree. If it never makes progress, read that stream's task log; see [Parallel streams](#parallel-streams) to abandon it |
-| A stream's tool call times out while another stream is verifying | Tool calls are handled one at a time, so it queued behind the other stream's longest command | Raise Claude Code's `MCP_TOOL_TIMEOUT` above `foundry_status`'s `longestCommandTimeoutMs`; see [Parallel streams](#parallel-streams) |
-| A wave ran serially though the plan declared streams | Its partition was invalid, its `parallel.setup` failed, or `parallel.maxStreams` is `1` | Read `foundry_status`'s `waves[].reason` and `.foundry/feedback.jsonl` for a `stream-partition`, `stream-setup` or `stream-exclusive` entry; it is a planning defect to fix in the next plan, not a stuck flight |
-| A verify or mutate command ran away (an infinite loop, endless output) | Before 0.4.0 this could hang the reviewer for the whole timeout, leave test processes spinning, or disconnect the MCP server | Nothing, now: the command's whole process group is killed at its timeout or at 64 MiB of output, and the result says `timedOut` or `outputLimitExceeded`. A reviewer who suspects a hanging mutant passes `timeoutMs` to `foundry_mutate` |
-| A step takes longer than the ten-minute limit on a foreground Bash call | Full benchmarks and heavy suites | Make it a `verify`/`extraVerify` command with its own `timeoutMs`, so it runs through `foundry_verify`, and raise `MCP_TOOL_TIMEOUT` above `foundry_status`'s `longestCommandTimeoutMs` |
+| Flight stops immediately with a routing config error | The global file, a profile, or `docs/foundry.json`'s `roles`/`permissionMode` is malformed | Run `kukulu_config_show` to see exactly what and where; fix it and re-run |
+| `kukulu_run_start` refuses with a signing message | `policies.signing` is `"required"` and either signing is not configured or a real signed commit failed | Fix the signing agent, or set `policies.signing` to `"off"` in `docs/foundry.json` |
+| Flight halts with a reason naming a dead tool or agent | `kukulu_run_halt` was called | Read the reason, fix the actual problem, clear `halted` in `.foundry/state.json`, re-run |
+| Flight halts with "non-converging" or "hard cap" in the reason | Review findings stopped shrinking for `maxRounds` rounds, or the round count reached `maxRoundsHard` | Read `kukulu_status`'s `state.rounds` for the trail of counts; if the reviewer is genuinely still converging, raise `maxRounds`/`maxRoundsHard`; otherwise a human needs to look at why findings keep recurring |
+| `kukulu_review_submit` refuses over the `Round:` line | `docs/REVIEW.md`'s `Round:` line is missing or does not equal `reviewRound` | The error names the expected value; `kukulu_status`'s `reviewRound` always has it too |
+| `kukulu_next` keeps handing out the same stream | A stream's implementer stops before `kukulu_stream_finish` (the guard cap, a crash, a refused call) | Expected: `kukulu_run_start({ stream })` resumes its worktree. If it never makes progress, read that stream's task log; see [Parallel streams](#parallel-streams) to abandon it |
+| A stream's tool call times out while another stream is verifying | Tool calls are handled one at a time, so it queued behind the other stream's longest command | Raise Claude Code's `MCP_TOOL_TIMEOUT` above `kukulu_status`'s `longestCommandTimeoutMs`; see [Parallel streams](#parallel-streams) |
+| A wave ran serially though the plan declared streams | Its partition was invalid, its `parallel.setup` failed, or `parallel.maxStreams` is `1` | Read `kukulu_status`'s `waves[].reason` and `.foundry/feedback.jsonl` for a `stream-partition`, `stream-setup` or `stream-exclusive` entry; it is a planning defect to fix in the next plan, not a stuck flight |
+| A verify or mutate command ran away (an infinite loop, endless output) | Before 0.4.0 this could hang the reviewer for the whole timeout, leave test processes spinning, or disconnect the MCP server | Nothing, now: the command's whole process group is killed at its timeout or at 64 MiB of output, and the result says `timedOut` or `outputLimitExceeded`. A reviewer who suspects a hanging mutant passes `timeoutMs` to `kukulu_mutate` |
+| A step takes longer than the ten-minute limit on a foreground Bash call | Full benchmarks and heavy suites | Make it a `verify`/`extraVerify` command with its own `timeoutMs`, so it runs through `kukulu_verify`, and raise `MCP_TOOL_TIMEOUT` above `kukulu_status`'s `longestCommandTimeoutMs` |
 | A project hook denies a `git commit` whose message only mentions a forbidden word | The hook scans the whole Bash command line, including the quoted message | The implement skill commits with `git commit -F <file>`; Foundry's own bookkeeping commits never pass through Bash |
-| A subagent's first `foundry_status` call is denied | The MCP allow rule is missing, or `foundry_agents_sync` reported `permissions: "failed: ..."` | Run `foundry_config_show` and check `permissionRule`; if a sync failed, the message names the broken `settings.local.json` — fix its JSON and re-run |
+| A subagent's first `kukulu_status` call is denied | The MCP allow rule is missing, or `kukulu_agents_sync` reported `permissions: "failed: ..."` | Run `kukulu_config_show` and check `permissionRule`; if a sync failed, the message names the broken `settings.local.json` — fix its JSON and re-run |
 
 ## Clearing a wedged run by hand
 
@@ -210,7 +210,7 @@ Nothing here is magic; it is all files.
 # stand the guard down (safe: the next run_start re-arms it)
 rm -f .foundry/implement.lock
 
-# put a blocked task (and what it skipped) back: use foundry_task_reopen,
+# put a blocked task (and what it skipped) back: use kukulu_task_reopen,
 # not an editor — see "Reopening a blocked task" above
 
 # mark a task blocked yourself, if a model cannot
@@ -235,7 +235,7 @@ one start cleanly.
 `/kukulu:go-flight` and the planner writes it for you. The slug names the
 flight's archive directory.
 
-**Archive it.** `foundry_flight_archive` moves a summarized flight into
+**Archive it.** `kukulu_flight_archive` moves a summarized flight into
 `docs/flights/<slug>/`: `PLAN.md`, `PROGRESS.md`, `HANDOFF.md`, `REVIEW.md`,
 `SUMMARY.md`, `foundry.json`, `.foundry/state.json` and
 `.foundry/feedback.jsonl`, each one that exists. It copies `docs/SPEC.md`
@@ -246,12 +246,12 @@ run is armed, the working tree is clean and the destination is free, and if
 its commit fails it puts every file back. By default the summarizer does not
 call it; set `policies.archive` to `true` (a ⚠️ ASSUMPTION, default `false`,
 until it has been proven in real flights) and the summarizer calls it after
-`foundry_summary_commit`. Or call it yourself.
+`kukulu_summary_commit`. Or call it yourself.
 
-**Edit the spec.** After an archive, `foundry_next` reports `done` ("flight
+**Edit the spec.** After an archive, `kukulu_next` reports `done` ("flight
 `<slug>` is archived in `docs/flights/<slug>`") for as long as `docs/SPEC.md`
 is byte-identical to the archived copy. Edit it for the next flight and
-`foundry_next` returns `plan` again.
+`kukulu_next` returns `plan` again.
 
 `CLAUDE.md` outlives a flight. The planner creates it under 150 lines, but
 for the next flight it adds or replaces one `## Flight <slug> notes` section
@@ -260,14 +260,14 @@ into the shared sections. `/kukulu:pull-feedback` reads
 `docs/flights/*/feedback.jsonl` as well as the live log, so friction from
 archived flights is not lost. And when a flight halts on a round cap, the
 halt message names the call that lifts it:
-`foundry_flight_options({ …, resume: true })` (see [Halts](#halts)).
+`kukulu_flight_options({ …, resume: true })` (see [Halts](#halts)).
 
 ## Signing
 
 `policies.signing` decides what Foundry does about commit signing:
 
 - `"auto"` (the default) signs when signing works and falls back when it does
-  not. At `foundry_run_start` it makes a real signed object to prove the
+  not. At `kukulu_run_start` it makes a real signed object to prove the
   agent answers. Later, every commit Foundry makes runs with no terminal
   prompt and a 30-second bound; if one fails to sign, the commit is retried
   once unsigned, local `commit.gpgsign` is set to `false`, and
@@ -281,7 +281,7 @@ halt message names the call that lifts it:
   tool wrote is restored, nothing stays staged), so the same call can be made
   again once the agent is back.
 
-At the end of a flight, `foundry_pr_finalize` looks at the commits
+At the end of a flight, `kukulu_pr_finalize` looks at the commits
 themselves, never at `state.signing`: every commit since the merge base with
 `baseBranch` is checked with `git log --format='%H %G?'`. `N` (none) and `B`
 (bad) are unsigned; anything else, `E` included, counts as signed, because a
@@ -296,16 +296,16 @@ machine without your public key still holds a signed commit.
 - **Any unsigned commit.** The PR stays a draft. `state.awaitingSigning`
   records the count, the oldest unsigned sha and when it began; one `signing`
   feedback entry is logged; an `## Awaiting signing` section is appended to
-  `SUMMARY.md`; the commit is `chore: awaiting signing`; and `foundry_next`
+  `SUMMARY.md`; the commit is `chore: awaiting signing`; and `kukulu_next`
   reports `done` with "awaiting signing: …" until it is resolved. The steps
   are, verbatim from the tool's `next` text: unlock the signing agent, then
   tell the flight controller to finalize with re-signing,
-  `foundry_pr_finalize({ resign: true })`; or by hand,
+  `kukulu_pr_finalize({ resign: true })`; or by hand,
   `git rebase -f --rebase-merges --gpg-sign <merge-base>`, then
-  `git push --force-with-lease`, then `foundry_pr_finalize({})`.
+  `git push --force-with-lease`, then `kukulu_pr_finalize({})`.
 
 Telling go-flight "signing is unlocked, finish it" is the one way the
-controller calls `foundry_pr_finalize({ resign: true })`; no agent ever passes
+controller calls `kukulu_pr_finalize({ resign: true })`; no agent ever passes
 `resign` on its own. A flight that finalizes cleanly leaves `chore: finalize
 flight` behind it, and re-enables the operator's own signing setting if a
 fallback had switched it off.
@@ -340,20 +340,20 @@ fallback had switched it off.
 | `branchPrefix` | `build/` | Prefix for run branches (`build/2026-09-18`, `-2`, …) |
 | `maxRounds` | `3` | Non-converging review rounds allowed before the flight halts; a round whose fix-task count did not shrink from the last one counts against this. Settable per flight with `/kukulu:go-flight max review rounds N` |
 | `maxRoundsHard` | `6` | Absolute review-round ceiling, regardless of convergence; a review numbered above it halts |
-| `commandTimeoutMs` | `600000` | Per-command timeout for `foundry_verify`, `foundry_mutate` and `parallel.setup`; a timeout kills the command's whole process group |
-| `guardCap` | `60` | Re-blocks since the last task state change before the implement guard gives up; carried into `.foundry/implement.lock` at `foundry_run_start` and wins over `FOUNDRY_GUARD_CAP` |
+| `commandTimeoutMs` | `600000` | Per-command timeout for `kukulu_verify`, `kukulu_mutate` and `parallel.setup`; a timeout kills the command's whole process group |
+| `guardCap` | `60` | Re-blocks since the last task state change before the implement guard gives up; carried into `.foundry/implement.lock` at `kukulu_run_start` and wins over `FOUNDRY_GUARD_CAP` |
 | `policies.signing` | `"auto"` | `"off"` disables commit signing for the run; `"required"` refuses to start unless a real signed commit succeeds; `"auto"` uses signing when it works and falls back to off, recording why, when it does not; this includes any later commit whose signing fails or exceeds 30 seconds, which is retried once unsigned and recorded in `state.signing` and `state.signingOverride` (under `"required"` that commit refuses instead) |
-| `policies.push` | `true` | `false` skips every push `foundry_run_start`, `foundry_run_finish`, `foundry_review_submit` and `foundry_summary_commit` would otherwise make |
-| `policies.pr` | `"draft"` | `"none"` skips draft-PR creation in `foundry_run_finish` even when `gh` is available |
-| `policies.archive` | `false` | ⚠️ ASSUMPTION. `true` makes the summarizer call `foundry_flight_archive` after the summary, moving the finished flight into `docs/flights/<flight>/` so the repository can run another. Off until it has been proven in real flights |
-| `policies.finalize` | `"auto"` | What `foundry_pr_finalize` does to a fully signed flight's draft pull request: `"auto"` marks it ready and, unless the flight is breaking, enables auto-merge; `"ready"` only marks it ready; `"draft"` leaves it alone |
-| `policies.mergeMethod` | `"merge"` | The method `foundry_pr_finalize` passes to `gh pr merge --auto`: `"merge"`, `"squash"` or `"rebase"`. Foundry never merges without `--auto` |
-| `flight` | absent | A slug (`^[a-z0-9][a-z0-9-]{0,39}$`) naming this flight; the default `slug` for `foundry_flight_archive` |
-| `policies.feedback` | `true` | `false` disables `foundry_feedback_log` (it returns `{ logged: false }` without writing) and every internal auto-log point |
+| `policies.push` | `true` | `false` skips every push `kukulu_run_start`, `kukulu_run_finish`, `kukulu_review_submit` and `kukulu_summary_commit` would otherwise make |
+| `policies.pr` | `"draft"` | `"none"` skips draft-PR creation in `kukulu_run_finish` even when `gh` is available |
+| `policies.archive` | `false` | ⚠️ ASSUMPTION. `true` makes the summarizer call `kukulu_flight_archive` after the summary, moving the finished flight into `docs/flights/<flight>/` so the repository can run another. Off until it has been proven in real flights |
+| `policies.finalize` | `"auto"` | What `kukulu_pr_finalize` does to a fully signed flight's draft pull request: `"auto"` marks it ready and, unless the flight is breaking, enables auto-merge; `"ready"` only marks it ready; `"draft"` leaves it alone |
+| `policies.mergeMethod` | `"merge"` | The method `kukulu_pr_finalize` passes to `gh pr merge --auto`: `"merge"`, `"squash"` or `"rebase"`. Foundry never merges without `--auto` |
+| `flight` | absent | A slug (`^[a-z0-9][a-z0-9-]{0,39}$`) naming this flight; the default `slug` for `kukulu_flight_archive` |
+| `policies.feedback` | `true` | `false` disables `kukulu_feedback_log` (it returns `{ logged: false }` without writing) and every internal auto-log point |
 | `parallel.maxStreams` | `3` | The most streams of one wave handed to implementers at once; `1` runs every wave serially, silently |
 | `parallel.setup` | `[]` | Commands (same entries as `verify`) run once in each newly created stream worktree, before its implementer starts — the dependency install a fresh checkout needs (`npm ci`, `composer install`) |
-| `mutation.targeted` | `{}` | Name → `{ cmd, timeoutMs }`: a test command with exactly one `{filter}` slot that `foundry_mutate` can run instead of the whole verify set, e.g. `{ "php": { "cmd": "vendor/bin/phpunit --filter {filter}" } }`. The reviewer passes `targeted` and `filter`; the filter is limited to letters, digits and `_ . : / -` and is substituted as one single-quoted word. `timeoutMs` defaults to `commandTimeoutMs` |
-| `constraints` | `[]` | `CLAUDE.md` rules expressed as data and checked by `foundry_verify` — see [Constraints](#constraints) below |
+| `mutation.targeted` | `{}` | Name → `{ cmd, timeoutMs }`: a test command with exactly one `{filter}` slot that `kukulu_mutate` can run instead of the whole verify set, e.g. `{ "php": { "cmd": "vendor/bin/phpunit --filter {filter}" } }`. The reviewer passes `targeted` and `filter`; the filter is limited to letters, digits and `_ . : / -` and is substituted as one single-quoted word. `timeoutMs` defaults to `commandTimeoutMs` |
+| `constraints` | `[]` | `CLAUDE.md` rules expressed as data and checked by `kukulu_verify` — see [Constraints](#constraints) below |
 
 Environment variables:
 
@@ -443,7 +443,7 @@ check works:
 | `shouldNotMatch` | yes, ≥ 1 | Lines it must not |
 | `from` | no | A task id such as `P1-03`. The rule stays inactive (reported `inactive: "until P1-03"`, no scan) while that task is todo, blocked or skipped, and applies once it is in progress or done, or once no task is open. Its fixtures are self-tested either way. Use it for a rule that only becomes true when a task has run |
 
-`foundry_verify` runs constraints before any shell command, always against
+`kukulu_verify` runs constraints before any shell command, always against
 the whole repo regardless of the `files` argument: first it self-tests every
 rule against its own `shouldMatch`/`shouldNotMatch` fixtures — a fixture
 that disagrees fails the rule outright, with `fixture` in the result naming
@@ -454,7 +454,7 @@ each hit as `{ file, line, text }`. A new file the implementer has not
 committed yet is scanned, so a regression cannot slip past a verify run
 made before its commit; a gitignored file, or one that was already
 untracked when the run started (`preexistingUntracked`), never is.
-`foundry_run_finish` runs the same scan over the whole tree at handoff and
+`kukulu_run_finish` runs the same scan over the whole tree at handoff and
 reports it as `constraints: { ok, failing }` (and in its ready line),
 without refusing the handoff, so the reviewer starts from it. A malformed rule (missing `id`/`paths`/`pattern`,
 no fixtures, an unparseable `pattern`, a duplicate `id`) refuses the whole
@@ -473,10 +473,10 @@ task closes the blind spot by adding the missed shape to `shouldMatch`.
 
 Which model runs each role, and where that comes from, is
 [docs/routing.md](./routing.md)'s subject in full. The short version for
-unattended use: `/kukulu:go-flight` calls `foundry_agents_sync` before its
+unattended use: `/kukulu:go-flight` calls `kukulu_agents_sync` before its
 loop. Claude Code hot-reloads a routing change to an already-populated
 `.claude/agents/` directory within seconds, so most edits need no restart at
-all — `foundry_next` falls back to the plugin's own agent with the resolved
+all — `kukulu_next` falls back to the plugin's own agent with the resolved
 model until the change is picked up. Only a project's very first sync, and
 only for a role routed to a model the `Agent` tool cannot name directly,
 prints `FOUNDRY: RESTART REQUIRED` and stops. A plain re-run picks up where
@@ -490,7 +490,7 @@ case "$out" in
 esac
 ```
 
-`foundry_config_show` prints the merged config and the source of every
+`kukulu_config_show` prints the merged config and the source of every
 value; run it whenever the resolved model for a role is not what you
 expected.
 
@@ -514,11 +514,11 @@ main checkout; any task that triggers one is kept out of waves, and an
 exclusive command in `verify` itself makes every wave serial.
 
 **The tool-call timeout.** The server handles one tool call at a time, so
-while one stream's `foundry_verify` runs a long suite, a sibling stream's
-`foundry_task_done` waits behind it — for up to that suite's timeout. Claude
+while one stream's `kukulu_verify` runs a long suite, a sibling stream's
+`kukulu_task_done` waits behind it — for up to that suite's timeout. Claude
 Code's MCP tool-call timeout (the `MCP_TOOL_TIMEOUT` environment variable)
 must therefore exceed the longest command timeout plus headroom, or the
-waiting call fails on the client side. `foundry_status` reports
+waiting call fails on the client side. `kukulu_status` reports
 `longestCommandTimeoutMs` (across `verify`, `extraVerify` and
 `parallel.setup`) to compare against. Verification is serialized on purpose:
 suites often share ports, containers or databases, and most of a stream's
@@ -530,15 +530,15 @@ log one feedback entry — `stream-partition`, `stream-setup` or
 `stream-exclusive` — in `.foundry/feedback.jsonl`. Pull it back with
 `/kukulu:pull-feedback`: it is material for the next plan.
 
-**A stream that stopped early.** The next `foundry_next` hands it out again;
-`foundry_run_start({ stream })` resumes its worktree and `foundry_task_next`
+**A stream that stopped early.** The next `kukulu_next` hands it out again;
+`kukulu_run_start({ stream })` resumes its worktree and `kukulu_task_next`
 resumes its in-progress task. Look at what is in flight with:
 
 ```bash
 git worktree list
 ls .foundry/worktrees/
 # per-wave, per-stream open counts:
-#   foundry_status -> waves
+#   kukulu_status -> waves
 ```
 
 **Recovering from a `stream-merge` halt.** The halt reason names the stream,
@@ -577,12 +577,12 @@ A `build/<date>` branch containing:
 - `docs/HANDOFF.md`, `docs/REVIEW.md` and `docs/SUMMARY.md` at the tip
 - a draft PR, if `gh` was available and `policies.pr` is not `"none"`
 - `chore: finalize flight` or `chore: awaiting signing`, from
-  `foundry_pr_finalize`, and `chore: archive flight <slug>` when the flight
+  `kukulu_pr_finalize`, and `chore: archive flight <slug>` when the flight
   was archived
 
 When there is an `origin`, every one of those commits is pushed as it lands —
-`foundry_run_finish`, `foundry_review_submit` and `foundry_summary_commit`
-all push (unless `policies.push` is `false`) — and `foundry_run_start`
+`kukulu_run_finish`, `kukulu_review_submit` and `kukulu_summary_commit`
+all push (unless `policies.push` is `false`) — and `kukulu_run_start`
 pushes the base branch itself before the first build branch is cut, so the
 base branch on the remote carries the planner's commits too and a PR's diff
 is the build, not the plan (F-18).
@@ -592,7 +592,7 @@ built, what was decided and by whom, which assumptions are still guesses, which
 spec issues need your edit, and what you still have to check by hand.
 
 Then look at the pull request. Foundry never merges synchronously: it never
-runs `gh pr merge` without `--auto`. At most, `foundry_pr_finalize` asks
+runs `gh pr merge` without `--auto`. At most, `kukulu_pr_finalize` asks
 GitHub to merge a signed, non-breaking flight's PR once CI is green
 (`policies.finalize: "auto"`), and GitHub does that, not Foundry. A breaking
 flight, or one with an unsigned commit, is yours to merge.
