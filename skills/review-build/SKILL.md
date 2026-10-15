@@ -1,6 +1,6 @@
 ---
 name: review-build
-description: "Foundry pipeline stage — review the completed build branch against SPEC and PLAN, then approve or queue fix tasks for implement. Invoked by go-flight through the foundry-reviewer agent; not for ordinary work."
+description: "Foundry pipeline stage — review the completed build branch against SPEC and PLAN, then approve or queue fix tasks for implement. Invoked by go-flight through the kukulu-reviewer agent; not for ordinary work."
 model: inherit
 ---
 

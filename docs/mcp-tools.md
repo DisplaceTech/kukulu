@@ -71,7 +71,7 @@ context.
 | `strayArtifacts` | The artifacts that are `"untracked"` while `PLAN.md` is `"absent"`: what an interrupted plan run leaves behind. `[]` otherwise |
 | `lastReviewCommit` | Short sha of the newest `review:` commit between `baseBranch` and `HEAD`; `null` when there is none |
 | `reviewVerdictInFile` | The verdict parsed out of `REVIEW.md`, if one exists |
-| `agentsGenerated` | Role names whose `.claude/agents/foundry-<role>.md` currently exists |
+| `agentsGenerated` | Role names whose `.claude/agents/kukulu-<role>.md` currently exists |
 | `agentsGeneratedThisSession` | Role names this MCP server process itself wrote — diagnostic only, for understanding why `kukulu_next` reported `agentFallback` |
 
 **Refuses when:** `PROGRESS.md` exists but has no `## Tasks` section,
@@ -94,7 +94,7 @@ model, agentModel, agentModelExact, round, reviewRound, reason, prompt,
 streams? }`.
 
 - `stage` — `plan` · `implement` · `review` · `summarize` · `done` · `halt`
-- `agent` — the subagent to spawn: the generated `foundry-<role>` name when
+- `agent` — the subagent to spawn: the generated `kukulu-<role>` name when
   it can be trusted to spawn (`agentFallback` is false), else the plugin's
   own `kukulu:planner` / `kukulu:implementer` / `kukulu:reviewer` /
   `kukulu:summarizer`; `null` for `done`, `halt`, and whenever
@@ -954,7 +954,7 @@ not a draft. `merge` is `"enabled"`, `"skipped: breaking"`, `"skipped: policy"`,
 
 ## `kukulu_agents_sync`
 
-Generate `.claude/agents/foundry-<role>.md` for each of the four roles from
+Generate `.claude/agents/kukulu-<role>.md` for each of the four roles from
 the merged routing config. This is what `/kukulu:go-flight` calls, once,
 before its loop; see [routing.md](./routing.md) for the full precedence.
 
@@ -977,7 +977,7 @@ before its loop; see [routing.md](./routing.md) for the full precedence.
    `settings.local.json` that exists but fails to parse is never
    overwritten. See [operations.md](./operations.md#running-a-flight) for
    why this rule matters.
-4. In a git repository, ensures both `.claude/agents/foundry-*.md` and
+4. In a git repository, ensures both `.claude/agents/kukulu-*.md` and
    `.claude/settings.local.json` are present in `.git/info/exclude` (not
    `.gitignore` — both encode a person's own machine, not the project, and
    this way needs no commit). Outside a git repository, this step is

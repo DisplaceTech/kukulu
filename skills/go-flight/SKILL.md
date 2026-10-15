@@ -64,7 +64,7 @@ transcript shows which model runs each role.
   "restart"`, and "agent definitions were (re)generated before the loop
   started", then print exactly this line and stop:
 
-  `FOUNDRY: RESTART REQUIRED — agent definitions were (re)generated; start a new session and run /kukulu:go-flight again.`
+  `KUKULU: RESTART REQUIRED — agent definitions were (re)generated; start a new session and run /kukulu:go-flight again.`
 
 - Otherwise continue to the loop, whether or not `changed` is empty. A
   changed role whose model is an Anthropic alias needs no restart:
@@ -87,13 +87,13 @@ as event-driven, not as a blocking call you sit inside:
 3. If `restartRequired` is true: call `kukulu_feedback_log` with `stage:
    "controller"`, `category: "restart"`, and "a stage mid-flight routed to a
    model the Agent tool cannot reach without a restart", then print the
-   `FOUNDRY: RESTART REQUIRED` line above and stop — the routed model for
+   `KUKULU: RESTART REQUIRED` line above and stop — the routed model for
    this stage cannot be reached without a session that has already loaded
    its generated agent.
 4. Otherwise call the `Agent` tool with:
    - `subagent_type`: the `agent` value, exactly as returned — one of
-     `foundry-planner`, `foundry-implementer`, `foundry-reviewer`,
-     `foundry-summarizer` once agents are generated, else `kukulu:planner`,
+     `kukulu-planner`, `kukulu-implementer`, `kukulu-reviewer`,
+     `kukulu-summarizer` once agents are generated, else `kukulu:planner`,
      `kukulu:implementer`, `kukulu:reviewer`, `kukulu:summarizer`
    - `model`: the `agentModel` value — never `model`, which may be a full
      `claude-*` id the `Agent` tool rejects — but **only** when
@@ -106,7 +106,7 @@ as event-driven, not as a blocking call you sit inside:
    `agent` already names the plugin's own agent: the generated agents
    directory was created in this session, and Claude Code loads a new
    agents directory only in the next one. That is expected, not friction:
-   do not log it, and do not try the `foundry-<role>` name first. The next
+   do not log it, and do not try the `kukulu-<role>` name first. The next
    flight, in a new session, uses the generated agents.
 
    When `agentFallback` is true and `agentModelExact` is false, print one
@@ -138,10 +138,10 @@ Never call `kukulu_next` again while any stream of the previous result is
 still running.
 
 If the `Agent` call in step 4 fails with an "agent type ... not found" error
-for a `foundry-<role>` name, retry once with `subagent_type: fallbackAgent`
+for a `kukulu-<role>` name, retry once with `subagent_type: fallbackAgent`
 and `model: agentModel` (omitted when null). If that also fails, call `kukulu_feedback_log` with
 `stage: "controller"`, `category: "restart"`, and "the fallback agent name
-also failed to spawn", then print the `FOUNDRY: RESTART REQUIRED` line
+also failed to spawn", then print the `KUKULU: RESTART REQUIRED` line
 above and stop. For any other failure spawning a stage, call
 `kukulu_run_halt` with a one-sentence reason (e.g. "Agent spawn failed:
 <error>"), so the next `/kukulu:go-flight` sees a clean `halt` instead of

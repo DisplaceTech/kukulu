@@ -486,7 +486,7 @@ export function writeGlobalConfig(dir, obj) {
 export function runGuard(repo, input = {}, env = {}) {
   const payload = JSON.stringify({
     hook_event_name: "SubagentStop",
-    agent_type: "foundry-implementer",
+    agent_type: "kukulu-implementer",
     transcript_path: path.join(repo, ".foundry-test-transcript.jsonl"),
     cwd: repo,
     ...input,

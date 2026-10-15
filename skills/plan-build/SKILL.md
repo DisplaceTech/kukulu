@@ -1,6 +1,6 @@
 ---
 name: plan-build
-description: "Foundry pipeline stage — derive docs/PLAN.md, docs/PROGRESS.md, docs/foundry.json and CLAUDE.md from docs/SPEC.md (run once, before implement). Invoked by go-flight through the foundry-planner agent; not for ordinary work."
+description: "Foundry pipeline stage — derive docs/PLAN.md, docs/PROGRESS.md, docs/foundry.json and CLAUDE.md from docs/SPEC.md (run once, before implement). Invoked by go-flight through the kukulu-planner agent; not for ordinary work."
 model: inherit
 ---
 

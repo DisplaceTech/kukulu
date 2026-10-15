@@ -1,6 +1,6 @@
 ---
 name: summarize
-description: "Foundry pipeline stage — compose the summary after an APPROVED review and commit it through kukulu_summary_commit: what was built, what was decided, what a human still owes. Invoked by go-flight through the foundry-summarizer agent; not for ordinary work."
+description: "Foundry pipeline stage — compose the summary after an APPROVED review and commit it through kukulu_summary_commit: what was built, what was decided, what a human still owes. Invoked by go-flight through the kukulu-summarizer agent; not for ordinary work."
 model: inherit
 ---
 

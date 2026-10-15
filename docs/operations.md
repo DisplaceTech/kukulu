@@ -41,7 +41,7 @@ map, it prints as `ignored flight option: …` and carries on. It never asks.
 
 On a project's first flight, every stage runs on the plugin's own
 `kukulu:<role>` agent, with the routed model passed as an alias. The
-generated `foundry-<role>` agents land in a `.claude/agents` directory this
+generated `kukulu-<role>` agents land in a `.claude/agents` directory this
 session created, and Claude Code loads a new agents directory only in the
 next session. `kukulu_next` names the plugin agent outright, so this is
 quiet. One difference matters: plugin agents ignore `permissionMode`, so the
@@ -52,7 +52,7 @@ the second flight on, the generated agents carry the routed `effort` and
 `permissionMode` themselves.
 
 An implementer that hits a permission prompt sits there until the guard's cap
-trips, hours later, having done nothing. The generated `foundry-<role>`
+trips, hours later, having done nothing. The generated `kukulu-<role>`
 agents carry `permissionMode: acceptEdits`, which covers file edits.
 
 MCP tool calls need one allow rule, since a subagent's permission mode does
@@ -187,8 +187,8 @@ recovery.
 | Run finishes but nothing was pushed | No `origin`, or the push failed | `push` in the handoff output says which; the branch is local and reviewable either way |
 | No draft PR | `gh` is not installed or not authenticated | Optional by design; open one yourself |
 | Reviewer approves work that is wrong | `CLAUDE.md` `## Constraints` are unverifiable | Tighten `SPEC.md` §3 so each rule is a grep, then re-plan |
-| Controller prints `FOUNDRY: RESTART REQUIRED` and stops | The agents directory was populated for the first time in this project, and a changed role routes to a model the `Agent` tool cannot name directly | Expected, and rare after 0.3.0 — only the first sync of a router-routed role hits this. Run `/kukulu:go-flight` again in a new session |
-| `Agent` call fails with `Agent type 'foundry-<role>' not found` | Same cause as above, hit mid-flight instead of at the start | Same fix: relaunch and re-run |
+| Controller prints `KUKULU: RESTART REQUIRED` and stops | The agents directory was populated for the first time in this project, and a changed role routes to a model the `Agent` tool cannot name directly | Expected, and rare after 0.3.0 — only the first sync of a router-routed role hits this. Run `/kukulu:go-flight` again in a new session |
+| `Agent` call fails with `Agent type 'kukulu-<role>' not found` | Same cause as above, hit mid-flight instead of at the start | Same fix: relaunch and re-run |
 | Flight stops immediately with a routing config error | The global file, a profile, or `docs/foundry.json`'s `roles`/`permissionMode` is malformed | Run `kukulu_config_show` to see exactly what and where; fix it and re-run |
 | `kukulu_run_start` refuses with a signing message | `policies.signing` is `"required"` and either signing is not configured or a real signed commit failed | Fix the signing agent, or set `policies.signing` to `"off"` in `docs/foundry.json` |
 | Flight halts with a reason naming a dead tool or agent | `kukulu_run_halt` was called | Read the reason, fix the actual problem, clear `halted` in `.foundry/state.json`, re-run |
@@ -479,14 +479,14 @@ loop. Claude Code hot-reloads a routing change to an already-populated
 all — `kukulu_next` falls back to the plugin's own agent with the resolved
 model until the change is picked up. Only a project's very first sync, and
 only for a role routed to a model the `Agent` tool cannot name directly,
-prints `FOUNDRY: RESTART REQUIRED` and stops. A plain re-run picks up where
+prints `KUKULU: RESTART REQUIRED` and stops. A plain re-run picks up where
 it left off. To make a headless launcher handle that restart itself:
 
 ```bash
 out=$(claude -p "/kukulu:go-flight")
 printf '%s\n' "$out"
 case "$out" in
-  *"FOUNDRY: RESTART REQUIRED"*) claude -p "/kukulu:go-flight" ;;
+  *"KUKULU: RESTART REQUIRED"*) claude -p "/kukulu:go-flight" ;;
 esac
 ```
 

@@ -245,7 +245,7 @@ sequenceDiagram
     participant DISK as PROGRESS.md + lock
 
     IMP->>IMP: tries to stop and report progress
-    IMP->>HOOK: SubagentStop (agent_type: foundry-implementer)
+    IMP->>HOOK: SubagentStop (agent_type: kukulu-implementer)
     HOOK->>DISK: lock present? open tasks?
     DISK-->>HOOK: yes, 7 open
     HOOK-->>IMP: block — "next: P2-03, call kukulu_task_next"
@@ -435,7 +435,7 @@ fix task is a task, and it goes through the same test-first loop as any other.
 | `.foundry/mutation.json` | no (`.git/info/exclude`) | present only while `kukulu_mutate` has a file mutated: `{ file, at, original }`, so a crash can be repaired by the next call |
 | `docs/PROGRESS.md` | yes | task checkboxes and the per-task log |
 | `docs/foundry.json` | yes | `verify`, `extraVerify`, `build`, `baseBranch`, `branchPrefix`, `maxRounds`, `commandTimeoutMs`, `roles`, `permissionMode` |
-| `.claude/agents/foundry-*.md` | no (`.git/info/exclude`) | the generated per-role agents; see [routing.md](./routing.md) |
+| `.claude/agents/kukulu-*.md` | no (`.git/info/exclude`) | the generated per-role agents; see [routing.md](./routing.md) |
 | `~/.config/foundry/config.json` | n/a (outside the project) | the global routing config, its profiles |
 
 A corrupt `state.json` degrades to defaults rather than failing — the tasks on

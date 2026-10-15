@@ -1,6 +1,6 @@
 ---
 name: implement
-description: "Foundry pipeline stage — work through every open task in docs/PROGRESS.md unattended, then hand off for review-build. Invoked by go-flight through the foundry-implementer agent; not for ordinary work."
+description: "Foundry pipeline stage — work through every open task in docs/PROGRESS.md unattended, then hand off for review-build. Invoked by go-flight through the kukulu-implementer agent; not for ordinary work."
 model: inherit
 ---
 

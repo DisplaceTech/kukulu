@@ -671,7 +671,7 @@ const feedbackOf = (repo) => (hasFile(repo, ".foundry/feedback.jsonl") ? readFil
   const repo = plannedRepo({ tasks: WAVE_PLAN });
   await withServer(repo, async ({ call }) => {
     await call("kukulu_run_start");
-    const stopInput = { hook_event_name: "SubagentStop", agent_type: "foundry-implementer", cwd: repo };
+    const stopInput = { hook_event_name: "SubagentStop", agent_type: "kukulu-implementer", cwd: repo };
     for (const [id, file] of [["P0-01", "package.json"], ["P0-02", "docs/notes.md"]]) {
       const t = await call("kukulu_task_next");
       eq(t.id, id, `the serial implementer gets ${id}`);

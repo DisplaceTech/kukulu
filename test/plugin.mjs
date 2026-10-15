@@ -75,7 +75,8 @@ for (const [event, entries] of Object.entries(hooks.hooks)) {
 }
 // SubagentStop is scoped to the implementer at the hook-registration level
 // (F-07): the harness never even runs the guard for any other subagent.
-like(hooks.hooks.SubagentStop[0].matcher, /foundry.implementer/, "SubagentStop's matcher names the implementer");
+like(hooks.hooks.SubagentStop[0].matcher, /kukulu.implementer/, "SubagentStop's matcher names the implementer");
+like(hooks.hooks.SubagentStop[0].matcher, /foundry.implementer/, "...and still names the pre-0.6.0 implementer, until 0.7.0");
 ok(!hooks.hooks.Stop[0].matcher, "Stop carries no matcher — a Stop event has no agent to match against");
 
 // ---------------------------------------------------------------- agents and skills
@@ -109,7 +110,7 @@ for (const name of skillNames.filter((n) => n !== "pull-feedback")) {
     ok(MODELS.includes(fm.model), `skills/${name} pins a known model (${fm.model})`);
     ok(EFFORTS.includes(fm.effort), `skills/${name} pins an effort level (${fm.effort})`);
   } else {
-    // The four stage skills are preloaded into their foundry-<role> agent, and
+    // The four stage skills are preloaded into their kukulu-<role> agent, and
     // disable-model-invocation also blocks preloading — so a stage skill must
     // never set it. Model and effort belong solely to the agent that routing
     // generates; the skill inherits whatever the agent is running as.

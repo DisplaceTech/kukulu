@@ -32,7 +32,7 @@ function guard(repo, { input = {}, projectDir = repo, cap = null } = {}) {
 /** A SubagentStop from the implementer — the input shape most tests use. */
 const implementerStop = (repo, extra = {}) => ({
   hook_event_name: "SubagentStop",
-  agent_type: "foundry-implementer",
+  agent_type: "kukulu-implementer",
   transcript_path: TRANSCRIPT(repo),
   ...extra,
 });
@@ -82,7 +82,7 @@ eq(
   const repo = armed();
   const out = guard(repo, { input: implementerStop(repo) });
   const j = JSON.parse(out);
-  eq(j.decision, "block", "a SubagentStop naming foundry-implementer blocks");
+  eq(j.decision, "block", "a SubagentStop naming kukulu-implementer blocks");
   eq(readFile(repo, ".foundry/implement.lock").trim(), "1", "the lock counts the re-block");
 }
 
@@ -90,6 +90,14 @@ eq(
   const repo = armed();
   const j = JSON.parse(guard(repo, { input: implementerStop(repo, { agent_type: "kukulu:implementer" }) }));
   eq(j.decision, "block", "the plugin-agent name kukulu:implementer also blocks");
+}
+
+// Agents generated before the rename are still named foundry-<role>; the guard
+// keeps blocking them until the 0.7.0 cleanup.
+for (const legacy of ["foundry-implementer", "foundry:implementer"]) {
+  const repo = armed();
+  const j = JSON.parse(guard(repo, { input: implementerStop(repo, { agent_type: legacy }) }));
+  eq(j.decision, "block", `the pre-rename agent name ${legacy} still blocks`);
 }
 
 {
@@ -148,7 +156,7 @@ eq(
     [
       toolUseLine("mcp__plugin_kukulu_kukulu__kukulu_next"),
       JSON.stringify({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_1", content: JSON.stringify({ stage: "implement", prompt }) }] } }),
-      toolUseLine("Agent", { subagent_type: "foundry-implementer", prompt }),
+      toolUseLine("Agent", { subagent_type: "kukulu-implementer", prompt }),
     ].join("\n") + "\n",
   );
   eq(guard(repo, { input: { hook_event_name: "Stop", transcript_path: TRANSCRIPT(repo) } }), "", "a controller transcript that only mentions kukulu_run_start is allowed (F-01)");
@@ -329,7 +337,7 @@ eq(
 
 {
   const repo = armed();
-  const input = { hook_event_name: "SubagentStop", agent_type: "foundry-implementer", cwd: repo };
+  const input = { hook_event_name: "SubagentStop", agent_type: "kukulu-implementer", cwd: repo };
   const j = JSON.parse(guard(repo, { input, projectDir: null }));
   eq(j.decision, "block", "with no CLAUDE_PROJECT_DIR, the input's own cwd is used next");
 }
@@ -354,7 +362,7 @@ const STREAM_TASKS = [
 const withStreamTasks = (states = {}) => STREAM_TASKS.map((t) => ({ ...t, state: states[t.id] || t.state }));
 const subagentStop = (repo, calls, extra = {}) => {
   writeFile(repo, "transcript.jsonl", calls.map((input) => toolUseLine(RUN_START, input)).join("\n") + "\n");
-  return { hook_event_name: "SubagentStop", agent_type: "foundry-implementer", agent_transcript_path: TRANSCRIPT(repo), transcript_path: path.join(repo, "parent.jsonl"), ...extra };
+  return { hook_event_name: "SubagentStop", agent_type: "kukulu-implementer", agent_transcript_path: TRANSCRIPT(repo), transcript_path: path.join(repo, "parent.jsonl"), ...extra };
 };
 
 {
@@ -390,7 +398,7 @@ const subagentStop = (repo, calls, extra = {}) => {
 {
   // The stream cannot be determined: no run_start call in the transcript.
   const repo = armed(withStreamTasks());
-  const noCall = { hook_event_name: "SubagentStop", agent_type: "foundry-implementer", transcript_path: TRANSCRIPT(repo) };
+  const noCall = { hook_event_name: "SubagentStop", agent_type: "kukulu-implementer", transcript_path: TRANSCRIPT(repo) };
   writeFile(repo, "transcript.jsonl", `${toolUseLine("Bash", { command: "ls" })}\n`);
   eq(JSON.parse(guard(repo, { input: noCall })).decision, "block", "with no run_start call and no stream worktrees, the serial rule applies unchanged");
   fs.mkdirSync(path.join(repo, ".foundry", "worktrees", "api"), { recursive: true });
@@ -420,7 +428,7 @@ const subagentStop = (repo, calls, extra = {}) => {
   fs.mkdirSync(path.join(repo, ".foundry", "worktrees", "api"), { recursive: true });
   const inline = (stream) => toolUseLine(RUN_START, { stream }, { isSidechain: true });
   writeFile(repo, "parent.jsonl", `${inline("api")}\n${inline("ui")}\n`);
-  const input = { hook_event_name: "SubagentStop", agent_type: "foundry-implementer", transcript_path: path.join(repo, "parent.jsonl") };
+  const input = { hook_event_name: "SubagentStop", agent_type: "kukulu-implementer", transcript_path: path.join(repo, "parent.jsonl") };
   eq(guard(repo, { input }), "", "with no agent_transcript_path, a sibling's call in the parent transcript is never attributed: allowed while a wave is in flight");
   eq(readFile(repo, ".foundry/implement.lock").trim(), "0", "...and nothing is counted");
 }

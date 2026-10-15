@@ -17,8 +17,9 @@
 //
 //   1. No lock, or no open tasks: allow. Nothing to guard.
 //   2. `hook_event_name` is `SubagentStop`: block only when `agent_type`
-//      names the implementer (`foundry-implementer` or
-//      `kukulu:implementer`). Any other named agent is allowed outright.
+//      names the implementer (`kukulu-implementer` or
+//      `kukulu:implementer`, or the pre-0.6.0 `foundry-implementer` and
+//      `foundry:implementer` until 0.7.0). Any other named agent is allowed outright.
 //      A missing `agent_type` falls back to rule 3's transcript check.
 //   3. `hook_event_name` is `Stop`: block only when *this session's own
 //      transcript* holds a `tool_use` of `kukulu_run_start` — i.e. the
@@ -65,7 +66,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-const IMPLEMENTER_AGENT_TYPES = new Set(["foundry-implementer", "foundry:implementer", "kukulu:implementer"]);
+const IMPLEMENTER_AGENT_TYPES = new Set(["kukulu-implementer", "kukulu:implementer", "foundry-implementer", "foundry:implementer"]);
 
 function readStdin() {
   try {
@@ -265,15 +266,15 @@ function main() {
     const stuckOn = scope.stalled ? ` stuck on ${scope.stalled}` : "";
     const recover = "block it by hand with kukulu_task_block, or resume the flight and it will pick up where it stalled";
     process.stdout.write(
-      `${JSON.stringify({ systemMessage: `foundry: implement guard cap (${cap}) reached with ${scope.open} open tasks${scope.label}${stuckOn}; run halted — ${recover}` })}\n`,
+      `${JSON.stringify({ systemMessage: `kukulu: implement guard cap (${cap}) reached with ${scope.open} open tasks${scope.label}${stuckOn}; run halted — ${recover}` })}\n`,
     );
     return;
   }
 
   const reason = stream
-    ? `foundry: stream '${stream}' is not finished — ${scope.open} task(s) of its still open in docs/PROGRESS.md (next: ${scope.next}). ` +
+    ? `kukulu: stream '${stream}' is not finished — ${scope.open} task(s) of its still open in docs/PROGRESS.md (next: ${scope.next}). ` +
       `Do not stop. Call kukulu_task_next with stream: "${stream}" and continue; call kukulu_stream_finish only when it reports done.`
-    : `foundry: implementation run is not finished — ${scope.open} task(s) still open in docs/PROGRESS.md (next: ${scope.next}). ` +
+    : `kukulu: implementation run is not finished — ${scope.open} task(s) still open in docs/PROGRESS.md (next: ${scope.next}). ` +
       "Do not stop. Call kukulu_task_next and continue; call kukulu_run_finish only when kukulu_status reports zero open tasks.";
   process.stdout.write(`${JSON.stringify({ decision: "block", reason })}\n`);
 }

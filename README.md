@@ -33,7 +33,7 @@ You need Node ≥ 22, git, and Claude Code. Nothing to `npm install`.
    prompt for (see [Per-project use](#per-project-use)). On the default,
    Anthropic-only routing this goes straight through to a reviewed
    `build/<date>` branch; only a role routed off-platform before that first
-   sync stops with `FOUNDRY: RESTART REQUIRED` — run it again in a new
+   sync stops with `KUKULU: RESTART REQUIRED` — run it again in a new
    session and it continues.
 
    ```bash
@@ -210,7 +210,7 @@ An unattended implementer that hits a permission prompt sits there until the
 guard's cap trips, so two kinds of prompt have to be dealt with up front, and
 they are handled differently:
 
-- **File edits.** The generated `foundry-<role>` agents carry
+- **File edits.** The generated `kukulu-<role>` agents carry
   `permissionMode: acceptEdits`, which plugin-shipped agents cannot. Once
   they exist, the implementer's edits never prompt and `--permission-mode
   acceptEdits` on launch is no longer needed.
@@ -229,12 +229,12 @@ they are handled differently:
 The first run in a project generates the agents. Claude Code hot-reloads a
 later routing edit to that directory within seconds, so only that first
 sync — and only when a role is routed to a model the `Agent` tool cannot
-name directly — prints `FOUNDRY: RESTART REQUIRED` and stops; run the
+name directly — prints `KUKULU: RESTART REQUIRED` and stops; run the
 command again in a new session and it continues. Every Anthropic-routed
 role needs no restart at all, ever. See [docs/routing.md](./docs/routing.md).
 
-Each stage also runs by hand by delegating to its agent — `foundry-planner`,
-`foundry-implementer`, `foundry-reviewer`, `foundry-summarizer` once
+Each stage also runs by hand by delegating to its agent — `kukulu-planner`,
+`kukulu-implementer`, `kukulu-reviewer`, `kukulu-summarizer` once
 generated, else `kukulu:planner` and so on — which keeps the same model and
 effort the flight controller would have used. Invoking `/kukulu:plan-build`,
 `/kukulu:implement`, `/kukulu:review-build` or `/kukulu:summarize`
@@ -270,7 +270,7 @@ claude-code-router walkthrough: [docs/routing.md](./docs/routing.md).
 | `.foundry/state.json` | MCP (committed) | `kukulu_next` |
 | `.foundry/implement.lock` | MCP (gitignored) | guard hook |
 | `.foundry/worktrees/<stream>/` | MCP (gitignored) — a parallel stream's worktree, until it is merged back | that stream's implementer |
-| `.claude/agents/foundry-*.md` | MCP (`kukulu_agents_sync`, git-excluded) | Claude Code |
+| `.claude/agents/kukulu-*.md` | MCP (`kukulu_agents_sync`, git-excluded) | Claude Code |
 | `~/.config/foundry/config.json` | you | MCP (`kukulu_agents_sync`, `kukulu_config_show`) |
 
 Checkbox states in `PROGRESS.md`: `[ ]` todo · `[~]` in progress · `[x]` done ·
@@ -301,7 +301,7 @@ The server exposes twenty-one tools.
 | `kukulu_summary_commit` | Write `SUMMARY.md` from `content`, commit it, mark the flight complete, report reviews, fix rounds, the branch's PR and whether to archive |
 | `kukulu_flight_archive` | Move a summarized flight's artifacts into `docs/flights/<slug>/` (the spec stays), write a fresh state, commit and push |
 | `kukulu_pr_finalize` | End a flight: if every commit is signed, mark the draft PR ready and, unless `breaking`, enable auto-merge; otherwise keep it a draft and record `awaitingSigning`. `resign: true` is for a human |
-| `kukulu_agents_sync` | Write `.claude/agents/foundry-<role>.md` from the merged routing config; only changed files are written |
+| `kukulu_agents_sync` | Write `.claude/agents/kukulu-<role>.md` from the merged routing config; only changed files are written |
 | `kukulu_config_show` | The merged routing config with the source of every value. Read-only |
 
 Full arguments, return shapes and failure modes:

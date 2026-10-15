@@ -2,7 +2,7 @@
   "hooks": {
     "SubagentStop": [
       {
-        "matcher": "^(kukulu:implementer|foundry:implementer|foundry-implementer)$",
+        "matcher": "^(kukulu:implementer|kukulu-implementer|foundry:implementer|foundry-implementer)$",
         "hooks": [
           {
             "type": "command",

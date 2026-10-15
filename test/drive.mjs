@@ -232,7 +232,7 @@ await withServer(repo, async ({ call }) => {
   await withServer(fresh, async ({ call }) => {
     const n = await call("kukulu_next");
     eq(n.agentFallback, false, "a fresh process against an already-synced repo trusts the generated agent immediately");
-    eq(n.agent, "foundry-implementer", "...and names it directly");
+    eq(n.agent, "kukulu-implementer", "...and names it directly");
   });
 }
 

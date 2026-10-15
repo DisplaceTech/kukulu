@@ -27,7 +27,7 @@ four layers it actually came from (`default`, `global`, `profile:<name>`, or
 
 Calling `kukulu_agents_sync` (which `/kukulu:go-flight` does automatically,
 before its loop) turns the merged result into
-`.claude/agents/foundry-<role>.md` — a project-level Claude Code subagent
+`.claude/agents/kukulu-<role>.md` — a project-level Claude Code subagent
 file, one per role. `kukulu_next` then names that generated agent instead of
 the plugin's own `kukulu:<role>` agent, whenever it exists. Project-level
 agents accept any `model:` string, including a router-specific
@@ -79,7 +79,7 @@ and `kukulu_next` both report the one case that truly needs a restart as
 true, prints the table and this line, then stops:
 
 ```text
-FOUNDRY: RESTART REQUIRED — agent definitions were (re)generated; start a new session and run /kukulu:go-flight again.
+KUKULU: RESTART REQUIRED — agent definitions were (re)generated; start a new session and run /kukulu:go-flight again.
 ```
 
 In practice this costs at most one extra launch per project — the first
@@ -307,8 +307,8 @@ Modelfile) — the client side of the connection does not control it.
 ## Running a stage by hand
 
 Each stage also runs on its own, outside `/kukulu:go-flight`, by delegating
-to its agent: `foundry-planner`, `foundry-implementer`, `foundry-reviewer`,
-`foundry-summarizer` once `kukulu_agents_sync` has run, or
+to its agent: `kukulu-planner`, `kukulu-implementer`, `kukulu-reviewer`,
+`kukulu-summarizer` once `kukulu_agents_sync` has run, or
 `kukulu:planner` and so on before it has. That keeps whatever model routing
 assigned that role. Invoking `/kukulu:plan-build`, `/kukulu:implement`,
 `/kukulu:review-build` or `/kukulu:summarize` directly, instead of through

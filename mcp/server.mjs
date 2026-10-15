@@ -477,7 +477,7 @@ function cfgFrom(c, planIds) {
 // stage roles runs with, merged from the plugin's own defaults (agents/*.md),
 // an optional global file, an optional named profile inside it, and an
 // optional project override in docs/foundry.json. kukulu_agents_sync turns
-// the merged result into .claude/agents/foundry-<role>.md files that Claude
+// the merged result into .claude/agents/kukulu-<role>.md files that Claude
 // Code will actually spawn; kukulu_next and kukulu_status read the merge
 // without writing anything.
 
@@ -684,7 +684,7 @@ function yamlScalar(s) {
 function renderAgentFile(role, resolved, permissionMode) {
   const agent = pluginAgent(role);
   const fm = agent.frontmatter;
-  const lines = ["---", `name: foundry-${role}`, `description: ${yamlScalar(fm.description)}`, `model: ${resolved.model}`];
+  const lines = ["---", `name: kukulu-${role}`, `description: ${yamlScalar(fm.description)}`, `model: ${resolved.model}`];
   if (resolved.effort !== undefined) lines.push(`effort: ${resolved.effort}`);
   lines.push(`permissionMode: ${permissionMode}`);
   if (fm.tools) lines.push(`tools: ${fm.tools}`);
@@ -701,14 +701,14 @@ function routingTable(r) {
     const e = r.roles[role];
     const effort = e.effort !== undefined ? e.effort : "–";
     const source = e.source.model === e.source.effort ? e.source.model : `model:${e.source.model} effort:${e.source.effort}`;
-    return `| ${role} | foundry-${role} | ${e.model} | ${effort} | ${source} |`;
+    return `| ${role} | kukulu-${role} | ${e.model} | ${effort} | ${source} |`;
   });
   return ["| role | agent | model | effort | source |", "|---|---|---|---|---|", ...rows].join("\n");
 }
 
 /** Roles whose generated agent file currently exists on disk. */
 function agentsOnDisk() {
-  return ROLES.filter((role) => exists(path.join(P.agentsDir, `foundry-${role}.md`)));
+  return ROLES.filter((role) => exists(path.join(P.agentsDir, `kukulu-${role}.md`)));
 }
 
 // Claude Code hot-reloads a project agent file within seconds of a change,
@@ -767,7 +767,7 @@ function configShow() {
   const r = resolveRouting();
   const generated = agentsOnDisk();
   const stale = generated.filter((role) => {
-    const file = path.join(P.agentsDir, `foundry-${role}.md`);
+    const file = path.join(P.agentsDir, `kukulu-${role}.md`);
     return read(file) !== renderAgentFile(role, r.roles[role], r.permissionMode);
   });
   return {
@@ -779,7 +779,7 @@ function configShow() {
     permissionMode: r.permissionMode,
     permissionModeSource: r.permissionModeSource,
     roles: Object.fromEntries(
-      ROLES.map((role) => [role, { agent: `foundry-${role}`, model: r.roles[role].model, effort: r.roles[role].effort, source: r.roles[role].source }]),
+      ROLES.map((role) => [role, { agent: `kukulu-${role}`, model: r.roles[role].model, effort: r.roles[role].effort, source: r.roles[role].source }]),
     ),
     effortDropped: r.effortDropped,
     agentsGenerated: generated,
@@ -796,7 +796,7 @@ function gitPath(name) {
 }
 
 /**
- * Write .claude/agents/foundry-<role>.md for every role from the resolved
+ * Write .claude/agents/kukulu-<role>.md for every role from the resolved
  * routing config, writing only files whose rendered content actually
  * changed, and exclude the pattern from git per clone (via
  * .git/info/exclude, not .gitignore: these files encode a person's own
@@ -812,7 +812,7 @@ function agentsSync() {
   const changed = [];
   const unchanged = [];
   for (const role of ROLES) {
-    const file = path.join(P.agentsDir, `foundry-${role}.md`);
+    const file = path.join(P.agentsDir, `kukulu-${role}.md`);
     const text = renderAgentFile(role, r.roles[role], r.permissionMode);
     if (exists(file) && read(file) === text) {
       unchanged.push(role);
@@ -837,7 +837,7 @@ function agentsSync() {
     // creates the file itself; a copy this sync creates (or already found)
     // needs the same per-clone exclusion the agent files get, since it
     // encodes a person's own permission grant, not the project's.
-    const addedAgents = ensureLineInFile(gitPath("info/exclude"), ".claude/agents/foundry-*.md");
+    const addedAgents = ensureLineInFile(gitPath("info/exclude"), ".claude/agents/kukulu-*.md");
     const addedSettings = ensureLineInFile(gitPath("info/exclude"), ".claude/settings.local.json");
     excludeResult = addedAgents || addedSettings ? "added" : "present";
   } else {
@@ -854,7 +854,7 @@ function agentsSync() {
     projectOverride: r.projectOverride,
     permissionMode: r.permissionMode,
     roles: Object.fromEntries(
-      ROLES.map((role) => [role, { agent: `foundry-${role}`, model: r.roles[role].model, effort: r.roles[role].effort, source: r.roles[role].source }]),
+      ROLES.map((role) => [role, { agent: `kukulu-${role}`, model: r.roles[role].model, effort: r.roles[role].effort, source: r.roles[role].source }]),
     ),
     effortDropped: r.effortDropped,
     changed,
@@ -1526,7 +1526,7 @@ function next() {
     const role = ROLE_OF_STAGE[name];
     const fallbackAgent = role ? AGENT[name] : null;
     if (!role) return { agent: null, agentFallback: false, fallbackAgent: null, agentModel: null, agentModelExact: true, restartRequired: false };
-    const onDisk = exists(path.join(P.agentsDir, `foundry-${role}.md`));
+    const onDisk = exists(path.join(P.agentsDir, `kukulu-${role}.md`));
     const agentFallback = !onDisk || agentsDirCreatedThisProcess;
     const mapped = agentToolModel(routing.roles[role].model);
     const agentModel = mapped ? mapped.value : null;
@@ -1538,7 +1538,7 @@ function next() {
     // generated one only produced an "agent type not found" error and a retry
     // on a project's first flight, since a new agents directory loads only in
     // the next session (F-22 of the 2026-09-30 cleanflate feedback).
-    return { agent: agentFallback ? fallbackAgent : `foundry-${role}`, agentFallback, fallbackAgent, agentModel, agentModelExact, restartRequired: false };
+    return { agent: agentFallback ? fallbackAgent : `kukulu-${role}`, agentFallback, fallbackAgent, agentModel, agentModelExact, restartRequired: false };
   };
   const modelFor = (name) => {
     const role = ROLE_OF_STAGE[name];
@@ -1673,7 +1673,7 @@ function probeSigning(signingPolicy) {
     }
     return "none";
   }
-  const probe = spawnSync("git", ["commit-tree", "-S", "HEAD^{tree}", "-m", "foundry signing probe"], {
+  const probe = spawnSync("git", ["commit-tree", "-S", "HEAD^{tree}", "-m", "kukulu signing probe"], {
     cwd: ROOT,
     encoding: "utf8",
     timeout: SIGNING_TIMEOUT_MS,
@@ -2140,7 +2140,7 @@ function runShell(cmd, timeoutMs, cwd = ROOT) {
       outputLimitExceeded: false,
       orphansKilled: false,
       stdout: "",
-      stderr: `foundry could not supervise this command: ${(r.error?.message || r.stderr || "the runner produced no result").trim()}`,
+      stderr: `Kūkulu could not supervise this command: ${(r.error?.message || r.stderr || "the runner produced no result").trim()}`,
     };
   }
   let truncated = false;
@@ -3355,7 +3355,7 @@ const TOOLS = [
   { name: "kukulu_pr_finalize", description: "End a flight. Checks that every commit since the merge base with baseBranch is signed (judged from the commits, not from state): if so, marks the draft PR ready and, unless breaking is true, enables auto-merge (gh pr merge --auto, never an immediate merge), per policies.finalize and policies.mergeMethod. If any commit is unsigned the PR stays a draft, state.awaitingSigning is recorded, the steps are appended to SUMMARY.md, and kukulu_next reports done until it is resolved. breaking is required on the first call. Returns { signed, unsigned, ready, merge, breaking, awaitingSigning, resigned, push, pr, next? }; merge is enabled, skipped: breaking, skipped: policy, skipped: no pull request, skipped: awaiting signing or unavailable: <why>.", inputSchema: S({ breaking: { type: "boolean", description: "whether this flight is a breaking change, so its PR must not auto-merge; required on the first call, remembered after" }, resign: { type: "boolean", description: "HUMAN-INITIATED ONLY: never pass this on your own. Re-sign every commit of the branch (git rebase -f --rebase-merges --gpg-sign), force-push with lease, then finalize. For an operator who has unlocked the signing agent after an awaiting-signing result" } }), fn: prFinalize },
   {
     name: "kukulu_agents_sync",
-    description: "Generate .claude/agents/foundry-<role>.md from the merged routing config (plugin defaults < global file < profile < docs/foundry.json roles). Writes only files whose content changed, excludes them from git, and returns the resolved per-role table. `restartRequired` is true only when this is the directory's first population and a changed role's model cannot be named directly by the Agent tool. Also ensures the MCP allow rule in .claude/settings.local.json (`permissions` in the result), without which a subagent's first kukulu_status call is denied under any permission mode.",
+    description: "Generate .claude/agents/kukulu-<role>.md from the merged routing config (plugin defaults < global file < profile < docs/foundry.json roles). Writes only files whose content changed, excludes them from git, and returns the resolved per-role table. `restartRequired` is true only when this is the directory's first population and a changed role's model cannot be named directly by the Agent tool. Also ensures the MCP allow rule in .claude/settings.local.json (`permissions` in the result), without which a subagent's first kukulu_status call is denied under any permission mode.",
     inputSchema: S({}),
     fn: agentsSync,
   },
