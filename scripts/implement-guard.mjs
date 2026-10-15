@@ -56,7 +56,7 @@
 //      stream that stopped early, so this is an optimisation, not the only
 //      safety net. With no worktrees, the rules above apply unchanged.
 //
-// A hard cap on re-blocks (default 60, see FOUNDRY_GUARD_CAP or
+// A hard cap on re-blocks (default 60, see KUKULU_GUARD_CAP, or the pre-0.6.0 FOUNDRY_GUARD_CAP until 0.7.0, or
 // docs/foundry.json's guardCap) still prevents a runaway. The counter
 // resets to zero on every task state change, so the cap bounds re-blocks
 // since the last time work actually moved, not over the whole run — a
@@ -254,8 +254,8 @@ function main() {
   // (kukulu_task_done / kukulu_task_block / kukulu_run_start all reset
   // the counter to zero), not the whole run — so a per-run cap set in
   // docs/foundry.json's guardCap, carried in the lock, wins over the
-  // process-wide FOUNDRY_GUARD_CAP env var, which wins over the default.
-  const cap = Number.isInteger(lock.json?.cap) ? lock.json.cap : Number(process.env.FOUNDRY_GUARD_CAP || 60);
+  // process-wide KUKULU_GUARD_CAP env var, which wins over the default.
+  const cap = Number.isInteger(lock.json?.cap) ? lock.json.cap : Number(process.env.KUKULU_GUARD_CAP || process.env.FOUNDRY_GUARD_CAP || 60);
   const count = lock.count + 1;
   writeLock(lockPath, lock, count);
 

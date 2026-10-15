@@ -59,7 +59,7 @@ You need Node ≥ 22, git, and Claude Code. Nothing to `npm install`.
 > model id, or a local or hosted model through
 > [claude-code-router](https://github.com/musistudio/claude-code-router) —
 > copy [`templates/foundry.config.example.json`](./templates/foundry.config.example.json)
-> to `~/.config/foundry/config.json`, edit the roles or pick a profile with
+> to `~/.config/kukulu/config.json`, edit the roles or pick a profile with
 > `"profile": "local"`, and run `/kukulu:go-flight` again — it will ask for
 > one more restart only the first time a role not reachable by name (a
 > router or local model) is generated. [docs/routing.md](./docs/routing.md)
@@ -271,7 +271,7 @@ claude-code-router walkthrough: [docs/routing.md](./docs/routing.md).
 | `.foundry/implement.lock` | MCP (gitignored) | guard hook |
 | `.foundry/worktrees/<stream>/` | MCP (gitignored) — a parallel stream's worktree, until it is merged back | that stream's implementer |
 | `.claude/agents/kukulu-*.md` | MCP (`kukulu_agents_sync`, git-excluded) | Claude Code |
-| `~/.config/foundry/config.json` | you | MCP (`kukulu_agents_sync`, `kukulu_config_show`) |
+| `~/.config/kukulu/config.json` | you | MCP (`kukulu_agents_sync`, `kukulu_config_show`) |
 
 Checkbox states in `PROGRESS.md`: `[ ]` todo · `[~]` in progress · `[x]` done ·
 `[!]` blocked · `[-]` skipped because a dependency is blocked.
@@ -319,7 +319,7 @@ has `[ ]` or `[~]` lines, it returns `{"decision":"block"}` naming the next
 task. `kukulu_task_done`, `kukulu_task_block` and `kukulu_run_start` all
 reset the lock's counter to zero, so the cap bounds re-blocks since the
 last time work actually moved, not the whole run. It gives up at the
-effective cap — `docs/foundry.json`'s `guardCap`, else `FOUNDRY_GUARD_CAP`,
+effective cap — `docs/foundry.json`'s `guardCap`, else `KUKULU_GUARD_CAP`,
 else 60 — naming the stalled task, so a wedged run ends rather than
 spinning.
 

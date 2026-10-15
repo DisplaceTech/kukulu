@@ -21,10 +21,11 @@ const TASKS = [
 const TRANSCRIPT = (repo) => path.join(repo, "transcript.jsonl");
 
 /** Run the hook with full control over its stdin JSON and environment. */
-function guard(repo, { input = {}, projectDir = repo, cap = null } = {}) {
+function guard(repo, { input = {}, projectDir = repo, cap = null, legacyCap = null } = {}) {
   const env = { PATH: process.env.PATH, HOME: process.env.HOME };
   if (projectDir !== null) env.CLAUDE_PROJECT_DIR = projectDir;
-  if (cap !== null) env.FOUNDRY_GUARD_CAP = String(cap);
+  if (cap !== null) env.KUKULU_GUARD_CAP = String(cap);
+  if (legacyCap !== null) env.FOUNDRY_GUARD_CAP = String(legacyCap);
   const payload = input === null ? "" : typeof input === "string" ? input : JSON.stringify(input);
   return execFileSync(process.execPath, [GUARD], { cwd: repo, input: payload, encoding: "utf8", env }).trim();
 }
@@ -311,7 +312,7 @@ for (const legacy of ["foundry-implementer", "foundry:implementer"]) {
   const repo = armed();
   writeFile(repo, ".foundry/implement.lock", '{"count":59,"cap":100}\n');
   const j = JSON.parse(guard(repo, { input: implementerStop(repo), cap: 10 }));
-  eq(j.decision, "block", "the lock's own cap wins over the FOUNDRY_GUARD_CAP env var");
+  eq(j.decision, "block", "the lock's own cap wins over the KUKULU_GUARD_CAP env var");
 }
 
 {
@@ -319,6 +320,21 @@ for (const legacy of ["foundry-implementer", "foundry:implementer"]) {
   writeFile(repo, ".foundry/implement.lock", '{"count":9}\n');
   const j = JSON.parse(guard(repo, { input: implementerStop(repo), cap: 5 }));
   eq(j.decision, undefined, "with no lock.cap, the env var is used instead of the default");
+}
+
+// The pre-0.6.0 spelling still works until 0.7.0, and the new one wins.
+{
+  const repo = armed();
+  writeFile(repo, ".foundry/implement.lock", '{"count":9}\n');
+  const j = JSON.parse(guard(repo, { input: implementerStop(repo), legacyCap: 5 }));
+  eq(j.decision, undefined, "FOUNDRY_GUARD_CAP is still honored when KUKULU_GUARD_CAP is unset");
+}
+
+{
+  const repo = armed();
+  writeFile(repo, ".foundry/implement.lock", '{"count":9}\n');
+  const j = JSON.parse(guard(repo, { input: implementerStop(repo), cap: 100, legacyCap: 5 }));
+  eq(j.decision, "block", "KUKULU_GUARD_CAP wins over FOUNDRY_GUARD_CAP");
 }
 
 // ---------------------------------------------------------------- environment

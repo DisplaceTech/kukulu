@@ -24,7 +24,7 @@ git(repo, ["remote", "add", "origin", mkBareRemote()]);
 
 // An untracked operator file, predating the whole flight, must survive it
 // unchanged: not committed, not moved, not deleted (F-09, F-17).
-writeFile(repo, "FOUNDRY_FEEDBACK.md", "pipeline feedback notes, unrelated to this build\n");
+writeFile(repo, "KUKULU_FEEDBACK.md", "pipeline feedback notes, unrelated to this build\n");
 
 await withServer(repo, async ({ call }) => {
   // ---------------------------------------------------------------- routing
@@ -201,8 +201,8 @@ await withServer(repo, async ({ call }) => {
   // history is exactly what it would have been without routing at all.
   // The only untracked thing left standing is the operator file the flight
   // found sitting there before it started (F-09, F-17).
-  eq(git(repo, ["status", "--porcelain"]), "?? FOUNDRY_FEEDBACK.md", "the branch is clean apart from the pre-existing operator file");
-  eq(readFile(repo, "FOUNDRY_FEEDBACK.md"), "pipeline feedback notes, unrelated to this build\n", "...which the whole flight left byte-for-byte untouched");
+  eq(git(repo, ["status", "--porcelain"]), "?? KUKULU_FEEDBACK.md", "the branch is clean apart from the pre-existing operator file");
+  eq(readFile(repo, "KUKULU_FEEDBACK.md"), "pipeline feedback notes, unrelated to this build\n", "...which the whole flight left byte-for-byte untouched");
   const log = sh(repo, "git log --oneline --format=%s");
   for (const expected of [
     "chore: build summary", "review: round 2 approved", "chore: round 1 implemented",
@@ -211,7 +211,7 @@ await withServer(repo, async ({ call }) => {
   ]) {
     ok(log.includes(expected), `the history records "${expected}"`);
   }
-  ok(!log.includes("FOUNDRY_FEEDBACK"), "the operator file is never mentioned in a commit");
+  ok(!log.includes("KUKULU_FEEDBACK"), "the operator file is never mentioned in a commit");
   eq(readFile(repo, "hello.txt"), "hello\n", "and the working tree holds the reviewed result");
 
   // Every push-worthy commit actually reached the remote (F-18): the base

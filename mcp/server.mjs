@@ -16,7 +16,28 @@ import path from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-const ROOT = path.resolve(process.env.FOUNDRY_PROJECT_DIR || process.cwd());
+// Notices for a project still using a pre-0.6.0 name, reported in the
+// `deprecations` field of kukulu_status and kukulu_next. Every compatibility
+// fallback below adds one and is removed in 0.7.0.
+const DEPRECATIONS = [];
+function deprecate(message) {
+  if (!DEPRECATIONS.includes(message)) DEPRECATIONS.push(message);
+}
+
+/**
+ * An environment variable by its Kūkulu name, falling back to the Foundry name
+ * until 0.7.0. A non-empty KUKULU_<name> always wins; an empty one counts as
+ * unset, because .mcp.json passes unset variables through as empty strings.
+ */
+function envVar(name) {
+  if (process.env[`KUKULU_${name}`]) return process.env[`KUKULU_${name}`];
+  const old = process.env[`FOUNDRY_${name}`];
+  if (!old) return undefined;
+  deprecate(`FOUNDRY_${name} is deprecated; set KUKULU_${name} instead. Support ends in 0.7.0.`);
+  return old;
+}
+
+const ROOT = path.resolve(envVar("PROJECT_DIR") || process.cwd());
 const P = {
   spec: path.join(ROOT, "docs", "SPEC.md"),
   plan: path.join(ROOT, "docs", "PLAN.md"),
@@ -541,9 +562,16 @@ function pluginAgent(role) {
 }
 
 function globalConfigPath() {
-  if (process.env.FOUNDRY_CONFIG) return path.resolve(process.env.FOUNDRY_CONFIG);
-  if (process.env.XDG_CONFIG_HOME) return path.join(process.env.XDG_CONFIG_HOME, "foundry", "config.json");
-  return path.join(os.homedir(), ".config", "foundry", "config.json");
+  const fromEnv = envVar("CONFIG");
+  if (fromEnv) return path.resolve(fromEnv);
+  const base = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config");
+  const current = path.join(base, "kukulu", "config.json");
+  const legacy = path.join(base, "foundry", "config.json");
+  if (!exists(current) && exists(legacy)) {
+    deprecate(`the global routing config ${legacy} is read from its pre-0.6.0 location; move it to ${current}. Support ends in 0.7.0.`);
+    return legacy;
+  }
+  return current;
 }
 
 function loadGlobalConfig() {
@@ -615,15 +643,15 @@ function resolveRouting() {
 
   let profile = null;
   let profileSource = null;
-  if (process.env.FOUNDRY_PROFILE) {
-    profile = process.env.FOUNDRY_PROFILE;
+  if (envVar("PROFILE")) {
+    profile = envVar("PROFILE");
     profileSource = "env";
   } else if (global.data.profile) {
     profile = global.data.profile;
     profileSource = "global";
   }
   if (profile !== null && !(profile in (global.data.profiles || {}))) {
-    const src = profileSource === "env" ? `FOUNDRY_PROFILE=${profile}` : `"profile": "${profile}" in ${global.path}`;
+    const src = profileSource === "env" ? `KUKULU_PROFILE=${profile}` : `"profile": "${profile}" in ${global.path}`;
     const globalDesc = global.present ? global.path : `${global.path} (does not exist)`;
     throw new ToolError(`${src} selects a profile, but ${globalDesc} has no profiles.${profile} entry`);
   }
@@ -1415,6 +1443,7 @@ function status() {
   const g = gitFacts();
   const out = {
     root: ROOT,
+    deprecations: DEPRECATIONS.slice(),
     specPresent: exists(P.spec),
     planPresent: exists(P.plan),
     progressPresent: exists(P.progress),
@@ -1560,6 +1589,7 @@ function next() {
       agentModel: info.agentModel,
       agentModelExact: info.agentModelExact,
       round: st.round,
+      deprecations: DEPRECATIONS.slice(),
       reviewRound: st.round + 1,
       reason,
       prompt: PROMPTS[name] ? PROMPTS[name](st.round, s, policySentence, st.round + 1) : null,

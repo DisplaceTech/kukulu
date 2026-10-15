@@ -180,7 +180,7 @@ recovery.
 |---|---|---|
 | Controller stops immediately with `halt` | Read the `reason` — missing spec, or `halted` in state | Fix the named cause, re-run |
 | The controller session itself gets blocked from stopping | Should not happen after 0.3.0 (F-07) — the guard only considers a stop it can attribute to the implementer | Check `hooks/hooks.json`'s `SubagentStop` matcher is intact and that no project override replaced it; file it as a bug otherwise |
-| Implementer stops with tasks open mid-task | The guard blocked and the agent still stopped, or the per-task stall cap tripped | Check `kukulu_status`'s `lockCounter` against the effective cap (`guardCap`, else `FOUNDRY_GUARD_CAP`, else 60); at the cap, something is genuinely wedged on one task — read its log and block it by hand |
+| Implementer stops with tasks open mid-task | The guard blocked and the agent still stopped, or the per-task stall cap tripped | Check `kukulu_status`'s `lockCounter` against the effective cap (`guardCap`, else `KUKULU_GUARD_CAP`, else 60); at the cap, something is genuinely wedged on one task — read its log and block it by hand |
 | Every task blocks with the same error | The plan assumes something that is not there | Stop the flight. Fix `SPEC.md`, re-plan; do not let it grind through 40 blocked tasks |
 | `kukulu_task_done` keeps refusing | The implementer is not committing with `<ID>:` as the subject, or is leaving files uncommitted | The commit template lives in `CLAUDE.md`; check the planner wrote one |
 | `kukulu_verify` fails on a clean checkout | The commands in `docs/foundry.json` are wrong | Fix them there — they came from `SPEC.md` §7, so fix that too |
@@ -341,7 +341,7 @@ fallback had switched it off.
 | `maxRounds` | `3` | Non-converging review rounds allowed before the flight halts; a round whose fix-task count did not shrink from the last one counts against this. Settable per flight with `/kukulu:go-flight max review rounds N` |
 | `maxRoundsHard` | `6` | Absolute review-round ceiling, regardless of convergence; a review numbered above it halts |
 | `commandTimeoutMs` | `600000` | Per-command timeout for `kukulu_verify`, `kukulu_mutate` and `parallel.setup`; a timeout kills the command's whole process group |
-| `guardCap` | `60` | Re-blocks since the last task state change before the implement guard gives up; carried into `.foundry/implement.lock` at `kukulu_run_start` and wins over `FOUNDRY_GUARD_CAP` |
+| `guardCap` | `60` | Re-blocks since the last task state change before the implement guard gives up; carried into `.foundry/implement.lock` at `kukulu_run_start` and wins over `KUKULU_GUARD_CAP` |
 | `policies.signing` | `"auto"` | `"off"` disables commit signing for the run; `"required"` refuses to start unless a real signed commit succeeds; `"auto"` uses signing when it works and falls back to off, recording why, when it does not; this includes any later commit whose signing fails or exceeds 30 seconds, which is retried once unsigned and recorded in `state.signing` and `state.signingOverride` (under `"required"` that commit refuses instead) |
 | `policies.push` | `true` | `false` skips every push `kukulu_run_start`, `kukulu_run_finish`, `kukulu_review_submit` and `kukulu_summary_commit` would otherwise make |
 | `policies.pr` | `"draft"` | `"none"` skips draft-PR creation in `kukulu_run_finish` even when `gh` is available |
@@ -359,10 +359,18 @@ Environment variables:
 
 | Variable | Default | Effect |
 |---|---|---|
-| `FOUNDRY_PROJECT_DIR` | `cwd` | Project root the server operates on; set by `.mcp.json` |
-| `FOUNDRY_GUARD_CAP` | `60` | Re-blocks since the last task state change before the guard gives up; `docs/foundry.json`'s `guardCap` wins over this when set |
-| `FOUNDRY_CONFIG` | `~/.config/foundry/config.json` (or `$XDG_CONFIG_HOME/foundry/config.json`) | Path to the global routing config |
-| `FOUNDRY_PROFILE` | the global file's own `"profile"` key, if any | Which profile in the global file to apply; wins over the file's own choice |
+| `KUKULU_PROJECT_DIR` | `cwd` | Project root the server operates on; set by `.mcp.json` |
+| `KUKULU_GUARD_CAP` | `60` | Re-blocks since the last task state change before the guard gives up; `docs/foundry.json`'s `guardCap` wins over this when set |
+| `KUKULU_CONFIG` | `~/.config/kukulu/config.json` (or `$XDG_CONFIG_HOME/kukulu/config.json`) | Path to the global routing config |
+| `KUKULU_PROFILE` | the global file's own `"profile"` key, if any | Which profile in the global file to apply; wins over the file's own choice |
+
+Before 0.6.0 these were `FOUNDRY_PROJECT_DIR`, `FOUNDRY_GUARD_CAP`,
+`FOUNDRY_CONFIG` and `FOUNDRY_PROFILE`, and the global file lived in
+`foundry/` instead of `kukulu/`. Until 0.7.0 the old names are still read when
+the new one is unset or empty, and the old global file is read when no
+`kukulu/config.json` exists. Each fallback adds a line to the `deprecations`
+array that `kukulu_status` and `kukulu_next` return; `/kukulu:go-flight`
+prints it. A new name always wins over an old one.
 
 ## Calibrating
 

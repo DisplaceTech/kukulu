@@ -54,9 +54,11 @@ ok(server, "the MCP config defines a server called kukulu");
 eq(server.command, "node", "the server runs under node, with no install step");
 like(server.args[0], /^\$\{CLAUDE_PLUGIN_ROOT\}/, "the server path is resolved from CLAUDE_PLUGIN_ROOT");
 ok(exists(server.args[0].replace("${CLAUDE_PLUGIN_ROOT}/", "")), "the server file the config names exists");
-eq(server.env.FOUNDRY_PROJECT_DIR, "${CLAUDE_PROJECT_DIR}", "the server is told which project it is operating on");
-eq(server.env.FOUNDRY_CONFIG, "${FOUNDRY_CONFIG:-}", "the global routing config path passes through, empty by default");
-eq(server.env.FOUNDRY_PROFILE, "${FOUNDRY_PROFILE:-}", "the routing profile passes through, empty by default");
+eq(server.env.KUKULU_PROJECT_DIR, "${CLAUDE_PROJECT_DIR}", "the server is told which project it is operating on");
+eq(server.env.KUKULU_CONFIG, "${KUKULU_CONFIG:-}", "the global routing config path passes through, empty by default");
+eq(server.env.KUKULU_PROFILE, "${KUKULU_PROFILE:-}", "the routing profile passes through, empty by default");
+eq(server.env.FOUNDRY_CONFIG, "${FOUNDRY_CONFIG:-}", "the pre-0.6.0 config variable still passes through, until 0.7.0");
+eq(server.env.FOUNDRY_PROFILE, "${FOUNDRY_PROFILE:-}", "the pre-0.6.0 profile variable still passes through, until 0.7.0");
 
 // ---------------------------------------------------------------- hooks
 

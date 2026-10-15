@@ -81,8 +81,10 @@ result later as a completion notification. Both are normal. Treat the loop
 as event-driven, not as a blocking call you sit inside:
 
 1. Call `kukulu_next`. It returns
-   `{ stage, agent, agentFallback, fallbackAgent, restartRequired, model, agentModel, agentModelExact, round, reason, prompt, streams? }`.
+   `{ stage, agent, agentFallback, fallbackAgent, restartRequired, model, agentModel, agentModelExact, round, deprecations, reason, prompt, streams? }`.
    `streams` appears only for an implement stage that is a parallel wave; see step 4.
+   Print each line of `deprecations` as `deprecated: <line>`, the first time
+   you see it in this flight and never again; it is not a reason to stop.
 2. If `stage` is `done` or `halt`: print the `reason` and stop.
 3. If `restartRequired` is true: call `kukulu_feedback_log` with `stage:
    "controller"`, `category: "restart"`, and "a stage mid-flight routed to a

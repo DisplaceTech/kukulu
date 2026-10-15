@@ -574,28 +574,28 @@ const alive = (pid) => {
 
 {
   const repo = plannedRepo();
-  writeFile(repo, "FOUNDRY_FEEDBACK.md", "notes predating this run\n");
+  writeFile(repo, "KUKULU_FEEDBACK.md", "notes predating this run\n");
   await withServer(repo, async ({ call }) => {
     await call("kukulu_run_start");
     const s = await call("kukulu_status");
-    eq(s.preexistingUntracked.join(","), "FOUNDRY_FEEDBACK.md", "run_start records what was already untracked");
+    eq(s.preexistingUntracked.join(","), "KUKULU_FEEDBACK.md", "run_start records what was already untracked");
 
     await call("kukulu_task_next");
     commitTask(repo, "P0-01", "Create hello", { "hello.txt": "hi\n" });
     const r = await call("kukulu_task_done", { id: "P0-01", log: "Added hello.txt." });
     eq(r.counts.done, 1, "task_done succeeds with the pre-existing file still untracked");
-    ok(hasFile(repo, "FOUNDRY_FEEDBACK.md"), "the file is untouched");
+    ok(hasFile(repo, "KUKULU_FEEDBACK.md"), "the file is untouched");
 
     await call("kukulu_task_next");
     const blocked = await call("kukulu_task_block", { id: "P0-02", reason: "tried A / fails B / fix C" });
     eq(blocked.counts.blocked, 1, "task_block succeeds with the pre-existing file present");
-    ok(hasFile(repo, "FOUNDRY_FEEDBACK.md"), "task_block's git clean spares it, rather than deleting it");
+    ok(hasFile(repo, "KUKULU_FEEDBACK.md"), "task_block's git clean spares it, rather than deleting it");
 
     await call("kukulu_task_next"); // P0-03, skipped as a dependent of the blocked P0-02
     writeFile(repo, "docs/HANDOFF.md", "# handoff\n");
     const f = await call("kukulu_run_finish");
     ok(f.readyLine, "run_finish succeeds with the pre-existing file still present");
-    ok(hasFile(repo, "FOUNDRY_FEEDBACK.md"), "...and it is still there afterwards");
+    ok(hasFile(repo, "KUKULU_FEEDBACK.md"), "...and it is still there afterwards");
   });
 }
 

@@ -11,12 +11,12 @@ Precedence, highest first:
 
 1. `docs/foundry.json` → `"roles": { ... }` and `"permissionMode"` (project
    override, committed with the rest of the plan).
-2. A named profile inside the global file — selected by `FOUNDRY_PROFILE`, or
+2. A named profile inside the global file — selected by `KUKULU_PROFILE`, or
    by the global file's own top-level `"profile"` key when the environment
    variable is unset.
-3. The global file itself: `$FOUNDRY_CONFIG` if set, else
-   `$XDG_CONFIG_HOME/foundry/config.json`, else
-   `~/.config/foundry/config.json`.
+3. The global file itself: `$KUKULU_CONFIG` if set, else
+   `$XDG_CONFIG_HOME/kukulu/config.json`, else
+   `~/.config/kukulu/config.json`.
 4. The plugin's own defaults, in `agents/*.md`.
 
 A profile or a project override is a *partial* overlay: it can set a role's
@@ -136,7 +136,7 @@ the base branch before a run can start.
 }
 ```
 
-Copy it to `~/.config/foundry/config.json` (or point `$FOUNDRY_CONFIG`
+Copy it to `~/.config/kukulu/config.json` (or point `$KUKULU_CONFIG`
 somewhere else) and edit it there — it applies across every project on the
 machine, unless a project's own `docs/foundry.json` overrides a role.
 
@@ -148,7 +148,7 @@ verbatim and never parses it.
 
 To pick a profile without setting an environment variable — the common case
 on a machine that always uses the same router setup — add `"profile":
-"local"` to the global file itself. `FOUNDRY_PROFILE`, when set, always
+"local"` to the global file itself. `KUKULU_PROFILE`, when set, always
 wins over the file's own choice.
 
 A project can still override any role for itself, in `docs/foundry.json`:

@@ -2,7 +2,7 @@
 
 Twenty-one tools, served over stdio by `mcp/server.mjs` with no dependencies.
 The server is launched by Claude Code from [`.mcp.json`](../.mcp.json) with
-`FOUNDRY_PROJECT_DIR` set to the project root; every path below is relative to
+`KUKULU_PROJECT_DIR` set to the project root; every path below is relative to
 that root.
 
 Three of them — `kukulu_status`, `kukulu_next` and `kukulu_config_show` —
@@ -51,6 +51,7 @@ context.
 | Field | Meaning |
 |---|---|
 | `root` | Absolute project root the server is operating on |
+| `deprecations` | Notices for a pre-0.6.0 name still in use: a `FOUNDRY_*` environment variable, or the global routing config in `foundry/`. Each says what to rename; support ends in 0.7.0. Empty when nothing is deprecated |
 | `specPresent` … `configPresent` | Which pipeline documents exist |
 | `lockPresent` | Whether an implementation run is armed |
 | `lockCounter` | The implement guard's re-block counter, read from the lock (either format); `null` when there is no lock |
@@ -90,10 +91,11 @@ serially (see `streams` below).
 **Arguments:** none.
 
 **Returns:** `{ stage, agent, agentFallback, fallbackAgent, restartRequired,
-model, agentModel, agentModelExact, round, reviewRound, reason, prompt,
-streams? }`.
+model, agentModel, agentModelExact, round, deprecations, reviewRound, reason,
+prompt, streams? }`.
 
 - `stage` — `plan` · `implement` · `review` · `summarize` · `done` · `halt`
+- `deprecations` — the same array `kukulu_status` returns, so the flight controller can print it
 - `agent` — the subagent to spawn: the generated `kukulu-<role>` name when
   it can be trusted to spawn (`agentFallback` is false), else the plugin's
   own `kukulu:planner` / `kukulu:implementer` / `kukulu:reviewer` /
@@ -1013,7 +1015,7 @@ rather than spawning a stage against a model it cannot reach; see
 
 **Refuses when:** the merged routing config is malformed — an unknown role
 or role key, an invalid `effort` or `permissionMode` value, an unknown
-top-level key in the global file, or a `FOUNDRY_PROFILE` (or the global
+top-level key in the global file, or a `KUKULU_PROFILE` (or the global
 file's own `"profile"` key) naming a profile that does not exist. Nothing is
 written on a refusal.
 
@@ -1048,7 +1050,7 @@ It speaks newline-delimited JSON-RPC 2.0 on stdin/stdout, so it can be driven
 from a shell for debugging:
 
 ```bash
-FOUNDRY_PROJECT_DIR=/path/to/project node mcp/server.mjs <<'EOF'
+KUKULU_PROJECT_DIR=/path/to/project node mcp/server.mjs <<'EOF'
 {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{}}}
 {"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"kukulu_status","arguments":{}}}
 EOF

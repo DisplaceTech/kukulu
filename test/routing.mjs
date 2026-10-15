@@ -212,7 +212,7 @@ const cfgDir = () => mkDir("foundry-cfg-");
   await withServer(repo, async ({ call }) => {
     const r = await call("kukulu_agents_sync");
     eq(r.restartRequired, true, "a first-time sync with a router-routed role among the changed ones needs a restart");
-  }, { env: { FOUNDRY_CONFIG: globalPath } });
+  }, { env: { KUKULU_CONFIG: globalPath } });
 }
 
 {
@@ -225,14 +225,14 @@ const cfgDir = () => mkDir("foundry-cfg-");
     const r = await call("kukulu_agents_sync");
     eq(r.restartRequired, false, "a first-time sync with a role on claude-opus-5-5 needs no restart");
     like(readFile(repo, ".claude/agents/kukulu-reviewer.md"), /^model: claude-opus-5-5$/m, "...and the generated agent still says the full id verbatim");
-  }, { env: { FOUNDRY_CONFIG: globalPath } });
+  }, { env: { KUKULU_CONFIG: globalPath } });
 
   const repo2 = plannedRepo();
   const globalPath2 = writeGlobalConfig(cfgDir(), { roles: { reviewer: { model: "claude-mystery-9" } } });
   await withServer(repo2, async ({ call }) => {
     const r = await call("kukulu_agents_sync");
     eq(r.restartRequired, true, "a first-time sync with a role on an unknown claude-* family needs a restart");
-  }, { env: { FOUNDRY_CONFIG: globalPath2 } });
+  }, { env: { KUKULU_CONFIG: globalPath2 } });
 }
 
 {
@@ -247,7 +247,7 @@ const cfgDir = () => mkDir("foundry-cfg-");
     const r = await call("kukulu_agents_sync");
     eq(r.changed.join(","), "implementer", "the routing change is picked up");
     eq(r.restartRequired, false, "but this process did not create the directory, so no restart is required");
-  }, { env: { FOUNDRY_CONFIG: globalPath } });
+  }, { env: { KUKULU_CONFIG: globalPath } });
 }
 
 // ---------------------------------------------------------------- kukulu_next before/after sync
@@ -304,7 +304,7 @@ const cfgDir = () => mkDir("foundry-cfg-");
     eq(impl.model, "claude-sonnet-5", "the generated implementer file carries the global model");
     eq(impl.effort, "medium", "...and keeps the default effort");
     eq(impl.permissionMode, "bypassPermissions", "...and carries the global permissionMode");
-  }, { env: { FOUNDRY_CONFIG: globalPath } });
+  }, { env: { KUKULU_CONFIG: globalPath } });
 }
 
 // ---------------------------------------------------------------- profile selected via env
@@ -343,7 +343,7 @@ const cfgDir = () => mkDir("foundry-cfg-");
 
     const n = await call("kukulu_next");
     eq(n.model, "ollama,qwen3.6:35b-a3b", "kukulu_next reports the profile's implementer model");
-  }, { env: { FOUNDRY_CONFIG: globalPath, FOUNDRY_PROFILE: "local" } });
+  }, { env: { KUKULU_CONFIG: globalPath, KUKULU_PROFILE: "local" } });
 }
 
 // ---------------------------------------------------------------- profile selected via the file itself
@@ -359,17 +359,17 @@ const cfgDir = () => mkDir("foundry-cfg-");
   });
   await withServer(repo, async ({ call }) => {
     const cfg = await call("kukulu_config_show");
-    eq(cfg.profile, "local", "the file's own \"profile\" key is used when FOUNDRY_PROFILE is unset");
+    eq(cfg.profile, "local", "the file's own \"profile\" key is used when KUKULU_PROFILE is unset");
     eq(cfg.profileSource, "global", "...with source global");
     eq(cfg.roles.implementer.model, "ollama,qwen3.6:35b-a3b", "the file-selected profile applies");
-  }, { env: { FOUNDRY_CONFIG: globalPath } });
+  }, { env: { KUKULU_CONFIG: globalPath } });
 
   await withServer(repo, async ({ call }) => {
     const cfg = await call("kukulu_config_show");
-    eq(cfg.profile, "cheap", "FOUNDRY_PROFILE overrides the file's own \"profile\" key");
+    eq(cfg.profile, "cheap", "KUKULU_PROFILE overrides the file's own \"profile\" key");
     eq(cfg.profileSource, "env", "...with source env");
     eq(cfg.roles.implementer.model, "haiku", "the env-selected profile applies instead");
-  }, { env: { FOUNDRY_CONFIG: globalPath, FOUNDRY_PROFILE: "cheap" } });
+  }, { env: { KUKULU_CONFIG: globalPath, KUKULU_PROFILE: "cheap" } });
 }
 
 // ---------------------------------------------------------------- project override
@@ -398,7 +398,7 @@ const cfgDir = () => mkDir("foundry-cfg-");
 
     const v = await call("kukulu_verify", { files: ["hello.txt"] });
     ok(v.results.length >= 1, "kukulu_verify still works; the routing keys leave the rest of foundry.json alone");
-  }, { env: { FOUNDRY_CONFIG: globalPath, FOUNDRY_PROFILE: "local" } });
+  }, { env: { KUKULU_CONFIG: globalPath, KUKULU_PROFILE: "local" } });
 }
 
 // ---------------------------------------------------------------- effort survives for claude-* ids
@@ -411,7 +411,7 @@ const cfgDir = () => mkDir("foundry-cfg-");
     eq(cfg.roles.planner.model, "claude-fable-5-1", "the planner's model is overridden to a full claude-* id");
     eq(cfg.roles.planner.effort, "high", "effort survives because claude-* counts as an Anthropic model");
     eq(cfg.effortDropped.planner, undefined, "nothing was dropped for the planner");
-  }, { env: { FOUNDRY_CONFIG: globalPath } });
+  }, { env: { KUKULU_CONFIG: globalPath } });
 }
 
 // ---------------------------------------------------------------- stale detection
@@ -424,7 +424,7 @@ const cfgDir = () => mkDir("foundry-cfg-");
     await call("kukulu_agents_sync");
     const cfg = await call("kukulu_config_show");
     eq(cfg.agentsStale.join(","), "", "freshly synced agents are not stale");
-  }, { env: { FOUNDRY_CONFIG: writeGlobalConfig(dir, { roles: { implementer: { model: "sonnet" } } }) } });
+  }, { env: { KUKULU_CONFIG: writeGlobalConfig(dir, { roles: { implementer: { model: "sonnet" } } }) } });
 
   // Change the global file without re-syncing.
   const changedPath = writeGlobalConfig(dir, { roles: { implementer: { model: "haiku" } } });
@@ -438,7 +438,7 @@ const cfgDir = () => mkDir("foundry-cfg-");
 
     cfg = await call("kukulu_config_show");
     eq(cfg.agentsStale.join(","), "", "nothing is stale after a fresh sync");
-  }, { env: { FOUNDRY_CONFIG: changedPath } });
+  }, { env: { KUKULU_CONFIG: changedPath } });
 }
 
 // ---------------------------------------------------------------- refusals
@@ -461,32 +461,32 @@ const cfgDir = () => mkDir("foundry-cfg-");
       isError(await call("kukulu_status"), re, `status refuses with the same kind of error: ${label}`);
       isError(await call("kukulu_agents_sync"), re, `agents_sync refuses: ${label}`);
       ok(!hasFile(repo, ".claude/agents"), `.claude/agents is never created on a refused sync (${label})`);
-    }, { env: { FOUNDRY_CONFIG: globalPath } });
+    }, { env: { KUKULU_CONFIG: globalPath } });
   }
 
   {
     const p = writeFile(cfgDir(), "foundry-global.json", "{not json");
     await withServer(repo, async ({ call }) => {
       isError(await call("kukulu_config_show"), /not valid JSON/, "invalid JSON in the global config");
-    }, { env: { FOUNDRY_CONFIG: p } });
+    }, { env: { KUKULU_CONFIG: p } });
   }
 
   {
     const globalPath = writeGlobalConfig(cfgDir(), { profiles: { cheap: {} } });
     await withServer(repo, async ({ call }) => {
-      isError(await call("kukulu_config_show"), /profiles\.nope/, "FOUNDRY_PROFILE names a profile that does not exist");
-    }, { env: { FOUNDRY_CONFIG: globalPath, FOUNDRY_PROFILE: "nope" } });
+      isError(await call("kukulu_config_show"), /profiles\.nope/, "KUKULU_PROFILE names a profile that does not exist");
+    }, { env: { KUKULU_CONFIG: globalPath, KUKULU_PROFILE: "nope" } });
   }
 
   {
     const globalPath = writeGlobalConfig(cfgDir(), { profile: "nope" });
     await withServer(repo, async ({ call }) => {
       isError(await call("kukulu_config_show"), /profiles\.nope/, "the global file's own \"profile\" key names a profile that does not exist");
-    }, { env: { FOUNDRY_CONFIG: globalPath } });
+    }, { env: { KUKULU_CONFIG: globalPath } });
   }
 
   {
-    // An unselected profile is still validated, not only the one FOUNDRY_PROFILE picks.
+    // An unselected profile is still validated, not only the one KUKULU_PROFILE picks.
     const globalPath = writeGlobalConfig(cfgDir(), {
       profiles: {
         local: { implementer: { model: "sonnet" } },
@@ -495,7 +495,7 @@ const cfgDir = () => mkDir("foundry-cfg-");
     });
     await withServer(repo, async ({ call }) => {
       isError(await call("kukulu_config_show"), /unknown key 'temperature'/, "an unselected profile is validated too");
-    }, { env: { FOUNDRY_CONFIG: globalPath, FOUNDRY_PROFILE: "local" } });
+    }, { env: { KUKULU_CONFIG: globalPath, KUKULU_PROFILE: "local" } });
   }
 }
 
@@ -521,19 +521,19 @@ const cfgDir = () => mkDir("foundry-cfg-");
     const cfg = await call("kukulu_config_show");
     eq(cfg.globalConfig, templatePath, "the template file is read as the global config");
     eq(cfg.roles.implementer.model, "sonnet", "the template's un-profiled defaults resolve");
-  }, { env: { FOUNDRY_CONFIG: templatePath } });
+  }, { env: { KUKULU_CONFIG: templatePath } });
 
   await withServer(repo, async ({ call }) => {
     const cfg = await call("kukulu_config_show");
     eq(cfg.profile, "local", "the template's local profile is selected");
     eq(cfg.roles.implementer.model, "Ollama/qwen3.6:35b-a3b", "the template's local profile resolves");
-  }, { env: { FOUNDRY_CONFIG: templatePath, FOUNDRY_PROFILE: "local" } });
+  }, { env: { KUKULU_CONFIG: templatePath, KUKULU_PROFILE: "local" } });
 
   await withServer(repo, async ({ call }) => {
     const cfg = await call("kukulu_config_show");
     eq(cfg.profile, "cheap", "the template's cheap profile is selected");
     eq(cfg.roles.implementer.model, "haiku", "the template's cheap profile resolves");
-  }, { env: { FOUNDRY_CONFIG: templatePath, FOUNDRY_PROFILE: "cheap" } });
+  }, { env: { KUKULU_CONFIG: templatePath, KUKULU_PROFILE: "cheap" } });
 
   for (const file of ["ollama.provider.json", "openrouter.provider.json"]) {
     const provider = JSON.parse(readFile(ROOT, `templates/ccr/${file}`)).provider;
@@ -555,6 +555,63 @@ const cfgDir = () => mkDir("foundry-cfg-");
       eq(fm.description, pluginAgent(role).frontmatter.description, `${role}'s description round-trips through the generated file exactly`);
     }
   });
+}
+
+// ---------------------------------------------------------------- pre-0.6.0 names (removed in 0.7.0)
+
+{
+  const repo = plannedRepo();
+  const globalPath = writeGlobalConfig(cfgDir(), {
+    profiles: { local: { implementer: { model: "ollama,qwen3.6:35b-a3b" } }, cheap: { implementer: { model: "haiku" } } },
+  });
+
+  await withServer(repo, async ({ call }) => {
+    const st = await call("kukulu_status");
+    eq(st.deprecations.length, 0, "no deprecation notice when only KUKULU_* names are used");
+  }, { env: { KUKULU_CONFIG: globalPath, KUKULU_PROFILE: "local" } });
+
+  await withServer(repo, async ({ call }) => {
+    const cfg = await call("kukulu_config_show");
+    eq(cfg.profile, "local", "FOUNDRY_PROFILE still selects a profile");
+    eq(cfg.roles.implementer.model, "ollama,qwen3.6:35b-a3b", "FOUNDRY_CONFIG still points at the global file");
+    const st = await call("kukulu_status");
+    eq(st.deprecations.join("\n"), [
+      "FOUNDRY_CONFIG is deprecated; set KUKULU_CONFIG instead. Support ends in 0.7.0.",
+      "FOUNDRY_PROFILE is deprecated; set KUKULU_PROFILE instead. Support ends in 0.7.0.",
+    ].join("\n"), "...and kukulu_status says to rename each, and when support ends");
+    const n = await call("kukulu_next");
+    eq(n.deprecations.length, 2, "...and kukulu_next carries the same notices");
+  }, { env: { KUKULU_CONFIG: "", FOUNDRY_CONFIG: globalPath, FOUNDRY_PROFILE: "local" } });
+
+  await withServer(repo, async ({ call }) => {
+    const cfg = await call("kukulu_config_show");
+    eq(cfg.profile, "cheap", "KUKULU_PROFILE wins over FOUNDRY_PROFILE");
+    const st = await call("kukulu_status");
+    eq(st.deprecations.length, 0, "...and a pre-0.6.0 name that lost is not reported");
+  }, { env: { KUKULU_CONFIG: globalPath, KUKULU_PROFILE: "cheap", FOUNDRY_PROFILE: "local" } });
+}
+
+{
+  // The global file moved from <config>/foundry/ to <config>/kukulu/.
+  const repo = plannedRepo();
+  const xdg = cfgDir();
+  writeFile(xdg, "foundry/config.json", JSON.stringify({ roles: { implementer: { model: "haiku" } } }));
+  const env = { KUKULU_CONFIG: "", XDG_CONFIG_HOME: xdg };
+
+  await withServer(repo, async ({ call }) => {
+    const cfg = await call("kukulu_config_show");
+    eq(cfg.roles.implementer.model, "haiku", "the global file is still read from the old foundry/ directory");
+    const st = await call("kukulu_status");
+    eq(st.deprecations.length, 1, "...with one notice");
+    like(st.deprecations[0], /move it to .*kukulu[/\\]config\.json\. Support ends in 0\.7\.0\./, "...naming the new location and the removal");
+  }, { env });
+
+  writeFile(xdg, "kukulu/config.json", JSON.stringify({ roles: { implementer: { model: "sonnet" } } }));
+  await withServer(repo, async ({ call }) => {
+    const cfg = await call("kukulu_config_show");
+    eq(cfg.roles.implementer.model, "sonnet", "the kukulu/ global file wins over the foundry/ one");
+    eq((await call("kukulu_status")).deprecations.length, 0, "...and nothing is reported");
+  }, { env });
 }
 
 finish();

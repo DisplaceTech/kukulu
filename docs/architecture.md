@@ -229,7 +229,7 @@ mechanisms keep it honest:
   re-blocks since the last time work actually moved, not over the whole
   run — a large plan making normal progress cannot exhaust it. At the
   effective cap (`docs/foundry.json`'s `guardCap`, carried in the lock;
-  else `FOUNDRY_GUARD_CAP`; else 60) it stops blocking and emits a
+  else `KUKULU_GUARD_CAP`; else 60) it stops blocking and emits a
   `systemMessage` naming the stalled task instead, leaving the lock in
   place so the next `kukulu_next` sees the unfinished run.
 - **The refusals.** `kukulu_task_done` requires HEAD's subject to start with
@@ -436,7 +436,7 @@ fix task is a task, and it goes through the same test-first loop as any other.
 | `docs/PROGRESS.md` | yes | task checkboxes and the per-task log |
 | `docs/foundry.json` | yes | `verify`, `extraVerify`, `build`, `baseBranch`, `branchPrefix`, `maxRounds`, `commandTimeoutMs`, `roles`, `permissionMode` |
 | `.claude/agents/kukulu-*.md` | no (`.git/info/exclude`) | the generated per-role agents; see [routing.md](./routing.md) |
-| `~/.config/foundry/config.json` | n/a (outside the project) | the global routing config, its profiles |
+| `~/.config/kukulu/config.json` | n/a (outside the project) | the global routing config, its profiles |
 
 A corrupt `state.json` degrades to defaults rather than failing — the tasks on
 disk are the real record. A corrupt `foundry.json` is a hard error, because

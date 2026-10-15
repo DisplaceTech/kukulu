@@ -15,7 +15,7 @@ export const SERVER = path.join(ROOT, "mcp", "server.mjs");
 export const GUARD = path.join(ROOT, "scripts", "implement-guard.mjs");
 
 const KEEP = Boolean(process.env.KEEP_REPO);
-const RPC_TIMEOUT_MS = Number(process.env.FOUNDRY_TEST_TIMEOUT_MS || 60_000);
+const RPC_TIMEOUT_MS = Number(process.env.KUKULU_TEST_TIMEOUT_MS || 60_000);
 
 // ---------------------------------------------------------------- assertions
 
@@ -338,17 +338,21 @@ export function commitTask(repo, id, title, files = {}) {
  * notifications produce no reply.
  */
 export function startServer(repo, { env = {}, server = SERVER } = {}) {
-  // Isolate every suite from the developer's own machine: point FOUNDRY_CONFIG
-  // at a path that does not exist and force FOUNDRY_PROFILE unset, so a real
-  // ~/.config/foundry/config.json (or an inherited FOUNDRY_PROFILE) can never
-  // leak into a test. A suite that wants to test the global file passes its
-  // own FOUNDRY_CONFIG/FOUNDRY_PROFILE via `env` to override these.
+  // Isolate every suite from the developer's own machine: point KUKULU_CONFIG
+  // at a path that does not exist and force KUKULU_PROFILE unset, so a real
+  // ~/.config/kukulu/config.json (or an inherited KUKULU_PROFILE) can never
+  // leak into a test. The pre-0.6.0 FOUNDRY_* names are blanked too, so a
+  // developer's old exports cannot reach a suite. A suite that wants to test
+  // the global file passes its own KUKULU_CONFIG/KUKULU_PROFILE via `env`.
   const isolation = {
-    FOUNDRY_CONFIG: path.join(repo, ".foundry-test-no-global.json"),
+    KUKULU_CONFIG: path.join(repo, ".kukulu-test-no-global.json"),
+    KUKULU_PROFILE: "",
+    FOUNDRY_CONFIG: "",
     FOUNDRY_PROFILE: "",
+    FOUNDRY_PROJECT_DIR: "",
   };
   const proc = spawn(process.execPath, [server], {
-    env: { ...process.env, FOUNDRY_PROJECT_DIR: repo, ...isolation, ...env },
+    env: { ...process.env, KUKULU_PROJECT_DIR: repo, ...isolation, ...env },
     stdio: ["pipe", "pipe", "inherit"],
   });
   const pending = new Map();
@@ -473,7 +477,7 @@ export function splitFrontmatter(text) {
 
 /** Write a Foundry global routing-config fixture; returns its path. */
 export function writeGlobalConfig(dir, obj) {
-  return writeFile(dir, "foundry-global.json", JSON.stringify(obj, null, 2) + "\n");
+  return writeFile(dir, "global-config.json", JSON.stringify(obj, null, 2) + "\n");
 }
 
 // ---------------------------------------------------------------- guard hook
@@ -487,7 +491,7 @@ export function runGuard(repo, input = {}, env = {}) {
   const payload = JSON.stringify({
     hook_event_name: "SubagentStop",
     agent_type: "kukulu-implementer",
-    transcript_path: path.join(repo, ".foundry-test-transcript.jsonl"),
+    transcript_path: path.join(repo, ".kukulu-test-transcript.jsonl"),
     cwd: repo,
     ...input,
   });

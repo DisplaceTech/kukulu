@@ -4,7 +4,9 @@
       "command": "node",
       "args": ["${CLAUDE_PLUGIN_ROOT}/mcp/server.mjs"],
       "env": {
-        "FOUNDRY_PROJECT_DIR": "${CLAUDE_PROJECT_DIR}",
+        "KUKULU_PROJECT_DIR": "${CLAUDE_PROJECT_DIR}",
+        "KUKULU_CONFIG": "${KUKULU_CONFIG:-}",
+        "KUKULU_PROFILE": "${KUKULU_PROFILE:-}",
         "FOUNDRY_CONFIG": "${FOUNDRY_CONFIG:-}",
         "FOUNDRY_PROFILE": "${FOUNDRY_PROFILE:-}"
       }
