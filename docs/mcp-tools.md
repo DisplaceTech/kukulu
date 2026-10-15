@@ -1,6 +1,6 @@
 # MCP tool reference
 
-Twenty-one tools, served over stdio by `mcp/server.mjs` with no dependencies.
+Twenty-two tools, served over stdio by `mcp/server.mjs` with no dependencies.
 The server is launched by Claude Code from [`.mcp.json`](../.mcp.json) with
 `KUKULU_PROJECT_DIR` set to the project root; every path below is relative to
 that root.
@@ -891,6 +891,41 @@ After it, `kukulu_next` reports `done` until `docs/SPEC.md` is edited, then
 the slug is malformed; the flight is not summarized; the implement lock is
 armed; the working tree is dirty (apart from files that were untracked before
 the run started); or `docs/flights/<slug>/` already exists.
+
+---
+
+## `kukulu_migrate`
+
+Move a project from the pre-0.6.0 Foundry layout to the current one. Until
+0.7.0 a project that has not migrated keeps working in place; this tool ends
+the deprecation notice.
+
+**Arguments:** none.
+
+**Does:** moves `.foundry/state.json`, `.foundry/feedback.jsonl` and
+`docs/foundry.json` (each one that exists) to `.kukulu/state.json`,
+`.kukulu/feedback.jsonl` and `docs/kukulu.json` (`git mv` for a tracked file, a
+plain rename for an untracked one), rewrites the `.foundry/implement.lock` and
+`.foundry/worktrees/` lines of `.gitignore`, removes the empty `.foundry/`,
+and commits `chore: migrate .foundry layout to .kukulu`. If the commit fails,
+every path is put back. Nothing under `docs/flights/` is touched: archived
+flights keep the names they were written with. After the commit it deletes the
+generated `.claude/agents/foundry-<role>.md` files (a file without the
+generated marker is kept and listed), replaces the matching lines of
+`.git/info/exclude`, and ensures the `mcp__plugin_kukulu_kukulu` allow rule in
+`.claude/settings.local.json`. The old `mcp__plugin_foundry_foundry` rule is
+left where it is; remove it by hand.
+
+**Returns:** `{ moved, gitignore, removedAgents, keptAgents, permissions,
+commit }`: `moved` is `[from, to]` pairs, `gitignore` is `rewritten`,
+`unchanged` or `absent`.
+
+**Refuses when** (before anything moves): the project holds both layouts
+(every tool refuses that); it is already on `.kukulu/` or has neither layout;
+it is not a git repository; the implement lock is armed; `mutation.json`
+exists; a stream worktree exists; `.foundry/` holds a file this tool does not
+know; or the working tree is dirty (apart from files that were untracked
+before the run started).
 
 ---
 

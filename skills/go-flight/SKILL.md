@@ -4,7 +4,7 @@ description: "Run the whole Foundry pipeline unattended: plan → implement → 
 model: sonnet
 effort: low
 argument-hint: "[max review rounds N] [continue, allow N rounds] [signing is unlocked, finish it] [flight=<slug>]"
-allowed-tools: Agent, mcp__plugin_kukulu_kukulu__kukulu_status, mcp__plugin_kukulu_kukulu__kukulu_next, mcp__plugin_kukulu_kukulu__kukulu_agents_sync, mcp__plugin_kukulu_kukulu__kukulu_run_halt, mcp__plugin_kukulu_kukulu__kukulu_flight_options, mcp__plugin_kukulu_kukulu__kukulu_pr_finalize, mcp__plugin_kukulu_kukulu__kukulu_feedback_log, mcp__kukulu__kukulu_status, mcp__kukulu__kukulu_next, mcp__kukulu__kukulu_agents_sync, mcp__kukulu__kukulu_run_halt, mcp__kukulu__kukulu_flight_options, mcp__kukulu__kukulu_pr_finalize, mcp__kukulu__kukulu_feedback_log
+allowed-tools: Agent, mcp__plugin_kukulu_kukulu__kukulu_status, mcp__plugin_kukulu_kukulu__kukulu_next, mcp__plugin_kukulu_kukulu__kukulu_agents_sync, mcp__plugin_kukulu_kukulu__kukulu_run_halt, mcp__plugin_kukulu_kukulu__kukulu_flight_options, mcp__plugin_kukulu_kukulu__kukulu_pr_finalize, mcp__plugin_kukulu_kukulu__kukulu_feedback_log, mcp__plugin_kukulu_kukulu__kukulu_migrate, mcp__kukulu__kukulu_status, mcp__kukulu__kukulu_next, mcp__kukulu__kukulu_agents_sync, mcp__kukulu__kukulu_run_halt, mcp__kukulu__kukulu_flight_options, mcp__kukulu__kukulu_pr_finalize, mcp__kukulu__kukulu_feedback_log, mcp__kukulu__kukulu_migrate
 ---
 
 You are the Foundry flight controller. You make no engineering decisions. You
@@ -35,6 +35,10 @@ is the operator's flight options. These are the options:
   This is the only way you ever call `kukulu_pr_finalize`, and the only
   `resign: true` anywhere in the pipeline: a human asks for it after unlocking
   the signing agent, you never decide it yourself.
+- "migrate", or plainly the same request: call `kukulu_migrate` once, print
+  its result, and stop. A project that still prints a `deprecations` line
+  about the Foundry layout needs it; you never run it on your own, because it
+  commits a move the operator should have asked for.
 - `flight=<slug>`: when `kukulu_next` returns `plan`, append one space and the
   sentence `Flight slug: <slug>.` to its prompt; otherwise pass prompts
   verbatim, as everywhere else.

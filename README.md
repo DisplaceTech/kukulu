@@ -278,7 +278,7 @@ Checkbox states in `PROGRESS.md`: `[ ]` todo · `[~]` in progress · `[x]` done 
 
 ## MCP tools
 
-The server exposes twenty-one tools.
+The server exposes twenty-two tools.
 
 | Tool | Does |
 |---|---|
@@ -300,6 +300,7 @@ The server exposes twenty-one tools.
 | `kukulu_review_submit` | `APPROVED` → commit. `CHANGES REQUESTED` → assign `R<N>-<nn>`, append to PLAN and PROGRESS, unblock (with skipped dependents), commit `review: round N` |
 | `kukulu_summary_commit` | Write `SUMMARY.md` from `content`, commit it, mark the flight complete, report reviews, fix rounds, the branch's PR and whether to archive |
 | `kukulu_flight_archive` | Move a summarized flight's artifacts into `docs/flights/<slug>/` (the spec stays), write a fresh state, commit and push |
+| `kukulu_migrate` | Move a project from the pre-0.6.0 Foundry layout (`.foundry/`, `docs/foundry.json`) to `.kukulu/` and `docs/kukulu.json`, fix the ignore lines and generated agents, and commit the move |
 | `kukulu_pr_finalize` | End a flight: if every commit is signed, mark the draft PR ready and, unless `breaking`, enable auto-merge; otherwise keep it a draft and record `awaitingSigning`. `resign: true` is for a human |
 | `kukulu_agents_sync` | Write `.claude/agents/kukulu-<role>.md` from the merged routing config; only changed files are written |
 | `kukulu_config_show` | The merged routing config with the source of every value. Read-only |
