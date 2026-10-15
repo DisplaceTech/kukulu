@@ -195,7 +195,7 @@ function waveRepo({ tasks = WAVE_PLAN, config = {} } = {}) {
   return repo;
 }
 const progressOf = (repo) => readFile(repo, "docs/PROGRESS.md");
-const stateOf = (repo) => JSON.parse(readFile(repo, ".foundry/state.json"));
+const stateOf = (repo) => JSON.parse(readFile(repo, ".kukulu/state.json"));
 
 {
   const repo = waveRepo();
@@ -204,12 +204,12 @@ const stateOf = (repo) => JSON.parse(readFile(repo, ".foundry/state.json"));
     eq(r.stream, "api", "run_start echoes the stream");
     eq(r.wave, 1, "...and the wave");
     ok(path.isAbsolute(r.cwd), "it returns an absolute worktree path");
-    eq(r.cwd, path.join(repo, ".foundry", "worktrees", "api"), "...under .foundry/worktrees/<stream>");
+    eq(r.cwd, path.join(repo, ".kukulu", "worktrees", "api"), "...under .kukulu/worktrees/<stream>");
     eq(r.created, true, "the worktree was created");
     like(r.streamBranch, /^build\/[\d-]+--api$/, "on a branch named <build-branch>--<stream>");
     like(git(repo, ["branch", "--list", r.streamBranch]), /--api/, "that branch exists");
     eq(git(r.cwd, ["rev-parse", "--abbrev-ref", "HEAD"]), r.streamBranch, "and the worktree has it checked out");
-    like(readFile(repo, ".gitignore"), /^\.foundry\/worktrees\/$/m, "the run's .gitignore gains the worktrees line");
+    like(readFile(repo, ".gitignore"), /^\.kukulu\/worktrees\/$/m, "the run's .gitignore gains the worktrees line");
     eq(git(repo, ["status", "--porcelain", "--untracked-files=all"]).split("\n").filter((l) => l.includes("worktrees")).length, 0, "the worktree does not show up as untracked in the main checkout");
 
     const again = await call("kukulu_run_start", { stream: "api" });
@@ -367,10 +367,10 @@ const stateOf = (repo) => JSON.parse(readFile(repo, ".foundry/state.json"));
   const repo = waveRepo({ config: { parallel: { setup: ["echo boom >&2; exit 3"] } } });
   await withServer(repo, async ({ call }) => {
     isError(await call("kukulu_run_start", { stream: "api" }), /setup command "echo boom >&2; exit 3" failed for stream api: boom\. Wave 1 now runs serially/, "a failing setup command refuses, saying the wave now runs serially");
-    ok(!hasFile(repo, ".foundry/worktrees/api"), "the worktree is removed");
+    ok(!hasFile(repo, ".kukulu/worktrees/api"), "the worktree is removed");
     eq(git(repo, ["branch", "--list", "*--api"]), "", "...and so is the stream branch");
     eq(stateOf(repo).serialWaves.map((w) => `${w.wave}:${w.category}`).join(","), "1:stream-setup", "the wave is recorded in serialWaves");
-    const fb = readFile(repo, ".foundry/feedback.jsonl").trim().split("\n").map((l) => JSON.parse(l));
+    const fb = readFile(repo, ".kukulu/feedback.jsonl").trim().split("\n").map((l) => JSON.parse(l));
     eq(fb.length, 1, "exactly one feedback entry");
     eq(fb[0].category, "stream-setup", "...of category stream-setup");
     eq(fb[0].source, "auto", "...written by the MCP itself");
@@ -408,7 +408,7 @@ const UI = [["P1-03", "src/ui/a.txt", "u\n"], ["P1-04", "src/ui/b.txt", "v\n"]];
     eq(f1.merged, true, "the first stream merges");
     ok(f1.mergeCommit, "and reports its merge commit");
     eq(f1.remainingStreams.join(","), "ui", "remainingStreams names the other stream");
-    ok(!hasFile(repo, ".foundry/worktrees/api"), "the worktree is removed");
+    ok(!hasFile(repo, ".kukulu/worktrees/api"), "the worktree is removed");
     eq(git(repo, ["branch", "--list", a.streamBranch]), "", "the stream branch is deleted");
     eq(subject(repo), "merge stream api (wave 1)", "the merge commit says which stream and wave");
     eq(readFile(repo, "src/api/a.txt"), "a\n", "the stream's files are in the main checkout");
@@ -440,7 +440,7 @@ const UI = [["P1-03", "src/ui/a.txt", "u\n"], ["P1-04", "src/ui/b.txt", "v\n"]];
     const f = await call("kukulu_stream_finish", { stream: "api" });
     eq(f.merged, true, "a wholly blocked stream still finishes");
     eq(f.mergeCommit, null, "with no merge commit, since it had nothing to merge");
-    ok(!hasFile(repo, ".foundry/worktrees/api"), "and its worktree is cleaned up");
+    ok(!hasFile(repo, ".kukulu/worktrees/api"), "and its worktree is cleaned up");
   });
 }
 
@@ -499,7 +499,7 @@ const UI = [["P1-03", "src/ui/a.txt", "u\n"], ["P1-04", "src/ui/b.txt", "v\n"]];
     const second = await call("kukulu_stream_finish", { stream: "ui" });
     eq(second.merged, false, "the second conflicts");
     like(second.halted, /merging stream 'ui' .* conflicted in shared\.txt/, "the halt reason names the stream and the conflicting path");
-    like(second.halted, /git merge --no-ff .*--ui.*git worktree remove --force \.foundry\/worktrees\/ui.*clear 'halted'/, "and the manual steps");
+    like(second.halted, /git merge --no-ff .*--ui.*git worktree remove --force \.kukulu\/worktrees\/ui.*clear 'halted'/, "and the manual steps");
     eq(second.conflicts.join(","), "shared.txt", "the conflicting paths are returned");
     eq(git(repo, ["status", "--porcelain", "--untracked-files=no"]), "", "the merge is aborted: the main checkout is clean");
     ok(!hasFile(repo, ".git/MERGE_HEAD"), "no merge is left in progress");
@@ -509,7 +509,7 @@ const UI = [["P1-03", "src/ui/a.txt", "u\n"], ["P1-04", "src/ui/b.txt", "v\n"]];
     const n = await call("kukulu_next");
     eq(n.stage, "halt", "kukulu_next now says halt");
     like(n.reason, /conflicted/, "with the reason");
-    const fb = readFile(repo, ".foundry/feedback.jsonl").trim().split("\n").map((l) => JSON.parse(l));
+    const fb = readFile(repo, ".kukulu/feedback.jsonl").trim().split("\n").map((l) => JSON.parse(l));
     eq(fb.filter((e) => e.category === "stream-merge").length, 1, "exactly one stream-merge feedback entry");
     eq(fb[0].source, "auto", "written by the MCP");
     eq(subject(repo), "chore: run halted (stream ui merge conflict)", "state and feedback are committed together");
@@ -536,7 +536,7 @@ const UI = [["P1-03", "src/ui/a.txt", "u\n"], ["P1-04", "src/ui/b.txt", "v\n"]];
 
 // ---------------------------------------------------------------- V4-04: kukulu_next hands out waves
 
-const feedbackOf = (repo) => (hasFile(repo, ".foundry/feedback.jsonl") ? readFile(repo, ".foundry/feedback.jsonl").trim().split("\n").map((l) => JSON.parse(l)) : []);
+const feedbackOf = (repo) => (hasFile(repo, ".kukulu/feedback.jsonl") ? readFile(repo, ".kukulu/feedback.jsonl").trim().split("\n").map((l) => JSON.parse(l)) : []);
 
 {
   const repo = waveRepo();
@@ -685,7 +685,7 @@ const feedbackOf = (repo) => (hasFile(repo, ".foundry/feedback.jsonl") ? readFil
     eq(p.streams.join(","), "api,ui", "and its streams");
     like(p.message, /P1-01.*wave 1.*Stop now\. Do NOT write docs\/HANDOFF\.md and do NOT call kukulu_run_finish/, "with an unmistakable instruction not to finish the run");
     eq(p.counts.open, 5, "the plan's open tasks are still open");
-    eq(JSON.parse(readFile(repo, ".foundry/implement.lock")).paused, 1, "the lock is flagged paused");
+    eq(JSON.parse(readFile(repo, ".kukulu/implement.lock")).paused, 1, "the lock is flagged paused");
     eq(runGuard(repo, stopInput), "", "so the guard lets the serial implementer stop with tasks open");
     isError(await call("kukulu_run_finish"), /open task|kukulu_task_next|HANDOFF/i, "and run_finish is refused anyway, the safety net if the instruction is ignored");
 
@@ -695,7 +695,7 @@ const feedbackOf = (repo) => (hasFile(repo, ".foundry/feedback.jsonl") ? readFil
     await call("kukulu_task_next", { stream: "api" });
     commitTask(a.cwd, "P1-01", "Task P1-01", { "src/api/a.txt": "a\n" });
     await call("kukulu_task_done", { stream: "api", id: "P1-01", log: "ok" });
-    ok(!("paused" in JSON.parse(readFile(repo, ".foundry/implement.lock"))), "any task state change clears the flag");
+    ok(!("paused" in JSON.parse(readFile(repo, ".kukulu/implement.lock"))), "any task state change clears the flag");
   });
 }
 
@@ -707,7 +707,7 @@ const feedbackOf = (repo) => (hasFile(repo, ".foundry/feedback.jsonl") ? readFil
     const t = await call("kukulu_task_next");
     eq(t.id, "P1-01", "a wave that runs serially is worked by the serial implementer");
     ok(!("paused" in t), "with no pause");
-    ok(!("paused" in JSON.parse(readFile(repo, ".foundry/implement.lock"))), "and no flag on the lock");
+    ok(!("paused" in JSON.parse(readFile(repo, ".kukulu/implement.lock"))), "and no flag on the lock");
   });
 }
 

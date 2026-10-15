@@ -1,6 +1,6 @@
 ---
 name: plan-build
-description: "Foundry pipeline stage — derive docs/PLAN.md, docs/PROGRESS.md, docs/foundry.json and CLAUDE.md from docs/SPEC.md (run once, before implement). Invoked by go-flight through the kukulu-planner agent; not for ordinary work."
+description: "Foundry pipeline stage — derive docs/PLAN.md, docs/PROGRESS.md, docs/kukulu.json and CLAUDE.md from docs/SPEC.md (run once, before implement). Invoked by go-flight through the kukulu-planner agent; not for ordinary work."
 model: inherit
 ---
 
@@ -21,7 +21,7 @@ these files with fixed patterns, so the formats below are exact.
 
 1. `docs/PLAN.md` in the exact format below.
 2. `docs/PROGRESS.md` in the exact format below.
-3. `docs/foundry.json` (verification commands and run settings).
+3. `docs/kukulu.json` (verification commands and run settings).
 4. `CLAUDE.md` for the repo.
 
 Do not write implementation code. Do not create the branch, package manifest,
@@ -76,7 +76,7 @@ or any source files; the first task of the first phase does that.
   CLAUDE.md"). PLAN.md's `## Conventions` is for the plan's own reader, and
   the implementer never sees it.
 - A verification step that takes longer than about ten minutes (a full
-  benchmark, a heavy suite) belongs in `docs/foundry.json` as a `verify` or
+  benchmark, a heavy suite) belongs in `docs/kukulu.json` as a `verify` or
   `extraVerify` command with its own `timeoutMs`, so it runs through
   `kukulu_verify` instead of a foreground shell call that the harness cuts
   off. Say so in the task's Verification section.
@@ -102,7 +102,7 @@ only where the tasks genuinely do not need each other.
   a wave, then serial tasks. Within a wave, tasks sharing a stream run in
   order on one implementer; different streams run concurrently. Use at least
   two streams per wave, and at most `parallel.maxStreams` (3 unless
-  `docs/foundry.json` says otherwise).
+  `docs/kukulu.json` says otherwise).
 - **Put tasks in a stream only when they can be built without seeing each
   other's code.** Every streamed task's `Files touched` must be a list of
   concrete backticked paths (`` `src/api/routes.ts` ``; a trailing `/` names a
@@ -121,7 +121,7 @@ only where the tasks genuinely do not need each other.
   manual checks). A wave never spans a phase-end task.
 - **Environments that cannot be shared.** Any command that starts a port-,
   container- or directory-keyed environment (wp-env, docker compose, a dev
-  server) must be marked `exclusive` in `docs/foundry.json` (see below), and
+  server) must be marked `exclusive` in `docs/kukulu.json` (see below), and
   the tasks that trigger it stay out of waves: two copies would collide on the
   same ports no matter how the commands are scheduled.
 - **A fresh checkout must be verifiable.** Each stream works in a newly
@@ -194,7 +194,7 @@ because a dependency is blocked. The implement guard hook counts `[ ]` and
 `[~]` lines under `## Tasks` to decide whether the run is finished, so do not
 add other checkbox lines to this file.
 
-## `docs/foundry.json`
+## `docs/kukulu.json`
 
 ```json
 {
@@ -270,12 +270,12 @@ for every key and its default.
 Under fixed headings so the implementer and reviewer can find them:
 
 - `## Principles` — SPEC's engineering principles condensed to a checklist.
-- `## Commands` — the same commands as foundry.json, for humans.
+- `## Commands` — the same commands as kukulu.json, for humans.
 - `## Module map` — from SPEC's architecture section.
 - `## Constraints` — every global invariant, one line each, phrased as a rule
   the reviewer can check mechanically ("no `Date.now` under `src/core/`").
   Every constraint here that can be expressed as a single-line pattern must
-  also appear in `docs/foundry.json`'s `constraints` array (below) — a rule
+  also appear in `docs/kukulu.json`'s `constraints` array (below) — a rule
   stated only in prose is a rule the reviewer has to remember to grep for by
   hand, three rounds running, and still might miss a shape (F-14). A
   constraint that genuinely cannot be a line pattern (a structural rule, a
@@ -293,7 +293,7 @@ merge only flight-agnostic facts into the shared sections (Constraints,
 Commands, Task protocols). Leave every other flight's section untouched.
 Do not describe the Foundry workflow in CLAUDE.md.
 
-### `constraints` in `docs/foundry.json`
+### `constraints` in `docs/kukulu.json`
 
 For each mechanically-checkable `## Constraints` line, add an entry:
 `{ "id", "description", "paths", "exclude"?, "pattern" (a JS regex source,
@@ -312,17 +312,17 @@ examples and [docs/operations.md](../../docs/operations.md#constraints).
 
 Call `kukulu_status` before you write anything. If `strayArtifacts` is not
 empty, an earlier plan run was interrupted and left those files behind
-(`PLAN.md` is absent, but `foundry.json` or others are on disk and untracked):
+(`PLAN.md` is absent, but `kukulu.json` or others are on disk and untracked):
 regenerate every one of them from SPEC, never trust their content, and name
 them in your report.
 
-Write `docs/PLAN.md`, `docs/PROGRESS.md`, `docs/foundry.json` and
+Write `docs/PLAN.md`, `docs/PROGRESS.md`, `docs/kukulu.json` and
 `CLAUDE.md` with the `Write` tool. If the harness refuses one (some builds
 tell subagents to return findings as text instead), write it with a shell
 heredoc in one `Bash` call and continue — do not argue with the refusal,
 and do not return the file's content as text in your own reply (F-16).
 
-Set `docs/foundry.json`'s `baseBranch` to the branch you are actually on
+Set `docs/kukulu.json`'s `baseBranch` to the branch you are actually on
 when you commit, and say so in your report — do not assume it is `main`.
 Then call `kukulu_plan_commit`. It checks the four files together (task
 headings, numbering, dependencies, streams, config, `from` references) and,
@@ -334,8 +334,8 @@ renumbering by hand; it rewrites the ids everywhere. You never run `git
 commit` yourself.
 
 Report: number of tasks per phase, the decisions you made, and the spec
-issues you found. Quote `docs/foundry.json` verbatim from disk (`cat
-docs/foundry.json`, not from memory) in your report, except that you list the
+issues you found. Quote `docs/kukulu.json` verbatim from disk (`cat
+docs/kukulu.json`, not from memory) in your report, except that you list the
 `constraints` entries by id with a fixture count instead of quoting their
 bodies, and state the
 `baseBranch` and `branchPrefix` it actually contains — a report that

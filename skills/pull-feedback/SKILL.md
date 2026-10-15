@@ -1,6 +1,6 @@
 ---
 name: pull-feedback
-description: "Read another project's .foundry/feedback.jsonl and write it into this repo's docs/feedback/ as a new, properly numbered file, so a real flight's friction can feed the next Foundry release plan. Invoke by name or as /kukulu:pull-feedback."
+description: "Read another project's .kukulu/feedback.jsonl and write it into this repo's docs/feedback/ as a new, properly numbered file, so a real flight's friction can feed the next Foundry release plan. Invoke by name or as /kukulu:pull-feedback."
 allowed-tools: Read, Write, Bash, Glob
 ---
 
@@ -13,8 +13,9 @@ appropriate.
 
 ## Steps
 
-1. Read `<path>/.foundry/feedback.jsonl` and every
-   `<path>/docs/flights/*/feedback.jsonl` (a flight that was archived moved
+1. Read `<path>/.kukulu/feedback.jsonl` (a project that has not migrated
+   since 0.6.0 still keeps it at `<path>/.foundry/feedback.jsonl`; read
+   whichever exists) and every `<path>/docs/flights/*/feedback.jsonl` (a flight that was archived moved
    its log there, so a project that has run several flights holds friction in
    more than one file). Stop only when all of them are missing or empty — then
    say so; there is nothing to pull. Never write to, delete, or modify
@@ -53,7 +54,7 @@ appropriate.
 7. Write or append the file using the header shape
    [`docs/feedback/README.md`](../../docs/feedback/README.md) documents:
    name every source log and how many items came from each (for example
-   "`.foundry/feedback.jsonl` (2 items) and
+   "`.kukulu/feedback.jsonl` (2 items) and
    `docs/flights/w1-share/feedback.jsonl` (4 items)"), name the plugin version the flight ran against (read it from the other
    project's installed plugin if you can determine it, otherwise write
    "version not determined" rather than guessing), and no "addressed in"

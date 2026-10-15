@@ -15,7 +15,7 @@ hold the judgment. These rules apply to every change in this repository.
   asserts its message.
 - Tools validate, then mutate: a refusal comes before any file is written, and
   a tool whose final commit fails leaves the tree as it found it.
-- Config never silently defaults a bad value: every new `docs/foundry.json`
+- Config never silently defaults a bad value: every new `docs/kukulu.json`
   key is validated like `validatePolicies`, `validateParallel` and
   `validateConstraints`, with an unknown-key refusal.
 - Documentation moves with the code: a task that adds or changes a tool
@@ -48,7 +48,7 @@ hold the judgment. These rules apply to every change in this repository.
 
 ## Constraints
 
-Mechanical rules are in `docs/foundry.json` `constraints` and run on every
+Mechanical rules are in `docs/kukulu.json` `constraints` and run on every
 `kukulu_verify`:
 
 - `server-synchronous`: no `async` or `await` anywhere in `mcp/server.mjs`,
@@ -84,7 +84,7 @@ in `TOOLS`, and spell the same number in words on the first line of
 Append `mcp__plugin_kukulu_kukulu__<tool>` to the `tools:` line of the agent
 the task names. Add a `## <tool>` section to `docs/mcp-tools.md`.
 
-**Adding a `docs/foundry.json` key.** Validate it in the config validator with
+**Adding a `docs/kukulu.json` key.** Validate it in the config validator with
 a refusal for every bad shape. Add a row to `docs/operations.md`'s
 configuration table, and make sure `test/plugin.mjs`'s "config keys
 documented" loop covers it (it reads `cfg()`'s top-level keys; a nested key

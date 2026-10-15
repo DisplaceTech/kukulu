@@ -4,9 +4,10 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { createHash } from "node:crypto";
 import {
-  finish, ok, eq, like, isError,
-  mkDir, specRepo, plannedRepo, withServer,
+  ROOT, finish, ok, eq, like, isError,
+  mkDir, specRepo, plannedRepo, withServer, useLegacyLayout,
   writeFile, readFile, setState, markTasks, git, subject, planDoc, progressDoc,
 } from "./harness.mjs";
 
@@ -48,7 +49,7 @@ await withServer(specRepo(), async ({ call }) => {
 // A role routed to a model the Agent tool cannot name, with nothing generated yet.
 {
   const repo = specRepo();
-  writeFile(repo, "docs/foundry.json", JSON.stringify({ verify: ["true"], roles: { planner: { model: "Ollama/x" } } }, null, 2) + "\n");
+  writeFile(repo, "docs/kukulu.json", JSON.stringify({ verify: ["true"], roles: { planner: { model: "Ollama/x" } } }, null, 2) + "\n");
   await withServer(repo, async ({ call }) => {
     const n = await call("kukulu_next");
     eq(n.agent, null, "a router-routed role with nothing generated has no agent to spawn");
@@ -62,9 +63,9 @@ await withServer(specRepo(), async ({ call }) => {
 // must be handed the alias — and told it is an approximation.
 const routedReviewRepo = (model) => {
   const repo = plannedRepo();
-  const cfgPath = path.join(repo, "docs/foundry.json");
+  const cfgPath = path.join(repo, "docs/kukulu.json");
   const c = JSON.parse(fs.readFileSync(cfgPath, "utf8"));
-  writeFile(repo, "docs/foundry.json", JSON.stringify({ ...c, roles: { reviewer: { model } } }, null, 2) + "\n");
+  writeFile(repo, "docs/kukulu.json", JSON.stringify({ ...c, roles: { reviewer: { model } } }, null, 2) + "\n");
   markTasks(repo, ALL_DONE);
   setState(repo, { implemented: true });
   return repo;
@@ -100,7 +101,7 @@ await withServer(plannedRepo(), async ({ call }) => {
 });
 
 // A half-written plan is not a plan.
-for (const missing of ["docs/PLAN.md", "docs/PROGRESS.md", "docs/foundry.json"]) {
+for (const missing of ["docs/PLAN.md", "docs/PROGRESS.md", "docs/kukulu.json"]) {
   const repo = plannedRepo();
   fs.rmSync(path.join(repo, missing));
   await withServer(repo, async ({ call }) => {
@@ -174,14 +175,14 @@ for (const round of [0, 1, 5]) {
 }
 {
   const repo = plannedRepo();
-  writeFile(repo, ".foundry/implement.lock", "3\n");
+  writeFile(repo, ".kukulu/implement.lock", "3\n");
   await withServer(repo, async ({ call }) => {
     eq((await call("kukulu_status")).lockCounter, 3, "a legacy bare-number lock still reads back its count");
   });
 }
 {
   const repo = plannedRepo();
-  writeFile(repo, ".foundry/implement.lock", '{"count":7,"round":1}\n');
+  writeFile(repo, ".kukulu/implement.lock", '{"count":7,"round":1}\n');
   await withServer(repo, async ({ call }) => {
     eq((await call("kukulu_status")).lockCounter, 7, "a JSON lock's count is read directly");
   });
@@ -191,7 +192,7 @@ for (const round of [0, 1, 5]) {
 {
   const repo = plannedRepo();
   markTasks(repo, ALL_DONE);
-  writeFile(repo, ".foundry/implement.lock", "3\n");
+  writeFile(repo, ".kukulu/implement.lock", "3\n");
   await withServer(repo, async ({ call }) => {
     const n = await call("kukulu_next");
     eq(n.stage, "implement", "a stale lock sends the flight back to implement");
@@ -304,8 +305,8 @@ for (const [body, expected, label] of [
     eq(JSON.stringify(r.before), JSON.stringify({ maxRounds: 3, maxRoundsHard: 6 }), "the previous bounds are reported");
     eq(JSON.stringify(r.after), JSON.stringify({ maxRounds: 6, maxRoundsHard: 6 }), "...and the new ones");
     eq(git(repo, ["log", "-1", "--format=%s"]), "chore: flight options (maxRounds=6, maxRoundsHard=6)", "the change is one commit");
-    const c = JSON.parse(readFile(repo, "docs/foundry.json"));
-    eq(c.maxRounds, 6, "docs/foundry.json carries the new bound");
+    const c = JSON.parse(readFile(repo, "docs/kukulu.json"));
+    eq(c.maxRounds, 6, "docs/kukulu.json carries the new bound");
     eq(JSON.stringify(c.verify), JSON.stringify(["true"]), "...and keeps everything else");
     const again = await call("kukulu_flight_options", { maxRounds: 6 });
     eq(again.commit, null, "applying the same options twice commits nothing");
@@ -321,11 +322,11 @@ for (const [body, expected, label] of [
   git(repo, ["add", "-A"]);
   git(repo, ["commit", "-qm", "chore: halted"]);
   await withServer(repo, async ({ call }) => {
-    const cfgBefore = readFile(repo, "docs/foundry.json");
-    const stateBefore = readFile(repo, ".foundry/state.json");
+    const cfgBefore = readFile(repo, "docs/kukulu.json");
+    const stateBefore = readFile(repo, ".kukulu/state.json");
     isError(await call("kukulu_flight_options", { maxRounds: 3, resume: true }), /pass maxRounds: 4 or more/, "resume with a bound that does not lift the cap is refused, naming 4");
-    eq(readFile(repo, "docs/foundry.json"), cfgBefore, "...docs/foundry.json is unchanged");
-    eq(readFile(repo, ".foundry/state.json"), stateBefore, "...and so is state");
+    eq(readFile(repo, "docs/kukulu.json"), cfgBefore, "...docs/kukulu.json is unchanged");
+    eq(readFile(repo, ".kukulu/state.json"), stateBefore, "...and so is state");
     isError(await call("kukulu_flight_options", { resume: true }), /pass at least one of/, "resume alone is refused");
     isError(await call("kukulu_flight_options", { maxRounds: 4, resume: "yes" }), /resume must be a boolean/, "a non-boolean resume is refused");
     const head = git(repo, ["rev-list", "--count", "HEAD"]);
@@ -333,7 +334,7 @@ for (const [body, expected, label] of [
     eq(r.resumed, true, "a lifting resume succeeds");
     eq(Number(git(repo, ["rev-list", "--count", "HEAD"])) - Number(head), 1, "...in one commit");
     eq(subject(repo), "chore: flight options (maxRounds=4, resume)", "...with the resume subject");
-    const st = JSON.parse(readFile(repo, ".foundry/state.json"));
+    const st = JSON.parse(readFile(repo, ".kukulu/state.json"));
     ok(st.halted === null && st.haltCap === undefined, "...and halted and haltCap are cleared");
     eq((await call("kukulu_next")).stage, "implement", "the flight goes on to implement");
     isError(await call("kukulu_flight_options", { maxRounds: 5, resume: true }), /not halted; there is nothing to resume/, "resume when not halted is refused");
@@ -382,15 +383,15 @@ await withServer(specRepo(), async ({ call }) => {
 
 {
   const repo = plannedRepo();
-  writeFile(repo, "docs/foundry.json", "{ this is not json }");
+  writeFile(repo, "docs/kukulu.json", "{ this is not json }");
   await withServer(repo, async ({ call }) => {
-    isError(await call("kukulu_status"), /not valid JSON/, "a corrupt foundry.json is reported, not swallowed");
+    isError(await call("kukulu_status"), /not valid JSON/, "a corrupt kukulu.json is reported, not swallowed");
   });
 }
 
 {
   const repo = plannedRepo();
-  writeFile(repo, ".foundry/state.json", "{ truncated");
+  writeFile(repo, ".kukulu/state.json", "{ truncated");
   await withServer(repo, async ({ call }) => {
     const s = await call("kukulu_status");
     eq(s.state.round, 0, "a corrupt state.json falls back to defaults rather than failing");
@@ -435,16 +436,16 @@ await withServer(specRepo(), async ({ call }) => {
 // ---------------------------------------------------------------- artifacts (S-08)
 
 {
-  // an untracked foundry.json with no plan is a stray artifact (project-c F-04)
+  // an untracked kukulu.json with no plan is a stray artifact (project-c F-04)
   const repo = specRepo();
-  writeFile(repo, "docs/foundry.json", "{}\n");
+  writeFile(repo, "docs/kukulu.json", "{}\n");
   await withServer(repo, async ({ call }) => {
     const s = await call("kukulu_status");
-    eq(s.artifacts["foundry.json"], "untracked", "an unstaged foundry.json is untracked");
+    eq(s.artifacts["kukulu.json"], "untracked", "an unstaged kukulu.json is untracked");
     eq(s.artifacts["PLAN.md"], "absent", "...PLAN.md is absent");
     eq(s.artifacts["SPEC.md"], "tracked", "...SPEC.md is tracked");
-    eq(Object.keys(s.artifacts).join(","), "SPEC.md,PLAN.md,PROGRESS.md,HANDOFF.md,REVIEW.md,SUMMARY.md,foundry.json", "...and the keys are exactly the seven artifacts");
-    eq(s.strayArtifacts.join(","), "foundry.json", "...so it is a stray artifact");
+    eq(Object.keys(s.artifacts).join(","), "SPEC.md,PLAN.md,PROGRESS.md,HANDOFF.md,REVIEW.md,SUMMARY.md,kukulu.json", "...and the keys are exactly the seven artifacts");
+    eq(s.strayArtifacts.join(","), "kukulu.json", "...so it is a stray artifact");
   });
 }
 
@@ -521,7 +522,7 @@ for (const [config, re, label] of [
   const plan = plannedRepo(); // only for its generated texts
   writeFile(repo, "docs/PLAN.md", readFile(plan, "docs/PLAN.md"));
   writeFile(repo, "docs/PROGRESS.md", readFile(plan, "docs/PROGRESS.md"));
-  writeFile(repo, "docs/foundry.json", readFile(plan, "docs/foundry.json"));
+  writeFile(repo, "docs/kukulu.json", readFile(plan, "docs/kukulu.json"));
   writeFile(repo, "CLAUDE.md", "# rules\n");
   await withServer(repo, async ({ call }) => {
     const r = await call("kukulu_plan_commit");
@@ -556,7 +557,7 @@ for (const [config, re, label] of [
   ].join("\n");
   writeFile(repo, "docs/PLAN.md", planText);
   writeFile(repo, "docs/PROGRESS.md", ["# P", "Branch: (x)", "Started: (x)", "", "## Tasks", "- [ ] P0-05 Five", "- [ ] P0-03 Three", "- [ ] P0-01 One", "", "## Log", ""].join("\n"));
-  writeFile(repo, "docs/foundry.json", JSON.stringify({ verify: ["true"], constraints: [{ id: "c", paths: ["src/"], pattern: "x", shouldMatch: ["x"], shouldNotMatch: ["y"], from: "P9-01" }] }));
+  writeFile(repo, "docs/kukulu.json", JSON.stringify({ verify: ["true"], constraints: [{ id: "c", paths: ["src/"], pattern: "x", shouldMatch: ["x"], shouldNotMatch: ["y"], from: "P9-01" }] }));
   const head = git(repo, ["rev-parse", "HEAD"]);
   await withServer(repo, async ({ rpc }) => {
     const e = (await rpc("tools/call", { name: "kukulu_plan_commit", arguments: {} })).result;
@@ -582,7 +583,7 @@ function splitPlanRepo(progressPatch = (t) => t) {
   ];
   writeFile(repo, "docs/PLAN.md", planDoc(tasks));
   writeFile(repo, "docs/PROGRESS.md", progressPatch(progressDoc(tasks)));
-  writeFile(repo, "docs/foundry.json", JSON.stringify({ verify: ["true"], constraints: [{ id: "c", paths: ["src/"], pattern: "x", shouldMatch: ["x"], shouldNotMatch: ["y"], from: "P1-03" }] }, null, 2) + "\n");
+  writeFile(repo, "docs/kukulu.json", JSON.stringify({ verify: ["true"], constraints: [{ id: "c", paths: ["src/"], pattern: "x", shouldMatch: ["x"], shouldNotMatch: ["y"], from: "P1-03" }] }, null, 2) + "\n");
   writeFile(repo, "CLAUDE.md", "# rules\n");
   return repo;
 }
@@ -598,7 +599,7 @@ function splitPlanRepo(progressPatch = (t) => t) {
     like(plan, /see P1-03, and not P1-02/, "...prose is rewritten too, and P1-02 is untouched");
     ok(!/P1-02a/.test(plan), "...no suffixed id is left in PLAN.md");
     like(readFile(repo, "docs/PROGRESS.md"), /- \[ \] P1-03 Two and a half\n- \[ \] P1-04 Three/, "...PROGRESS.md's lines are rewritten");
-    like(readFile(repo, "docs/foundry.json"), /"from": "P1-04"/, "...and the from value follows its task");
+    like(readFile(repo, "docs/kukulu.json"), /"from": "P1-04"/, "...and the from value follows its task");
     eq(subject(repo), "plan: derive build plan from SPEC", "...in the plan commit");
     ok(plan.includes("### P1-02: Two"), "...P1-02 keeps its heading");
   });
@@ -617,10 +618,10 @@ for (const [label, patch] of [
   ["a task that is not [ ]", (t) => t.replace("- [ ] P1-01", "- [x] P1-01")],
 ]) {
   const repo = splitPlanRepo(patch);
-  const before = { plan: readFile(repo, "docs/PLAN.md"), progress: readFile(repo, "docs/PROGRESS.md"), cfg: readFile(repo, "docs/foundry.json") };
+  const before = { plan: readFile(repo, "docs/PLAN.md"), progress: readFile(repo, "docs/PROGRESS.md"), cfg: readFile(repo, "docs/kukulu.json") };
   await withServer(repo, async ({ call }) => {
     isError(await call("kukulu_plan_commit", { renumber: true }), /only for a plan no run has touched/, `renumber is refused once a run has started: ${label}`);
-    ok(readFile(repo, "docs/PLAN.md") === before.plan && readFile(repo, "docs/PROGRESS.md") === before.progress && readFile(repo, "docs/foundry.json") === before.cfg, "...and every file is unchanged");
+    ok(readFile(repo, "docs/PLAN.md") === before.plan && readFile(repo, "docs/PROGRESS.md") === before.progress && readFile(repo, "docs/kukulu.json") === before.cfg, "...and every file is unchanged");
   });
 }
 
@@ -629,6 +630,81 @@ for (const [label, patch] of [
   await withServer(repo, async ({ rpc }) => {
     const e = (await rpc("tools/call", { name: "kukulu_plan_commit", arguments: {} })).result;
     eq(e.structuredContent.problems.filter((p) => p.check === "config").length, 1, "a broken config is one config problem");
+  });
+}
+
+// ---------------------------------------------------------------- pre-0.6.0 layout and recorded flights (RN-06)
+
+{
+  // The 0.5.0 flight archive is recorded evidence. Its bytes are pinned here, so
+  // a rename that touches them fails the suite instead of passing silently.
+  const FLIGHT = "docs/flights/v0-5-0";
+  const PINNED = {
+    "HANDOFF.md": "9863d227bda6e2ed78e06b636d126bb51d6d601cbdd155106aeccc7cee1316dd",
+    "PLAN.md": "d19b22535ee8c15991ade980fc21c59e94e299b25aee2a2a7fd9a317cda508a4",
+    "PROGRESS.md": "052741b07c57deb3d8f42128efbd68ffe496b045e15be0469946790f84091f93",
+    "REVIEW.md": "ebe811b9a0a8f33089d11908ddd09e15e8e9c741108322db3a941225c93fcc3a",
+    "SPEC.md": "5573578c6720ac37d8ad3ebf9dad7bed98ae578bcb87537833982dc659da8f7f",
+    "SUMMARY.md": "5daee8277cf18e5ead6fd1fa0cd42ecb5fbbce7b8aaa6120b10ad06ce27e5b33",
+    "feedback.jsonl": "cf70939964c3ad6882a755fbd04b63c40c21ca682fa4ec1e65c0952eb7a9b9e0",
+    "foundry.json": "fe937f3a9f406e774639d17b0573eec8f8192cbfa7f34c521816b0682f09e756",
+    "state.json": "21e3cd2fe3f8b88acccb4d00013b97ab42ce3a11738d946f68d747518092fd4c",
+  };
+  const sha = (file) => createHash("sha256").update(fs.readFileSync(file)).digest("hex");
+  for (const [name, hash] of Object.entries(PINNED)) {
+    eq(sha(path.join(ROOT, FLIGHT, name)), hash, `${FLIGHT}/${name} is byte-identical to the recorded flight`);
+  }
+  eq(fs.readdirSync(path.join(ROOT, FLIGHT)).sort().join(","), Object.keys(PINNED).sort().join(","), `${FLIGHT} holds exactly the recorded files`);
+
+  // A project on the old layout that archived that flight is still understood.
+  const repo = specRepo();
+  fs.mkdirSync(path.join(repo, FLIGHT), { recursive: true });
+  for (const name of Object.keys(PINNED)) fs.copyFileSync(path.join(ROOT, FLIGHT, name), path.join(repo, FLIGHT, name));
+  fs.copyFileSync(path.join(ROOT, FLIGHT, "SPEC.md"), path.join(repo, "docs", "SPEC.md"));
+  writeFile(repo, ".foundry/state.json", JSON.stringify({ ...JSON.parse(readFile(repo, `${FLIGHT}/state.json`)), summarized: false, archived: { slug: "v0-5-0", dir: FLIGHT, at: "2026-10-07T20:54:01.917Z" } }));
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-qm", "chore: archive flight v0-5-0"]);
+  await withServer(repo, async ({ call }) => {
+    const st = await call("kukulu_status");
+    eq(st.state.archived.slug, "v0-5-0", "status reads the archive record of a flight archived before 0.6.0");
+    like(st.deprecations.join("\n"), /Foundry layout \(\.foundry\/, docs\/foundry\.json\); run kukulu_migrate\. Support ends in 0\.7\.0/, "...and says the project is on the old layout");
+    const n = await call("kukulu_next");
+    eq(n.stage, "done", "kukulu_next recognizes the archived flight");
+    like(n.reason, /flight v0-5-0 is archived in docs\/flights\/v0-5-0/, "...and names it");
+  });
+  for (const name of Object.keys(PINNED)) {
+    eq(sha(path.join(repo, FLIGHT, name)), PINNED[name], `...and left ${name} byte-identical`);
+  }
+}
+
+{
+  const repo = useLegacyLayout(plannedRepo());
+  await withServer(repo, async ({ call }) => {
+    const st = await call("kukulu_status");
+    eq(st.configPresent, true, "a project with docs/foundry.json and .foundry/ is read in place");
+    eq(st.deprecations.length, 1, "...with exactly one layout notice");
+  });
+}
+
+{
+  // Error messages name the files the project actually has.
+  const repo = plannedRepo();
+  setState(repo, { round: 0 });
+  useLegacyLayout(repo);
+  fs.rmSync(path.join(repo, "docs/foundry.json"));
+  await withServer(repo, async ({ call }) => {
+    isError(await call("kukulu_verify"), /docs\/foundry\.json is missing/, "on the old layout a refusal names docs/foundry.json, not docs/kukulu.json");
+  });
+}
+
+{
+  const repo = plannedRepo();
+  writeFile(repo, "docs/foundry.json", "{}");
+  setState(repo, { round: 0 });
+  writeFile(repo, ".foundry/state.json", "{}");
+  await withServer(repo, async ({ call }) => {
+    isError(await call("kukulu_status"), /both the pre-0\.6\.0 layout .* and the current one .* exist/, "a project holding both layouts is refused, since either would hide the other");
+    isError(await call("kukulu_next"), /Keep the one you use and remove the other/, "...for every tool, with what to do");
   });
 }
 

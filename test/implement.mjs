@@ -9,7 +9,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import {
   finish, ok, eq, like, isError,
-  mkDir, plannedRepo, withServer, readFile, writeFile, hasFile, subject,
+  mkDir, plannedRepo, withServer, readFile, writeFile, hasFile, subject, useLegacyLayout,
   commitTask, markTasks, setState, git, mkBareRemote, mkFailingGhBin, mkFakeGhBin,
 } from "./harness.mjs";
 
@@ -24,8 +24,8 @@ function startedRepo(opts) {
   const repo = plannedRepo(opts);
   git(repo, ["checkout", "-q", "-b", `build/${TODAY}`]);
   markTasks(repo, ALL_DONE);
-  writeFile(repo, ".gitignore", ".foundry/implement.lock\n");
-  writeFile(repo, ".foundry/implement.lock", "0\n");
+  writeFile(repo, ".gitignore", ".kukulu/implement.lock\n");
+  writeFile(repo, ".kukulu/implement.lock", "0\n");
   setState(repo, { round: 0 });
   git(repo, ["add", "-A"]);
   git(repo, ["commit", "-qm", "chore: start implementation run"]);
@@ -34,7 +34,7 @@ function startedRepo(opts) {
 
 // ---------------------------------------------------------------- run_start
 
-for (const missing of ["docs/SPEC.md", "docs/PLAN.md", "docs/PROGRESS.md", "docs/foundry.json"]) {
+for (const missing of ["docs/SPEC.md", "docs/PLAN.md", "docs/PROGRESS.md", "docs/kukulu.json"]) {
   const repo = plannedRepo();
   fs.rmSync(path.join(repo, missing));
   await withServer(repo, async ({ call }) => {
@@ -46,7 +46,7 @@ for (const missing of ["docs/SPEC.md", "docs/PLAN.md", "docs/PROGRESS.md", "docs
 {
   const dir = mkDir();
   for (const f of ["docs/SPEC.md", "docs/PLAN.md"]) writeFile(dir, f, "x");
-  writeFile(dir, "docs/foundry.json", '{ "verify": ["true"] }');
+  writeFile(dir, "docs/kukulu.json", '{ "verify": ["true"] }');
   writeFile(dir, "docs/PROGRESS.md", "# p\n\n## Tasks\n\n## Log\n");
   await withServer(dir, async ({ call }) => {
     isError(await call("kukulu_run_start"), /not a git repository/, "run_start refuses outside a git repository");
@@ -90,24 +90,24 @@ for (const missing of ["docs/SPEC.md", "docs/PLAN.md", "docs/PROGRESS.md", "docs
     eq(r.branch, `build/${TODAY}`, "run_start names the branch after the date");
     eq(r.round, 0, "a fresh run is round 0");
     eq(r.counts.open, 3, "run_start reports the open task count");
-    ok(hasFile(repo, ".foundry/implement.lock"), "run_start arms the Stop-hook lock");
-    const lock = JSON.parse(readFile(repo, ".foundry/implement.lock"));
+    ok(hasFile(repo, ".kukulu/implement.lock"), "run_start arms the Stop-hook lock");
+    const lock = JSON.parse(readFile(repo, ".kukulu/implement.lock"));
     eq(lock.count, 0, "the lock starts its re-block counter at zero");
     eq(lock.round, 0, "the lock records the round it was armed for");
     eq(lock.cap, 60, "the lock carries the default guard cap");
     ok(lock.armedAt, "the lock records when it was armed");
     eq((await call("kukulu_status")).lockCounter, 0, "status reads the lock's counter");
-    like(readFile(repo, ".gitignore"), /^\.foundry\/implement\.lock$/m, "run_start gitignores the lock");
+    like(readFile(repo, ".gitignore"), /^\.kukulu\/implement\.lock$/m, "run_start gitignores the lock");
     like(readFile(repo, "docs/PROGRESS.md"), new RegExp(`^Branch: build/${TODAY}$`, "m"), "run_start stamps the branch into PROGRESS.md");
     like(readFile(repo, "docs/PROGRESS.md"), /^Started: \d{4}-\d\d-\d\dT/m, "run_start stamps a start timestamp");
     eq(subject(repo), "chore: start implementation run", "run_start commits the stamp");
     eq(git(repo, ["status", "--porcelain"]), "", "run_start leaves a clean tree");
 
-    writeFile(repo, ".foundry/implement.lock", JSON.stringify({ ...JSON.parse(readFile(repo, ".foundry/implement.lock")), count: 40 }));
+    writeFile(repo, ".kukulu/implement.lock", JSON.stringify({ ...JSON.parse(readFile(repo, ".kukulu/implement.lock")), count: 40 }));
     const again = await call("kukulu_run_start");
     eq(again.alreadyStarted, true, "run_start is idempotent while the lock is held");
     eq(subject(repo), "chore: start implementation run", "the idempotent call commits nothing new");
-    eq(JSON.parse(readFile(repo, ".foundry/implement.lock")).count, 0, "resuming an already-started run resets the guard's counter");
+    eq(JSON.parse(readFile(repo, ".kukulu/implement.lock")).count, 0, "resuming an already-started run resets the guard's counter");
   });
 }
 
@@ -124,7 +124,7 @@ for (const missing of ["docs/SPEC.md", "docs/PLAN.md", "docs/PROGRESS.md", "docs
 {
   const repo = plannedRepo();
   git(repo, ["checkout", "-q", "-b", `build/${TODAY}`]);
-  writeFile(repo, ".gitignore", ".foundry/implement.lock\n");
+  writeFile(repo, ".gitignore", ".kukulu/implement.lock\n");
   git(repo, ["add", "-A"]);
   git(repo, ["commit", "-qm", "chore: pre-existing"]);
   await withServer(repo, async ({ call }) => {
@@ -138,7 +138,7 @@ for (const missing of ["docs/SPEC.md", "docs/PLAN.md", "docs/PROGRESS.md", "docs
 {
   const repo = plannedRepo({ config: { branchPrefix: "wip/", baseBranch: "main" } });
   await withServer(repo, async ({ call }) => {
-    eq((await call("kukulu_run_start")).branch, `wip/${TODAY}`, "branchPrefix from foundry.json is honoured");
+    eq((await call("kukulu_run_start")).branch, `wip/${TODAY}`, "branchPrefix from kukulu.json is honoured");
   });
 }
 
@@ -146,7 +146,7 @@ for (const missing of ["docs/SPEC.md", "docs/PLAN.md", "docs/PROGRESS.md", "docs
   const repo = plannedRepo({ config: { guardCap: 200 } });
   await withServer(repo, async ({ call }) => {
     await call("kukulu_run_start");
-    eq(JSON.parse(readFile(repo, ".foundry/implement.lock")).cap, 200, "a configured guardCap is carried into the lock");
+    eq(JSON.parse(readFile(repo, ".kukulu/implement.lock")).cap, 200, "a configured guardCap is carried into the lock");
   });
 }
 
@@ -194,7 +194,7 @@ for (const missing of ["docs/SPEC.md", "docs/PLAN.md", "docs/PROGRESS.md", "docs
   // basePush belongs only to the creation path.
   const repo = plannedRepo();
   git(repo, ["checkout", "-q", "-b", `build/${TODAY}`]);
-  writeFile(repo, ".gitignore", ".foundry/implement.lock\n");
+  writeFile(repo, ".gitignore", ".kukulu/implement.lock\n");
   git(repo, ["add", "-A"]);
   git(repo, ["commit", "-qm", "chore: pre-existing"]);
   await withServer(repo, async ({ call }) => {
@@ -289,18 +289,18 @@ for (const missing of ["docs/SPEC.md", "docs/PLAN.md", "docs/PROGRESS.md", "docs
     isError(await call("kukulu_task_done", { id: "P0-01", log: "x" }), /HEAD commit .* is not this task's commit/, "task_done refuses without the task's own commit");
 
     // Simulate blocked stops piling up the guard's counter before the task lands.
-    writeFile(repo, ".foundry/implement.lock", JSON.stringify({ ...JSON.parse(readFile(repo, ".foundry/implement.lock")), count: 12 }));
+    writeFile(repo, ".kukulu/implement.lock", JSON.stringify({ ...JSON.parse(readFile(repo, ".kukulu/implement.lock")), count: 12 }));
 
     commitTask(repo, "P0-01", "Create hello", { "hello.txt": "hi\n" });
     writeFile(repo, "leftover.txt", "forgotten\n");
     isError(await call("kukulu_task_done", { id: "P0-01", log: "x" }), /uncommitted changes remain[\s\S]*leftover\.txt/, "task_done refuses to leave work uncommitted");
-    eq(JSON.parse(readFile(repo, ".foundry/implement.lock")).count, 12, "a refused task_done does not touch the guard's counter");
+    eq(JSON.parse(readFile(repo, ".kukulu/implement.lock")).count, 12, "a refused task_done does not touch the guard's counter");
 
     fs.rmSync(path.join(repo, "leftover.txt"));
     const r = await call("kukulu_task_done", { id: "P0-01", log: "Added hello.txt." });
     eq(r.counts.done, 1, "task_done marks the task done");
     eq(r.guardReset, true, "task_done reports that it reset the guard's counter");
-    eq(JSON.parse(readFile(repo, ".foundry/implement.lock")).count, 0, "...and the lock's counter is actually back to zero");
+    eq(JSON.parse(readFile(repo, ".kukulu/implement.lock")).count, 0, "...and the lock's counter is actually back to zero");
     eq(r.taskCommit, git(repo, ["rev-parse", "--short", "HEAD~1"]), "task_done records the task's commit sha");
     like(readFile(repo, "docs/PROGRESS.md"), /^### P0-01 — [0-9a-f]{7,}\nAdded hello\.txt\.$/m, "the log entry is stamped with that sha");
     eq(subject(repo), "progress: P0-01 done", "the bookkeeping commit is separate from the task commit");
@@ -320,13 +320,13 @@ for (const missing of ["docs/SPEC.md", "docs/PLAN.md", "docs/PROGRESS.md", "docs
     await call("kukulu_task_next");
     writeFile(repo, "half-done.txt", "debris\n");
     writeFile(repo, "docs/SPEC.md", "# Spec\nedited by mistake\n");
-    writeFile(repo, ".foundry/implement.lock", JSON.stringify({ ...JSON.parse(readFile(repo, ".foundry/implement.lock")), count: 9 }));
+    writeFile(repo, ".kukulu/implement.lock", JSON.stringify({ ...JSON.parse(readFile(repo, ".kukulu/implement.lock")), count: 9 }));
     const r = await call("kukulu_task_block", { id: "P0-01", reason: "tried A / fails B / fix C" });
     eq(r.counts.blocked, 1, "task_block marks the task blocked");
-    eq(JSON.parse(readFile(repo, ".foundry/implement.lock")).count, 0, "task_block resets the guard's counter too");
+    eq(JSON.parse(readFile(repo, ".kukulu/implement.lock")).count, 0, "task_block resets the guard's counter too");
     ok(!hasFile(repo, "half-done.txt"), "task_block deletes untracked debris");
     eq(readFile(repo, "docs/SPEC.md"), "# Spec\n", "task_block reverts tracked edits");
-    ok(hasFile(repo, ".foundry/implement.lock"), "task_block keeps the run's lock armed");
+    ok(hasFile(repo, ".kukulu/implement.lock"), "task_block keeps the run's lock armed");
     like(readFile(repo, "docs/PROGRESS.md"), /### P0-01 — blocked\nBLOCKED: tried A \/ fails B \/ fix C/, "the block reason is logged verbatim");
     eq(subject(repo), "progress: P0-01 blocked", "the block is committed");
   });
@@ -398,9 +398,9 @@ for (const missing of ["docs/SPEC.md", "docs/PLAN.md", "docs/PROGRESS.md", "docs
 
 {
   const repo = plannedRepo();
-  fs.rmSync(path.join(repo, "docs/foundry.json"));
+  fs.rmSync(path.join(repo, "docs/kukulu.json"));
   await withServer(repo, async ({ call }) => {
-    isError(await call("kukulu_verify"), /docs\/foundry\.json is missing/, "verify needs a config");
+    isError(await call("kukulu_verify"), /docs\/kukulu\.json is missing/, "verify needs a config");
   });
 }
 
@@ -644,9 +644,9 @@ const alive = (pid) => {
     eq(r.pr, null, "no remote means no pull request");
     eq(r.counts.done, 3, "run_finish reports the final counts");
     like(r.readyLine, /^READY FOR REVIEW — branch build\/.*3 done \/ 0 blocked \/ 0 skipped of 3$/, "the ready line summarises the run");
-    ok(!hasFile(repo, ".foundry/implement.lock"), "run_finish disarms the Stop-hook lock");
+    ok(!hasFile(repo, ".kukulu/implement.lock"), "run_finish disarms the Stop-hook lock");
     eq(subject(repo), "chore: round 0 implemented", "run_finish records the round as implemented");
-    eq(JSON.parse(readFile(repo, ".foundry/state.json")).implemented, true, "the implemented flag is persisted");
+    eq(JSON.parse(readFile(repo, ".kukulu/state.json")).implemented, true, "the implemented flag is persisted");
     eq(git(repo, ["status", "--porcelain"]), "", "run_finish leaves a clean tree");
   });
 }
@@ -669,7 +669,7 @@ const alive = (pid) => {
   await withServer(repo, async ({ call }) => {
     const r = await call("kukulu_run_finish");
     like(r.push, /^failed: /, "a failed push is reported, not swallowed");
-    ok(!hasFile(repo, ".foundry/implement.lock"), "a failed push still ends the run cleanly");
+    ok(!hasFile(repo, ".kukulu/implement.lock"), "a failed push still ends the run cleanly");
   }, noGh);
 }
 
@@ -706,9 +706,9 @@ for (const [bad, re] of [
   await withServer(repo, async ({ call }) => {
     const r = await call("kukulu_run_start");
     eq(r.signing, "off", "policies.signing: off records off without even probing");
-    ok(JSON.parse(readFile(repo, ".foundry/state.json")).signingOverride !== true, "an explicit off does not set signingOverride");
+    ok(JSON.parse(readFile(repo, ".kukulu/state.json")).signingOverride !== true, "an explicit off does not set signingOverride");
     eq(git(repo, ["config", "--local", "commit.gpgsign"]), "false", "...and disables signing locally");
-    ok(!hasFile(repo, ".foundry/feedback.jsonl"), "an explicit off is the operator's own choice, not friction — no feedback entry");
+    ok(!hasFile(repo, ".kukulu/feedback.jsonl"), "an explicit off is the operator's own choice, not friction — no feedback entry");
   });
 }
 
@@ -719,7 +719,7 @@ for (const [bad, re] of [
   await withServer(repo, async ({ call }) => {
     const r = await call("kukulu_run_start");
     eq(r.signing, "none", "no signing configured at all");
-    ok(!hasFile(repo, ".foundry/feedback.jsonl"), "no feedback entry for an unconfigured signer");
+    ok(!hasFile(repo, ".kukulu/feedback.jsonl"), "no feedback entry for an unconfigured signer");
   });
 }
 
@@ -743,16 +743,16 @@ for (const [bad, re] of [
   await withServer(repo, async ({ call }) => {
     const r = await call("kukulu_run_start");
     like(r.signing, /^off \(probe failed: /, "auto falls back to off and records why, rather than refusing");
-    eq(JSON.parse(readFile(repo, ".foundry/state.json")).signingOverride, true, "a failed probe sets signingOverride");
+    eq(JSON.parse(readFile(repo, ".kukulu/state.json")).signingOverride, true, "a failed probe sets signingOverride");
     eq(git(repo, ["config", "--local", "commit.gpgsign"]), "false", "...and disables signing locally so the first task commit does not hang");
 
-    const lines = readFile(repo, ".foundry/feedback.jsonl").trim().split("\n");
+    const lines = readFile(repo, ".kukulu/feedback.jsonl").trim().split("\n");
     eq(lines.length, 1, "the auto fallback is the one case that logs itself as friction");
     const entry = JSON.parse(lines[0]);
     eq(entry.category, "signing", "...tagged with the signing category");
     eq(entry.source, "auto", "...and recorded as an auto entry, not one the agent called explicitly");
     like(entry.message, /off \(probe failed:/, "the message carries the same fallback reason");
-    like(git(repo, ["show", "--stat", "--format=", "HEAD"]), /\.foundry\/feedback\.jsonl/, "it lands in the same commit as the run-start stamp");
+    like(git(repo, ["show", "--stat", "--format=", "HEAD"]), /\.kukulu\/feedback\.jsonl/, "it lands in the same commit as the run-start stamp");
   });
 }
 
@@ -766,7 +766,7 @@ for (const [bad, re] of [
   await withServer(repo, async ({ call }) => {
     const r = await call("kukulu_run_start");
     like(r.signing, /^off \(probe failed: /, "the fallback itself still happens");
-    ok(!hasFile(repo, ".foundry/feedback.jsonl"), "...but policies.feedback: false suppresses even the auto entry");
+    ok(!hasFile(repo, ".kukulu/feedback.jsonl"), "...but policies.feedback: false suppresses even the auto entry");
   });
 }
 
@@ -863,16 +863,16 @@ for (const [bad, re] of [
 
     const r = await call("kukulu_run_halt", { reason: "signing agent died: connection refused" });
     eq(r.halted, "signing agent died: connection refused", "run_halt reports the reason it recorded");
-    ok(!hasFile(repo, ".foundry/implement.lock"), "run_halt disarms the lock");
-    eq(JSON.parse(readFile(repo, ".foundry/state.json")).halted, "signing agent died: connection refused", "the reason is persisted in state");
+    ok(!hasFile(repo, ".kukulu/implement.lock"), "run_halt disarms the lock");
+    eq(JSON.parse(readFile(repo, ".kukulu/state.json")).halted, "signing agent died: connection refused", "the reason is persisted in state");
     ok(hasFile(repo, "half-finished.txt"), "run_halt never resets or cleans the tree");
     ok(r.dirty, "run_halt reports that the tree is still dirty");
 
     eq(subject(repo), "chore: run halted", "one commit, not two, carries both the halt and its feedback entry");
     const changed = git(repo, ["show", "--stat", "--format=", "HEAD"]);
-    like(changed, /\.foundry\/state\.json/, "...touching state");
-    like(changed, /\.foundry\/feedback\.jsonl/, "...and the feedback log, in the same commit");
-    const entry = JSON.parse(readFile(repo, ".foundry/feedback.jsonl").trim());
+    like(changed, /\.kukulu\/state\.json/, "...touching state");
+    like(changed, /\.kukulu\/feedback\.jsonl/, "...and the feedback log, in the same commit");
+    const entry = JSON.parse(readFile(repo, ".kukulu/feedback.jsonl").trim());
     eq(entry.stage, "controller", "the halt is logged from the controller's own vantage point");
     eq(entry.category, "halt", "...tagged as a halt");
     eq(entry.source, "auto", "...recorded as an auto entry");
@@ -889,7 +889,7 @@ for (const [bad, re] of [
   await withServer(repo, async ({ call }) => {
     const r = await call("kukulu_run_halt", { reason: "operator intervened" });
     eq(r.halted, "operator intervened", "the halt itself still works");
-    ok(!hasFile(repo, ".foundry/feedback.jsonl"), "policies.feedback: false skips even the auto entry");
+    ok(!hasFile(repo, ".kukulu/feedback.jsonl"), "policies.feedback: false skips even the auto entry");
   });
 }
 
@@ -909,11 +909,11 @@ function failingSignerRepo(config) {
     const r = await call("kukulu_feedback_log", { stage: "plan", message: "something slow" });
     eq(r.logged, true, "auto: the feedback entry is logged");
     eq(subject(repo), "chore: pipeline friction (plan)", "auto: a Foundry commit whose signing fails is retried unsigned");
-    const st = JSON.parse(git(repo, ["show", "HEAD:.foundry/state.json"]));
+    const st = JSON.parse(git(repo, ["show", "HEAD:.kukulu/state.json"]));
     like(st.signing, /^off \(commit signing failed: /, "...the committed state records why");
     eq(st.signingOverride, true, "...and sets signingOverride");
     eq(git(repo, ["config", "--local", "commit.gpgsign"]), "false", "...and signing is off locally");
-    const entries = git(repo, ["show", "HEAD:.foundry/feedback.jsonl"]).trim().split("\n").map((l) => JSON.parse(l));
+    const entries = git(repo, ["show", "HEAD:.kukulu/feedback.jsonl"]).trim().split("\n").map((l) => JSON.parse(l));
     eq(entries.filter((e) => e.category === "signing").length, 1, "...with exactly one signing entry");
     ok(entries.some((e) => e.message === "something slow"), "...beside the logged entry");
     eq(git(repo, ["status", "--porcelain"]), "", "...and the tree is clean");
@@ -936,7 +936,7 @@ function failingSignerRepo(config) {
   fs.writeFileSync(hook, '#!/bin/sh\nc="$(dirname "$0")/../hook-count"\nif [ -e "$c" ]; then echo "rejected by test hook" >&2; exit 1; fi\ntouch "$c"\nexit 0\n');
   fs.chmodSync(hook, 0o755);
   const rec = (f) => (hasFile(repo, f) ? readFile(repo, f) : null);
-  const files = ["docs/foundry.json", ".foundry/state.json", ".foundry/feedback.jsonl"];
+  const files = ["docs/kukulu.json", ".kukulu/state.json", ".kukulu/feedback.jsonl"];
   const before = files.map(rec);
   const head = git(repo, ["rev-parse", "HEAD"]);
   await withServer(repo, async ({ call }) => {
@@ -959,7 +959,7 @@ function failingSignerRepo(config) {
   fs.writeFileSync(hook, '#!/bin/sh\nc="$(dirname "$0")/../hook-count"\nif [ -e "$c" ]; then echo "rejected by test hook" >&2; exit 1; fi\ntouch "$c"\nexit 0\n');
   fs.chmodSync(hook, 0o755);
   const rec = (f) => (hasFile(repo, f) ? readFile(repo, f) : null);
-  const files = ["docs/foundry.json", ".foundry/state.json", ".foundry/feedback.jsonl"];
+  const files = ["docs/kukulu.json", ".kukulu/state.json", ".kukulu/feedback.jsonl"];
   const before = files.map(rec);
   const head = git(repo, ["rev-parse", "HEAD"]);
   await withServer(repo, async ({ call }) => {
@@ -1004,11 +1004,29 @@ function rejectCommitsStarting(repo, prefix) {
 {
   const repo = plannedRepo();
   rejectCommitsStarting(repo, "chore: flight options");
-  const before = readFile(repo, "docs/foundry.json");
+  const before = readFile(repo, "docs/kukulu.json");
   await withServer(repo, async ({ call }) => {
     isError(await call("kukulu_flight_options", { maxRounds: 7 }), /commit failed/, "flight_options rolls back when its commit fails: the call is an error");
-    eq(readFile(repo, "docs/foundry.json"), before, "...docs/foundry.json is byte-identical");
+    eq(readFile(repo, "docs/kukulu.json"), before, "...docs/kukulu.json is byte-identical");
     eq(git(repo, ["diff", "--cached", "--name-only"]), "", "...nothing is staged");
+  });
+}
+
+// ---------------------------------------------------------------- pre-0.6.0 layout (RN-06)
+
+{
+  // A project that has not migrated keeps its lock, ignore line and state in
+  // .foundry/, and no .kukulu/ appears beside them.
+  const repo = plannedRepo();
+  setState(repo, { round: 0 });
+  useLegacyLayout(repo);
+  await withServer(repo, async ({ call }) => {
+    const r = await call("kukulu_run_start");
+    eq(r.alreadyStarted, false, "run_start works on the pre-0.6.0 layout");
+    ok(hasFile(repo, ".foundry/implement.lock"), "...arming the lock under .foundry/");
+    ok(!hasFile(repo, ".kukulu"), "...without creating .kukulu/");
+    like(readFile(repo, ".gitignore"), /^\.foundry\/implement\.lock$/m, "...and ignoring the lock under its .foundry/ name");
+    eq(git(repo, ["status", "--porcelain"]), "", "...leaving the tree clean");
   });
 }
 

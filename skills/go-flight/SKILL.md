@@ -40,8 +40,8 @@ is the operator's flight options. These are the options:
   verbatim, as everywhere else.
 
 Apply the review-loop bounds with `kukulu_flight_options` — never by editing
-`docs/foundry.json` yourself — as soon as `kukulu_next` returns a stage
-other than `plan` (before that, `docs/foundry.json` does not exist yet), and
+`docs/kukulu.json` yourself — as soon as `kukulu_next` returns a stage
+other than `plan` (before that, `docs/kukulu.json` does not exist yet), and
 only once per flight. Print its `after` value. For anything you cannot map to
 an option, print `ignored flight option: <text>` and carry on; never ask.
 

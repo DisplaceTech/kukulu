@@ -31,7 +31,7 @@ it.
 | `skills/*/SKILL.md` | The prose each stage follows |
 | `templates/SPEC.md` | The spec skeleton users copy |
 | `templates/foundry.config.example.json`, `templates/ccr/` | The global routing config and claude-code-router provider manifests |
-| `templates/constraints.example.json` | Three worked `docs/foundry.json` `constraints` rules, with fixtures |
+| `templates/constraints.example.json` | Three worked `docs/kukulu.json` `constraints` rules, with fixtures |
 | `test/` | Harness plus eleven suites |
 | `docs/` | Architecture, tool reference, routing guide, spec guide, runbook |
 | `docs/plans/` | The task-by-task plan behind each release |
@@ -88,8 +88,8 @@ npm install --no-save mermaid jsdom && node scripts/check-diagrams.mjs
 | `implement` | `run_start`, `task_next`, `task_done`, `task_block`, `verify`, `run_finish`; the commit helper's signing fallback |
 | `review` | `review_submit` and `summary_commit`, including every refusal and rollback on a failed commit; `kukulu_flight_archive`; `kukulu_pr_finalize` |
 | `routing` | Config merge and precedence, `kukulu_agents_sync`, `kukulu_config_show`, every refusal |
-| `constraints` | `docs/foundry.json` constraints, fixture self-tests, the scan, every refusal |
-| `feedback` | `kukulu_feedback_log`, `.foundry/feedback.jsonl`, and the `policies.feedback` opt-out |
+| `constraints` | `docs/kukulu.json` constraints, fixture self-tests, the scan, every refusal |
+| `feedback` | `kukulu_feedback_log`, `.kukulu/feedback.jsonl`, and the `policies.feedback` opt-out |
 | `streams` | Parallel workstreams: stream tags, waves, partition validation, stream-scoped tools, worktrees, `kukulu_stream_finish`, `kukulu_next`'s `streams`, pausing at a wave |
 | `guard` | The Stop / SubagentStop hook: scoping, blocking, counting, giving up, environment handling |
 | `drive` | Complete flights end to end over real stdio: one serial, and parallel ones (a wave, `maxStreams: 1`, an overlapping partition) |

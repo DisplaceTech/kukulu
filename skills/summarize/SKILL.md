@@ -39,7 +39,8 @@ it to disk yourself (see below):
    stall, a permission prompt, anything an implementer or reviewer had to
    route around rather than the project itself being hard. Call
    `kukulu_status` for `feedbackCount`; if it is greater than zero, read
-   `.foundry/feedback.jsonl` directly (`cat` it — it is small, plain JSONL)
+   `.kukulu/feedback.jsonl` directly (`.foundry/feedback.jsonl` in a project
+   that has not moved to the 0.6.0 layout) (`cat` it — it is small, plain JSONL)
    and render one line per entry, in the order logged: stage, category, and
    the message. Write "None" when `feedbackCount` is `0` — that is a real,
    useful line, not an empty section to skip. This section is what a human

@@ -53,7 +53,7 @@ function stopWithTranscript(repo, calledRunStart, extra = {}) {
 const armed = (tasks = TASKS, lock = "0\n") => {
   const repo = mkRepo();
   writeFile(repo, "docs/PROGRESS.md", progressDoc(tasks));
-  if (lock !== null) writeFile(repo, ".foundry/implement.lock", lock);
+  if (lock !== null) writeFile(repo, ".kukulu/implement.lock", lock);
   return repo;
 };
 
@@ -63,7 +63,7 @@ eq(guard(armed(TASKS, null), { input: implementerStop }), "", "no lock means no 
 
 {
   const repo = mkRepo();
-  writeFile(repo, ".foundry/implement.lock", "0\n");
+  writeFile(repo, ".kukulu/implement.lock", "0\n");
   eq(guard(repo, { input: implementerStop(repo) }), "", "a lock without a PROGRESS.md cannot block anything");
 }
 
@@ -84,7 +84,7 @@ eq(
   const out = guard(repo, { input: implementerStop(repo) });
   const j = JSON.parse(out);
   eq(j.decision, "block", "a SubagentStop naming kukulu-implementer blocks");
-  eq(readFile(repo, ".foundry/implement.lock").trim(), "1", "the lock counts the re-block");
+  eq(readFile(repo, ".kukulu/implement.lock").trim(), "1", "the lock counts the re-block");
 }
 
 {
@@ -104,7 +104,7 @@ for (const legacy of ["foundry-implementer", "foundry:implementer"]) {
 {
   const repo = armed();
   eq(guard(repo, { input: implementerStop(repo, { agent_type: "Explore" }) }), "", "a SubagentStop from an unrelated agent is allowed outright");
-  eq(readFile(repo, ".foundry/implement.lock").trim(), "0", "...and the counter is untouched");
+  eq(readFile(repo, ".kukulu/implement.lock").trim(), "0", "...and the counter is untouched");
 }
 
 {
@@ -161,7 +161,7 @@ for (const legacy of ["foundry-implementer", "foundry:implementer"]) {
     ].join("\n") + "\n",
   );
   eq(guard(repo, { input: { hook_event_name: "Stop", transcript_path: TRANSCRIPT(repo) } }), "", "a controller transcript that only mentions kukulu_run_start is allowed (F-01)");
-  eq(readFile(repo, ".foundry/implement.lock").trim(), "0", "...and the counter is untouched");
+  eq(readFile(repo, ".kukulu/implement.lock").trim(), "0", "...and the counter is untouched");
 }
 
 {
@@ -217,7 +217,7 @@ for (const legacy of ["foundry-implementer", "foundry:implementer"]) {
   like(j.reason, /kukulu_task_next/, "the reason says which tool to call");
   like(j.reason, /kukulu_run_finish only when/, "the reason says when the run may end");
   guard(repo, { input: implementerStop(repo) });
-  eq(readFile(repo, ".foundry/implement.lock").trim(), "2", "each re-block increments the counter");
+  eq(readFile(repo, ".kukulu/implement.lock").trim(), "2", "each re-block increments the counter");
 }
 
 {
@@ -237,7 +237,7 @@ for (const legacy of ["foundry-implementer", "foundry:implementer"]) {
     "docs/PROGRESS.md",
     "# progress\n\n## Tasks\n- [x] P0-01 done\n\n## Log\n### P0-01 — abc1234\n- [ ] a leftover checkbox in a log entry\n",
   );
-  writeFile(repo, ".foundry/implement.lock", "0\n");
+  writeFile(repo, ".kukulu/implement.lock", "0\n");
   eq(guard(repo, { input: implementerStop(repo) }), "", "a checkbox under ## Log is not an open task");
 }
 
@@ -246,20 +246,20 @@ for (const legacy of ["foundry-implementer", "foundry:implementer"]) {
 {
   const repo = armed(TASKS, "");
   like(JSON.parse(guard(repo, { input: implementerStop(repo) })).reason, /still open/, "an empty lock file still blocks");
-  eq(readFile(repo, ".foundry/implement.lock").trim(), "1", "an empty lock file restarts the count at one");
+  eq(readFile(repo, ".kukulu/implement.lock").trim(), "1", "an empty lock file restarts the count at one");
 }
 
 {
   const repo = armed(TASKS, "not a number\n");
   const out = guard(repo, { input: implementerStop(repo) });
   eq(out.startsWith("{"), true, "a corrupt lock file does not crash the hook");
-  eq(readFile(repo, ".foundry/implement.lock").trim(), "1", "a corrupt counter is reset from its digits");
+  eq(readFile(repo, ".kukulu/implement.lock").trim(), "1", "a corrupt counter is reset from its digits");
 }
 
 {
   const repo = armed(TASKS, '{"count":4,"armedAt":"2026-09-21T00:00:00.000Z","round":0}\n');
   guard(repo, { input: implementerStop(repo) });
-  const lock = JSON.parse(readFile(repo, ".foundry/implement.lock"));
+  const lock = JSON.parse(readFile(repo, ".kukulu/implement.lock"));
   eq(lock.count, 5, "a JSON lock's counter increments");
   eq(lock.round, 0, "...and its other keys are preserved");
   eq(lock.armedAt, "2026-09-21T00:00:00.000Z", "...every one of them");
@@ -274,7 +274,7 @@ for (const legacy of ["foundry-implementer", "foundry:implementer"]) {
   const over = JSON.parse(guard(repo, { input: implementerStop(repo), cap: 2 }));
   eq(over.decision, undefined, "past the cap, the hook stops blocking");
   like(over.systemMessage, /cap \(2\) reached with 2 open tasks/, "the hook explains why it gave up");
-  ok(readFile(repo, ".foundry/implement.lock").includes("3"), "the lock keeps counting past the cap");
+  ok(readFile(repo, ".kukulu/implement.lock").includes("3"), "the lock keeps counting past the cap");
 }
 
 {
@@ -296,28 +296,28 @@ for (const legacy of ["foundry-implementer", "foundry:implementer"]) {
 
 {
   const repo = armed();
-  writeFile(repo, ".foundry/implement.lock", '{"count":59}\n');
+  writeFile(repo, ".kukulu/implement.lock", '{"count":59}\n');
   const j = JSON.parse(guard(repo, { input: implementerStop(repo) }));
   eq(j.decision, "block", "the default cap of 60 is still in effect at count 59→60");
 }
 
 {
   const repo = armed();
-  writeFile(repo, ".foundry/implement.lock", '{"count":60}\n');
+  writeFile(repo, ".kukulu/implement.lock", '{"count":60}\n');
   const j = JSON.parse(guard(repo, { input: implementerStop(repo) }));
   eq(j.decision, undefined, "the default cap of 60 trips with no lock.cap and no env override");
 }
 
 {
   const repo = armed();
-  writeFile(repo, ".foundry/implement.lock", '{"count":59,"cap":100}\n');
+  writeFile(repo, ".kukulu/implement.lock", '{"count":59,"cap":100}\n');
   const j = JSON.parse(guard(repo, { input: implementerStop(repo), cap: 10 }));
   eq(j.decision, "block", "the lock's own cap wins over the KUKULU_GUARD_CAP env var");
 }
 
 {
   const repo = armed();
-  writeFile(repo, ".foundry/implement.lock", '{"count":9}\n');
+  writeFile(repo, ".kukulu/implement.lock", '{"count":9}\n');
   const j = JSON.parse(guard(repo, { input: implementerStop(repo), cap: 5 }));
   eq(j.decision, undefined, "with no lock.cap, the env var is used instead of the default");
 }
@@ -325,16 +325,26 @@ for (const legacy of ["foundry-implementer", "foundry:implementer"]) {
 // The pre-0.6.0 spelling still works until 0.7.0, and the new one wins.
 {
   const repo = armed();
-  writeFile(repo, ".foundry/implement.lock", '{"count":9}\n');
+  writeFile(repo, ".kukulu/implement.lock", '{"count":9}\n');
   const j = JSON.parse(guard(repo, { input: implementerStop(repo), legacyCap: 5 }));
   eq(j.decision, undefined, "FOUNDRY_GUARD_CAP is still honored when KUKULU_GUARD_CAP is unset");
 }
 
 {
   const repo = armed();
-  writeFile(repo, ".foundry/implement.lock", '{"count":9}\n');
+  writeFile(repo, ".kukulu/implement.lock", '{"count":9}\n');
   const j = JSON.parse(guard(repo, { input: implementerStop(repo), cap: 100, legacyCap: 5 }));
   eq(j.decision, "block", "KUKULU_GUARD_CAP wins over FOUNDRY_GUARD_CAP");
+}
+
+// A project that has not migrated keeps its lock in .foundry/ (until 0.7.0).
+{
+  const repo = armed(TASKS, null);
+  writeFile(repo, ".foundry/implement.lock", "0\n");
+  const j = JSON.parse(guard(repo, { input: implementerStop(repo) }));
+  eq(j.decision, "block", "a lock under .foundry/ still blocks a stop with open tasks");
+  eq(readFile(repo, ".foundry/implement.lock").trim(), "1", "...and the counter is kept in that lock");
+  ok(!fs.existsSync(path.join(repo, ".kukulu")), "...without creating .kukulu/");
 }
 
 // ---------------------------------------------------------------- environment
@@ -386,13 +396,13 @@ const subagentStop = (repo, calls, extra = {}) => {
   const j = JSON.parse(guard(repo, { input: subagentStop(repo, [{ stream: "api" }]) }));
   eq(j.decision, "block", "a stream's implementer with its own stream open is blocked");
   like(j.reason, /stream 'api' is not finished — 2 task\(s\) of its still open.*next: P1-01.*stream: "api".*kukulu_stream_finish/, "the reason names the stream, its own open count, and the stream-scoped calls");
-  eq(readFile(repo, ".foundry/implement.lock").trim(), "1", "and the block is counted");
+  eq(readFile(repo, ".kukulu/implement.lock").trim(), "1", "and the block is counted");
 }
 
 {
   const repo = armed(withStreamTasks({ "P1-01": "x", "P1-02": "x" }));
   eq(guard(repo, { input: subagentStop(repo, [{ stream: "api" }]) }), "", "a finished stream is allowed to stop while another stream's tasks are open");
-  eq(readFile(repo, ".foundry/implement.lock").trim(), "0", "...and the counter is untouched");
+  eq(readFile(repo, ".kukulu/implement.lock").trim(), "0", "...and the counter is untouched");
 }
 
 {
@@ -417,7 +427,7 @@ const subagentStop = (repo, calls, extra = {}) => {
   const noCall = { hook_event_name: "SubagentStop", agent_type: "kukulu-implementer", transcript_path: TRANSCRIPT(repo) };
   writeFile(repo, "transcript.jsonl", `${toolUseLine("Bash", { command: "ls" })}\n`);
   eq(JSON.parse(guard(repo, { input: noCall })).decision, "block", "with no run_start call and no stream worktrees, the serial rule applies unchanged");
-  fs.mkdirSync(path.join(repo, ".foundry", "worktrees", "api"), { recursive: true });
+  fs.mkdirSync(path.join(repo, ".kukulu", "worktrees", "api"), { recursive: true });
   eq(guard(repo, { input: noCall }), "", "with a stream worktree on disk a wave is in flight: an undeterminable stream is allowed (the controller re-hands it out)");
 }
 
@@ -425,7 +435,7 @@ const subagentStop = (repo, calls, extra = {}) => {
   // A serial implementer parked at a wave boundary by kukulu_task_next.
   const repo = armed(withStreamTasks(), JSON.stringify({ count: 0, paused: 1 }) + "\n");
   eq(guard(repo, { input: implementerStop(repo) }), "", "a lock flagged paused allows the stop");
-  eq(JSON.parse(readFile(repo, ".foundry/implement.lock")).count, 0, "...without counting a re-block");
+  eq(JSON.parse(readFile(repo, ".kukulu/implement.lock")).count, 0, "...without counting a re-block");
 }
 
 {
@@ -441,12 +451,12 @@ const subagentStop = (repo, calls, extra = {}) => {
   // and its last run_start may be a sibling's; blocking on that sibling's
   // behalf would send a second implementer into the same stream.
   const repo = armed(withStreamTasks({ "P1-01": "x", "P1-02": "x" }));
-  fs.mkdirSync(path.join(repo, ".foundry", "worktrees", "api"), { recursive: true });
+  fs.mkdirSync(path.join(repo, ".kukulu", "worktrees", "api"), { recursive: true });
   const inline = (stream) => toolUseLine(RUN_START, { stream }, { isSidechain: true });
   writeFile(repo, "parent.jsonl", `${inline("api")}\n${inline("ui")}\n`);
   const input = { hook_event_name: "SubagentStop", agent_type: "kukulu-implementer", transcript_path: path.join(repo, "parent.jsonl") };
   eq(guard(repo, { input }), "", "with no agent_transcript_path, a sibling's call in the parent transcript is never attributed: allowed while a wave is in flight");
-  eq(readFile(repo, ".foundry/implement.lock").trim(), "0", "...and nothing is counted");
+  eq(readFile(repo, ".kukulu/implement.lock").trim(), "0", "...and nothing is counted");
 }
 
 finish();

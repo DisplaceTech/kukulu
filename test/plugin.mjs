@@ -155,7 +155,7 @@ like(read("skills/pull-feedback/SKILL.md"), /how many items came from each/, "..
 {
   const pb = read("skills/plan-build/SKILL.md");
   like(pb, /kukulu_plan_commit/, "plan-build commits through kukulu_plan_commit (project-d F-03)");
-  ok(!pb.includes("Commit PLAN.md, PROGRESS.md, foundry.json and CLAUDE.md as"), "...and no longer tells the planner to commit by hand");
+  ok(!pb.includes("Commit PLAN.md, PROGRESS.md, kukulu.json and CLAUDE.md as"), "...and no longer tells the planner to commit by hand");
   like(pb, /renumber: true/, "plan-build renumbers with renumber: true (project-c F-07)");
   like(pb, /"from": "<that task's id>"/, "plan-build gates late rules with from (project-d F-01)");
   like(pb, /test ! -f X \|\| bash X/, "...and forbids the test-or-skip guard");
@@ -412,7 +412,7 @@ for (const heading of [
   ok(template.includes(heading), `the SPEC template keeps "${heading}"`);
 }
 like(read("skills/plan-build/SKILL.md"), /⚠️ ASSUMPTION/, "the planner knows the template's assumption marker");
-like(read("skills/plan-build/SKILL.md"), /cat\s+docs\/foundry\.json/, "the planner is told to quote foundry.json from disk, not from memory, in its report (F-06)");
+like(read("skills/plan-build/SKILL.md"), /cat\s+docs\/kukulu\.json/, "the planner is told to quote kukulu.json from disk, not from memory, in its report (F-06)");
 like(template, /⚠️ ASSUMPTION/, "the template explains the assumption marker");
 
 // ---------------------------------------------------------------- routing config templates
@@ -534,7 +534,7 @@ like(read("skills/implement/SKILL.md"), /kukulu_feedback_log/, "the implement sk
 like(read("skills/review-build/SKILL.md"), /kukulu_feedback_log/, "the review-build skill calls kukulu_feedback_log directly");
 like(read("skills/plan-build/SKILL.md"), /kukulu_feedback_log/, "the plan-build skill calls kukulu_feedback_log directly");
 like(read("skills/summarize/SKILL.md"), /feedbackCount/, "the summarize skill reads feedbackCount rather than scanning headings");
-like(read("skills/summarize/SKILL.md"), /\.foundry\/feedback\.jsonl/, "...and reads the feedback log itself for the entries");
+like(read("skills/summarize/SKILL.md"), /\.kukulu\/feedback\.jsonl/, "...and reads the feedback log itself for the entries");
 like(read("docs/feedback/README.md"), /foundry_feedback_log/, "docs/feedback/README.md documents the tool that produces the source log");
 like(read("docs/feedback/README.md"), /\/foundry:pull-feedback/, "...and the skill that pulls it back here");
 

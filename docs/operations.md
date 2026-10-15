@@ -33,7 +33,7 @@ The review-loop bounds are the only options. "max review rounds N" (or
 "maximum review depth of N rounds", or any phrasing that plainly asks for at
 most N reviews) sets both `maxRounds` and `maxRoundsHard` to N. The
 controller applies the options with `kukulu_flight_options` as soon as
-`docs/foundry.json` exists, that is, right after the plan stage. The tool
+`docs/kukulu.json` exists, that is, right after the plan stage. The tool
 commits them as `chore: flight options (…)`. Anything the controller cannot
 map, it prints as `ignored flight option: …` and carries on. It never asks.
 
@@ -85,8 +85,8 @@ Or straight from a shell, without a session:
 ```bash
 git log --oneline
 cat docs/PROGRESS.md          # checkboxes and the per-task log
-cat .foundry/state.json       # round, verdict, halted
-ls .foundry/implement.lock    # present = a run is armed
+cat .kukulu/state.json       # round, verdict, halted
+ls .kukulu/implement.lock    # present = a run is armed
 ```
 
 The commit history is designed to be read on its own. Bookkeeping commits are
@@ -151,8 +151,8 @@ git show <sha>:docs/REVIEW.md
 To continue anyway, make the call the halt message names:
 `kukulu_flight_options({ maxRounds: <k + 1>, resume: true })` for the soft
 cap, `kukulu_flight_options({ maxRoundsHard: <N>, resume: true })` for the
-hard one. It raises the bound in `docs/foundry.json`, clears `halted` in
-`.foundry/state.json` and commits both; it refuses if the bound would not lift
+hard one. It raises the bound in `docs/kukulu.json`, clears `halted` in
+`.kukulu/state.json` and commits both; it refuses if the bound would not lift
 the cap that fired, and it never clears any other halt. Then re-run the
 flight.
 
@@ -166,7 +166,7 @@ branch (F-05). Nothing is reset or cleaned — read the branch exactly as the
 run left it.
 
 To continue anyway, after fixing the actual problem: set `"halted": null` in
-`.foundry/state.json`, commit it, and re-run the flight.
+`.kukulu/state.json`, commit it, and re-run the flight.
 
 **A stream merge conflict.** When a parallel stream's branch conflicts on
 merge, `kukulu_stream_finish` aborts the merge, keeps the stream's branch
@@ -183,20 +183,20 @@ recovery.
 | Implementer stops with tasks open mid-task | The guard blocked and the agent still stopped, or the per-task stall cap tripped | Check `kukulu_status`'s `lockCounter` against the effective cap (`guardCap`, else `KUKULU_GUARD_CAP`, else 60); at the cap, something is genuinely wedged on one task — read its log and block it by hand |
 | Every task blocks with the same error | The plan assumes something that is not there | Stop the flight. Fix `SPEC.md`, re-plan; do not let it grind through 40 blocked tasks |
 | `kukulu_task_done` keeps refusing | The implementer is not committing with `<ID>:` as the subject, or is leaving files uncommitted | The commit template lives in `CLAUDE.md`; check the planner wrote one |
-| `kukulu_verify` fails on a clean checkout | The commands in `docs/foundry.json` are wrong | Fix them there — they came from `SPEC.md` §7, so fix that too |
+| `kukulu_verify` fails on a clean checkout | The commands in `docs/kukulu.json` are wrong | Fix them there — they came from `SPEC.md` §7, so fix that too |
 | Run finishes but nothing was pushed | No `origin`, or the push failed | `push` in the handoff output says which; the branch is local and reviewable either way |
 | No draft PR | `gh` is not installed or not authenticated | Optional by design; open one yourself |
 | Reviewer approves work that is wrong | `CLAUDE.md` `## Constraints` are unverifiable | Tighten `SPEC.md` §3 so each rule is a grep, then re-plan |
 | Controller prints `KUKULU: RESTART REQUIRED` and stops | The agents directory was populated for the first time in this project, and a changed role routes to a model the `Agent` tool cannot name directly | Expected, and rare after 0.3.0 — only the first sync of a router-routed role hits this. Run `/kukulu:go-flight` again in a new session |
 | `Agent` call fails with `Agent type 'kukulu-<role>' not found` | Same cause as above, hit mid-flight instead of at the start | Same fix: relaunch and re-run |
-| Flight stops immediately with a routing config error | The global file, a profile, or `docs/foundry.json`'s `roles`/`permissionMode` is malformed | Run `kukulu_config_show` to see exactly what and where; fix it and re-run |
-| `kukulu_run_start` refuses with a signing message | `policies.signing` is `"required"` and either signing is not configured or a real signed commit failed | Fix the signing agent, or set `policies.signing` to `"off"` in `docs/foundry.json` |
-| Flight halts with a reason naming a dead tool or agent | `kukulu_run_halt` was called | Read the reason, fix the actual problem, clear `halted` in `.foundry/state.json`, re-run |
+| Flight stops immediately with a routing config error | The global file, a profile, or `docs/kukulu.json`'s `roles`/`permissionMode` is malformed | Run `kukulu_config_show` to see exactly what and where; fix it and re-run |
+| `kukulu_run_start` refuses with a signing message | `policies.signing` is `"required"` and either signing is not configured or a real signed commit failed | Fix the signing agent, or set `policies.signing` to `"off"` in `docs/kukulu.json` |
+| Flight halts with a reason naming a dead tool or agent | `kukulu_run_halt` was called | Read the reason, fix the actual problem, clear `halted` in `.kukulu/state.json`, re-run |
 | Flight halts with "non-converging" or "hard cap" in the reason | Review findings stopped shrinking for `maxRounds` rounds, or the round count reached `maxRoundsHard` | Read `kukulu_status`'s `state.rounds` for the trail of counts; if the reviewer is genuinely still converging, raise `maxRounds`/`maxRoundsHard`; otherwise a human needs to look at why findings keep recurring |
 | `kukulu_review_submit` refuses over the `Round:` line | `docs/REVIEW.md`'s `Round:` line is missing or does not equal `reviewRound` | The error names the expected value; `kukulu_status`'s `reviewRound` always has it too |
 | `kukulu_next` keeps handing out the same stream | A stream's implementer stops before `kukulu_stream_finish` (the guard cap, a crash, a refused call) | Expected: `kukulu_run_start({ stream })` resumes its worktree. If it never makes progress, read that stream's task log; see [Parallel streams](#parallel-streams) to abandon it |
 | A stream's tool call times out while another stream is verifying | Tool calls are handled one at a time, so it queued behind the other stream's longest command | Raise Claude Code's `MCP_TOOL_TIMEOUT` above `kukulu_status`'s `longestCommandTimeoutMs`; see [Parallel streams](#parallel-streams) |
-| A wave ran serially though the plan declared streams | Its partition was invalid, its `parallel.setup` failed, or `parallel.maxStreams` is `1` | Read `kukulu_status`'s `waves[].reason` and `.foundry/feedback.jsonl` for a `stream-partition`, `stream-setup` or `stream-exclusive` entry; it is a planning defect to fix in the next plan, not a stuck flight |
+| A wave ran serially though the plan declared streams | Its partition was invalid, its `parallel.setup` failed, or `parallel.maxStreams` is `1` | Read `kukulu_status`'s `waves[].reason` and `.kukulu/feedback.jsonl` for a `stream-partition`, `stream-setup` or `stream-exclusive` entry; it is a planning defect to fix in the next plan, not a stuck flight |
 | A verify or mutate command ran away (an infinite loop, endless output) | Before 0.4.0 this could hang the reviewer for the whole timeout, leave test processes spinning, or disconnect the MCP server | Nothing, now: the command's whole process group is killed at its timeout or at 64 MiB of output, and the result says `timedOut` or `outputLimitExceeded`. A reviewer who suspects a hanging mutant passes `timeoutMs` to `kukulu_mutate` |
 | A step takes longer than the ten-minute limit on a foreground Bash call | Full benchmarks and heavy suites | Make it a `verify`/`extraVerify` command with its own `timeoutMs`, so it runs through `kukulu_verify`, and raise `MCP_TOOL_TIMEOUT` above `kukulu_status`'s `longestCommandTimeoutMs` |
 | A project hook denies a `git commit` whose message only mentions a forbidden word | The hook scans the whole Bash command line, including the quoted message | The implement skill commits with `git commit -F <file>`; Foundry's own bookkeeping commits never pass through Bash |
@@ -208,7 +208,7 @@ Nothing here is magic; it is all files.
 
 ```bash
 # stand the guard down (safe: the next run_start re-arms it)
-rm -f .foundry/implement.lock
+rm -f .kukulu/implement.lock
 
 # put a blocked task (and what it skipped) back: use kukulu_task_reopen,
 # not an editor — see "Reopening a blocked task" above
@@ -218,7 +218,7 @@ $EDITOR docs/PROGRESS.md      # change [~] to [!], add a log entry under ## Log
 git commit -am "progress: P3-07 blocked by hand"
 
 # abandon a round and go back to review
-$EDITOR .foundry/state.json   # implemented: true, reviewed: false
+$EDITOR .kukulu/state.json   # implemented: true, reviewed: false
 ```
 
 The one file not to hand-edit casually is `docs/PROGRESS.md` while a run is
@@ -230,17 +230,17 @@ parse. Edit it between stages, not during one.
 A repository usually runs more than one flight. Three things make the second
 one start cleanly.
 
-**Name the flight.** Set `"flight"` in `docs/foundry.json` to a slug
+**Name the flight.** Set `"flight"` in `docs/kukulu.json` to a slug
 (`^[a-z0-9][a-z0-9-]{0,39}$`), or pass `flight=<slug>` to
 `/kukulu:go-flight` and the planner writes it for you. The slug names the
 flight's archive directory.
 
 **Archive it.** `kukulu_flight_archive` moves a summarized flight into
 `docs/flights/<slug>/`: `PLAN.md`, `PROGRESS.md`, `HANDOFF.md`, `REVIEW.md`,
-`SUMMARY.md`, `foundry.json`, `.foundry/state.json` and
-`.foundry/feedback.jsonl`, each one that exists. It copies `docs/SPEC.md`
+`SUMMARY.md`, `kukulu.json`, `.kukulu/state.json` and
+`.kukulu/feedback.jsonl`, each one that exists. It copies `docs/SPEC.md`
 there but leaves the live spec where it is, writes a fresh
-`.foundry/state.json` recording the archive, and commits everything as
+`.kukulu/state.json` recording the archive, and commits everything as
 `chore: archive flight <slug>`. It refuses unless the flight is summarized, no
 run is armed, the working tree is clean and the destination is free, and if
 its commit fails it puts every file back. By default the summarizer does not
@@ -312,7 +312,7 @@ fallback had switched it off.
 
 ## Configuration
 
-`docs/foundry.json`, written by the planner, read by the MCP:
+`docs/kukulu.json`, written by the planner, read by the MCP:
 
 ```json
 {
@@ -341,7 +341,7 @@ fallback had switched it off.
 | `maxRounds` | `3` | Non-converging review rounds allowed before the flight halts; a round whose fix-task count did not shrink from the last one counts against this. Settable per flight with `/kukulu:go-flight max review rounds N` |
 | `maxRoundsHard` | `6` | Absolute review-round ceiling, regardless of convergence; a review numbered above it halts |
 | `commandTimeoutMs` | `600000` | Per-command timeout for `kukulu_verify`, `kukulu_mutate` and `parallel.setup`; a timeout kills the command's whole process group |
-| `guardCap` | `60` | Re-blocks since the last task state change before the implement guard gives up; carried into `.foundry/implement.lock` at `kukulu_run_start` and wins over `KUKULU_GUARD_CAP` |
+| `guardCap` | `60` | Re-blocks since the last task state change before the implement guard gives up; carried into `.kukulu/implement.lock` at `kukulu_run_start` and wins over `KUKULU_GUARD_CAP` |
 | `policies.signing` | `"auto"` | `"off"` disables commit signing for the run; `"required"` refuses to start unless a real signed commit succeeds; `"auto"` uses signing when it works and falls back to off, recording why, when it does not; this includes any later commit whose signing fails or exceeds 30 seconds, which is retried once unsigned and recorded in `state.signing` and `state.signingOverride` (under `"required"` that commit refuses instead) |
 | `policies.push` | `true` | `false` skips every push `kukulu_run_start`, `kukulu_run_finish`, `kukulu_review_submit` and `kukulu_summary_commit` would otherwise make |
 | `policies.pr` | `"draft"` | `"none"` skips draft-PR creation in `kukulu_run_finish` even when `gh` is available |
@@ -360,7 +360,7 @@ Environment variables:
 | Variable | Default | Effect |
 |---|---|---|
 | `KUKULU_PROJECT_DIR` | `cwd` | Project root the server operates on; set by `.mcp.json` |
-| `KUKULU_GUARD_CAP` | `60` | Re-blocks since the last task state change before the guard gives up; `docs/foundry.json`'s `guardCap` wins over this when set |
+| `KUKULU_GUARD_CAP` | `60` | Re-blocks since the last task state change before the guard gives up; `docs/kukulu.json`'s `guardCap` wins over this when set |
 | `KUKULU_CONFIG` | `~/.config/kukulu/config.json` (or `$XDG_CONFIG_HOME/kukulu/config.json`) | Path to the global routing config |
 | `KUKULU_PROFILE` | the global file's own `"profile"` key, if any | Which profile in the global file to apply; wins over the file's own choice |
 
@@ -371,6 +371,15 @@ the new one is unset or empty, and the old global file is read when no
 `kukulu/config.json` exists. Each fallback adds a line to the `deprecations`
 array that `kukulu_status` and `kukulu_next` return; `/kukulu:go-flight`
 prints it. A new name always wins over an old one.
+
+The project layout follows the same rule. A project that has `.foundry/` or
+`docs/foundry.json` and none of `.kukulu/` or `docs/kukulu.json` keeps working
+in place under the old names, with one more `deprecations` line; its refusals
+name the old files. A project that has both is refused by every tool, because
+reading either would hide the other: keep the one you use and remove the other
+with git. Flights archived before 0.6.0 keep `foundry.json` in their archive
+directory, and finalizing one still reads it. These fallbacks, like the
+`FOUNDRY_*` ones, end in 0.7.0.
 
 ## Calibrating
 
@@ -419,7 +428,7 @@ What each default came from:
 
 A `## Constraints` line in `CLAUDE.md` is prose a reviewer has to remember
 to check by hand, three review rounds running, and can still miss a shape a
-hand-written grep never covered (F-14). `docs/foundry.json`'s `constraints`
+hand-written grep never covered (F-14). `docs/kukulu.json`'s `constraints`
 array turns a mechanically-checkable one into data with proof that its own
 check works:
 
@@ -442,7 +451,7 @@ check works:
 | Field | Required | Meaning |
 |---|---|---|
 | `id` | yes | Unique name; the fix task for a violation names it |
-| `description` | no | For a human reading `docs/foundry.json` |
+| `description` | no | For a human reading `docs/kukulu.json` |
 | `paths` | yes | Path prefixes to scan (matches `git ls-files`'s pathspec) |
 | `exclude` | no | Path prefixes to skip within `paths` |
 | `pattern` | yes | A JS `RegExp` source, checked line by line — no multi-line patterns |
@@ -510,7 +519,7 @@ as they finish — how and why is in
 [architecture.md](./architecture.md#parallel-workstreams). The operator's
 concerns are these.
 
-**Config** (`docs/foundry.json`; see [Configuration](#configuration)).
+**Config** (`docs/kukulu.json`; see [Configuration](#configuration)).
 `parallel.maxStreams` caps how many streams of one wave run at once (default
 3; `1` turns parallelism off, silently). `parallel.setup` lists commands run
 once in each new worktree before its implementer starts — a fresh checkout
@@ -535,7 +544,7 @@ wall clock is model time, not test time.
 **A wave that ran serially.** Not a fault. An invalid partition, a failed
 `parallel.setup`, or an exclusive command each degrade the wave to serial and
 log one feedback entry — `stream-partition`, `stream-setup` or
-`stream-exclusive` — in `.foundry/feedback.jsonl`. Pull it back with
+`stream-exclusive` — in `.kukulu/feedback.jsonl`. Pull it back with
 `/kukulu:pull-feedback`: it is material for the next plan.
 
 **A stream that stopped early.** The next `kukulu_next` hands it out again;
@@ -544,7 +553,7 @@ resumes its in-progress task. Look at what is in flight with:
 
 ```bash
 git worktree list
-ls .foundry/worktrees/
+ls .kukulu/worktrees/
 # per-wave, per-stream open counts:
 #   kukulu_status -> waves
 ```
@@ -555,9 +564,9 @@ branch:
 
 ```bash
 git merge --no-ff <build-branch>--<stream>     # resolve the conflicts, then commit
-git worktree remove --force .foundry/worktrees/<stream>
+git worktree remove --force .kukulu/worktrees/<stream>
 git branch -d <build-branch>--<stream>
-$EDITOR .foundry/state.json                    # set "halted": null
+$EDITOR .kukulu/state.json                    # set "halted": null
 git commit -am "chore: stream <stream> merged by hand"
 ```
 
@@ -566,7 +575,7 @@ the next wave or the handoff.
 
 **Abandoning a stream** you cannot recover: block its open tasks by hand (see
 [Clearing a wedged run](#clearing-a-wedged-run-by-hand)), then
-`git worktree remove --force .foundry/worktrees/<stream>` and
+`git worktree remove --force .kukulu/worktrees/<stream>` and
 `git branch -D <build-branch>--<stream>`. Nothing is lost that was not
 already committed to the stream branch, which you can still inspect until you
 delete it.

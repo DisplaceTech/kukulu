@@ -107,7 +107,7 @@ flowchart TD
     NEXT -->|"halted: rounds, or run_halt"| HALT["halt — a human decides"]
     NEXT -->|"summarized"| DONE["done — a human merges"]
 
-    PLAN -->|"PLAN · PROGRESS · foundry.json · CLAUDE.md"| NEXT
+    PLAN -->|"PLAN · PROGRESS · kukulu.json · CLAUDE.md"| NEXT
     IMPL -->|"one commit per task, then HANDOFF.md"| NEXT
     REV -->|"APPROVED"| NEXT
     REV -->|"CHANGES REQUESTED — queues R-tasks"| NEXT
@@ -155,7 +155,7 @@ A plan may split independent tasks into **streams**. Tag a task with
 line; a run of consecutive streamed tasks is a **wave**, and any untagged task
 is a barrier between waves. The flight controller then runs a wave's streams
 at the same time, each on its own implementer in its own git worktree
-(`.foundry/worktrees/<stream>`, on a branch `<build-branch>--<stream>`), and
+(`.kukulu/worktrees/<stream>`, on a branch `<build-branch>--<stream>`), and
 merges each stream back into the build branch the moment it finishes.
 
 ```mermaid
@@ -174,7 +174,7 @@ whose `parallel.setup` fails, simply runs serially and logs one feedback entry
 — a bad partition is a planning defect, never a halt. A command marked
 `exclusive` (wp-env, anything bound to a port or a directory) only ever runs
 from the main checkout, and the tasks that trigger it stay out of waves.
-`docs/foundry.json`'s `parallel.maxStreams` (default 3; `1` turns it off) and
+`docs/kukulu.json`'s `parallel.maxStreams` (default 3; `1` turns it off) and
 `parallel.setup` (the install a fresh worktree needs) configure it. A plan with
 no streams behaves exactly as it always did. See
 [docs/architecture.md](./docs/architecture.md#parallel-workstreams) for how,
@@ -223,7 +223,7 @@ they are handled differently:
   [docs/operations.md](./docs/operations.md#running-a-flight) for the exact
   rule and what its result field means. Put it in `~/.claude/settings.json`
   yourself instead if you want it to apply to every project rather than
-  one. The `verify` commands in `docs/foundry.json` run through the MCP
+  one. The `verify` commands in `docs/kukulu.json` run through the MCP
   rather than the model's Bash tool, so those never prompt at all.
 
 The first run in a project generates the agents. Claude Code hot-reloads a
@@ -262,14 +262,14 @@ claude-code-router walkthrough: [docs/routing.md](./docs/routing.md).
 | `docs/SPEC.md` | you | everyone |
 | `docs/PLAN.md` | planner (reviewer appends `## Review fixes (round N)`) | implementer, reviewer |
 | `docs/PROGRESS.md` | MCP only | guard hook, everyone |
-| `docs/foundry.json` | planner | MCP (`verify`, `extraVerify`, `maxRounds`, `baseBranch`, `branchPrefix`) |
+| `docs/kukulu.json` | planner | MCP (`verify`, `extraVerify`, `maxRounds`, `baseBranch`, `branchPrefix`) |
 | `CLAUDE.md` | planner | implementer, reviewer |
 | `docs/HANDOFF.md` | implementer | reviewer, summarizer |
 | `docs/REVIEW.md` | reviewer | summarizer |
 | `docs/SUMMARY.md` | summarizer | you |
-| `.foundry/state.json` | MCP (committed) | `kukulu_next` |
-| `.foundry/implement.lock` | MCP (gitignored) | guard hook |
-| `.foundry/worktrees/<stream>/` | MCP (gitignored) — a parallel stream's worktree, until it is merged back | that stream's implementer |
+| `.kukulu/state.json` | MCP (committed) | `kukulu_next` |
+| `.kukulu/implement.lock` | MCP (gitignored) | guard hook |
+| `.kukulu/worktrees/<stream>/` | MCP (gitignored) — a parallel stream's worktree, until it is merged back | that stream's implementer |
 | `.claude/agents/kukulu-*.md` | MCP (`kukulu_agents_sync`, git-excluded) | Claude Code |
 | `~/.config/kukulu/config.json` | you | MCP (`kukulu_agents_sync`, `kukulu_config_show`) |
 
@@ -284,7 +284,7 @@ The server exposes twenty-one tools.
 |---|---|
 | `kukulu_status` | Everything on disk: docs present, counts, branch/base/head, lock, round, verdict, generated agents, where each flight artifact stands (`artifacts`, `strayArtifacts`) and the last `review:` commit |
 | `kukulu_next` | The state machine. Returns `{stage, agent, agentFallback, fallbackAgent, restartRequired, model, agentModel, agentModelExact, round, reason, prompt, streams?}` |
-| `kukulu_plan_commit` | Validate PLAN, PROGRESS, `foundry.json` and `CLAUDE.md` together, list every problem at once, and commit the plan; `renumber: true` rewrites split task ids |
+| `kukulu_plan_commit` | Validate PLAN, PROGRESS, `kukulu.json` and `CLAUDE.md` together, list every problem at once, and commit the plan; `renumber: true` rewrites split task ids |
 | `kukulu_run_start` | Create or reuse `build/<date>`, record pre-existing untracked files and run policies, probe signing, arm the lock, stamp PROGRESS, commit. Idempotent. With `stream`, also create (or resume) that stream's worktree and run `parallel.setup` in it |
 | `kukulu_task_next` | Pick first `[~]` else first `[ ]`, auto-skip dependency-blocked tasks, mark `[~]`, return PLAN text and dependency logs |
 | `kukulu_task_done` | Requires `<ID>:` at HEAD and a clean tree; mark `[x]`, log with the sha, commit |
@@ -294,8 +294,8 @@ The server exposes twenty-one tools.
 | `kukulu_stream_finish` | Finish one stream of a parallel wave: require no open tasks and a clean worktree, merge its branch into the build branch, remove the worktree and branch. A merge conflict aborts, keeps the stream, and halts |
 | `kukulu_run_finish` | Requires zero open tasks and `HANDOFF.md`; commit, push, draft a PR against `baseBranch` (unless policies say otherwise), disarm the lock, report a whole-tree constraint scan |
 | `kukulu_run_halt` | Record an operator-level reason the run cannot continue; disarm the lock; commit state; never resets or cleans the tree |
-| `kukulu_flight_options` | Apply go-flight's options (`maxRounds`, `maxRoundsHard`) to `docs/foundry.json` and commit; with `resume: true`, also lift a round-cap halt |
-| `kukulu_feedback_log` | Append one pipeline-friction entry to `.foundry/feedback.jsonl` and commit it immediately, so it survives a flight that never reaches summarize |
+| `kukulu_flight_options` | Apply go-flight's options (`maxRounds`, `maxRoundsHard`) to `docs/kukulu.json` and commit; with `resume: true`, also lift a round-cap halt |
+| `kukulu_feedback_log` | Append one pipeline-friction entry to `.kukulu/feedback.jsonl` and commit it immediately, so it survives a flight that never reaches summarize |
 | `kukulu_mutate` | Mutation-test one file for the reviewer: apply one exact find/replace, run the verify commands that file triggers (or a `targeted` command with a `filter`; optionally with a shorter `timeoutMs`), always restore it and undo any residue the commands left, commit nothing; reports whether the tests noticed and lists `failedCommands`, and with `confirmKill` re-runs a kill on the unmutated tree |
 | `kukulu_review_submit` | `APPROVED` → commit. `CHANGES REQUESTED` → assign `R<N>-<nn>`, append to PLAN and PROGRESS, unblock (with skipped dependents), commit `review: round N` |
 | `kukulu_summary_commit` | Write `SUMMARY.md` from `content`, commit it, mark the flight complete, report reviews, fix rounds, the branch's PR and whether to archive |
@@ -314,12 +314,12 @@ considers a stop that actually belongs to the implementer — a `SubagentStop`
 naming it (`hooks/hooks.json`'s matcher already scopes the hook to it) or a
 `Stop` whose own transcript called `kukulu_run_start`. A controller session
 merely waiting on a background implementer is never blocked. For a stop it
-does consider: while `.foundry/implement.lock` exists and `## Tasks` still
+does consider: while `.kukulu/implement.lock` exists and `## Tasks` still
 has `[ ]` or `[~]` lines, it returns `{"decision":"block"}` naming the next
 task. `kukulu_task_done`, `kukulu_task_block` and `kukulu_run_start` all
 reset the lock's counter to zero, so the cap bounds re-blocks since the
 last time work actually moved, not the whole run. It gives up at the
-effective cap — `docs/foundry.json`'s `guardCap`, else `KUKULU_GUARD_CAP`,
+effective cap — `docs/kukulu.json`'s `guardCap`, else `KUKULU_GUARD_CAP`,
 else 60 — naming the stalled task, so a wedged run ends rather than
 spinning.
 
@@ -328,14 +328,14 @@ spinning.
 Everything is on disk and committed, so `/kukulu:go-flight` can be re-run from
 any point: `kukulu_next` reads the state and continues. Three things stop a
 flight on purpose, and all of them write an explicit `halted` value in
-`.foundry/state.json`: a review round reaching `maxRoundsHard` regardless of
+`.kukulu/state.json`: a review round reaching `maxRoundsHard` regardless of
 how well it's going, review findings that stop shrinking for `maxRounds`
 rounds running (F-13, F-15 — a flight whose findings go 15 → 3 → 2 → 1 is
 never penalised for taking rounds, only one that stops improving is), and
 `kukulu_run_halt`, which an implementer calls for an operator-level problem
 it cannot resolve itself (F-05), and a parallel stream whose merge conflicts
 (`kukulu_stream_finish` aborts it and keeps the stream). All four want a human. Raise `maxRounds` or
-`maxRoundsHard` in `docs/foundry.json` as appropriate, clear `halted`, and
+`maxRoundsHard` in `docs/kukulu.json` as appropriate, clear `halted`, and
 run `/kukulu:go-flight` again. [docs/operations.md](./docs/operations.md)
 has the rest of the runbook, including how to reopen a task once its blocker
 is fixed (`kukulu_task_reopen`), what each failure looks like and how
@@ -410,7 +410,7 @@ Eleven suites, about 1600 assertions: the plugin manifests and documentation
 links, the JSON-RPC transport, the `kukulu_next` decision table, the
 implement-stage tools, the review and summary tools, per-role routing
 (config merge, `kukulu_agents_sync`, `kukulu_config_show`),
-`docs/foundry.json` constraints and their fixture self-tests,
+`docs/kukulu.json` constraints and their fixture self-tests,
 `kukulu_feedback_log` and the feedback policy, parallel streams (waves,
 partition validation, worktrees, merge-back), the guard hook, and end-to-end
 flights — serial and parallel — driven over real stdio against a real git
@@ -427,7 +427,7 @@ remotely. See [CONTRIBUTING.md](./CONTRIBUTING.md).
 **Feeding back.** Every stage calls `kukulu_feedback_log` the moment
 Foundry itself costs it time — a refused tool, an ambiguous prompt, a
 stall — and the MCP logs its own halts and fallbacks the same way. Each
-entry lands in `.foundry/feedback.jsonl` and is committed immediately, so
+entry lands in `.kukulu/feedback.jsonl` and is committed immediately, so
 it survives even a flight that never reaches summarize. Run
 `/kukulu:pull-feedback` against a project's checkout to turn its log into
 a new, numbered file under [docs/feedback/](./docs/feedback/), and a

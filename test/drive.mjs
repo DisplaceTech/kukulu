@@ -46,12 +46,12 @@ await withServer(repo, async ({ call }) => {
 
   writeFile(repo, "docs/PLAN.md", planDoc(TASKS));
   writeFile(repo, "docs/PROGRESS.md", progressDoc(TASKS));
-  writeFile(repo, "docs/foundry.json", JSON.stringify({ verify: ["test -f hello.txt"], extraVerify: { "src/": ["echo extra"] }, maxRounds: 2 }, null, 2) + "\n");
+  writeFile(repo, "docs/kukulu.json", JSON.stringify({ verify: ["test -f hello.txt"], extraVerify: { "src/": ["echo extra"] }, maxRounds: 2 }, null, 2) + "\n");
   writeFile(repo, "CLAUDE.md", "# rules\n## Constraints\n- greet in lowercase\n");
   // The plan-build skill commits exactly its four deliverables, never a
   // blanket `-A` — which would otherwise sweep up the untracked operator
   // file seeded above.
-  git(repo, ["add", "--", "docs/PLAN.md", "docs/PROGRESS.md", "docs/foundry.json", "CLAUDE.md"]);
+  git(repo, ["add", "--", "docs/PLAN.md", "docs/PROGRESS.md", "docs/kukulu.json", "CLAUDE.md"]);
   git(repo, ["commit", "-qm", "plan: derive build plan from SPEC"]);
 
   n = await call("kukulu_next");
@@ -64,7 +64,7 @@ await withServer(repo, async ({ call }) => {
 
   let r = await call("kukulu_run_start");
   like(r.branch, /^build\/\d{4}-\d\d-\d\d/, `the run gets its own branch (${r.branch})`);
-  ok(hasFile(repo, ".foundry/implement.lock"), "the Stop-hook lock is armed for the whole run");
+  ok(hasFile(repo, ".kukulu/implement.lock"), "the Stop-hook lock is armed for the whole run");
 
   let t = await call("kukulu_task_next");
   eq(t.id, "P0-01", "the first task comes off the top of the plan");
@@ -89,7 +89,7 @@ await withServer(repo, async ({ call }) => {
   writeFile(repo, "junk.txt", "half-finished\n");
   r = await call("kukulu_task_block", { id: "P0-02", reason: "tried A / fails B / fix C" });
   ok(!hasFile(repo, "junk.txt"), "blocking a task throws away its debris");
-  ok(hasFile(repo, ".foundry/implement.lock"), "blocking a task does not end the run");
+  ok(hasFile(repo, ".kukulu/implement.lock"), "blocking a task does not end the run");
 
   t = await call("kukulu_task_next");
   eq(t.done, true, "no work is left");
@@ -109,7 +109,7 @@ await withServer(repo, async ({ call }) => {
   writeFile(repo, "docs/HANDOFF.md", "# handoff\n## Round 0\nP0-02 blocked, P0-03 skipped.\n");
   r = await call("kukulu_run_finish");
   like(r.readyLine, /^READY FOR REVIEW/, r.readyLine);
-  ok(!hasFile(repo, ".foundry/implement.lock"), "the lock is disarmed at the handoff");
+  ok(!hasFile(repo, ".kukulu/implement.lock"), "the lock is disarmed at the handoff");
   eq(runGuard(repo), "", "and the guard stands down");
 
   n = await call("kukulu_next");
@@ -323,7 +323,7 @@ async function fly(call, repo) {
   throw new Error(`the flight did not finish: ${events.join(" → ")}`);
 }
 
-const feedbackLines = (repo) => (hasFile(repo, ".foundry/feedback.jsonl") ? readFile(repo, ".foundry/feedback.jsonl").trim().split("\n").map((l) => JSON.parse(l)) : []);
+const feedbackLines = (repo) => (hasFile(repo, ".kukulu/feedback.jsonl") ? readFile(repo, ".kukulu/feedback.jsonl").trim().split("\n").map((l) => JSON.parse(l)) : []);
 const flightRepo = (tasks, config = {}) => {
   const repo = plannedRepo({ tasks, config: { verify: ["true"], policies: { pr: "none", push: false }, ...config } });
   writeFile(repo, "OPERATOR_NOTES.md", "predates the flight\n"); // untracked, must survive

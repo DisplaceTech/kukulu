@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Foundry implement guard — Stop / SubagentStop hook.
 //
-// While .foundry/implement.lock exists, an implementation run is in
+// While .kukulu/implement.lock exists, an implementation run is in
 // progress. If docs/PROGRESS.md still has open tasks ([ ] or [~]), the run
 // is not finished and a stop should be pushed back into the loop — but only
 // when the party actually stopping is the implementer.
@@ -57,7 +57,7 @@
 //      safety net. With no worktrees, the rules above apply unchanged.
 //
 // A hard cap on re-blocks (default 60, see KUKULU_GUARD_CAP, or the pre-0.6.0 FOUNDRY_GUARD_CAP until 0.7.0, or
-// docs/foundry.json's guardCap) still prevents a runaway. The counter
+// docs/kukulu.json's guardCap) still prevents a runaway. The counter
 // resets to zero on every task state change, so the cap bounds re-blocks
 // since the last time work actually moved, not over the whole run — a
 // 76-task plan making normal progress cannot exhaust it. Exit 0 with no
@@ -202,19 +202,25 @@ function openTasks(progressPath) {
   return { open, next: inProgress || todo, stalled: inProgress, byStream };
 }
 
-/** Does any stream worktree exist under `.foundry/worktrees/`? A wave is in flight when one does. */
+// A project that has not run kukulu_migrate yet keeps its state in `.foundry/`.
+// Both are checked until 0.7.0, and `.kukulu/` wins when both hold a lock.
+const STATE_DIRS = [".kukulu", ".foundry"];
+
+/** Does any stream worktree exist under `<state dir>/worktrees/`? A wave is in flight when one does. */
 function streamWorktreesExist(root) {
-  try {
-    return fs.readdirSync(path.join(root, ".foundry", "worktrees"), { withFileTypes: true }).some((d) => d.isDirectory());
-  } catch {
-    return false;
-  }
+  return STATE_DIRS.some((dir) => {
+    try {
+      return fs.readdirSync(path.join(root, dir, "worktrees"), { withFileTypes: true }).some((d) => d.isDirectory());
+    } catch {
+      return false;
+    }
+  });
 }
 
 function main() {
   const input = parseInput(readStdin());
   const root = projectRoot(input);
-  const lockPath = path.join(root, ".foundry", "implement.lock");
+  const lockPath = STATE_DIRS.map((dir) => path.join(root, dir, "implement.lock")).find((p) => fs.existsSync(p)) || path.join(root, STATE_DIRS[0], "implement.lock");
   const progressPath = path.join(root, "docs", "PROGRESS.md");
 
   if (!fs.existsSync(lockPath) || !fs.existsSync(progressPath)) return;
@@ -253,7 +259,7 @@ function main() {
   // The effective cap bounds re-blocks *since the last task state change*
   // (kukulu_task_done / kukulu_task_block / kukulu_run_start all reset
   // the counter to zero), not the whole run — so a per-run cap set in
-  // docs/foundry.json's guardCap, carried in the lock, wins over the
+  // docs/kukulu.json's guardCap, carried in the lock, wins over the
   // process-wide KUKULU_GUARD_CAP env var, which wins over the default.
   const cap = Number.isInteger(lock.json?.cap) ? lock.json.cap : Number(process.env.KUKULU_GUARD_CAP || process.env.FOUNDRY_GUARD_CAP || 60);
   const count = lock.count + 1;

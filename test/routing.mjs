@@ -1,6 +1,6 @@
 // Per-role model routing (v0.2.0): merging the plugin's own agents/*.md
 // defaults with an optional global file, an optional named profile inside
-// it, and an optional docs/foundry.json project override, then generating
+// it, and an optional docs/kukulu.json project override, then generating
 // .claude/agents/kukulu-<role>.md from the result. kukulu_config_show is
 // read-only; kukulu_agents_sync is the only tool that writes.
 //
@@ -31,7 +31,7 @@ const cfgDir = () => mkDir("foundry-cfg-");
     const cfg = await call("kukulu_config_show");
     eq(cfg.globalConfig, "none", "no global config file is present");
     eq(cfg.profile, null, "no profile is selected");
-    eq(cfg.projectOverride, false, "the project's foundry.json carries no roles or permissionMode");
+    eq(cfg.projectOverride, false, "the project's kukulu.json carries no roles or permissionMode");
     eq(cfg.permissionMode, "acceptEdits", "the default permission mode is acceptEdits");
     eq(cfg.permissionModeSource, "default", "...with source default");
     eq(cfg.agentsGenerated.join(","), "", "nothing has been generated yet");
@@ -380,8 +380,8 @@ const cfgDir = () => mkDir("foundry-cfg-");
     profiles: { local: { implementer: { model: "ollama,qwen3.6:35b-a3b" } } },
     permissionMode: "bypassPermissions",
   });
-  const existing = JSON.parse(readFile(repo, "docs/foundry.json"));
-  writeFile(repo, "docs/foundry.json", `${JSON.stringify({ ...existing, roles: { reviewer: { model: "haiku" } }, permissionMode: "default" }, null, 2)}\n`);
+  const existing = JSON.parse(readFile(repo, "docs/kukulu.json"));
+  writeFile(repo, "docs/kukulu.json", `${JSON.stringify({ ...existing, roles: { reviewer: { model: "haiku" } }, permissionMode: "default" }, null, 2)}\n`);
   git(repo, ["add", "-A"]);
   git(repo, ["commit", "-qm", "docs: project routing override"]);
 
@@ -397,7 +397,7 @@ const cfgDir = () => mkDir("foundry-cfg-");
     eq(cfg.permissionModeSource, "project", "...with source project");
 
     const v = await call("kukulu_verify", { files: ["hello.txt"] });
-    ok(v.results.length >= 1, "kukulu_verify still works; the routing keys leave the rest of foundry.json alone");
+    ok(v.results.length >= 1, "kukulu_verify still works; the routing keys leave the rest of kukulu.json alone");
   }, { env: { KUKULU_CONFIG: globalPath, KUKULU_PROFILE: "local" } });
 }
 

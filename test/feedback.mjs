@@ -1,4 +1,4 @@
-// kukulu_feedback_log and .foundry/feedback.jsonl (v0.3.1): durable,
+// kukulu_feedback_log and .kukulu/feedback.jsonl (v0.3.1): durable,
 // MCP-owned friction capture that survives a flight regardless of how it
 // ends, since it commits immediately rather than waiting for some later
 // stage to notice and transcribe it.
@@ -16,9 +16,9 @@ import {
     const r = await call("kukulu_feedback_log", { stage: "implement", message: "the Write tool was refused; fell back to a heredoc.", category: "tool-refusal" });
     eq(r.logged, true, "a call with policies.feedback at its default logs successfully");
     eq(r.count, 1, "the reported count matches what was just written");
-    ok(hasFile(repo, ".foundry/feedback.jsonl"), "the file is created");
+    ok(hasFile(repo, ".kukulu/feedback.jsonl"), "the file is created");
 
-    const lines = readFile(repo, ".foundry/feedback.jsonl").trim().split("\n");
+    const lines = readFile(repo, ".kukulu/feedback.jsonl").trim().split("\n");
     eq(lines.length, 1, "exactly one line was written");
     const entry = JSON.parse(lines[0]);
     eq(entry.stage, "implement", "the stage is recorded");
@@ -30,7 +30,7 @@ import {
 
     eq(subject(repo), "chore: pipeline friction (implement)", "the call commits on its own");
     const changed = git(repo, ["show", "--stat", "--format=", "HEAD"]);
-    like(changed, /\.foundry\/feedback\.jsonl/, "the commit touches the feedback file");
+    like(changed, /\.kukulu\/feedback\.jsonl/, "the commit touches the feedback file");
     ok(!/docs\/PROGRESS\.md|state\.json/.test(changed), "...and nothing else");
   });
 }
@@ -42,7 +42,7 @@ import {
     const firstCommit = git(repo, ["rev-parse", "HEAD"]);
     const r = await call("kukulu_feedback_log", { stage: "review", message: "second entry" });
     eq(r.count, 2, "a second call appends rather than overwriting");
-    const lines = readFile(repo, ".foundry/feedback.jsonl").trim().split("\n");
+    const lines = readFile(repo, ".kukulu/feedback.jsonl").trim().split("\n");
     eq(lines.length, 2, "two lines on disk");
     eq(JSON.parse(lines[1]).message, "second entry", "the second line is the second entry");
     ok(git(repo, ["rev-parse", "HEAD"]) !== firstCommit, "a second, separate commit was made");
@@ -53,7 +53,7 @@ import {
   const repo = plannedRepo();
   await withServer(repo, async ({ call }) => {
     await call("kukulu_feedback_log", { stage: "plan", message: "no category given" });
-    const entry = JSON.parse(readFile(repo, ".foundry/feedback.jsonl").trim());
+    const entry = JSON.parse(readFile(repo, ".kukulu/feedback.jsonl").trim());
     eq(entry.category, "other", "category defaults to 'other' when omitted");
   });
 }
@@ -70,7 +70,7 @@ import {
     );
     isError(await call("kukulu_feedback_log", { stage: "implement", message: "" }), /message is required/, "an empty message is refused");
     isError(await call("kukulu_feedback_log", { stage: "implement" }), /message is required/, "a missing message is refused");
-    ok(!hasFile(repo, ".foundry/feedback.jsonl"), "no refusal creates the file");
+    ok(!hasFile(repo, ".kukulu/feedback.jsonl"), "no refusal creates the file");
   });
 }
 
@@ -89,7 +89,7 @@ import {
 
 {
   const repo = plannedRepo();
-  writeFile(repo, ".foundry/feedback.jsonl", '{"stage":"implement","message":"ok"}\n{not json\n');
+  writeFile(repo, ".kukulu/feedback.jsonl", '{"stage":"implement","message":"ok"}\n{not json\n');
   await withServer(repo, async ({ call }) => {
     eq((await call("kukulu_status")).feedbackCount, 1, "a corrupt line is skipped, not fatal, like a corrupt state.json degrading to defaults");
   });
@@ -103,7 +103,7 @@ import {
     const r = await call("kukulu_feedback_log", { stage: "implement", message: "should not be written" });
     eq(r.logged, false, "policies.feedback: false disables logging");
     eq(r.reason, "disabled by policy", "...and says why, rather than throwing");
-    ok(!hasFile(repo, ".foundry/feedback.jsonl"), "no file is created");
+    ok(!hasFile(repo, ".kukulu/feedback.jsonl"), "no file is created");
     eq(git(repo, ["status", "--porcelain"]), "", "no commit is made");
   });
 }

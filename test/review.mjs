@@ -8,7 +8,7 @@ import { spawnSync } from "node:child_process";
 import {
   finish, ok, eq, like, isError,
   plannedRepo, withServer, readFile, writeFile, subject, hasFile,
-  markTasks, setState, git, mkBareRemote, mkFakeGhBin, mkFakeGpg, useFakeSigner,
+  markTasks, setState, git, mkBareRemote, mkFakeGhBin, mkFakeGpg, useFakeSigner, useLegacyLayout,
 } from "./harness.mjs";
 
 const TODAY = new Date().toISOString().slice(0, 10);
@@ -258,7 +258,7 @@ async function driveRounds(call, repo, counts) {
     const r = await driveRounds(call, repo, [15, 3, 2, 1]);
     eq(r.halted, null, "findings shrinking every round never halts, even across four rounds with a maxRounds of 3");
     eq(r.round, 4, "the round still counts up normally");
-    ok(!hasFile(repo, ".foundry/feedback.jsonl"), "a round that never halts logs no feedback entry");
+    ok(!hasFile(repo, ".kukulu/feedback.jsonl"), "a round that never halts logs no feedback entry");
   });
 }
 
@@ -270,8 +270,8 @@ async function driveRounds(call, repo, counts) {
     like(r.halted, /reaching maxRounds=2/, "the message names the exceeded cap");
     like(r.halted, /the 3rd non-converging round|the 2nd non-converging round/, "the message uses a correct ordinal");
     like(r.halted, /kukulu_flight_options\(\{ maxRounds: 3, resume: true \}\)/, "...and names the call that resumes the flight");
-    ok(!r.halted.includes("edit .foundry/state.json"), "...and no longer tells the operator to edit state by hand");
-    eq(JSON.stringify(JSON.parse(readFile(repo, ".foundry/state.json")).haltCap), JSON.stringify({ cap: "maxRounds", round: 3, nonConverging: 2 }), "...and state.haltCap records the cap");
+    ok(!r.halted.includes("edit .kukulu/state.json"), "...and no longer tells the operator to edit state by hand");
+    eq(JSON.stringify(JSON.parse(readFile(repo, ".kukulu/state.json")).haltCap), JSON.stringify({ cap: "maxRounds", round: 3, nonConverging: 2 }), "...and state.haltCap records the cap");
     like(r.halted, /findings per round: 4 → 4 → 4/, "the message shows the trail of counts");
     const n = await call("kukulu_next");
     eq(n.stage, "halt", "the flight now halts");
@@ -279,8 +279,8 @@ async function driveRounds(call, repo, counts) {
 
     like(subject(repo), /^review: round 3/, "the feedback entry lands in the same commit as the round's own review: commit");
     const changed = git(repo, ["show", "--stat", "--format=", "HEAD"]);
-    like(changed, /\.foundry\/feedback\.jsonl/, "...the commit touches the feedback file");
-    const lines = readFile(repo, ".foundry/feedback.jsonl").trim().split("\n");
+    like(changed, /\.kukulu\/feedback\.jsonl/, "...the commit touches the feedback file");
+    const lines = readFile(repo, ".kukulu/feedback.jsonl").trim().split("\n");
     eq(lines.length, 1, "exactly one feedback entry for the one round that halted");
     const entry = JSON.parse(lines[0]);
     eq(entry.stage, "review", "logged from the review stage");
@@ -296,8 +296,8 @@ async function driveRounds(call, repo, counts) {
     const r = await driveRounds(call, repo, [10, 5, 2]);
     like(r.halted, /hard cap maxRoundsHard=2/, "the hard cap fires on round 3 even while every round is converging, since maxRounds=100 would never trip");
     like(r.halted, /kukulu_flight_options\(\{ maxRoundsHard: 3, resume: true \}\)/, "the hard-cap halt names its resume call");
-    eq(JSON.stringify(JSON.parse(readFile(repo, ".foundry/state.json")).haltCap), JSON.stringify({ cap: "maxRoundsHard", round: 3 }), "...and records haltCap");
-    const entry = JSON.parse(readFile(repo, ".foundry/feedback.jsonl").trim());
+    eq(JSON.stringify(JSON.parse(readFile(repo, ".kukulu/state.json")).haltCap), JSON.stringify({ cap: "maxRoundsHard", round: 3 }), "...and records haltCap");
+    const entry = JSON.parse(readFile(repo, ".kukulu/feedback.jsonl").trim());
     eq(entry.category, "round-cap", "the hard-cap halt is logged the same way as a non-converging one");
   });
 }
@@ -307,7 +307,7 @@ async function driveRounds(call, repo, counts) {
   await withServer(repo, async ({ call }) => {
     const r = await driveRounds(call, repo, [4, 4, 4]);
     like(r.halted, /non-converging/, "the halt itself is unaffected by policies.feedback");
-    ok(!hasFile(repo, ".foundry/feedback.jsonl"), "...but policies.feedback: false suppresses the auto entry");
+    ok(!hasFile(repo, ".kukulu/feedback.jsonl"), "...but policies.feedback: false suppresses the auto entry");
   });
 }
 
@@ -406,7 +406,7 @@ async function driveRounds(call, repo, counts) {
 
 {
   // reviewableRepo bypasses kukulu_run_start, which is what would normally
-  // copy docs/foundry.json's policies into state; set state directly to
+  // copy docs/kukulu.json's policies into state; set state directly to
   // simulate what a real run_start earlier in the round would have recorded.
   const repo = reviewableRepo({ config: { policies: { push: false } } });
   setState(repo, { policies: { signing: "auto", push: false, pr: "draft" } });
@@ -444,7 +444,7 @@ function mutationRepo({ config = {} } = {}) {
 const untouched = (repo, head) => {
   eq(git(repo, ["status", "--porcelain"]), "", "the tree is clean afterwards");
   eq(git(repo, ["rev-parse", "HEAD"]), head, "no commit was made");
-  ok(!hasFile(repo, ".foundry/mutation.json"), "no sentinel is left behind");
+  ok(!hasFile(repo, ".kukulu/mutation.json"), "no sentinel is left behind");
 };
 
 {
@@ -549,7 +549,7 @@ const untouched = (repo, head) => {
     isError(await call("kukulu_mutate", { file: "src/add.mjs", find: "a + b" }), /replace is required/, "a missing replace is refused");
     eq(readFile(repo, "src/add.mjs"), ADD_SRC, "no refusal touched the file");
     eq(git(repo, ["rev-parse", "HEAD"]), head, "no refusal committed anything");
-    ok(!hasFile(repo, ".foundry/mutation.json"), "no refusal left a sentinel");
+    ok(!hasFile(repo, ".kukulu/mutation.json"), "no refusal left a sentinel");
   });
 }
 
@@ -567,7 +567,7 @@ const untouched = (repo, head) => {
 // Mutation testing is a review-stage tool, not something to run mid-implement.
 {
   const repo = mutationRepo();
-  writeFile(repo, ".foundry/implement.lock", "0\n");
+  writeFile(repo, ".kukulu/implement.lock", "0\n");
   await withServer(repo, async ({ call }) => {
     isError(await call("kukulu_mutate", { file: "src/add.mjs", find: "a + b", replace: "a - b" }), /implementation run is in progress/, "a present implement lock refuses");
     eq(readFile(repo, "src/add.mjs"), ADD_SRC, "...and leaves the file alone");
@@ -595,13 +595,13 @@ const untouched = (repo, head) => {
   const repo = mutationRepo();
   const head = git(repo, ["rev-parse", "HEAD"]);
   writeFile(repo, "src/add.mjs", ADD_SRC.replace("a + b", "a - b"));
-  writeFile(repo, ".foundry/mutation.json", JSON.stringify({ file: "src/add.mjs", at: new Date().toISOString(), original: "0".repeat(40) }) + "\n");
+  writeFile(repo, ".kukulu/mutation.json", JSON.stringify({ file: "src/add.mjs", at: new Date().toISOString(), original: "0".repeat(40) }) + "\n");
   await withServer(repo, async ({ call }) => {
     const v = await call("kukulu_verify");
     eq(v.recoveredMutation, "src/add.mjs", "verify names the file it restored");
     eq(v.ok, true, "and verifies the restored tree, not the mutated one");
     eq(readFile(repo, "src/add.mjs"), ADD_SRC, "the file is back to HEAD");
-    ok(!hasFile(repo, ".foundry/mutation.json"), "the sentinel is gone");
+    ok(!hasFile(repo, ".kukulu/mutation.json"), "the sentinel is gone");
     eq(git(repo, ["status", "--porcelain"]), "", "recovery leaves the tree clean, so a later kukulu_task_done is not refused");
     eq(subject(repo), "chore: pipeline friction (review)", "the only commit is the recovery's own feedback entry");
     eq(git(repo, ["rev-parse", "HEAD~1"]), head, "...directly on top of the previous HEAD");
@@ -614,7 +614,7 @@ const untouched = (repo, head) => {
   git(repo, ["add", "-A"]);
   git(repo, ["commit", "-qm", "hello"]);
   writeFile(repo, "hello.txt", "goodbye\n");
-  writeFile(repo, ".foundry/mutation.json", JSON.stringify({ file: "hello.txt", at: new Date().toISOString(), original: "0".repeat(40) }) + "\n");
+  writeFile(repo, ".kukulu/mutation.json", JSON.stringify({ file: "hello.txt", at: new Date().toISOString(), original: "0".repeat(40) }) + "\n");
   await withServer(repo, async ({ call }) => {
     const r = await call("kukulu_review_submit", { verdict: "CHANGES REQUESTED", tasks: [FIX] });
     eq(r.recoveredMutation, "hello.txt", "review_submit also recovers a crashed mutation and says so");
@@ -624,7 +624,7 @@ const untouched = (repo, head) => {
 
 {
   const repo = mutationRepo();
-  writeFile(repo, ".foundry/mutation.json", "{not json");
+  writeFile(repo, ".kukulu/mutation.json", "{not json");
   await withServer(repo, async ({ call }) => {
     isError(await call("kukulu_verify"), /unreadable[\s\S]*git checkout HEAD -- <file>/, "an unreadable sentinel is loud, and says how to recover by hand");
   });
@@ -732,7 +732,7 @@ for (const [mutation, re, label] of [
 
 // ---------------------------------------------------------------- flight_archive (S-07)
 
-const ARCHIVE_FILES = ["docs/PLAN.md", "docs/PROGRESS.md", "docs/HANDOFF.md", "docs/REVIEW.md", "docs/SUMMARY.md", "docs/foundry.json", ".foundry/state.json", ".foundry/feedback.jsonl"];
+const ARCHIVE_FILES = ["docs/PLAN.md", "docs/PROGRESS.md", "docs/HANDOFF.md", "docs/REVIEW.md", "docs/SUMMARY.md", "docs/kukulu.json", ".kukulu/state.json", ".kukulu/feedback.jsonl"];
 
 /** A summarized flight on a build branch, every artifact committed. */
 function summarizedRepo({ config = { flight: "w1-share" }, state = {} } = {}) {
@@ -742,7 +742,7 @@ function summarizedRepo({ config = { flight: "w1-share" }, state = {} } = {}) {
   writeFile(repo, "docs/HANDOFF.md", "# handoff\n");
   writeFile(repo, "docs/REVIEW.md", "# Review\nRound: 1\n**Verdict**: APPROVED\n");
   writeFile(repo, "docs/SUMMARY.md", "# summary\n");
-  writeFile(repo, ".foundry/feedback.jsonl", '{"at":"x","stage":"implement","round":0,"category":"other","message":"m","source":"agent"}\n');
+  writeFile(repo, ".kukulu/feedback.jsonl", '{"at":"x","stage":"implement","round":0,"category":"other","message":"m","source":"agent"}\n');
   setState(repo, { round: 0, implemented: true, reviewed: true, verdict: "APPROVED", summarized: true, ...state });
   git(repo, ["add", "-A"]);
   git(repo, ["commit", "-qm", "chore: build summary"]);
@@ -754,7 +754,7 @@ const snapshot = (repo) => Object.fromEntries(ARCHIVE_FILES.map((f) => [f, hasFi
 {
   const repo = summarizedRepo({ config: {} });
   await withServer(repo, async ({ call }) => {
-    isError(await call("kukulu_flight_archive"), /pass slug, or set "flight" in docs\/foundry\.json/, "archive refuses with no slug and no flight key");
+    isError(await call("kukulu_flight_archive"), /pass slug, or set "flight" in docs\/kukulu\.json/, "archive refuses with no slug and no flight key");
     isError(await call("kukulu_flight_archive", { slug: "Bad_Slug" }), /slug must match/, "...and a malformed slug");
     ok(hasFile(repo, "docs/PLAN.md") && !hasFile(repo, "docs/flights"), "...and nothing moved");
   });
@@ -764,12 +764,12 @@ const snapshot = (repo) => Object.fromEntries(ARCHIVE_FILES.map((f) => [f, hasFi
   const repo = summarizedRepo({ state: { summarized: false } });
   await withServer(repo, async ({ call }) => {
     isError(await call("kukulu_flight_archive"), /not summarized yet/, "archive refuses before the summary");
-    writeFile(repo, ".foundry/implement.lock", "0\n");
+    writeFile(repo, ".kukulu/implement.lock", "0\n");
     setState(repo, { summarized: true });
     git(repo, ["add", "-A"]);
     git(repo, ["commit", "-qm", "state"]);
     isError(await call("kukulu_flight_archive"), /implement\.lock exists/, "...and while the lock is armed");
-    fs.rmSync(path.join(repo, ".foundry/implement.lock"));
+    fs.rmSync(path.join(repo, ".kukulu/implement.lock"));
     writeFile(repo, "docs/PLAN.md", readFile(repo, "docs/PLAN.md") + "edit\n");
     isError(await call("kukulu_flight_archive"), /working tree is not clean/, "...and with a modified tracked file");
     git(repo, ["checkout", "--", "docs/PLAN.md"]);
@@ -791,9 +791,9 @@ const snapshot = (repo) => Object.fromEntries(ARCHIVE_FILES.map((f) => [f, hasFi
     eq(r.moved.length, 8, "...all eight files are moved");
     for (const f of ARCHIVE_FILES) eq(readFile(repo, `docs/flights/w1-share/${path.basename(f)}`), before[f], `...${f} arrived byte-identical`);
     eq(subject(repo), "chore: archive flight w1-share", "...in one commit");
-    ok(!hasFile(repo, "docs/PLAN.md") && !hasFile(repo, "docs/foundry.json"), "...docs/PLAN.md and foundry.json are gone");
+    ok(!hasFile(repo, "docs/PLAN.md") && !hasFile(repo, "docs/kukulu.json"), "...docs/PLAN.md and kukulu.json are gone");
     eq(readFile(repo, "docs/SPEC.md"), readFile(repo, "docs/flights/w1-share/SPEC.md"), "...and docs/SPEC.md stays, with an identical copy");
-    const st = JSON.parse(readFile(repo, ".foundry/state.json"));
+    const st = JSON.parse(readFile(repo, ".kukulu/state.json"));
     eq(st.archived.slug, "w1-share", "...the fresh state records the archive");
     ok(st.summarized === false && st.round === 0 && st.verdict === null && st.rounds.length === 0, "...and is otherwise the default state");
     eq(st.signingOverride, true, "signingOverride is carried over");
@@ -880,13 +880,13 @@ const ghCalls = (ghDir) => readFile(ghDir, "calls.log").split("\n").filter(Boole
 
 {
   const { repo, opts } = finalizeRepo({ summarized: false });
-  const before = readFile(repo, ".foundry/state.json");
+  const before = readFile(repo, ".kukulu/state.json");
   await withServer(repo, async ({ call }) => {
     isError(await call("kukulu_pr_finalize", { breaking: false }), /summary is not committed yet/, "finalize is refused before the summary is committed");
     setState(repo, { summarized: true });
     isError(await call("kukulu_pr_finalize", {}), /breaking is required on the first call/, "the first call without breaking is refused");
     isError(await call("kukulu_pr_finalize", { breaking: "no" }), /breaking must be a boolean/, "a non-boolean breaking is refused");
-    eq(JSON.parse(readFile(repo, ".foundry/state.json")).breaking, undefined, "...and state records no breaking");
+    eq(JSON.parse(readFile(repo, ".kukulu/state.json")).breaking, undefined, "...and state records no breaking");
     ok(before.length > 0, "...state existed");
   }, opts);
 }
@@ -900,9 +900,9 @@ const ghCalls = (ghDir) => readFile(ghDir, "calls.log").split("\n").filter(Boole
     eq(r.merge, "skipped: awaiting signing", "...and merge is skipped");
     like(r.next, /kukulu_pr_finalize\(\{ resign: true \}\)/, "...next names the resign call");
     like(r.next, /git rebase -f --rebase-merges --gpg-sign/, "...and the by-hand rebase");
-    const st = JSON.parse(readFile(repo, ".foundry/state.json"));
+    const st = JSON.parse(readFile(repo, ".kukulu/state.json"));
     ok(st.awaitingSigning && st.breaking === false, "...state records awaitingSigning and breaking");
-    const signing = readFile(repo, ".foundry/feedback.jsonl").trim().split("\n").map((l) => JSON.parse(l)).filter((e) => e.category === "signing");
+    const signing = readFile(repo, ".kukulu/feedback.jsonl").trim().split("\n").map((l) => JSON.parse(l)).filter((e) => e.category === "signing");
     eq(signing.length, 1, "...exactly one signing feedback entry");
     eq(readFile(repo, "docs/SUMMARY.md").split("## Awaiting signing").length - 1, 1, "...SUMMARY.md has the awaiting section once");
     const n = await call("kukulu_next");
@@ -910,9 +910,9 @@ const ghCalls = (ghDir) => readFile(ghDir, "calls.log").split("\n").filter(Boole
     like(n.reason, /^awaiting signing:/, "...with an awaiting signing reason");
     const since = st.awaitingSigning.since;
     await call("kukulu_pr_finalize", { breaking: false });
-    const again = JSON.parse(readFile(repo, ".foundry/state.json"));
+    const again = JSON.parse(readFile(repo, ".kukulu/state.json"));
     eq(again.awaitingSigning.since, since, "a second call keeps since");
-    eq(readFile(repo, ".foundry/feedback.jsonl").trim().split("\n").length, 1, "...and adds no feedback entry");
+    eq(readFile(repo, ".kukulu/feedback.jsonl").trim().split("\n").length, 1, "...and adds no feedback entry");
     eq(readFile(repo, "docs/SUMMARY.md").split("## Awaiting signing").length - 1, 1, "...nor a second section");
     eq(ghCalls(opts.env.PATH.split(":")[0]).filter((c) => c.startsWith("pr ready") || c.startsWith("pr merge")).length, 0, "gh never marked it ready or merged");
   }, opts);
@@ -961,7 +961,7 @@ for (const [verify, want] of [["err", 0], ["bad", 2]]) {
     await call("kukulu_pr_finalize", { breaking: false });
     const cfgv = spawnSync("git", ["config", "--local", "--get", "commit.gpgsign"], { cwd: repo, encoding: "utf8" });
     eq(cfgv.stdout.trim(), "", "a manual re-sign then finalize clears the override: local commit.gpgsign is unset");
-    const st = JSON.parse(readFile(repo, ".foundry/state.json"));
+    const st = JSON.parse(readFile(repo, ".kukulu/state.json"));
     eq(st.signing, "on", "...state.signing is 'on'");
     eq(st.signingOverride, undefined, "...and signingOverride is gone");
   }, { env });
@@ -1009,7 +1009,7 @@ function resignRepo({ extraState = {} } = {}) {
     const merges = git(repo, ["log", "--merges", "--format=%P", `${mb}..HEAD`]).split("\n").filter(Boolean);
     ok(merges.length === 1 && merges[0].split(" ").length === 2, "...the merge commit still has two parents");
     eq(spawnSync("git", ["config", "--local", "commit.gpgsign"], { cwd: repo, encoding: "utf8" }).stdout.trim(), "", "...the local commit.gpgsign override is unset");
-    const st = JSON.parse(readFile(repo, ".foundry/state.json"));
+    const st = JSON.parse(readFile(repo, ".kukulu/state.json"));
     ok(st.signing === "on" && st.awaitingSigning === undefined && st.signingOverride === undefined, "...state is signing on, with no awaiting or override");
     eq(git(repo, ["rev-parse", "origin/build/x"]), git(repo, ["rev-parse", "HEAD"]), "...origin's branch equals local HEAD");
     ok(ghCalls(ghDir).some((c) => c.startsWith("pr ready")), "...and the pull request was marked ready");
@@ -1072,6 +1072,33 @@ function resignRepo({ extraState = {} } = {}) {
   });
 }
 
+{
+  // A flight archived before 0.6.0 holds foundry.json, not kukulu.json; finalize
+  // still reads it, and the archive keeps the name it was written with.
+  const repo = summarizedRepo();
+  await withServer(repo, async ({ call }) => {
+    await call("kukulu_flight_archive");
+  });
+  git(repo, ["mv", "docs/flights/w1-share/kukulu.json", "docs/flights/w1-share/foundry.json"]);
+  git(repo, ["commit", "-qm", "chore: pre-0.6.0 archive"]);
+  await withServer(repo, async ({ call }) => {
+    const r = await call("kukulu_pr_finalize", { breaking: false });
+    ok(r.awaitingSigning, "finalize reads the config of a flight archived as foundry.json");
+  });
+}
+
+{
+  // Archiving a project still on the old layout moves each file under its own name.
+  const repo = summarizedRepo();
+  useLegacyLayout(repo);
+  await withServer(repo, async ({ call }) => {
+    const r = await call("kukulu_flight_archive");
+    ok(r.moved.includes("docs/foundry.json") && r.moved.includes(".foundry/state.json"), "archive on the old layout reports the .foundry names it moved");
+    ok(hasFile(repo, "docs/flights/w1-share/foundry.json") && !hasFile(repo, "docs/flights/w1-share/kukulu.json"), "...and keeps foundry.json's name in the archive");
+    ok(hasFile(repo, ".foundry/state.json") && !hasFile(repo, ".kukulu"), "...writing the fresh state where the project keeps it");
+  });
+}
+
 // ---------------------------------------------------------------- summary from content
 
 {
@@ -1101,11 +1128,11 @@ function resignRepo({ extraState = {} } = {}) {
   git(repo, ["config", "--local", "gpg.format", "openpgp"]);
   git(repo, ["config", "--local", "gpg.program", "/nonexistent-signing-agent"]);
   const before = {};
-  for (const f of ["docs/PLAN.md", "docs/PROGRESS.md", ".foundry/state.json", "docs/REVIEW.md"]) before[f] = readFile(repo, f);
+  for (const f of ["docs/PLAN.md", "docs/PROGRESS.md", ".kukulu/state.json", "docs/REVIEW.md"]) before[f] = readFile(repo, f);
   const head = git(repo, ["rev-parse", "HEAD"]);
   await withServer(repo, async ({ call }) => {
     isError(await call("kukulu_review_submit", { verdict: "CHANGES REQUESTED", tasks: [FIX] }), /could not be signed/, "review_submit rolls back when its commit fails: the call is an error");
-    for (const f of ["docs/PLAN.md", "docs/PROGRESS.md", ".foundry/state.json", "docs/REVIEW.md"]) eq(readFile(repo, f), before[f], `...${f} is byte-identical afterwards`);
+    for (const f of ["docs/PLAN.md", "docs/PROGRESS.md", ".kukulu/state.json", "docs/REVIEW.md"]) eq(readFile(repo, f), before[f], `...${f} is byte-identical afterwards`);
     eq(git(repo, ["diff", "--cached", "--name-only"]), "", "...nothing is staged");
     eq(git(repo, ["rev-parse", "HEAD"]), head, "...and HEAD did not move");
     git(repo, ["config", "commit.gpgsign", "false"]);

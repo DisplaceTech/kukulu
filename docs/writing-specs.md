@@ -20,7 +20,7 @@ the ones the planner looks for by name.
 | **4. Architecture** | Becomes the module map and the boundaries the reviewer enforces. |
 | **5. Data and configuration** | Config keys and defaults; every `⚠️ ASSUMPTION` becomes a tuning task. |
 | **6. Interfaces** | The contracts tasks are written against, so two tasks touching both sides agree. |
-| **7. Commands** | Copied verbatim into `docs/foundry.json` as `verify`. Get these right. |
+| **7. Commands** | Copied verbatim into `docs/kukulu.json` as `verify`. Get these right. |
 | **8. Phases** | Become the phases of the plan, in order, each ending in something a human can look at. |
 | **9. Open questions** | Each one is resolved under `## Decisions` in `PLAN.md` with a rationale, or becomes a bounded spike task. |
 | **Appendix** | Mockups and fixtures. The planner opens every file in `docs/`. |
@@ -44,7 +44,7 @@ The reviewer treats a constraint violation as the most severe category of
 finding. A principle it cannot check is a principle that does not exist.
 
 Better still: a principle phrased as a single-line pattern becomes an entry
-in `docs/foundry.json`'s `constraints`, with fixture lines proving the
+in `docs/kukulu.json`'s `constraints`, with fixture lines proving the
 pattern actually catches every shape you meant it to (a hard-coded tunable,
 for instance, can be `const x = 5;`, `'x' => 5,`, or `x: 5,` — a grep that
 only catches one shape passes silently past the other two for as many
@@ -55,7 +55,7 @@ remember to grep for it by hand each round. See
 
 ### 2. Commands that exit non-zero
 
-Section 7 becomes `verify` in `docs/foundry.json`, and `kukulu_verify` runs it
+Section 7 becomes `verify` in `docs/kukulu.json`, and `kukulu_verify` runs it
 after every task. Each command must fail loudly:
 
 ```text
@@ -76,7 +76,7 @@ an unquoted `{filter}` placeholder where the class or path goes:
 php artisan test --filter={filter}
 ```
 
-The planner copies it into `mutation.targeted` in `docs/foundry.json`, and the
+The planner copies it into `mutation.targeted` in `docs/kukulu.json`, and the
 reviewer then mutation-tests a single file in seconds instead of running the
 whole suite.
 
@@ -141,7 +141,7 @@ mark it exclusive and keep its tasks out of the parallel part.
 Some rules cannot hold from the first commit: "no `TODO` left in `src/`" is
 false until the cleanup task has run, and a script a later task creates cannot
 be checked before it exists. Say which task makes the rule true. The planner
-then gives the rule `from: "<that task's id>"` in `docs/foundry.json`: the rule
+then gives the rule `from: "<that task's id>"` in `docs/kukulu.json`: the rule
 stays inactive until that task is in progress, and still self-tests its own
 fixtures. The old idiom, wrapping a command in `test ! -f X || bash X`, is no
 longer needed, and it was a trap: it passed forever if `X` was never written.
@@ -188,7 +188,7 @@ esac
 - extra, when `src/core/` is touched: `npm run test:invariants`
 ```
 
-That is enough for the planner to write a `foundry.json` with a matching
+That is enough for the planner to write a `kukulu.json` with a matching
 `extraVerify`, a `CLAUDE.md` with four checkable constraints, and a reviewer
 that can grep for violations rather than form an impression.
 

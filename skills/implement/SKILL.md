@@ -48,7 +48,7 @@ the end of the plan.
 4. **Implement** the smallest change that makes them pass, within Files
    touched.
 5. **Verify.** Call `kukulu_verify` with the task's Files touched. It
-   self-tests and runs every `docs/foundry.json` constraint against the
+   self-tests and runs every `docs/kukulu.json` constraint against the
    whole repo, then runs the project's verify commands plus any
    path-specific extras, returning each command's exit status and tail. All
    must pass: no skipped tests, no lint suppressions added. A constraint hit
@@ -154,7 +154,7 @@ everything above still applies, with these changes:
   `kukulu_task_block` and `kukulu_verify` each take `stream: "<s>"`. Without
   it they refuse, or would act on the main checkout.
 - **The MCP owns the shared files.** Never touch `docs/PROGRESS.md`,
-  `docs/PLAN.md`, `docs/HANDOFF.md` or anything under `.foundry/`. Your
+  `docs/PLAN.md`, `docs/HANDOFF.md` or anything under `.kukulu/`. Your
   worktree's copies of them are stale by design. Stage only the task's own
   files.
 - **No handoff.** You do not write `docs/HANDOFF.md`, and you do not call

@@ -25,8 +25,8 @@ flowchart LR
     end
 
     subgraph REPO["your repository"]
-        DOCS["docs/*.md<br/>docs/foundry.json"]
-        STATE[".foundry/state.json<br/>.foundry/implement.lock"]
+        DOCS["docs/*.md<br/>docs/kukulu.json"]
+        STATE[".kukulu/state.json<br/>.kukulu/implement.lock"]
         GIT["git history"]
     end
 
@@ -61,7 +61,7 @@ stateDiagram-v2
     [*] --> done_signing: state.awaitingSigning is set
     [*] --> done_archived: flight archived, SPEC.md unchanged
 
-    plan --> implement: PLAN + PROGRESS + foundry.json exist
+    plan --> implement: PLAN + PROGRESS + kukulu.json exist
     implement --> implement: open tasks remain
     implement --> review: zero open tasks, handoff recorded
     implement --> halt_ops: kukulu_run_halt called
@@ -89,7 +89,7 @@ The decision order, exactly as the server evaluates it:
 4. `state.archived` is set, `PLAN.md` is absent and `docs/SPEC.md` is
    byte-identical to the archived copy → **done**, "flight archived". Once
    the spec differs, decision 5 applies and the answer is **plan**.
-5. Any of `PLAN.md`, `PROGRESS.md`, `foundry.json` missing → **plan**.
+5. Any of `PLAN.md`, `PROGRESS.md`, `kukulu.json` missing → **plan**.
 6. Open tasks → **implement**.
 7. Lock present (a run died before its handoff) → **implement**.
 8. Nothing recorded as implemented → **implement**.
@@ -123,7 +123,7 @@ controller's context.
 flowchart TD
     YOU["you"] -->|writes| SPEC["docs/SPEC.md"]
     PLANNER["planner"] -->|writes| PLAN["docs/PLAN.md"]
-    PLANNER -->|writes| CFG["docs/foundry.json"]
+    PLANNER -->|writes| CFG["docs/kukulu.json"]
     PLANNER -->|writes| CLAUDE["CLAUDE.md"]
     PLANNER -->|"creates, then never touches again"| PROG["docs/PROGRESS.md"]
     IMPL["implementer"] -->|"writes"| HAND["docs/HANDOFF.md"]
@@ -132,7 +132,7 @@ flowchart TD
     REVIEWER -->|"appends via kukulu_review_submit"| PLAN
     SUMMARIZER["summarizer"] -->|writes| SUMMARY["docs/SUMMARY.md"]
     MCP["foundry MCP"] -->|"sole writer"| PROG
-    MCP -->|"sole writer"| ST[".foundry/state.json"]
+    MCP -->|"sole writer"| ST[".kukulu/state.json"]
     MCP -->|"kukulu_plan_commit validates, then commits"| PLAN
     MCP -->|"kukulu_flight_archive moves the flight into"| FLIGHTS["docs/flights/slug/"]
     MCP -->|"kukulu_pr_finalize readies the PR, notes awaiting signing in"| SUMMARY
@@ -151,7 +151,7 @@ draft and appends an `## Awaiting signing` section to `docs/SUMMARY.md`.
 guard hook trustworthy — the file it counts open tasks in cannot be edited by
 the thing it is guarding.
 
-`.foundry/feedback.jsonl` does not fit this diagram's one-row-one-writer
+`.kukulu/feedback.jsonl` does not fit this diagram's one-row-one-writer
 shape and is left out of it on purpose: every stage — planner, implementer,
 reviewer, summarizer — may append to it through `kukulu_feedback_log`, and
 the MCP itself appends to it directly (never through the tool, so no extra
@@ -165,7 +165,7 @@ The reviewer is the one role that may cause a *transient* source edit, and
 only through the MCP: `kukulu_mutate` applies one find/replace to one clean
 tracked file, runs that file's verify commands, and restores it from `HEAD`
 before returning, along with anything else those commands changed that was
-clean before (a new untracked file, a rewritten regressions file) — a sentinel in `.foundry/mutation.json` lets the next
+clean before (a new untracked file, a rewritten regressions file) — a sentinel in `.kukulu/mutation.json` lets the next
 Foundry call repair the file if the server dies in between. The reviewer
 holds no other way to edit source, and never commits one; a surviving
 mutation is a finding, and the fix still goes through the fix-task loop.
@@ -196,7 +196,7 @@ model.
 An implement run can last hours and will be compacted repeatedly. Three
 mechanisms keep it honest:
 
-- **The lock.** `kukulu_run_start` writes `.foundry/implement.lock` as JSON
+- **The lock.** `kukulu_run_start` writes `.kukulu/implement.lock` as JSON
   (`{ count, armedAt, round }`; a bare-number lock left by a 0.2.x run is
   still read correctly). It is gitignored, so `git clean -fd` during a
   blocked task leaves it alone, and `count` is the re-block counter.
@@ -228,7 +228,7 @@ mechanisms keep it honest:
   `kukulu_run_start` all reset the counter to zero, so the cap bounds
   re-blocks since the last time work actually moved, not over the whole
   run — a large plan making normal progress cannot exhaust it. At the
-  effective cap (`docs/foundry.json`'s `guardCap`, carried in the lock;
+  effective cap (`docs/kukulu.json`'s `guardCap`, carried in the lock;
   else `KUKULU_GUARD_CAP`; else 60) it stops blocking and emits a
   `systemMessage` naming the stalled task instead, leaving the lock in
   place so the next `kukulu_next` sees the unfinished run.
@@ -315,7 +315,7 @@ did before.
   command only ever runs from the main checkout, and any task that
   triggers one is kept out of waves.
 - **Worktrees, and where each file lives.** A stream runs in its own git
-  worktree, `.foundry/worktrees/<stream>`, on a branch
+  worktree, `.kukulu/worktrees/<stream>`, on a branch
   `<build-branch>--<stream>` cut from the build branch (`kukulu_run_start`
   with `stream`, which also runs `parallel.setup` in the fresh checkout).
   Task *code* commits happen there. `PROGRESS.md`, `PLAN.md` and
@@ -389,7 +389,7 @@ For `CHANGES REQUESTED`, this is the only way findings become work:
 5. Tasks named in `unblock` are reset to `[ ]` with the reviewer's reason in
    the log, along with every task skipped because of them.
 6. Round, verdict, a new entry in `state.rounds` and — if a cap is reached —
-   the halt reason are written to `.foundry/state.json`.
+   the halt reason are written to `.kukulu/state.json`.
 7. All of it lands in one commit, `review: round N`, then pushed per
    `policies.push` (F-18).
 
@@ -427,17 +427,17 @@ fix task is a task, and it goes through the same test-first loop as any other.
 
 | Path | Committed | Contents |
 |---|---|---|
-| `.foundry/state.json` | yes | `round`, `implemented`, `reviewed`, `verdict`, `summarized`, `halted`, `preexistingUntracked`, `policies`, `signing`, `rounds`; and, once they apply, `signingOverride` (a commit failed to sign and signing was switched off), `awaitingSigning` (`{ unsigned, first, since }`), `breaking`, `haltCap` (which round cap halted the flight, so `resume` knows what lifts it) and `archived` (`{ slug, dir, at }`) |
-| `docs/flights/<slug>/` | yes | an archived flight: its PLAN, PROGRESS, HANDOFF, REVIEW, SUMMARY, `foundry.json`, `state.json` and `feedback.jsonl`, plus a copy of `SPEC.md`; written by `kukulu_flight_archive` |
-| `.foundry/feedback.jsonl` | yes | one JSON line per pipeline-friction entry — `at`, `stage`, `round`, `category`, `message`, `source`; see [mcp-tools.md](./mcp-tools.md#kukulu_feedback_log) |
-| `.foundry/implement.lock` | no (gitignored) | JSON `{ count, armedAt, round }` — the guard's re-block counter (a legacy bare number still reads back correctly) |
-| `.foundry/worktrees/<stream>/` | no (`.gitignore`) | a parallel stream's git worktree, present from `kukulu_run_start({ stream })` until `kukulu_stream_finish` merges it back; `state.streams[<s>]` records its branch and the untracked paths `parallel.setup` left behind, and `state.serialWaves` the waves degraded to serial |
-| `.foundry/mutation.json` | no (`.git/info/exclude`) | present only while `kukulu_mutate` has a file mutated: `{ file, at, original }`, so a crash can be repaired by the next call |
+| `.kukulu/state.json` | yes | `round`, `implemented`, `reviewed`, `verdict`, `summarized`, `halted`, `preexistingUntracked`, `policies`, `signing`, `rounds`; and, once they apply, `signingOverride` (a commit failed to sign and signing was switched off), `awaitingSigning` (`{ unsigned, first, since }`), `breaking`, `haltCap` (which round cap halted the flight, so `resume` knows what lifts it) and `archived` (`{ slug, dir, at }`) |
+| `docs/flights/<slug>/` | yes | an archived flight: its PLAN, PROGRESS, HANDOFF, REVIEW, SUMMARY, `kukulu.json`, `state.json` and `feedback.jsonl`, plus a copy of `SPEC.md`; written by `kukulu_flight_archive` |
+| `.kukulu/feedback.jsonl` | yes | one JSON line per pipeline-friction entry — `at`, `stage`, `round`, `category`, `message`, `source`; see [mcp-tools.md](./mcp-tools.md#kukulu_feedback_log) |
+| `.kukulu/implement.lock` | no (gitignored) | JSON `{ count, armedAt, round }` — the guard's re-block counter (a legacy bare number still reads back correctly) |
+| `.kukulu/worktrees/<stream>/` | no (`.gitignore`) | a parallel stream's git worktree, present from `kukulu_run_start({ stream })` until `kukulu_stream_finish` merges it back; `state.streams[<s>]` records its branch and the untracked paths `parallel.setup` left behind, and `state.serialWaves` the waves degraded to serial |
+| `.kukulu/mutation.json` | no (`.git/info/exclude`) | present only while `kukulu_mutate` has a file mutated: `{ file, at, original }`, so a crash can be repaired by the next call |
 | `docs/PROGRESS.md` | yes | task checkboxes and the per-task log |
-| `docs/foundry.json` | yes | `verify`, `extraVerify`, `build`, `baseBranch`, `branchPrefix`, `maxRounds`, `commandTimeoutMs`, `roles`, `permissionMode` |
+| `docs/kukulu.json` | yes | `verify`, `extraVerify`, `build`, `baseBranch`, `branchPrefix`, `maxRounds`, `commandTimeoutMs`, `roles`, `permissionMode` |
 | `.claude/agents/kukulu-*.md` | no (`.git/info/exclude`) | the generated per-role agents; see [routing.md](./routing.md) |
 | `~/.config/kukulu/config.json` | n/a (outside the project) | the global routing config, its profiles |
 
 A corrupt `state.json` degrades to defaults rather than failing — the tasks on
-disk are the real record. A corrupt `foundry.json` is a hard error, because
+disk are the real record. A corrupt `kukulu.json` is a hard error, because
 guessing at someone's verify commands is worse than stopping.

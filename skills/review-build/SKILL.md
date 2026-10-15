@@ -26,7 +26,7 @@ severe first:
    `kukulu_verify` yourself and read its `constraints` result — the tool
    self-tests each rule against its own fixtures before scanning, so a
    `fixture` failure there means the rule itself is broken, not the code.
-   For any rule expressed in `docs/foundry.json`'s `constraints`, trust the
+   For any rule expressed in `docs/kukulu.json`'s `constraints`, trust the
    tool's `hits`, not your own re-derivation of the grep. Then read the
    diff yourself for anything the mechanical rules cannot express, and for
    any constraint you find violated that the tool's rule *missed* — if it
@@ -69,7 +69,7 @@ Never edit source in the working tree yourself, not even temporarily — you
 are not to fix code, and the tool restores the file where you cannot
 guarantee you would.
 
-**Targeted mutants.** When `docs/foundry.json` has `mutation.targeted`, prefer
+**Targeted mutants.** When `docs/kukulu.json` has `mutation.targeted`, prefer
 `kukulu_mutate({ file, find, replace, targeted: <name>, filter: <the test
 class or path that covers the file> })` over the full verify set: it runs
 only the tests that matter, in seconds instead of minutes.

@@ -294,16 +294,35 @@ export function plannedRepo({ tasks = DEFAULT_TASKS, config = {}, claude = "# ru
   const repo = specRepo();
   writeFile(repo, "docs/PLAN.md", planDoc(tasks));
   writeFile(repo, "docs/PROGRESS.md", progressDoc(tasks));
-  writeFile(repo, "docs/foundry.json", JSON.stringify({ verify: ["true"], maxRounds: 3, ...config }, null, 2) + "\n");
+  writeFile(repo, "docs/kukulu.json", JSON.stringify({ verify: ["true"], maxRounds: 3, ...config }, null, 2) + "\n");
   writeFile(repo, "CLAUDE.md", claude);
   gitIn(repo, ["add", "-A"]);
   gitIn(repo, ["commit", "-qm", "plan: derive build plan from SPEC"]);
   return repo;
 }
 
-/** Force `.foundry/state.json` into a given shape, bypassing the tools. */
+/**
+ * Rewrite a repo into the pre-0.6.0 layout (`.foundry/`, `docs/foundry.json`)
+ * and commit it, so a suite can prove the compatibility fallback. Whatever the
+ * repo holds of the new names is moved; nothing is invented.
+ */
+export function useLegacyLayout(repo) {
+  const move = (from, to) => {
+    const abs = path.join(repo, from);
+    if (!fs.existsSync(abs)) return;
+    fs.mkdirSync(path.dirname(path.join(repo, to)), { recursive: true });
+    fs.renameSync(abs, path.join(repo, to));
+  };
+  move("docs/kukulu.json", "docs/foundry.json");
+  move(".kukulu", ".foundry");
+  gitIn(repo, ["add", "-A"]);
+  if (gitIn(repo, ["status", "--porcelain"])) gitIn(repo, ["commit", "-qm", "chore: pre-0.6.0 layout"]);
+  return repo;
+}
+
+/** Force `.kukulu/state.json` into a given shape, bypassing the tools. */
 export function setState(repo, patch) {
-  const p = path.join(repo, ".foundry", "state.json");
+  const p = path.join(repo, ".kukulu", "state.json");
   const cur = fs.existsSync(p) ? JSON.parse(fs.readFileSync(p, "utf8")) : {};
   fs.mkdirSync(path.dirname(p), { recursive: true });
   fs.writeFileSync(p, JSON.stringify({ ...cur, ...patch }, null, 2) + "\n");

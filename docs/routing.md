@@ -9,7 +9,7 @@ agent files that Claude Code will actually spawn.
 
 Precedence, highest first:
 
-1. `docs/foundry.json` → `"roles": { ... }` and `"permissionMode"` (project
+1. `docs/kukulu.json` → `"roles": { ... }` and `"permissionMode"` (project
    override, committed with the rest of the plan).
 2. A named profile inside the global file — selected by `KUKULU_PROFILE`, or
    by the global file's own top-level `"profile"` key when the environment
@@ -138,7 +138,7 @@ the base branch before a run can start.
 
 Copy it to `~/.config/kukulu/config.json` (or point `$KUKULU_CONFIG`
 somewhere else) and edit it there — it applies across every project on the
-machine, unless a project's own `docs/foundry.json` overrides a role.
+machine, unless a project's own `docs/kukulu.json` overrides a role.
 
 `"Ollama"` and `"OpenRouter"` above are not special strings Foundry
 understands; they are provider *names* you give claude-code-router when you
@@ -151,7 +151,7 @@ on a machine that always uses the same router setup — add `"profile":
 "local"` to the global file itself. `KUKULU_PROFILE`, when set, always
 wins over the file's own choice.
 
-A project can still override any role for itself, in `docs/foundry.json`:
+A project can still override any role for itself, in `docs/kukulu.json`:
 
 ```json
 {

@@ -38,25 +38,62 @@ function envVar(name) {
 }
 
 const ROOT = path.resolve(envVar("PROJECT_DIR") || process.cwd());
-const P = {
-  spec: path.join(ROOT, "docs", "SPEC.md"),
-  plan: path.join(ROOT, "docs", "PLAN.md"),
-  progress: path.join(ROOT, "docs", "PROGRESS.md"),
-  handoff: path.join(ROOT, "docs", "HANDOFF.md"),
-  review: path.join(ROOT, "docs", "REVIEW.md"),
-  summary: path.join(ROOT, "docs", "SUMMARY.md"),
-  config: path.join(ROOT, "docs", "foundry.json"),
-  stateDir: path.join(ROOT, ".foundry"),
-  state: path.join(ROOT, ".foundry", "state.json"),
-  lock: path.join(ROOT, ".foundry", "implement.lock"),
-  feedback: path.join(ROOT, ".foundry", "feedback.jsonl"),
-  mutation: path.join(ROOT, ".foundry", "mutation.json"),
-  worktrees: path.join(ROOT, ".foundry", "worktrees"),
-  gitignore: path.join(ROOT, ".gitignore"),
-  agentsDir: path.join(ROOT, ".claude", "agents"),
-  settings: path.join(ROOT, ".claude", "settings.json"),
-  settingsLocal: path.join(ROOT, ".claude", "settings.local.json"),
-};
+/** Every path the server reads or writes; the state directory and config file differ between the two layouts. */
+function layoutFor(stateName, configName) {
+  const stateDir = path.join(ROOT, stateName);
+  return {
+    spec: path.join(ROOT, "docs", "SPEC.md"),
+    plan: path.join(ROOT, "docs", "PLAN.md"),
+    progress: path.join(ROOT, "docs", "PROGRESS.md"),
+    handoff: path.join(ROOT, "docs", "HANDOFF.md"),
+    review: path.join(ROOT, "docs", "REVIEW.md"),
+    summary: path.join(ROOT, "docs", "SUMMARY.md"),
+    config: path.join(ROOT, "docs", configName),
+    stateDir,
+    state: path.join(stateDir, "state.json"),
+    lock: path.join(stateDir, "implement.lock"),
+    feedback: path.join(stateDir, "feedback.jsonl"),
+    mutation: path.join(stateDir, "mutation.json"),
+    worktrees: path.join(stateDir, "worktrees"),
+    gitignore: path.join(ROOT, ".gitignore"),
+    agentsDir: path.join(ROOT, ".claude", "agents"),
+    settings: path.join(ROOT, ".claude", "settings.json"),
+    settingsLocal: path.join(ROOT, ".claude", "settings.local.json"),
+  };
+}
+
+const LAYOUT = { current: [".kukulu", "kukulu.json"], legacy: [".foundry", "foundry.json"] };
+const LEGACY_LAYOUT_NOTICE = "this project uses the pre-0.6.0 Foundry layout (.foundry/, docs/foundry.json); run kukulu_migrate. Support ends in 0.7.0.";
+
+let P = layoutFor(...LAYOUT.current);
+let legacyLayout = false;
+
+const layoutPresent = ([stateName, configName]) => exists(path.join(ROOT, stateName)) || exists(path.join(ROOT, "docs", configName));
+
+/**
+ * Pick the layout this project is on, once per tool call, because
+ * kukulu_migrate (and a human) can change it between calls. A project with
+ * only the Foundry names keeps working in place; a project with both is
+ * refused, since reading either would silently ignore the other. Removed in
+ * 0.7.0 with the rest of the compatibility code.
+ */
+function resolveLayout() {
+  const hasCurrent = layoutPresent(LAYOUT.current);
+  const hasLegacy = layoutPresent(LAYOUT.legacy);
+  legacyLayout = hasLegacy && !hasCurrent;
+  P = layoutFor(...(legacyLayout ? LAYOUT.legacy : LAYOUT.current));
+  const at = DEPRECATIONS.indexOf(LEGACY_LAYOUT_NOTICE);
+  if (legacyLayout && at === -1) DEPRECATIONS.push(LEGACY_LAYOUT_NOTICE);
+  if (!legacyLayout && at !== -1) DEPRECATIONS.splice(at, 1);
+  if (hasCurrent && hasLegacy) {
+    throw new ToolError(
+      "both the pre-0.6.0 layout (.foundry/ or docs/foundry.json) and the current one (.kukulu/ or docs/kukulu.json) exist, so Kūkulu cannot tell which holds the live state. Keep the one you use and remove the other with git (kukulu_migrate only runs on a project with none of the .kukulu files), then call again.",
+    );
+  }
+}
+
+/** Error messages are written for the current layout; a project still on the old one is told its own file names. */
+const inLayoutNames = (message) => (legacyLayout ? message.replaceAll("docs/kukulu.json", "docs/foundry.json").replaceAll(".kukulu/", ".foundry/") : message);
 
 // The one rule an unattended flight needs before its first kukulu_status
 // call: without it, a subagent's MCP tool call is denied under every
@@ -261,7 +298,7 @@ function loadConfig() {
   try {
     return JSON.parse(read(P.config));
   } catch (e) {
-    throw new ToolError(`docs/foundry.json is not valid JSON: ${e.message}`);
+    throw new ToolError(`docs/kukulu.json is not valid JSON: ${e.message}`);
   }
 }
 
@@ -272,35 +309,35 @@ const FINALIZE_POLICIES = ["auto", "ready", "draft"];
 const MERGE_METHODS = ["merge", "squash", "rebase"];
 const FLIGHT_SLUG = /^[a-z0-9][a-z0-9-]{0,39}$/;
 
-/** Validate `docs/foundry.json`'s `policies` block; throws, never defaults a bad value away. */
+/** Validate `docs/kukulu.json`'s `policies` block; throws, never defaults a bad value away. */
 function validatePolicies(policies) {
   if (policies === undefined) return;
   if (typeof policies !== "object" || policies === null || Array.isArray(policies)) {
-    throw new ToolError("docs/foundry.json 'policies' must be an object");
+    throw new ToolError("docs/kukulu.json 'policies' must be an object");
   }
   for (const key of Object.keys(policies)) {
-    if (!POLICY_KEYS.includes(key)) throw new ToolError(`docs/foundry.json policies has an unknown key '${key}'`);
+    if (!POLICY_KEYS.includes(key)) throw new ToolError(`docs/kukulu.json policies has an unknown key '${key}'`);
   }
   if (policies.signing !== undefined && !SIGNING_POLICIES.includes(policies.signing)) {
-    throw new ToolError(`docs/foundry.json policies.signing must be one of ${SIGNING_POLICIES.join(", ")}`);
+    throw new ToolError(`docs/kukulu.json policies.signing must be one of ${SIGNING_POLICIES.join(", ")}`);
   }
   if (policies.push !== undefined && typeof policies.push !== "boolean") {
-    throw new ToolError("docs/foundry.json policies.push must be a boolean");
+    throw new ToolError("docs/kukulu.json policies.push must be a boolean");
   }
   if (policies.pr !== undefined && !PR_POLICIES.includes(policies.pr)) {
-    throw new ToolError(`docs/foundry.json policies.pr must be one of ${PR_POLICIES.join(", ")}`);
+    throw new ToolError(`docs/kukulu.json policies.pr must be one of ${PR_POLICIES.join(", ")}`);
   }
   if (policies.feedback !== undefined && typeof policies.feedback !== "boolean") {
-    throw new ToolError("docs/foundry.json policies.feedback must be a boolean");
+    throw new ToolError("docs/kukulu.json policies.feedback must be a boolean");
   }
   if (policies.archive !== undefined && typeof policies.archive !== "boolean") {
-    throw new ToolError("docs/foundry.json policies.archive must be a boolean");
+    throw new ToolError("docs/kukulu.json policies.archive must be a boolean");
   }
   if (policies.finalize !== undefined && !FINALIZE_POLICIES.includes(policies.finalize)) {
-    throw new ToolError(`docs/foundry.json policies.finalize must be one of ${FINALIZE_POLICIES.join(", ")}`);
+    throw new ToolError(`docs/kukulu.json policies.finalize must be one of ${FINALIZE_POLICIES.join(", ")}`);
   }
   if (policies.mergeMethod !== undefined && !MERGE_METHODS.includes(policies.mergeMethod)) {
-    throw new ToolError(`docs/foundry.json policies.mergeMethod must be one of ${MERGE_METHODS.join(", ")}`);
+    throw new ToolError(`docs/kukulu.json policies.mergeMethod must be one of ${MERGE_METHODS.join(", ")}`);
   }
 }
 
@@ -354,37 +391,37 @@ function inactiveUntil(from, pr) {
 
 const PARALLEL_KEYS = ["maxStreams", "setup"];
 
-/** Validate `docs/foundry.json`'s `parallel` block; throws, never defaults a bad value away. */
+/** Validate `docs/kukulu.json`'s `parallel` block; throws, never defaults a bad value away. */
 function validateParallel(parallel) {
   if (parallel === undefined) return;
   if (typeof parallel !== "object" || parallel === null || Array.isArray(parallel)) {
-    throw new ToolError("docs/foundry.json 'parallel' must be an object");
+    throw new ToolError("docs/kukulu.json 'parallel' must be an object");
   }
   for (const key of Object.keys(parallel)) {
-    if (!PARALLEL_KEYS.includes(key)) throw new ToolError(`docs/foundry.json parallel has an unknown key '${key}'`);
+    if (!PARALLEL_KEYS.includes(key)) throw new ToolError(`docs/kukulu.json parallel has an unknown key '${key}'`);
   }
   if (parallel.maxStreams !== undefined && (!Number.isInteger(parallel.maxStreams) || parallel.maxStreams <= 0)) {
-    throw new ToolError("docs/foundry.json parallel.maxStreams must be a positive integer");
+    throw new ToolError("docs/kukulu.json parallel.maxStreams must be a positive integer");
   }
   if (parallel.setup !== undefined && !Array.isArray(parallel.setup)) {
-    throw new ToolError("docs/foundry.json parallel.setup must be an array of commands");
+    throw new ToolError("docs/kukulu.json parallel.setup must be an array of commands");
   }
 }
 
 const MUTATION_FILTER = /^[A-Za-z0-9_.:\\/-]{1,200}$/;
 
-/** Validate `docs/foundry.json`'s `mutation` block: named test commands with one `{filter}` slot, for kukulu_mutate's `targeted` argument. */
+/** Validate `docs/kukulu.json`'s `mutation` block: named test commands with one `{filter}` slot, for kukulu_mutate's `targeted` argument. */
 function validateMutation(mutation) {
   if (mutation === undefined) return;
   const isObj = (v) => typeof v === "object" && v !== null && !Array.isArray(v);
-  if (!isObj(mutation)) throw new ToolError("docs/foundry.json 'mutation' must be an object");
+  if (!isObj(mutation)) throw new ToolError("docs/kukulu.json 'mutation' must be an object");
   for (const k of Object.keys(mutation)) {
-    if (k !== "targeted") throw new ToolError(`docs/foundry.json mutation has an unknown key '${k}'`);
+    if (k !== "targeted") throw new ToolError(`docs/kukulu.json mutation has an unknown key '${k}'`);
   }
   if (mutation.targeted === undefined) return;
-  if (!isObj(mutation.targeted)) throw new ToolError("docs/foundry.json mutation.targeted must be an object mapping a name to { cmd, timeoutMs }");
+  if (!isObj(mutation.targeted)) throw new ToolError("docs/kukulu.json mutation.targeted must be an object mapping a name to { cmd, timeoutMs }");
   for (const [name, entry] of Object.entries(mutation.targeted)) {
-    const where = `docs/foundry.json mutation.targeted.${name}`;
+    const where = `docs/kukulu.json mutation.targeted.${name}`;
     if (!isObj(entry)) throw new ToolError(`${where} must be an object { cmd, timeoutMs }`);
     for (const k of Object.keys(entry)) {
       if (!["cmd", "timeoutMs"].includes(k)) throw new ToolError(`${where} has an unknown key '${k}'`);
@@ -400,7 +437,7 @@ function validateMutation(mutation) {
 const CONSTRAINT_KEYS = ["id", "description", "paths", "exclude", "pattern", "flags", "shouldMatch", "shouldNotMatch", "from"];
 
 /**
- * Validate `docs/foundry.json`'s `constraints` array: every rule must carry
+ * Validate `docs/kukulu.json`'s `constraints` array: every rule must carry
  * proof that its own check works, so a grep with a blind spot fails its own
  * fixture instead of passing silently (F-14). Never checks the pattern
  * against real files — that is `checkConstraints`'s job at `kukulu_verify`
@@ -408,7 +445,7 @@ const CONSTRAINT_KEYS = ["id", "description", "paths", "exclude", "pattern", "fl
  */
 function validateConstraints(constraints, planIds = null) {
   if (constraints === undefined) return;
-  if (!Array.isArray(constraints)) throw new ToolError("docs/foundry.json 'constraints' must be an array");
+  if (!Array.isArray(constraints)) throw new ToolError("docs/kukulu.json 'constraints' must be an array");
   const seen = new Set();
   for (const c of constraints) {
     const label = c && typeof c === "object" && typeof c.id === "string" ? c.id : "?";
@@ -445,11 +482,11 @@ function cfg() {
   return cfgFrom(loadConfig() || {}, exists(P.plan) ? planIdsOf(read(P.plan)) : null);
 }
 
-/** The resolved config for parsed `docs/foundry.json` content; `planIds` (or null to skip the check) are the tasks a `from` may name. */
+/** The resolved config for parsed `docs/kukulu.json` content; `planIds` (or null to skip the check) are the tasks a `from` may name. */
 function cfgFrom(c, planIds) {
   validatePolicies(c.policies);
   if (c.flight !== undefined && (typeof c.flight !== "string" || !FLIGHT_SLUG.test(c.flight))) {
-    throw new ToolError(`docs/foundry.json flight must be a slug matching ${FLIGHT_SLUG} (lowercase letters, digits and -, at most 40 characters)`);
+    throw new ToolError(`docs/kukulu.json flight must be a slug matching ${FLIGHT_SLUG} (lowercase letters, digits and -, at most 40 characters)`);
   }
   validateConstraints(c.constraints, planIds);
   validateParallel(c.parallel);
@@ -458,7 +495,7 @@ function cfgFrom(c, planIds) {
   const targeted = Object.fromEntries(
     Object.entries(c.mutation?.targeted || {}).map(([name, e]) => [name, { cmd: e.cmd, timeoutMs: e.timeoutMs ?? commandTimeoutMs }]),
   );
-  const norm = (entry, i, where, opts) => normalizeCommand(entry, commandTimeoutMs, `docs/foundry.json ${where}[${i}]`, opts);
+  const norm = (entry, i, where, opts) => normalizeCommand(entry, commandTimeoutMs, `docs/kukulu.json ${where}[${i}]`, opts);
   const gated = { allowFrom: true, planIds };
   return {
     verify: (c.verify || []).map((e, i) => norm(e, i, "verify", gated)),
@@ -497,7 +534,7 @@ function cfgFrom(c, planIds) {
 // Per-role model routing (v0.2.0): which model and effort each of the four
 // stage roles runs with, merged from the plugin's own defaults (agents/*.md),
 // an optional global file, an optional named profile inside it, and an
-// optional project override in docs/foundry.json. kukulu_agents_sync turns
+// optional project override in docs/kukulu.json. kukulu_agents_sync turns
 // the merged result into .claude/agents/kukulu-<role>.md files that Claude
 // Code will actually spawn; kukulu_next and kukulu_status read the merge
 // without writing anything.
@@ -589,7 +626,7 @@ function loadGlobalConfig() {
   return { path: p, present: true, data };
 }
 
-/** `where` names the block itself, e.g. "global config <path> roles" or "docs/foundry.json roles". */
+/** `where` names the block itself, e.g. "global config <path> roles" or "docs/kukulu.json roles". */
 function validateRolesBlock(roles, where) {
   if (roles === undefined) return;
   if (typeof roles !== "object" || roles === null || Array.isArray(roles)) {
@@ -657,8 +694,8 @@ function resolveRouting() {
   }
 
   const project = loadConfig() || {};
-  validateRolesBlock(project.roles, "docs/foundry.json roles");
-  validatePermissionMode(project.permissionMode, "docs/foundry.json permissionMode");
+  validateRolesBlock(project.roles, "docs/kukulu.json roles");
+  validatePermissionMode(project.permissionMode, "docs/kukulu.json permissionMode");
 
   const roles = {};
   const effortDropped = {};
@@ -1165,7 +1202,7 @@ function computeWaves(pr, cc, planLines) {
 
 // ---------------------------------------------------------------- streams at run time
 //
-// A stream runs in its own git worktree, `.foundry/worktrees/<stream>`, on a
+// A stream runs in its own git worktree, `.kukulu/worktrees/<stream>`, on a
 // branch `<build-branch>--<stream>` cut from the build branch. Task *code*
 // commits happen there. PROGRESS.md, PLAN.md and state.json live only in the
 // main checkout: every stream-scoped call reads and writes them in ROOT and
@@ -1361,7 +1398,7 @@ function setLockPaused(wave) {
 const FEEDBACK_STAGES = ["plan", "implement", "review", "summarize", "controller"];
 
 /**
- * Append one pipeline-friction entry to `.foundry/feedback.jsonl` — never
+ * Append one pipeline-friction entry to `.kukulu/feedback.jsonl` — never
  * commits; callers decide whether to commit alone (the externally-callable
  * `kukulu_feedback_log` tool) or fold it into a commit they are already
  * making (every MCP-internal auto-log call site). `source` is `"agent"`
@@ -1377,7 +1414,7 @@ function appendFeedback(stage, message, category, source) {
   fs.appendFileSync(P.feedback, `${JSON.stringify(entry)}\n`);
 }
 
-/** Number of parseable entries in `.foundry/feedback.jsonl`; `0` if the file does not exist. A line that fails to parse — a partial write from an interrupted process — is skipped, not fatal. */
+/** Number of parseable entries in `.kukulu/feedback.jsonl`; `0` if the file does not exist. A line that fails to parse — a partial write from an interrupted process — is skipped, not fatal. */
 function countFeedback() {
   if (!exists(P.feedback)) return 0;
   let n = 0;
@@ -1503,12 +1540,12 @@ function status() {
   return out;
 }
 
-const ARTIFACT_NAMES = ["SPEC.md", "PLAN.md", "PROGRESS.md", "HANDOFF.md", "REVIEW.md", "SUMMARY.md", "foundry.json"];
+const artifactNames = () => ["SPEC.md", "PLAN.md", "PROGRESS.md", "HANDOFF.md", "REVIEW.md", "SUMMARY.md", path.basename(P.config)];
 
 /** Where each flight artifact stands: absent, untracked, modified (tracked but changed) or tracked. Read-only. */
 function artifactStates(inRepo) {
   const out = {};
-  for (const name of ARTIFACT_NAMES) {
+  for (const name of artifactNames()) {
     const abs = path.join(ROOT, "docs", name);
     const relPath = rel(abs);
     if (!exists(abs)) out[name] = "absent";
@@ -1573,7 +1610,7 @@ function next() {
     const role = ROLE_OF_STAGE[name];
     return role ? routing.roles[role].model : null;
   };
-  // Read fresh from foundry.json rather than state, so the sentence is
+  // Read fresh from kukulu.json rather than state, so the sentence is
   // accurate even before this round's kukulu_run_start has recorded
   // state.policies (round 0, before the implementer's first call).
   const policySentence = `Run policies: signing=${c.policies.signing}, push=${c.policies.push ? "on" : "off"}, pr=${c.policies.pr}.`;
@@ -1647,7 +1684,7 @@ function next() {
     return stage("done", `flight ${st.archived.slug} is archived in ${st.archived.dir}; edit docs/SPEC.md for the next flight, then run /kukulu:go-flight`);
   }
   if (!s.planPresent || !s.progressPresent || !s.configPresent) {
-    return stage("plan", "no plan on disk (docs/PLAN.md, docs/PROGRESS.md and docs/foundry.json are all required)");
+    return stage("plan", "no plan on disk (docs/PLAN.md, docs/PROGRESS.md and docs/kukulu.json are all required)");
   }
   const offer = streamOffer();
   if (offer.streams) return stage("implement", offer.reason, { streams: offer.streams });
@@ -1672,7 +1709,7 @@ function next() {
 
 const PROMPTS = {
   plan: () =>
-    "Run the Foundry plan stage for this repository. Read docs/SPEC.md and everything else in docs/ in full, then produce docs/PLAN.md, docs/PROGRESS.md, docs/foundry.json and CLAUDE.md exactly as your plan-build instructions specify, commit them, and report. Do not write implementation code.",
+    "Run the Foundry plan stage for this repository. Read docs/SPEC.md and everything else in docs/ in full, then produce docs/PLAN.md, docs/PROGRESS.md, docs/kukulu.json and CLAUDE.md exactly as your plan-build instructions specify, commit them, and report. Do not write implementation code.",
   implement: (round, s, policies) =>
     `Run the Foundry implement stage. ${round === 0 ? "This is the initial build." : `This is review-fix round ${round}; the open tasks are R${round}-* fix tasks queued by the reviewer.`} Call kukulu_run_start, then loop on kukulu_task_next until it reports done, then write docs/HANDOFF.md and call kukulu_run_finish. You are unattended; never ask a question and never stop with open tasks. ${s.counts ? `${s.counts.open} task(s) are open.` : ""} ${policies}`,
   // Not a stage of its own: one entry of `streams` in an implement result.
@@ -1763,10 +1800,10 @@ function startRun() {
 
   // .gitignore the lock, arm it, stamp PROGRESS, commit.
   const sha = withRollback([P.gitignore, P.progress, P.state, P.feedback], () => {
-  ensureLineInFile(P.gitignore, ".foundry/implement.lock");
+  ensureLineInFile(P.gitignore, rel(P.lock));
   // Only a plan that declares streams ever creates worktrees, so only such a
   // plan gets the extra line (a plan without streams stays byte-identical).
-  if (pr.tasks.some((t) => t.stream)) ensureLineInFile(P.gitignore, ".foundry/worktrees/");
+  if (pr.tasks.some((t) => t.stream)) ensureLineInFile(P.gitignore, `${rel(P.worktrees)}/`);
   fs.mkdirSync(P.stateDir, { recursive: true });
   write(P.lock, `${JSON.stringify({ count: 0, armedAt: new Date().toISOString(), round: st.round, cap: c.guardCap })}\n`);
   if (!pr.branch || pr.branch.startsWith("(")) setHeader(pr, "Branch", branch);
@@ -1793,7 +1830,7 @@ function startRun() {
 }
 
 /**
- * Create `.foundry/worktrees/<stream>` on `<build>--<stream>` and run
+ * Create `.kukulu/worktrees/<stream>` on `<build>--<stream>` and run
  * `parallel.setup` in it (a fresh checkout has none of the installed
  * dependencies verify needs). Returns `{ cwd, streamBranch, created, setup }`;
  * on a setup failure the worktree (and a branch this call created) is removed
@@ -1849,8 +1886,8 @@ function runStart({ stream } = {}) {
     gitCommitIfChanged([P.state], `chore: stream ${stream} started (wave ${wave.index})`);
     // Runs that began before this plan's streams (or before 0.4.0) may lack
     // the .gitignore line; exclude per clone rather than dirty the tree.
-    const ignored = exists(P.gitignore) && read(P.gitignore).split("\n").includes(".foundry/worktrees/");
-    if (!ignored) ensureLineInFile(gitPath("info/exclude"), ".foundry/worktrees/");
+    const ignored = exists(P.gitignore) && read(P.gitignore).split("\n").includes(`${rel(P.worktrees)}/`);
+    if (!ignored) ensureLineInFile(gitPath("info/exclude"), `${rel(P.worktrees)}/`);
   }
   return { ...res, stream, wave: wave.index, cwd: created.cwd, streamBranch: created.streamBranch, created: created.created, setup: created.setup };
 }
@@ -1899,7 +1936,7 @@ function streamFinish({ stream } = {}) {
     // conflict paths, and git's own message is the only useful explanation.
     const gitSays = (merge.err || merge.out || "unknown error").split("\n").filter(Boolean).slice(0, 4).join(" ").replace(/\s+/g, " ");
     const what = conflicts.length ? `conflicted in ${conflicts.join(", ")}` : `failed: ${gitSays}`;
-    const halted = `merging stream '${stream}' (branch ${streamBranch}) into ${g.branch} ${what}; the stream's branch and worktree ${rel(dir)} are kept. A human must resolve it: from the main checkout run \`git merge --no-ff ${streamBranch}\`, fix what it reports and commit, then \`git worktree remove --force ${rel(dir)}\` and clear 'halted' in .foundry/state.json.`;
+    const halted = `merging stream '${stream}' (branch ${streamBranch}) into ${g.branch} ${what}; the stream's branch and worktree ${rel(dir)} are kept. A human must resolve it: from the main checkout run \`git merge --no-ff ${streamBranch}\`, fix what it reports and commit, then \`git worktree remove --force ${rel(dir)}\` and clear 'halted' in ${rel(P.state)}.`;
     const cur = loadState();
     cur.halted = halted;
     delete cur.haltCap;
@@ -2266,9 +2303,9 @@ function verifyCommands(cc, touched) {
 function verify({ files = [], stream } = {}) {
   const recovered = recoverMutation();
   const c = loadConfig();
-  if (!c) throw new ToolError("docs/foundry.json is missing; the plan stage must write it");
+  if (!c) throw new ToolError("docs/kukulu.json is missing; the plan stage must write it");
   const cc = cfg();
-  if (!cc.verify.length) throw new ToolError("docs/foundry.json has no 'verify' commands");
+  if (!cc.verify.length) throw new ToolError("docs/kukulu.json has no 'verify' commands");
   let cwd = ROOT;
   let ignore = loadState().preexistingUntracked || [];
   if (stream !== undefined) {
@@ -2384,20 +2421,20 @@ function mutate({ file, find, replace, commands, timeoutMs, targeted, filter, co
   if (typeof replace !== "string") throw new ToolError('replace is required and must be a string (use "" to delete the matched text)');
   if (find === replace) throw new ToolError("find and replace are identical; that is not a mutation");
   if (commands !== undefined && (!Array.isArray(commands) || !commands.length || !commands.every((x) => typeof x === "string"))) {
-    throw new ToolError("commands must be a non-empty array of command strings taken from docs/foundry.json's verify/extraVerify");
+    throw new ToolError("commands must be a non-empty array of command strings taken from docs/kukulu.json's verify/extraVerify");
   }
   if (timeoutMs !== undefined && (!Number.isInteger(timeoutMs) || timeoutMs <= 0)) {
     throw new ToolError("timeoutMs must be a positive integer (milliseconds)");
   }
   if (!gitFacts().inRepo) throw new ToolError("not a git repository");
-  if (!loadConfig()) throw new ToolError("docs/foundry.json is missing; the plan stage must write it");
+  if (!loadConfig()) throw new ToolError("docs/kukulu.json is missing; the plan stage must write it");
   const cc = cfg();
   if (confirmKill !== undefined && typeof confirmKill !== "boolean") throw new ToolError("confirmKill must be a boolean");
   if ((targeted === undefined) !== (filter === undefined)) throw new ToolError("targeted and filter must be passed together");
   if (targeted !== undefined) {
     if (commands !== undefined) throw new ToolError("targeted cannot be combined with commands; pass one or the other");
     const names = Object.keys(cc.mutation.targeted);
-    const legal = names.length ? `Configured names: ${names.join(", ")}.` : "No targeted commands are configured; add them under `mutation.targeted` in docs/foundry.json.";
+    const legal = names.length ? `Configured names: ${names.join(", ")}.` : "No targeted commands are configured; add them under `mutation.targeted` in docs/kukulu.json.";
     if (typeof targeted !== "string" || !Object.hasOwn(cc.mutation.targeted, targeted)) throw new ToolError(`unknown targeted command ${JSON.stringify(targeted)}. ${legal}`);
     if (typeof filter !== "string" || !MUTATION_FILTER.test(filter)) {
       throw new ToolError(`filter must be 1 to 200 characters from letters, digits and _ . : / - (no spaces, quotes or shell characters); got ${JSON.stringify(filter)}`);
@@ -2405,9 +2442,9 @@ function mutate({ file, find, replace, commands, timeoutMs, targeted, filter, co
   }
   const recovered = recoverMutation();
   if (exists(P.lock)) {
-    throw new ToolError("an implementation run is in progress (.foundry/implement.lock exists); kukulu_mutate is a review-stage tool — run it after kukulu_run_finish");
+    throw new ToolError("an implementation run is in progress (.kukulu/implement.lock exists); kukulu_mutate is a review-stage tool — run it after kukulu_run_finish");
   }
-  if (!cc.verify.length) throw new ToolError("docs/foundry.json has no 'verify' commands");
+  if (!cc.verify.length) throw new ToolError("docs/kukulu.json has no 'verify' commands");
 
   const { abs, rel: relPath } = projectFile(file);
   if (!git(["ls-files", "--error-unmatch", "--", relPath], { allowFail: true }).ok) {
@@ -2579,11 +2616,11 @@ const FLIGHT_OPTION_KEYS = ["maxRounds", "maxRoundsHard"];
 
 /**
  * Apply the options an operator passed to /kukulu:go-flight ("maximum
- * review depth of 6 rounds") to docs/foundry.json and commit them, so the
+ * review depth of 6 rounds") to docs/kukulu.json and commit them, so the
  * controller never hand-edits a config file (F-20 of the 2026-09-30
  * cleanflate feedback). Only the review-loop bounds are settable; anything
  * else is the planner's to decide from SPEC. Refused before the plan stage
- * has written docs/foundry.json.
+ * has written docs/kukulu.json.
  */
 function flightOptions(args = {}) {
   if (args.resume !== undefined && typeof args.resume !== "boolean") throw new ToolError("resume must be a boolean");
@@ -2592,7 +2629,7 @@ function flightOptions(args = {}) {
   for (const k of given) {
     if (!Number.isInteger(args[k]) || args[k] <= 0) throw new ToolError(`${k} must be a positive integer`);
   }
-  if (!exists(P.config)) throw new ToolError("docs/foundry.json does not exist yet; set flight options once the plan stage has written it");
+  if (!exists(P.config)) throw new ToolError("docs/kukulu.json does not exist yet; set flight options once the plan stage has written it");
   const resume = args.resume === true;
   const st = loadState();
   if (resume) {
@@ -2848,16 +2885,17 @@ function signedCheck(mergeBase) {
   return { signed: log.length - unsigned.length, unsigned: unsigned.length, first: unsigned.length ? unsigned[unsigned.length - 1].split(" ")[0] : null };
 }
 
-/** The config a finalize runs under: docs/foundry.json, or the archived copy once the flight has been archived. */
+/** The config a finalize runs under: docs/kukulu.json, or the archived copy once the flight has been archived. */
 function finalizeConfig(st) {
   if (!exists(P.config) && st.archived) {
-    const archived = path.join(ROOT, st.archived.dir, "foundry.json");
-    if (exists(archived)) {
+    // Flights archived before 0.6.0 hold foundry.json; that name is history and stays readable.
+    const archived = ["kukulu.json", "foundry.json"].map((n) => path.join(ROOT, st.archived.dir, n)).find(exists);
+    if (archived) {
       let raw;
       try {
         raw = JSON.parse(read(archived));
       } catch (e) {
-        throw new ToolError(`${st.archived.dir}/foundry.json is not valid JSON: ${e.message}`);
+        throw new ToolError(`${rel(archived)} is not valid JSON: ${e.message}`);
       }
       return cfgFrom(raw, null);
     }
@@ -2882,7 +2920,7 @@ function prFinalize({ breaking, resign } = {}) {
   if (typeof brk !== "boolean") throw new ToolError("breaking is required on the first call: pass true or false");
   const cc = finalizeConfig(st);
   const mb = git(["merge-base", cc.baseBranch, "HEAD"], { allowFail: true }).out;
-  if (!mb) throw new ToolError(`cannot find a merge base with baseBranch '${cc.baseBranch}'; check out the build branch, or fix baseBranch in docs/foundry.json`);
+  if (!mb) throw new ToolError(`cannot find a merge base with baseBranch '${cc.baseBranch}'; check out the build branch, or fix baseBranch in docs/kukulu.json`);
 
   const branch = gitFacts().branch;
   const summaryPath = exists(P.summary) ? P.summary : st.archived && exists(path.join(ROOT, st.archived.dir, "SUMMARY.md")) ? path.join(ROOT, st.archived.dir, "SUMMARY.md") : null;
@@ -3001,10 +3039,8 @@ function prFinalize({ breaking, resign } = {}) {
   };
 }
 
-const ARCHIVED = [
-  [P.plan, "docs/PLAN.md"], [P.progress, "docs/PROGRESS.md"], [P.handoff, "docs/HANDOFF.md"], [P.review, "docs/REVIEW.md"],
-  [P.summary, "docs/SUMMARY.md"], [P.config, "docs/foundry.json"], [P.state, ".foundry/state.json"], [P.feedback, ".foundry/feedback.jsonl"],
-];
+/** The files an archive moves, as [absolute path, repo-relative name]; a move keeps each file's name, so an old project's config stays foundry.json. */
+const archivedFiles = () => [P.plan, P.progress, P.handoff, P.review, P.summary, P.config, P.state, P.feedback].map((abs) => [abs, rel(abs)]);
 
 /**
  * Move a summarized flight's artifacts into docs/flights/<slug>/ so the
@@ -3014,20 +3050,20 @@ const ARCHIVED = [
 function flightArchive({ slug } = {}) {
   const c0 = cfg();
   slug = slug === undefined ? c0.flight : slug;
-  if (slug === null || slug === undefined) throw new ToolError('pass slug, or set "flight" in docs/foundry.json');
+  if (slug === null || slug === undefined) throw new ToolError('pass slug, or set "flight" in docs/kukulu.json');
   if (typeof slug !== "string" || !FLIGHT_SLUG.test(slug)) throw new ToolError(`slug must match ${FLIGHT_SLUG} (lowercase letters, digits and -, at most 40 characters), not ${JSON.stringify(slug)}`);
   const old = loadState();
   if (!old.summarized) throw new ToolError("the flight is not summarized yet; archive only after kukulu_summary_commit has run");
-  if (exists(P.lock)) throw new ToolError("an implementation run is armed (.foundry/implement.lock exists); finish or halt the run before archiving");
+  if (exists(P.lock)) throw new ToolError("an implementation run is armed (.kukulu/implement.lock exists); finish or halt the run before archiving");
   const dirty = porcelainExcludingPreexisting(old.preexistingUntracked);
   if (dirty.length) throw new ToolError(`the working tree is not clean:\n${dirty.join("\n")}\nCommit or discard these before archiving.`);
   const relDir = `docs/flights/${slug}`;
   const dir = path.join(ROOT, relDir);
   if (exists(dir)) throw new ToolError(`${relDir} already exists; choose another slug, or remove the old archive`);
-  // Everything that needs docs/foundry.json is read before it moves.
+  // Everything that needs docs/kukulu.json is read before it moves.
   const pushAllowed = c0.policies.push;
 
-  const sources = ARCHIVED.filter(([abs]) => exists(abs));
+  const sources = archivedFiles().filter(([abs]) => exists(abs));
   const copyDest = path.join(dir, "SPEC.md");
   const touched = [...sources.map(([abs]) => abs), ...sources.map(([abs]) => path.join(dir, path.basename(abs))), copyDest, P.state, P.feedback];
   const all = [...new Set(touched)];
@@ -3078,7 +3114,7 @@ function validatePlanTexts({ planText, progressText, configRaw, configError, cla
   };
   if (planText == null) add("files", "docs/PLAN.md is missing");
   if (progressText == null) add("files", "docs/PROGRESS.md is missing");
-  if (configRaw == null && !configError) add("files", "docs/foundry.json is missing");
+  if (configRaw == null && !configError) add("files", "docs/kukulu.json is missing");
   if (configError) add("config", configError);
   if (!claudeExists) add("claude", "CLAUDE.md does not exist at the repository root; the implementer reads it first");
 
@@ -3257,7 +3293,7 @@ function planCommit({ renumber } = {}) {
     try {
       configRaw = JSON.parse(configText);
     } catch (e) {
-      configError = `docs/foundry.json is not valid JSON: ${e.message}`;
+      configError = `docs/kukulu.json is not valid JSON: ${e.message}`;
     }
   }
   const claudePath = path.join(ROOT, "CLAUDE.md");
@@ -3302,7 +3338,7 @@ const S = (props, required = []) => ({
 const TOOLS = [
   { name: "kukulu_status", description: "Everything the pipeline knows from disk: which docs exist, task counts by state, branch/base/head, lock, round, review verdict. Read-only.", inputSchema: S({}), fn: status },
   { name: "kukulu_next", description: "Deterministic stage selection: returns { stage, agent, agentFallback, fallbackAgent, restartRequired, model, agentModel, agentModelExact, round, reason, prompt, streams? }. stage is plan | implement | review | summarize | done | halt. agentModel is the value to pass as the Agent tool's model when agentFallback is true (an alias, or null to pass none); agentModelExact is false when a full claude-* id was mapped to its family alias. restartRequired is true only when the routed model cannot be reached without relaunching the session. Read-only, except that when a parallel wave's partition is invalid it records once (state, one feedback entry, one commit, only on a build branch) that the wave runs serially. When streams is present, spawn one implementer per entry, all at once, and wait for all of them.", inputSchema: S({}), fn: next },
-  { name: "kukulu_plan_commit", description: "Validate the plan as a whole and commit it: docs/PLAN.md, docs/PROGRESS.md, docs/foundry.json and CLAUDE.md must exist and agree (task headings, numbering, dependencies, streams, config, from references). Every problem is listed at once, as numbered lines and as structuredContent.problems [{ check, id?, message }]; nothing is committed while any remain. With renumber: true (only before any run has started) it first renumbers split ids everywhere. On success it commits 'plan: derive build plan from SPEC' and returns { commit, tasks, phases, waves, renumbered }. For the planner, as its last step.", inputSchema: S({ renumber: { type: "boolean", description: "rewrite split or out-of-sequence task ids (such as P1-02a) to a clean P<n>-01.. sequence everywhere they appear, then validate and commit; refused once a run has started" } }), fn: planCommit },
+  { name: "kukulu_plan_commit", description: "Validate the plan as a whole and commit it: docs/PLAN.md, docs/PROGRESS.md, docs/kukulu.json and CLAUDE.md must exist and agree (task headings, numbering, dependencies, streams, config, from references). Every problem is listed at once, as numbered lines and as structuredContent.problems [{ check, id?, message }]; nothing is committed while any remain. With renumber: true (only before any run has started) it first renumbers split ids everywhere. On success it commits 'plan: derive build plan from SPEC' and returns { commit, tasks, phases, waves, renumbered }. For the planner, as its last step.", inputSchema: S({ renumber: { type: "boolean", description: "rewrite split or out-of-sequence task ids (such as P1-02a) to a clean P<n>-01.. sequence everywhere they appear, then validate and commit; refused once a run has started" } }), fn: planCommit },
   { name: "kukulu_run_start", description: "Begin (or resume) an implementation run: create/reuse the build branch, arm the implement guard lock, stamp Branch/Started in PROGRESS.md, commit. Idempotent. With stream, also create (or resume) that stream's git worktree for a parallel wave, run parallel.setup in it, and return its cwd: do all of that stream's work inside cwd.", inputSchema: S({ stream: { type: "string", description: "a stream of the current parallel wave, when kukulu_next handed you one" } }), fn: runStart },
   { name: "kukulu_task_next", description: "Select the next task (first [~], else first [ ]), auto-skip tasks whose dependencies are blocked, mark it [~], and return its PLAN.md text plus dependency log entries. Returns { done: true } when none remain.", inputSchema: S({ stream: { type: "string", description: "restrict to this stream's tasks (parallel waves only)" } }), fn: taskNext },
   { name: "kukulu_task_done", description: "Mark a task [x] and append its log entry stamped with HEAD's sha. Requires HEAD's commit subject to start with '<id>:' and a clean tree. Commits PROGRESS.md.", inputSchema: S({ stream: { type: "string", description: "the stream this task belongs to, when working in a parallel wave" }, id: { type: "string" }, log: { type: "string", description: "Log entry body, under 15 lines" } }, ["id", "log"]), fn: taskDone },
@@ -3313,7 +3349,7 @@ const TOOLS = [
     inputSchema: S({ id: { type: "string" }, reason: { type: "string", description: "what changed so the task can now succeed" } }, ["id", "reason"]),
     fn: taskReopen,
   },
-  { name: "kukulu_verify", description: "Self-tests and runs every docs/foundry.json constraint against the whole repo (tracked files plus new untracked ones, never ignored files or files untracked before the run started), then runs the verify commands plus extraVerify commands for any path prefix the given files fall under. Returns constraint results and per-command exit status and output tails.", inputSchema: S({ files: { type: "array", items: { type: "string" }, description: "Files touched by the task (optional); narrows extraVerify only, never the constraint scan" }, stream: { type: "string", description: "run in this stream's worktree (parallel waves only); refuses if an exclusive command would run" } }), fn: verify },
+  { name: "kukulu_verify", description: "Self-tests and runs every docs/kukulu.json constraint against the whole repo (tracked files plus new untracked ones, never ignored files or files untracked before the run started), then runs the verify commands plus extraVerify commands for any path prefix the given files fall under. Returns constraint results and per-command exit status and output tails.", inputSchema: S({ files: { type: "array", items: { type: "string" }, description: "Files touched by the task (optional); narrows extraVerify only, never the constraint scan" }, stream: { type: "string", description: "run in this stream's worktree (parallel waves only); refuses if an exclusive command would run" } }), fn: verify },
   { name: "kukulu_stream_finish", description: "Finish one stream of a parallel wave: requires no open tasks in the stream and a clean worktree, merges the stream's branch into the build branch (git merge --no-ff), then removes the worktree and branch. On a merge conflict it aborts, keeps the stream's branch and worktree, and halts the flight with instructions. Returns { stream, merged, mergeCommit, remainingStreams }.", inputSchema: S({ stream: { type: "string", description: "the stream whose tasks are all done or blocked" } }, ["stream"]), fn: streamFinish },
   { name: "kukulu_run_finish", description: "End an implementation run: requires zero open tasks and docs/HANDOFF.md; commits it, pushes and opens a draft PR against baseBranch unless policies say otherwise, disarms the lock, records the round as implemented, and reports a whole-tree constraint scan (constraints: { ok, failing }) without refusing on it.", inputSchema: S({}), fn: runFinish },
   {
@@ -3324,7 +3360,7 @@ const TOOLS = [
   },
   {
     name: "kukulu_flight_options",
-    description: "Apply an operator's flight options to docs/foundry.json and commit them: maxRounds (non-converging review rounds tolerated) and maxRoundsHard (absolute ceiling on review rounds). For the flight controller, when /kukulu:go-flight was given options such as a maximum review depth. Refused before the plan stage has written docs/foundry.json. With resume: true it also clears a round-cap halt, provided the bound passed lifts the cap that fired. Returns { before, after, commit } (plus resumed: true).",
+    description: "Apply an operator's flight options to docs/kukulu.json and commit them: maxRounds (non-converging review rounds tolerated) and maxRoundsHard (absolute ceiling on review rounds). For the flight controller, when /kukulu:go-flight was given options such as a maximum review depth. Refused before the plan stage has written docs/kukulu.json. With resume: true it also clears a round-cap halt, provided the bound passed lifts the cap that fired. Returns { before, after, commit } (plus resumed: true).",
     inputSchema: S({
       maxRounds: { type: "integer", minimum: 1, description: "non-converging review rounds tolerated before the flight halts" },
       maxRoundsHard: { type: "integer", minimum: 1, description: "a review numbered above this halts the flight, converging or not" },
@@ -3334,7 +3370,7 @@ const TOOLS = [
   },
   {
     name: "kukulu_feedback_log",
-    description: "Record one pipeline-friction entry — something Foundry's own tooling cost time on, not the project it is building. Appends to .foundry/feedback.jsonl and commits it immediately, so it survives even if the flight never reaches summarize. Call it the moment friction happens.",
+    description: "Record one pipeline-friction entry — something Foundry's own tooling cost time on, not the project it is building. Appends to .kukulu/feedback.jsonl and commits it immediately, so it survives even if the flight never reaches summarize. Call it the moment friction happens.",
     inputSchema: S(
       {
         stage: { type: "string", enum: FEEDBACK_STAGES, description: "which role is logging this" },
@@ -3353,8 +3389,8 @@ const TOOLS = [
         file: { type: "string", description: "repo-relative path of a tracked, clean text file" },
         find: { type: "string", description: "exact text to replace; must appear exactly once in the file" },
         replace: { type: "string", description: "the mutated text (\"\" deletes the match)" },
-        commands: { type: "array", items: { type: "string" }, description: "optional: run only these configured verify/extraVerify commands, each spelled exactly as in docs/foundry.json" },
-        targeted: { type: "string", description: "optional: the name of a docs/foundry.json mutation.targeted command to run instead of the verify commands; pass with filter, never with commands" },
+        commands: { type: "array", items: { type: "string" }, description: "optional: run only these configured verify/extraVerify commands, each spelled exactly as in docs/kukulu.json" },
+        targeted: { type: "string", description: "optional: the name of a docs/kukulu.json mutation.targeted command to run instead of the verify commands; pass with filter, never with commands" },
         filter: { type: "string", description: "with targeted: the test name or path substituted for {filter} (letters, digits and _ . : / - only)" },
         timeoutMs: { type: "integer", minimum: 1, description: "optional: cap every command's timeout for this call (never raises a configured one), for a mutant you suspect hangs" },
         confirmKill: { type: "boolean", description: "optional: when the mutant is killed, re-run each failed command once on the unmutated tree; a command that fails there too makes the result inconclusive, not a kill" },
@@ -3381,11 +3417,11 @@ const TOOLS = [
     fn: reviewSubmit,
   },
   { name: "kukulu_summary_commit", description: "Write docs/SUMMARY.md from `content` (preferred) or commit the file already on disk, and mark the flight complete. Only valid after an APPROVED review. Returns { commit, branch, base, head, reviews, fixRounds, push, pr, archive }; archive is the policies.archive setting (true means call kukulu_flight_archive next); pr is the branch's pull request ({ url, state, draft, base }) or \"none\", \"skipped: policy\" or \"unknown: <why>\".", inputSchema: S({ content: { type: "string", description: "the full text of docs/SUMMARY.md; the tool writes the file itself, so never Write it yourself" } }), fn: summaryCommit },
-  { name: "kukulu_flight_archive", description: "Archive a summarized flight so the repository can run its next flight: move PLAN, PROGRESS, HANDOFF, REVIEW, SUMMARY, foundry.json, .foundry/state.json and .foundry/feedback.jsonl into docs/flights/<slug>/ (copying SPEC.md, which stays), write a fresh state.json, commit 'chore: archive flight <slug>' and push per policy. slug defaults to the 'flight' key in docs/foundry.json. Refused unless the flight is summarized, no run is armed, and the tree is clean. All-or-nothing. Returns { slug, dir, moved, copied, commit, push }.", inputSchema: S({ slug: { type: "string", description: "lowercase letters, digits and - (at most 40 characters); defaults to docs/foundry.json's flight" } }), fn: flightArchive },
+  { name: "kukulu_flight_archive", description: "Archive a summarized flight so the repository can run its next flight: move PLAN, PROGRESS, HANDOFF, REVIEW, SUMMARY, kukulu.json, .kukulu/state.json and .kukulu/feedback.jsonl into docs/flights/<slug>/ (copying SPEC.md, which stays), write a fresh state.json, commit 'chore: archive flight <slug>' and push per policy. slug defaults to the 'flight' key in docs/kukulu.json. Refused unless the flight is summarized, no run is armed, and the tree is clean. All-or-nothing. Returns { slug, dir, moved, copied, commit, push }.", inputSchema: S({ slug: { type: "string", description: "lowercase letters, digits and - (at most 40 characters); defaults to docs/kukulu.json's flight" } }), fn: flightArchive },
   { name: "kukulu_pr_finalize", description: "End a flight. Checks that every commit since the merge base with baseBranch is signed (judged from the commits, not from state): if so, marks the draft PR ready and, unless breaking is true, enables auto-merge (gh pr merge --auto, never an immediate merge), per policies.finalize and policies.mergeMethod. If any commit is unsigned the PR stays a draft, state.awaitingSigning is recorded, the steps are appended to SUMMARY.md, and kukulu_next reports done until it is resolved. breaking is required on the first call. Returns { signed, unsigned, ready, merge, breaking, awaitingSigning, resigned, push, pr, next? }; merge is enabled, skipped: breaking, skipped: policy, skipped: no pull request, skipped: awaiting signing or unavailable: <why>.", inputSchema: S({ breaking: { type: "boolean", description: "whether this flight is a breaking change, so its PR must not auto-merge; required on the first call, remembered after" }, resign: { type: "boolean", description: "HUMAN-INITIATED ONLY: never pass this on your own. Re-sign every commit of the branch (git rebase -f --rebase-merges --gpg-sign), force-push with lease, then finalize. For an operator who has unlocked the signing agent after an awaiting-signing result" } }), fn: prFinalize },
   {
     name: "kukulu_agents_sync",
-    description: "Generate .claude/agents/kukulu-<role>.md from the merged routing config (plugin defaults < global file < profile < docs/foundry.json roles). Writes only files whose content changed, excludes them from git, and returns the resolved per-role table. `restartRequired` is true only when this is the directory's first population and a changed role's model cannot be named directly by the Agent tool. Also ensures the MCP allow rule in .claude/settings.local.json (`permissions` in the result), without which a subagent's first kukulu_status call is denied under any permission mode.",
+    description: "Generate .claude/agents/kukulu-<role>.md from the merged routing config (plugin defaults < global file < profile < docs/kukulu.json roles). Writes only files whose content changed, excludes them from git, and returns the resolved per-role table. `restartRequired` is true only when this is the directory's first population and a changed role's model cannot be named directly by the Agent tool. Also ensures the MCP allow rule in .claude/settings.local.json (`permissions` in the result), without which a subagent's first kukulu_status call is denied under any permission mode.",
     inputSchema: S({}),
     fn: agentsSync,
   },
@@ -3418,10 +3454,11 @@ function handle(req) {
       const tool = TOOLS.find((t) => t.name === params?.name);
       if (!tool) return fail(-32602, `unknown tool ${params?.name}`);
       try {
+        resolveLayout();
         const result = tool.fn(params?.arguments || {});
         return reply({ content: [{ type: "text", text: JSON.stringify(result, null, 2) }] });
       } catch (e) {
-        const text = e instanceof ToolError ? e.message : `${e.message}\n${e.stack}`;
+        const text = e instanceof ToolError ? inLayoutNames(e.message) : `${e.message}\n${e.stack}`;
         if (e instanceof ToolError && e.data !== undefined) return reply({ content: [{ type: "text", text }], isError: true, structuredContent: e.data });
         return reply({ content: [{ type: "text", text }], isError: true });
       }
