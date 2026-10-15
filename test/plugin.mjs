@@ -6,7 +6,8 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { finish, ok, eq, like, ROOT, frontmatter } from "./harness.mjs";
+import { spawnSync } from "node:child_process";
+import { finish, ok, eq, like, ROOT, frontmatter, mkDir } from "./harness.mjs";
 
 const read = (rel) => fs.readFileSync(path.join(ROOT, rel), "utf8");
 const json = (rel) => JSON.parse(read(rel));
@@ -544,5 +545,64 @@ const glRev = /repo:\s*https:\/\/github\.com\/gitleaks\/gitleaks\s*\n\s*rev:\s*v
 const scanYml = read(".github/workflows/secret-scan.yml");
 const glPin = /^\s*GITLEAKS_VERSION:\s*"?([^"\s#]+)"?/m.exec(scanYml)?.[1];
 ok(glRev && glPin === glRev, "secret-scan.yml pins GITLEAKS_VERSION to the pre-commit gitleaks rev");
+
+// RN-01: the name check. Fixtures are built from escapes so this file is itself
+// clean: the display name has a macron over the first u (U+016B), identifiers
+// are ASCII, and the okina in a Hawaiian word is U+02BB.
+{
+  const U = "\u016b";
+  const display = `K${U}kulu`;
+  const ascii = "K" + "ukulu";
+  const run = (files) => {
+    const dir = mkDir("kukulu-names-");
+    for (const [rel, text] of Object.entries(files)) {
+      fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true });
+      fs.writeFileSync(path.join(dir, rel), text);
+    }
+    return spawnSync(process.execPath, [path.join(ROOT, "scripts", "check-names.mjs"), dir], { encoding: "utf8" });
+  };
+
+  const clean = spawnSync(process.execPath, [path.join(ROOT, "scripts", "check-names.mjs")], { encoding: "utf8" });
+  eq(clean.status, 0, `check-names passes on this repository (${(clean.stderr || clean.stdout).trim()})`);
+
+  const good = run({ "README.md": `# ${display}\n\n${display} is built from a spec. Run \`${ascii}\` or see https://github.com/DisplaceTech/${ascii.toLowerCase()}.\n` });
+  eq(good.status, 0, "check-names accepts the display name in prose and the ASCII spelling in code and URLs");
+
+  const inPath = run({ [`docs/${U}x.md`]: "x\n" });
+  eq(inPath.status, 1, "check-names refuses a non-ASCII path");
+  like(inPath.stderr, /path contains non-ASCII characters/, "...and says paths use the ASCII identifier");
+
+  const inIdent = run({ "server.mjs": `const name = "${display.toLowerCase()}_status";\n` });
+  eq(inIdent.status, 1, "check-names refuses the macron letter in an identifier");
+  like(inIdent.stderr, /server\.mjs:1: a .* outside the standalone word/, "...and names the file and line");
+
+  const inUrl = run({ "README.md": `See https://example.com/${display}/x for it.\n` });
+  eq(inUrl.status, 1, "check-names refuses the display name inside a URL");
+
+  const nfd = run({ "README.md": `${display.replace(U, "u\u0304")} is decomposed.\n` });
+  eq(nfd.status, 1, "check-names refuses a decomposed u + U+0304");
+  like(nfd.stderr, /single NFC character U\+016B/, "...and says to store U+016B");
+
+  const prose = run({ "docs/guide.md": `${ascii} builds from a spec.\n` });
+  eq(prose.status, 1, "check-names refuses the ASCII spelling in prose");
+  like(prose.stderr, /docs\/guide\.md:1: the display name is written/, "...and names the file and line");
+
+  const fenced = run({ "docs/guide.md": `Text.\n\n\`\`\`bash\n${ascii} --help\n\`\`\`\n\nInline \`${ascii}\` too.\n` });
+  eq(fenced.status, 0, "check-names allows the ASCII spelling in fenced blocks and inline code");
+
+  const history = run({ "docs/flights/old/SUMMARY.md": `${ascii} history.\n`, "docs/feedback/a.md": `${ascii} history.\n` });
+  eq(history.status, 0, "check-names leaves history paths alone");
+
+  const changelog = run({ "CHANGELOG.md": `## [0.6.0]\n\n${display} is new.\n\n## [0.5.0]\n\n${ascii} was Foundry.\n` });
+  eq(changelog.status, 0, "check-names treats CHANGELOG.md as history from the 0.5.0 entry down");
+  const changelogNew = run({ "CHANGELOG.md": `## [0.6.0]\n\n${ascii} is new.\n\n## [0.5.0]\n` });
+  eq(changelogNew.status, 1, "...but not the entries above it");
+
+  const apostrophe = run({ "README.md": "Hawai'i and '\u014dlelo.\n" });
+  eq(apostrophe.status, 1, "check-names refuses an apostrophe where the okina belongs");
+  like(apostrophe.stderr, /\u02bbokina/, "...and names the okina");
+  const okina = run({ "README.md": "Hawai\u02bbi and \u02bb\u014dlelo.\n" });
+  eq(okina.status, 0, "check-names accepts the okina");
+}
 
 finish();

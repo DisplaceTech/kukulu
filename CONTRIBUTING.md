@@ -25,6 +25,7 @@ it.
 | `mcp/run-command.mjs` | Runs one verify/mutate/setup command in its own process group, bounded in time and output, for the synchronous server |
 | `scripts/implement-guard.mjs` | The Stop / SubagentStop hook |
 | `scripts/lint.sh` | Dependency-free syntax and manifest lint |
+| `scripts/check-names.mjs` | Fails on a misplaced kahakō or an ASCII spelling of the display name in prose; run by `scripts/lint.sh` |
 | `scripts/check-diagrams.mjs` | Parses every Mermaid block; CI-only, needs mermaid + jsdom |
 | `agents/*.md` | Stage agents: default model, effort, and the skill each preloads |
 | `skills/*/SKILL.md` | The prose each stage follows |
@@ -48,6 +49,23 @@ There is nothing to install. The server, the tests and the lint script have no
 dependencies; `package.json` has no `dependencies` block and there is no
 lockfile, on purpose — a plugin that needs `npm install` before it works is a
 plugin that fails on someone else's machine.
+
+## Names
+
+The display name is **Kūkulu**, with the macron (kahakō) over the first u,
+U+016B, stored NFC. Use it in prose: docs, README, titles, release notes and
+messages a person reads. Everything a machine reads is ASCII: `kukulu` for ids,
+namespaces, tool names, paths, keys and URLs, and `KUKULU_` for environment
+variables. Never put the macron in an identifier, path, key or URL. The word
+ʻōlelo Hawaiʻi is written with the ʻokina, U+02BB, not an apostrophe.
+
+`node scripts/check-names.mjs` enforces this and runs inside `npm run lint`,
+pre-commit and CI. It fails on a macron outside the standalone word, a
+decomposed u + U+0304, a non-ASCII path, the ASCII spelling of the display name
+in Markdown prose (code spans, fenced blocks and URLs are exempt), and an
+apostrophe where the ʻokina belongs. Archived flights, `docs/plans/`,
+`docs/feedback/`, `docs/SPEC.md` and the changelog below its newest entry are
+history and are not checked for prose.
 
 ## Tests
 
