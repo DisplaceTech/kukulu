@@ -39,7 +39,7 @@ const init = await s.rpc("initialize", {
   clientInfo: { name: "protocol-suite", version: "0" },
 });
 eq(init.jsonrpc, "2.0", "initialize reply is JSON-RPC 2.0");
-eq(init.result.serverInfo.name, "foundry", "serverInfo.name is foundry");
+eq(init.result.serverInfo.name, "kukulu", "serverInfo.name is kukulu");
 like(init.result.serverInfo.version, /^\d+\.\d+\.\d+$/, "serverInfo.version is semver");
 eq(init.result.protocolVersion, "2025-06-18", "initialize echoes the client's protocol version");
 ok(init.result.capabilities && init.result.capabilities.tools, "server advertises the tools capability");

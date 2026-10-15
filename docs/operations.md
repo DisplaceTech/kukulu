@@ -9,7 +9,7 @@ something looks wrong, `foundry_status` is the whole truth.
 ```bash
 cd myproject
 claude
-> /foundry:go-flight
+> /kukulu:go-flight
 ```
 
 The controller is model-invocable, so asking for it by name works too; the
@@ -26,7 +26,7 @@ number of reviews and fix rounds, the branch, and the path to
 Text after the command is the flight's options:
 
 ```text
-> /foundry:go-flight max review rounds 6
+> /kukulu:go-flight max review rounds 6
 ```
 
 The review-loop bounds are the only options. "max review rounds N" (or
@@ -40,7 +40,7 @@ map, it prints as `ignored flight option: …` and carries on. It never asks.
 ### First flight in a project
 
 On a project's first flight, every stage runs on the plugin's own
-`foundry:<role>` agent, with the routed model passed as an alias. The
+`kukulu:<role>` agent, with the routed model passed as an alias. The
 generated `foundry-<role>` agents land in a `.claude/agents` directory this
 session created, and Claude Code loads a new agents directory only in the
 next session. `foundry_next` names the plugin agent outright, so this is
@@ -59,10 +59,10 @@ MCP tool calls need one allow rule, since a subagent's permission mode does
 not cover them:
 
 ```json
-{ "permissions": { "allow": ["mcp__plugin_foundry_foundry"] } }
+{ "permissions": { "allow": ["mcp__plugin_kukulu_kukulu"] } }
 ```
 
-`foundry_agents_sync` — which `/foundry:go-flight` calls before its loop —
+`foundry_agents_sync` — which `/kukulu:go-flight` calls before its loop —
 writes this itself into the project's `.claude/settings.local.json` (F-03),
 read-merge-write, unless it is already covered there or in the committed
 `.claude/settings.json`. It never touches `~/.claude/settings.json`; put the
@@ -98,7 +98,7 @@ with their task id, so `git log --oneline` reads as a narrative of the run.
 There is one command:
 
 ```text
-> /foundry:go-flight
+> /kukulu:go-flight
 ```
 
 `foundry_next` re-reads disk and continues from wherever the flight stopped —
@@ -122,7 +122,7 @@ the task back with `foundry_task_reopen` from any session in the project:
 Every task that was skipped because of it comes back too, transitively. A
 dependent that still waits on a different blocked task is just skipped
 again. The next `foundry_task_next` picks the reopened task up. If the run
-had already finished, the next `/foundry:go-flight` hands out an implement
+had already finished, the next `/kukulu:go-flight` hands out an implement
 stage for the same round. Inside a flight, the reviewer does the same thing
 through `foundry_review_submit`'s `unblock`. Do not flip checkboxes in
 `docs/PROGRESS.md` by hand (cleanflate F-03, F-18).
@@ -187,7 +187,7 @@ recovery.
 | Run finishes but nothing was pushed | No `origin`, or the push failed | `push` in the handoff output says which; the branch is local and reviewable either way |
 | No draft PR | `gh` is not installed or not authenticated | Optional by design; open one yourself |
 | Reviewer approves work that is wrong | `CLAUDE.md` `## Constraints` are unverifiable | Tighten `SPEC.md` §3 so each rule is a grep, then re-plan |
-| Controller prints `FOUNDRY: RESTART REQUIRED` and stops | The agents directory was populated for the first time in this project, and a changed role routes to a model the `Agent` tool cannot name directly | Expected, and rare after 0.3.0 — only the first sync of a router-routed role hits this. Run `/foundry:go-flight` again in a new session |
+| Controller prints `FOUNDRY: RESTART REQUIRED` and stops | The agents directory was populated for the first time in this project, and a changed role routes to a model the `Agent` tool cannot name directly | Expected, and rare after 0.3.0 — only the first sync of a router-routed role hits this. Run `/kukulu:go-flight` again in a new session |
 | `Agent` call fails with `Agent type 'foundry-<role>' not found` | Same cause as above, hit mid-flight instead of at the start | Same fix: relaunch and re-run |
 | Flight stops immediately with a routing config error | The global file, a profile, or `docs/foundry.json`'s `roles`/`permissionMode` is malformed | Run `foundry_config_show` to see exactly what and where; fix it and re-run |
 | `foundry_run_start` refuses with a signing message | `policies.signing` is `"required"` and either signing is not configured or a real signed commit failed | Fix the signing agent, or set `policies.signing` to `"off"` in `docs/foundry.json` |
@@ -232,7 +232,7 @@ one start cleanly.
 
 **Name the flight.** Set `"flight"` in `docs/foundry.json` to a slug
 (`^[a-z0-9][a-z0-9-]{0,39}$`), or pass `flight=<slug>` to
-`/foundry:go-flight` and the planner writes it for you. The slug names the
+`/kukulu:go-flight` and the planner writes it for you. The slug names the
 flight's archive directory.
 
 **Archive it.** `foundry_flight_archive` moves a summarized flight into
@@ -256,7 +256,7 @@ is byte-identical to the archived copy. Edit it for the next flight and
 `CLAUDE.md` outlives a flight. The planner creates it under 150 lines, but
 for the next flight it adds or replaces one `## Flight <slug> notes` section
 and leaves other flights' sections alone, merging only flight-agnostic facts
-into the shared sections. `/foundry:pull-feedback` reads
+into the shared sections. `/kukulu:pull-feedback` reads
 `docs/flights/*/feedback.jsonl` as well as the live log, so friction from
 archived flights is not lost. And when a flight halts on a round cap, the
 halt message names the call that lifts it:
@@ -338,7 +338,7 @@ fallback had switched it off.
 | `build` | `[]` | Recorded for the plan's use; the MCP does not run it |
 | `baseBranch` | `main` | Branch runs start from, and the merge-base reported as `base` |
 | `branchPrefix` | `build/` | Prefix for run branches (`build/2026-09-18`, `-2`, …) |
-| `maxRounds` | `3` | Non-converging review rounds allowed before the flight halts; a round whose fix-task count did not shrink from the last one counts against this. Settable per flight with `/foundry:go-flight max review rounds N` |
+| `maxRounds` | `3` | Non-converging review rounds allowed before the flight halts; a round whose fix-task count did not shrink from the last one counts against this. Settable per flight with `/kukulu:go-flight max review rounds N` |
 | `maxRoundsHard` | `6` | Absolute review-round ceiling, regardless of convergence; a review numbered above it halts |
 | `commandTimeoutMs` | `600000` | Per-command timeout for `foundry_verify`, `foundry_mutate` and `parallel.setup`; a timeout kills the command's whole process group |
 | `guardCap` | `60` | Re-blocks since the last task state change before the implement guard gives up; carried into `.foundry/implement.lock` at `foundry_run_start` and wins over `FOUNDRY_GUARD_CAP` |
@@ -473,7 +473,7 @@ task closes the blind spot by adding the missed shape to `shouldMatch`.
 
 Which model runs each role, and where that comes from, is
 [docs/routing.md](./routing.md)'s subject in full. The short version for
-unattended use: `/foundry:go-flight` calls `foundry_agents_sync` before its
+unattended use: `/kukulu:go-flight` calls `foundry_agents_sync` before its
 loop. Claude Code hot-reloads a routing change to an already-populated
 `.claude/agents/` directory within seconds, so most edits need no restart at
 all — `foundry_next` falls back to the plugin's own agent with the resolved
@@ -483,10 +483,10 @@ prints `FOUNDRY: RESTART REQUIRED` and stops. A plain re-run picks up where
 it left off. To make a headless launcher handle that restart itself:
 
 ```bash
-out=$(claude -p "/foundry:go-flight")
+out=$(claude -p "/kukulu:go-flight")
 printf '%s\n' "$out"
 case "$out" in
-  *"FOUNDRY: RESTART REQUIRED"*) claude -p "/foundry:go-flight" ;;
+  *"FOUNDRY: RESTART REQUIRED"*) claude -p "/kukulu:go-flight" ;;
 esac
 ```
 
@@ -528,7 +528,7 @@ wall clock is model time, not test time.
 `parallel.setup`, or an exclusive command each degrade the wave to serial and
 log one feedback entry — `stream-partition`, `stream-setup` or
 `stream-exclusive` — in `.foundry/feedback.jsonl`. Pull it back with
-`/foundry:pull-feedback`: it is material for the next plan.
+`/kukulu:pull-feedback`: it is material for the next plan.
 
 **A stream that stopped early.** The next `foundry_next` hands it out again;
 `foundry_run_start({ stream })` resumes its worktree and `foundry_task_next`

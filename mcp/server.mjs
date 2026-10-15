@@ -41,7 +41,7 @@ const P = {
 // call: without it, a subagent's MCP tool call is denied under every
 // permission mode, and the flight stalls silently (F-03). Named once here so
 // every place that writes or documents it says the same thing.
-const MCP_ALLOW_RULE = "mcp__plugin_foundry_foundry";
+const MCP_ALLOW_RULE = "mcp__plugin_kukulu_kukulu";
 
 // The plugin's own root — where agents/*.md ships — derived from this file's
 // own location rather than ROOT, because ROOT is the *project* Foundry is
@@ -1504,7 +1504,7 @@ function lastReviewCommit(inRepo) {
   return line ? line.split("\t")[0] : null;
 }
 
-const AGENT = { plan: "foundry:planner", implement: "foundry:implementer", review: "foundry:reviewer", summarize: "foundry:summarizer" };
+const AGENT = { plan: "kukulu:planner", implement: "kukulu:implementer", review: "kukulu:reviewer", summarize: "kukulu:summarizer" };
 const ROLE_OF_STAGE = { plan: "planner", implement: "implementer", review: "reviewer", summarize: "summarizer" };
 
 function next() {
@@ -1614,7 +1614,7 @@ function next() {
     return stage("done", `awaiting signing: ${st.awaitingSigning.unsigned} unsigned commit(s), oldest ${String(st.awaitingSigning.first).slice(0, 7)}. ${nextSteps(mb)}`);
   }
   if (st.archived && !s.planPresent && exists(path.join(ROOT, st.archived.dir, "SPEC.md")) && read(P.spec) === read(path.join(ROOT, st.archived.dir, "SPEC.md"))) {
-    return stage("done", `flight ${st.archived.slug} is archived in ${st.archived.dir}; edit docs/SPEC.md for the next flight, then run /foundry:go-flight`);
+    return stage("done", `flight ${st.archived.slug} is archived in ${st.archived.dir}; edit docs/SPEC.md for the next flight, then run /kukulu:go-flight`);
   }
   if (!s.planPresent || !s.progressPresent || !s.configPresent) {
     return stage("plan", "no plan on disk (docs/PLAN.md, docs/PROGRESS.md and docs/foundry.json are all required)");
@@ -2548,7 +2548,7 @@ function runFinish() {
 const FLIGHT_OPTION_KEYS = ["maxRounds", "maxRoundsHard"];
 
 /**
- * Apply the options an operator passed to /foundry:go-flight ("maximum
+ * Apply the options an operator passed to /kukulu:go-flight ("maximum
  * review depth of 6 rounds") to docs/foundry.json and commit them, so the
  * controller never hand-edits a config file (F-20 of the 2026-09-30
  * cleanflate feedback). Only the review-loop bounds are settable; anything
@@ -3294,7 +3294,7 @@ const TOOLS = [
   },
   {
     name: "foundry_flight_options",
-    description: "Apply an operator's flight options to docs/foundry.json and commit them: maxRounds (non-converging review rounds tolerated) and maxRoundsHard (absolute ceiling on review rounds). For the flight controller, when /foundry:go-flight was given options such as a maximum review depth. Refused before the plan stage has written docs/foundry.json. With resume: true it also clears a round-cap halt, provided the bound passed lifts the cap that fired. Returns { before, after, commit } (plus resumed: true).",
+    description: "Apply an operator's flight options to docs/foundry.json and commit them: maxRounds (non-converging review rounds tolerated) and maxRoundsHard (absolute ceiling on review rounds). For the flight controller, when /kukulu:go-flight was given options such as a maximum review depth. Refused before the plan stage has written docs/foundry.json. With resume: true it also clears a round-cap halt, provided the bound passed lifts the cap that fired. Returns { before, after, commit } (plus resumed: true).",
     inputSchema: S({
       maxRounds: { type: "integer", minimum: 1, description: "non-converging review rounds tolerated before the flight halts" },
       maxRoundsHard: { type: "integer", minimum: 1, description: "a review numbered above this halts the flight, converging or not" },
@@ -3375,7 +3375,7 @@ function handle(req) {
       return reply({
         protocolVersion: params?.protocolVersion || "2025-06-18",
         capabilities: { tools: {} },
-        serverInfo: { name: "foundry", version: VERSION },
+        serverInfo: { name: "kukulu", version: VERSION },
       });
     case "notifications/initialized":
     case "notifications/cancelled":

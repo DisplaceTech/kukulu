@@ -30,9 +30,9 @@ await withServer(mkDir(), async ({ call }) => {
 await withServer(specRepo(), async ({ call }) => {
   let n = await call("foundry_next");
   eq(n.stage, "plan", "SPEC alone → plan");
-  eq(n.agent, "foundry:planner", "the plan stage delegates to the planner");
+  eq(n.agent, "kukulu:planner", "the plan stage delegates to the planner");
   eq(n.agentFallback, true, "with nothing generated yet, the stage falls back to the plugin agent");
-  eq(n.fallbackAgent, "foundry:planner", "the fallback agent is always named");
+  eq(n.fallbackAgent, "kukulu:planner", "the fallback agent is always named");
   eq(n.restartRequired, false, "an Anthropic-routed role never needs a restart");
   eq(n.round, 0, "a fresh flight is round 0");
   like(n.prompt, /docs\/SPEC\.md/, "the planner prompt points at the spec");
@@ -41,7 +41,7 @@ await withServer(specRepo(), async ({ call }) => {
   await call("foundry_agents_sync");
   n = await call("foundry_next");
   eq(n.agentFallback, true, "this process created the agents directory itself, so fallback stays in effect");
-  eq(n.agent, "foundry:planner", "...and next names the plugin agent outright, not a generated one that cannot load yet (cleanflate F-22)");
+  eq(n.agent, "kukulu:planner", "...and next names the plugin agent outright, not a generated one that cannot load yet (cleanflate F-22)");
   eq(n.restartRequired, false, "still no restart needed for an Anthropic-routed role");
 });
 
@@ -120,7 +120,7 @@ await withServer(plannedRepo(), async ({ call }) => {
 
   const n = await call("foundry_next");
   eq(n.stage, "implement", "open tasks → implement");
-  eq(n.agent, "foundry:implementer", "the implement stage delegates to the implementer");
+  eq(n.agent, "kukulu:implementer", "the implement stage delegates to the implementer");
   like(n.reason, /3 open task/, "the reason counts the open tasks");
   like(n.prompt, /initial build/, "round 0's prompt says this is the initial build");
   like(n.prompt, /never ask a question/i, "the implementer prompt states the unattended contract");
@@ -219,13 +219,13 @@ for (const round of [0, 1, 5]) {
   await withServer(repo, async ({ call }) => {
     let n = await call("foundry_next");
     eq(n.stage, "review", "implemented and unreviewed → review");
-    eq(n.agent, "foundry:reviewer", "the review stage delegates to the reviewer");
+    eq(n.agent, "kukulu:reviewer", "the review stage delegates to the reviewer");
     like(n.prompt, /exactly once/, "the reviewer prompt caps the verdict at one submission");
 
     setState(repo, { reviewed: true, verdict: "APPROVED" });
     n = await call("foundry_next");
     eq(n.stage, "summarize", "approved and unsummarized → summarize");
-    eq(n.agent, "foundry:summarizer", "the summarize stage delegates to the summarizer");
+    eq(n.agent, "kukulu:summarizer", "the summarize stage delegates to the summarizer");
 
     setState(repo, { summarized: true });
     n = await call("foundry_next");

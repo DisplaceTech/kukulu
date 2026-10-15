@@ -12,11 +12,11 @@ compacted for the fortieth time.
 ```mermaid
 flowchart LR
     subgraph CC["Claude Code session"]
-        GF["/foundry:go-flight<br/>sonnet · low"]
-        A1["foundry:planner"]
-        A2["foundry:implementer"]
-        A3["foundry:reviewer"]
-        A4["foundry:summarizer"]
+        GF["/kukulu:go-flight<br/>sonnet · low"]
+        A1["kukulu:planner"]
+        A2["kukulu:implementer"]
+        A3["kukulu:reviewer"]
+        A4["kukulu:summarizer"]
     end
 
     subgraph PL["plugin"]
@@ -47,7 +47,7 @@ none of them start a run, mark a task, or record a verdict.
 `foundry_agents_sync` writes only the generated agent files under
 `.claude/agents/`, the MCP allow rule and a `.git/info/exclude` line (see
 [routing.md](./routing.md)). `foundry_flight_options` writes only the two
-review-loop bounds the operator passed to `/foundry:go-flight`.
+review-loop bounds the operator passed to `/kukulu:go-flight`.
 
 ## The stage machine
 

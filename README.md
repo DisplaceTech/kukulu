@@ -14,8 +14,8 @@ You need Node ≥ 22, git, and Claude Code. Nothing to `npm install`.
 1. **Install the plugin.** The repo is its own marketplace.
 
    ```bash
-   claude plugin marketplace add ericmann/foundry
-   claude plugin install foundry@ericmann
+   claude plugin marketplace add DisplaceTech/kukulu
+   claude plugin install kukulu@displacetech
    ```
 
 2. **Write a spec** in the project you want built, and commit it.
@@ -38,13 +38,13 @@ You need Node ≥ 22, git, and Claude Code. Nothing to `npm install`.
 
    ```bash
    claude
-   > /foundry:go-flight
+   > /kukulu:go-flight
    ```
 
-   `/foundry:go-flight` is the documented entry point, but the controller is
+   `/kukulu:go-flight` is the documented entry point, but the controller is
    model-invocable too — asking Claude to "run the foundry flight" reaches
    the same instructions. It takes one option, the review depth:
-   `/foundry:go-flight max review rounds 6`.
+   `/kukulu:go-flight max review rounds 6`.
 
 4. **Read `docs/SUMMARY.md`, then review the pull request.** Under
    `policies.finalize: "auto"`, a flight whose commits are all signed and that
@@ -60,7 +60,7 @@ You need Node ≥ 22, git, and Claude Code. Nothing to `npm install`.
 > [claude-code-router](https://github.com/musistudio/claude-code-router) —
 > copy [`templates/foundry.config.example.json`](./templates/foundry.config.example.json)
 > to `~/.config/foundry/config.json`, edit the roles or pick a profile with
-> `"profile": "local"`, and run `/foundry:go-flight` again — it will ask for
+> `"profile": "local"`, and run `/kukulu:go-flight` again — it will ask for
 > one more restart only the first time a role not reachable by name (a
 > router or local model) is generated. [docs/routing.md](./docs/routing.md)
 > has the whole story, including the router setup.
@@ -76,7 +76,7 @@ You need Node ≥ 22, git, and Claude Code. Nothing to `npm install`.
   a project override — lets you point any role at a cheaper model, local or
   hosted through a router, without changing how the pipeline runs. See
   [docs/routing.md](./docs/routing.md).
-- **A flight controller** — `/foundry:go-flight` — that makes no engineering
+- **A flight controller** — `/kukulu:go-flight` — that makes no engineering
   decisions. It asks the MCP what runs next, spawns that agent, and repeats
   until the pipeline reports `done` or `halt`.
 - **A deterministic MCP server** (`mcp/server.mjs`, no dependencies, Node ≥ 22)
@@ -190,7 +190,7 @@ checkout for one session instead:
 claude --plugin-dir /path/to/foundry
 ```
 
-Plugin skills are namespaced, so the entry point is `/foundry:go-flight`; the
+Plugin skills are namespaced, so the entry point is `/kukulu:go-flight`; the
 bare `/go-flight` form does not resolve for plugin skills.
 
 ## Per-project use
@@ -203,7 +203,7 @@ cp /path/to/foundry/templates/SPEC.md docs/SPEC.md   # then write the spec
 git add -A && git commit -m "spec"
 
 claude
-> /foundry:go-flight
+> /kukulu:go-flight
 ```
 
 An unattended implementer that hits a permission prompt sits there until the
@@ -235,9 +235,9 @@ role needs no restart at all, ever. See [docs/routing.md](./docs/routing.md).
 
 Each stage also runs by hand by delegating to its agent — `foundry-planner`,
 `foundry-implementer`, `foundry-reviewer`, `foundry-summarizer` once
-generated, else `foundry:planner` and so on — which keeps the same model and
-effort the flight controller would have used. Invoking `/foundry:plan-build`,
-`/foundry:implement`, `/foundry:review-build` or `/foundry:summarize`
+generated, else `kukulu:planner` and so on — which keeps the same model and
+effort the flight controller would have used. Invoking `/kukulu:plan-build`,
+`/kukulu:implement`, `/kukulu:review-build` or `/kukulu:summarize`
 directly runs the stage on your session's current model instead.
 
 Writing the spec is the part that decides whether any of this works —
@@ -249,7 +249,7 @@ from it and what it does with each section.
 Each of the four roles can be pointed at a different model — an Anthropic
 alias or id, or a model reached through a local router such as
 claude-code-router — from a global config file, an optional profile inside
-it, and an optional per-project override. `/foundry:go-flight` calls
+it, and an optional per-project override. `/kukulu:go-flight` calls
 `foundry_agents_sync` before its loop and prints the resolved table;
 `foundry_config_show` shows the same table, with the source of every value,
 at any time. Full precedence, the config file shape, and a
@@ -325,7 +325,7 @@ spinning.
 
 ## Resuming and halting
 
-Everything is on disk and committed, so `/foundry:go-flight` can be re-run from
+Everything is on disk and committed, so `/kukulu:go-flight` can be re-run from
 any point: `foundry_next` reads the state and continues. Three things stop a
 flight on purpose, and all of them write an explicit `halted` value in
 `.foundry/state.json`: a review round reaching `maxRoundsHard` regardless of
@@ -336,7 +336,7 @@ never penalised for taking rounds, only one that stops improving is), and
 it cannot resolve itself (F-05), and a parallel stream whose merge conflicts
 (`foundry_stream_finish` aborts it and keeps the stream). All four want a human. Raise `maxRounds` or
 `maxRoundsHard` in `docs/foundry.json` as appropriate, clear `halted`, and
-run `/foundry:go-flight` again. [docs/operations.md](./docs/operations.md)
+run `/kukulu:go-flight` again. [docs/operations.md](./docs/operations.md)
 has the rest of the runbook, including how to reopen a task once its blocker
 is fixed (`foundry_task_reopen`), what each failure looks like and how
 to unstick it.
@@ -429,7 +429,7 @@ Foundry itself costs it time — a refused tool, an ambiguous prompt, a
 stall — and the MCP logs its own halts and fallbacks the same way. Each
 entry lands in `.foundry/feedback.jsonl` and is committed immediately, so
 it survives even a flight that never reaches summarize. Run
-`/foundry:pull-feedback` against a project's checkout to turn its log into
+`/kukulu:pull-feedback` against a project's checkout to turn its log into
 a new, numbered file under [docs/feedback/](./docs/feedback/), and a
 future release plan works through it item by item.
 `docs/feedback/2026-09-21-project-a.md` is the first one, and every item

@@ -15,7 +15,7 @@ Never use AskUserQuestion. Never wait for input. Never ask whether to proceed.
 ## The MCP owns the bookkeeping
 
 All task selection, checkbox edits, log entries, verification runs and commits
-of `docs/PROGRESS.md` go through the `foundry` MCP tools. Do not edit
+of `docs/PROGRESS.md` go through the `kukulu` MCP tools. Do not edit
 `docs/PROGRESS.md` or `docs/PLAN.md` by hand. Do not decide which task is
 next; ask.
 

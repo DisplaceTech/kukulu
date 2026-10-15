@@ -23,7 +23,7 @@ const plugin = json(".claude-plugin/plugin.json");
 const pkg = json("package.json");
 const market = json(".claude-plugin/marketplace.json");
 
-eq(plugin.name, "foundry", "the plugin is named foundry");
+eq(plugin.name, "kukulu", "the plugin is named kukulu");
 ok(plugin.description && plugin.description.length > 40, "the plugin describes itself in the marketplace listing");
 like(plugin.version, /^\d+\.\d+\.\d+$/, "the plugin version is semver");
 ok(plugin.author?.name, "the plugin names an author");
@@ -49,8 +49,8 @@ ok(market.owner?.name, "the marketplace names an owner");
 
 eq(plugin.mcpServers, "./.mcp.json", "the plugin points at .mcp.json for its MCP server");
 const mcp = json(".mcp.json");
-const server = mcp.mcpServers.foundry;
-ok(server, "the MCP config defines a server called foundry");
+const server = mcp.mcpServers.kukulu;
+ok(server, "the MCP config defines a server called kukulu");
 eq(server.command, "node", "the server runs under node, with no install step");
 like(server.args[0], /^\$\{CLAUDE_PLUGIN_ROOT\}/, "the server path is resolved from CLAUDE_PLUGIN_ROOT");
 ok(exists(server.args[0].replace("${CLAUDE_PLUGIN_ROOT}/", "")), "the server file the config names exists");
@@ -201,8 +201,8 @@ for (const name of agentNames) {
   ok(fm.color, `agents/${name} has a colour`);
   const skills = Array.isArray(fm.skills) ? fm.skills : [];
   eq(skills.length, 1, `agents/${name} preloads exactly one skill`);
-  like(skills[0], /^foundry:/, `agents/${name}'s skill is namespaced`);
-  ok(skillNames.includes(skills[0].replace("foundry:", "")), `agents/${name}'s skill exists`);
+  like(skills[0], /^kukulu:/, `agents/${name}'s skill is namespaced`);
+  ok(skillNames.includes(skills[0].replace("kukulu:", "")), `agents/${name}'s skill exists`);
   like(body, new RegExp(`/${skills[0]}`), `agents/${name} tells the model how to reload its skill by name`);
 }
 
@@ -210,9 +210,9 @@ for (const name of agentNames) {
 const serverSrc = read("mcp/server.mjs");
 const AGENT_MAP = serverSrc.match(/const AGENT = \{([^}]+)\}/)[1];
 for (const name of agentNames) {
-  like(AGENT_MAP, new RegExp(`foundry:${name}`), `the server's stage table names foundry:${name}`);
+  like(AGENT_MAP, new RegExp(`kukulu:${name}`), `the server's stage table names kukulu:${name}`);
 }
-eq((AGENT_MAP.match(/foundry:/g) || []).length, agentNames.length, "the stage table has no agent the plugin does not ship");
+eq((AGENT_MAP.match(/kukulu:/g) || []).length, agentNames.length, "the stage table has no agent the plugin does not ship");
 
 // ---------------------------------------------------------------- the flight controller
 
@@ -247,14 +247,14 @@ for (const name of agentNames) {
   const mcpTools = tools.filter((t) => t.startsWith("mcp__"));
   ok(mcpTools.length > 0, `agents/${name} names at least one foundry MCP tool`);
   for (const t of mcpTools) {
-    ok(t.startsWith("mcp__plugin_foundry_foundry__"), `agents/${name}'s MCP tool ${t} uses the plugin-prefixed form`);
-    ok(toolNames.includes(t.replace("mcp__plugin_foundry_foundry__", "")), `agents/${name}'s MCP tool ${t} actually exists`);
+    ok(t.startsWith("mcp__plugin_kukulu_kukulu__"), `agents/${name}'s MCP tool ${t} uses the plugin-prefixed form`);
+    ok(toolNames.includes(t.replace("mcp__plugin_kukulu_kukulu__", "")), `agents/${name}'s MCP tool ${t} actually exists`);
   }
   ok(mcpTools.some((t) => t.endsWith("foundry_status")), `agents/${name} can call foundry_status to re-orient itself`);
-  ok(tools.includes("mcp__plugin_foundry_foundry__foundry_feedback_log"), `agents/${name} can log pipeline friction the moment it happens`);
+  ok(tools.includes("mcp__plugin_kukulu_kukulu__foundry_feedback_log"), `agents/${name} can log pipeline friction the moment it happens`);
 }
 const agentTools = (n) => frontmatter(read(`agents/${n}.md`)).tools.split(",").map((t) => t.trim());
-const PFX = "mcp__plugin_foundry_foundry__";
+const PFX = "mcp__plugin_kukulu_kukulu__";
 ok(agentTools("planner").includes(`${PFX}foundry_plan_commit`), "agents/planner names foundry_plan_commit");
 for (const t of ["foundry_summary_commit", "foundry_flight_archive", "foundry_pr_finalize"]) {
   ok(agentTools("summarizer").includes(PFX + t), `agents/summarizer names ${t}`);
@@ -268,7 +268,7 @@ for (const name of agentNames) {
 // the bare mcp__<server>__<tool> a project .mcp.json would give. The
 // controller lists both, so it is allowed its tools whichever way the server
 // was loaded.
-const MCP_PREFIXES = ["mcp__plugin_foundry_foundry__", "mcp__foundry__"];
+const MCP_PREFIXES = ["mcp__plugin_kukulu_kukulu__", "mcp__foundry__"];
 const bareTool = (t) => MCP_PREFIXES.reduce((s, p) => s.replace(p, ""), t);
 ok(allowed.includes("Agent"), "the flight controller may spawn agents");
 for (const t of ["foundry_status", "foundry_next", "foundry_agents_sync", "foundry_run_halt", "foundry_feedback_log"]) {
@@ -294,11 +294,11 @@ like(goFlight, /resume: true/, "go-flight resumes a round-cap halt with foundry_
 like(goFlight, /foundry_pr_finalize\(\{ resign: true \}\)/, "go-flight finishes a signing-blocked flight only with foundry_pr_finalize({ resign: true })");
 like(goFlight, /`flight=<slug>`/, "go-flight passes flight=<slug> to the planner");
 like(goFlight, /Flight slug: <slug>\./, "...as the sentence the planner skill looks for");
-for (const name of agentNames) like(goFlight, new RegExp(`foundry:${name}`), `go-flight names foundry:${name}`);
+for (const name of agentNames) like(goFlight, new RegExp(`kukulu:${name}`), `go-flight names kukulu:${name}`);
 like(goFlight, /notification/, "go-flight describes the loop as event-driven, not a blocking wait");
 like(goFlight, /do not poll/, "go-flight says not to poll while a stage is running");
 // F-04: the reviewer mutation-tests through the MCP, never by hand-editing source.
-ok(String(frontmatter(read("agents/reviewer.md")).tools).includes("mcp__plugin_foundry_foundry__foundry_mutate"), "agents/reviewer can call foundry_mutate");
+ok(String(frontmatter(read("agents/reviewer.md")).tools).includes("mcp__plugin_kukulu_kukulu__foundry_mutate"), "agents/reviewer can call foundry_mutate");
 {
   const reviewSkill = read("skills/review-build/SKILL.md");
   like(reviewSkill, /foundry_mutate/, "review-build tells the reviewer to mutation-test with foundry_mutate");
@@ -362,7 +362,7 @@ for (const file of PROSE) {
   }
 }
 eq(unknownTool, null, "every foundry_* tool named in prose exists on the server");
-eq(unknownSkill, null, "every foundry:* skill or agent named in prose exists");
+eq(unknownSkill, null, "every kukulu:* skill or agent named in prose exists");
 
 // Documentation links have to land somewhere.
 let brokenLink = null;

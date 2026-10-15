@@ -96,8 +96,8 @@ streams? }`.
 - `stage` — `plan` · `implement` · `review` · `summarize` · `done` · `halt`
 - `agent` — the subagent to spawn: the generated `foundry-<role>` name when
   it can be trusted to spawn (`agentFallback` is false), else the plugin's
-  own `foundry:planner` / `foundry:implementer` / `foundry:reviewer` /
-  `foundry:summarizer`; `null` for `done`, `halt`, and whenever
+  own `kukulu:planner` / `kukulu:implementer` / `kukulu:reviewer` /
+  `kukulu:summarizer`; `null` for `done`, `halt`, and whenever
   `restartRequired` is true. On a project's first flight, when this session
   created the agents directory, that means the plugin agent outright,
   rather than a generated name that fails with "not found" and is retried
@@ -107,7 +107,7 @@ streams? }`.
   `.claude/agents` directory itself (see [routing.md](./routing.md) for why
   that one case needs a restart and a routing *change* to an existing
   directory does not)
-- `fallbackAgent` — the plugin's own `foundry:<role>` name, always present
+- `fallbackAgent` — the plugin's own `kukulu:<role>` name, always present
   for a stage that has a role, so a controller can retry with it if spawning
   a generated `agent` still fails with "not found"
 - `restartRequired` — true only when `agentFallback` is true **and** the
@@ -134,7 +134,7 @@ streams? }`.
   after 2 reviews (1 fix round); …" (cleanflate F-21). After
   [`foundry_flight_archive`](#foundry_flight_archive) it is `done` with the
   reason "flight <slug> is archived in <dir>; edit docs/SPEC.md for the next
-  flight, then run /foundry:go-flight", until `docs/SPEC.md` differs from the
+  flight, then run /kukulu:go-flight", until `docs/SPEC.md` differs from the
   archived copy; then the stage is `plan` again. While
   `foundry_pr_finalize` has recorded `state.awaitingSigning` the stage is
   `done` with the reason "awaiting signing: <n> unsigned commit(s), oldest
@@ -697,7 +697,7 @@ same reason. Clearing it is the same hand edit as any other halt — see
 ## `foundry_flight_options`
 
 Apply the operator's flight options to `docs/foundry.json`. go-flight calls
-it when `/foundry:go-flight` was given options such as "maximum review depth
+it when `/kukulu:go-flight` was given options such as "maximum review depth
 of 6 rounds", so the controller never hand-edits the config (cleanflate
 F-20).
 
@@ -955,7 +955,7 @@ not a draft. `merge` is `"enabled"`, `"skipped: breaking"`, `"skipped: policy"`,
 ## `foundry_agents_sync`
 
 Generate `.claude/agents/foundry-<role>.md` for each of the four roles from
-the merged routing config. This is what `/foundry:go-flight` calls, once,
+the merged routing config. This is what `/kukulu:go-flight` calls, once,
 before its loop; see [routing.md](./routing.md) for the full precedence.
 
 **Arguments:** none.
@@ -970,7 +970,7 @@ before its loop; see [routing.md](./routing.md) for the full precedence.
    alias or a `claude-*` id) and `permissionMode` — and writes it only when
    the rendered text differs from what is already on disk.
 3. Ensures the MCP allow rule (`{ "permissions": { "allow":
-   ["mcp__plugin_foundry_foundry"] } }`) is covered by either
+   ["mcp__plugin_kukulu_kukulu"] } }`) is covered by either
    `.claude/settings.json` or `.claude/settings.local.json` (F-03):
    read-merge-write on the local file, preserving every other key and allow
    entry, creating the file only if neither already covers it. A
@@ -1007,7 +1007,7 @@ permissions, restartRequired, exclude, table }`.
 - `exclude` — `"added"` | `"present"` | `"skipped: not a git repository"`
 - `table` — the same information as a ready-to-print Markdown table
 
-`/foundry:go-flight` checks `restartRequired` and stops with a fixed message
+`/kukulu:go-flight` checks `restartRequired` and stops with a fixed message
 rather than spawning a stage against a model it cannot reach; see
 [operations.md](./operations.md#routing).
 

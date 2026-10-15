@@ -18,12 +18,12 @@
 //   1. No lock, or no open tasks: allow. Nothing to guard.
 //   2. `hook_event_name` is `SubagentStop`: block only when `agent_type`
 //      names the implementer (`foundry-implementer` or
-//      `foundry:implementer`). Any other named agent is allowed outright.
+//      `kukulu:implementer`). Any other named agent is allowed outright.
 //      A missing `agent_type` falls back to rule 3's transcript check.
 //   3. `hook_event_name` is `Stop`: block only when *this session's own
 //      transcript* holds a `tool_use` of `foundry_run_start` — i.e. the
 //      implement stage is running directly in the main session
-//      (`/foundry:implement` by hand, or `claude -p`), not a flight this
+//      (`/kukulu:implement` by hand, or `claude -p`), not a flight this
 //      session is merely waiting on in the background. The check parses
 //      the transcript and looks for the call itself; the bare text
 //      "foundry_run_start" proves nothing, because a go-flight controller's
@@ -65,7 +65,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-const IMPLEMENTER_AGENT_TYPES = new Set(["foundry-implementer", "foundry:implementer"]);
+const IMPLEMENTER_AGENT_TYPES = new Set(["foundry-implementer", "foundry:implementer", "kukulu:implementer"]);
 
 function readStdin() {
   try {

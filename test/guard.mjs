@@ -41,11 +41,11 @@ const implementerStop = (repo, extra = {}) => ({
 const toolUseLine = (name, input = {}, extra = {}) =>
   JSON.stringify({ type: "assistant", isSidechain: false, message: { role: "assistant", content: [{ type: "tool_use", id: "toolu_1", name, input }] }, ...extra });
 
-const RUN_START = "mcp__plugin_foundry_foundry__foundry_run_start";
+const RUN_START = "mcp__plugin_kukulu_kukulu__foundry_run_start";
 
 /** A Stop whose transcript does (or does not) call foundry_run_start. */
 function stopWithTranscript(repo, calledRunStart, extra = {}) {
-  writeFile(repo, "transcript.jsonl", `${toolUseLine(calledRunStart ? RUN_START : "mcp__plugin_foundry_foundry__foundry_status")}\n`);
+  writeFile(repo, "transcript.jsonl", `${toolUseLine(calledRunStart ? RUN_START : "mcp__plugin_kukulu_kukulu__foundry_status")}\n`);
   return { hook_event_name: "Stop", transcript_path: TRANSCRIPT(repo), ...extra };
 }
 
@@ -88,8 +88,8 @@ eq(
 
 {
   const repo = armed();
-  const j = JSON.parse(guard(repo, { input: implementerStop(repo, { agent_type: "foundry:implementer" }) }));
-  eq(j.decision, "block", "the plugin-agent name foundry:implementer also blocks");
+  const j = JSON.parse(guard(repo, { input: implementerStop(repo, { agent_type: "kukulu:implementer" }) }));
+  eq(j.decision, "block", "the plugin-agent name kukulu:implementer also blocks");
 }
 
 {
@@ -137,7 +137,7 @@ eq(
     repo,
     "transcript.jsonl",
     [
-      toolUseLine("mcp__plugin_foundry_foundry__foundry_next"),
+      toolUseLine("mcp__plugin_kukulu_kukulu__foundry_next"),
       JSON.stringify({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_1", content: JSON.stringify({ stage: "implement", prompt }) }] } }),
       toolUseLine("Agent", { subagent_type: "foundry-implementer", prompt }),
     ].join("\n") + "\n",

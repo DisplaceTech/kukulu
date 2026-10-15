@@ -41,7 +41,7 @@ await withServer(repo, async ({ call }) => {
   // directory, which loads only in the next session, so every stage names
   // the plugin's own agent outright (cleanflate F-22). The fresh-process
   // block below covers the generated names.
-  eq(n.agent, "foundry:planner", "the plugin planner agent is named on a first flight");
+  eq(n.agent, "kukulu:planner", "the plugin planner agent is named on a first flight");
   ok(n.model, "a resolved model is reported for the plan stage");
 
   writeFile(repo, "docs/PLAN.md", planDoc(TASKS));
@@ -57,7 +57,7 @@ await withServer(repo, async ({ call }) => {
   n = await call("foundry_next");
   eq(n.stage, "implement", "a plan on disk means it is time to build");
   eq(n.round, 0, "the first build is round 0");
-  eq(n.agent, "foundry:implementer", "the plugin implementer agent is named");
+  eq(n.agent, "kukulu:implementer", "the plugin implementer agent is named");
   ok(n.model, "a resolved model is reported for the implement stage");
 
   // ---------------------------------------------------------------- build
@@ -114,7 +114,7 @@ await withServer(repo, async ({ call }) => {
 
   n = await call("foundry_next");
   eq(n.stage, "review", "a handoff means it is the reviewer's turn");
-  eq(n.agent, "foundry:reviewer", "the plugin reviewer agent is named");
+  eq(n.agent, "kukulu:reviewer", "the plugin reviewer agent is named");
   ok(n.model, "a resolved model is reported for the review stage");
 
   // ---------------------------------------------------------------- review
@@ -138,7 +138,7 @@ await withServer(repo, async ({ call }) => {
   n = await call("foundry_next");
   eq(n.stage, "implement", "changes requested sends the flight back to the implementer");
   eq(n.round, 1, "on round 1");
-  eq(n.agent, "foundry:implementer", "still the plugin implementer agent, on the fix round");
+  eq(n.agent, "kukulu:implementer", "still the plugin implementer agent, on the fix round");
 
   // ---------------------------------------------------------------- fix round
 
@@ -170,7 +170,7 @@ await withServer(repo, async ({ call }) => {
 
   n = await call("foundry_next");
   eq(n.stage, "review", "round 1 goes back for review");
-  eq(n.agent, "foundry:reviewer", "still the plugin reviewer agent, on round 1");
+  eq(n.agent, "kukulu:reviewer", "still the plugin reviewer agent, on round 1");
 
   writeFile(repo, "docs/REVIEW.md", "# Review\nRound: 2\n**Verdict**: APPROVED\n");
   isError(await call("foundry_summary_commit"), /docs\/SUMMARY\.md does not exist/, "there is no summary to commit yet");
@@ -180,7 +180,7 @@ await withServer(repo, async ({ call }) => {
 
   n = await call("foundry_next");
   eq(n.stage, "summarize", "an approved branch needs its summary");
-  eq(n.agent, "foundry:summarizer", "the plugin summarizer agent is named");
+  eq(n.agent, "kukulu:summarizer", "the plugin summarizer agent is named");
   ok(n.model, "a resolved model is reported for the summarize stage");
 
   writeFile(repo, "docs/SUMMARY.md", "# summary\nMerge build/... into main.\n");

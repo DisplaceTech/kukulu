@@ -14,7 +14,7 @@ by a smaller model running the `implement` stage, which grinds through every
 task in order with no human in the loop and no memory of earlier tasks beyond
 what is on disk, and is then reviewed by a stronger model running the
 `review-build` stage. Everything the implementer needs must therefore be in the
-task text, and the plan must be machine-trackable: the `foundry` MCP parses
+task text, and the plan must be machine-trackable: the `kukulu` MCP parses
 these files with fixed patterns, so the formats below are exact.
 
 ## Deliverables

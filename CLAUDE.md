@@ -81,7 +81,7 @@ and the name at the same position in `test/protocol.mjs`'s `EXPECTED_TOOLS`.
 Set the count in `test/plugin.mjs` to the number of `name: "foundry_` entries
 in `TOOLS`, and spell the same number in words on the first line of
 `docs/mcp-tools.md` ("Nineteen tools", "Twenty tools", "Twenty-one tools").
-Append `mcp__plugin_foundry_foundry__<tool>` to the `tools:` line of the agent
+Append `mcp__plugin_kukulu_kukulu__<tool>` to the `tools:` line of the agent
 the task names. Add a `## <tool>` section to `docs/mcp-tools.md`.
 
 **Adding a `docs/foundry.json` key.** Validate it in the config validator with

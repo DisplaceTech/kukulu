@@ -204,7 +204,7 @@ Then:
 
 ```bash
 claude
-> /foundry:go-flight
+> /kukulu:go-flight
 ```
 
 (The README's per-project section covers the one-time permission rule an

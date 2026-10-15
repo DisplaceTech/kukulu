@@ -104,7 +104,7 @@ const cfgDir = () => mkDir("foundry-cfg-");
     const r = await call("foundry_agents_sync");
     eq(r.permissions, "added", "the first sync adds the allow rule");
     const settings = JSON.parse(readFile(repo, ".claude/settings.local.json"));
-    eq(settings.permissions.allow.join(","), "mcp__plugin_foundry_foundry", "settings.local.json carries exactly the one rule");
+    eq(settings.permissions.allow.join(","), "mcp__plugin_kukulu_kukulu", "settings.local.json carries exactly the one rule");
     eq((await call("foundry_config_show")).permissionRule, "present", "config_show now reports it present");
 
     const r2 = await call("foundry_agents_sync");
@@ -130,7 +130,7 @@ const cfgDir = () => mkDir("foundry-cfg-");
     eq(r.permissions, "added", "the rule is added alongside what was already there");
     const settings = JSON.parse(readFile(repo, ".claude/settings.local.json"));
     eq(settings.theme, "dark", "an unrelated top-level key survives");
-    eq(settings.permissions.allow.join(","), "Bash(npm test),mcp__plugin_foundry_foundry", "an existing allow entry survives, and the rule is appended");
+    eq(settings.permissions.allow.join(","), "Bash(npm test),mcp__plugin_kukulu_kukulu", "an existing allow entry survives, and the rule is appended");
     eq(settings.permissions.deny.join(","), "Bash(rm -rf /)", "an existing deny list survives untouched");
   });
 }
@@ -138,7 +138,7 @@ const cfgDir = () => mkDir("foundry-cfg-");
 {
   // The committed settings.json can carry the rule instead; nothing is written.
   const repo = plannedRepo();
-  writeFile(repo, ".claude/settings.json", JSON.stringify({ permissions: { allow: ["mcp__plugin_foundry_foundry"] } }, null, 2) + "\n");
+  writeFile(repo, ".claude/settings.json", JSON.stringify({ permissions: { allow: ["mcp__plugin_kukulu_kukulu"] } }, null, 2) + "\n");
   git(repo, ["add", "-A"]);
   git(repo, ["commit", "-qm", "chore: commit the allow rule"]);
   await withServer(repo, async ({ call }) => {
@@ -257,7 +257,7 @@ const cfgDir = () => mkDir("foundry-cfg-");
   await withServer(repo, async ({ call }) => {
     let n = await call("foundry_next");
     eq(n.stage, "implement", "a freshly planned repo has open tasks");
-    eq(n.agent, "foundry:implementer", "before sync, the plugin agent name is used");
+    eq(n.agent, "kukulu:implementer", "before sync, the plugin agent name is used");
     const modelBefore = n.model;
     ok(modelBefore, "a resolved model is reported even before sync");
 
@@ -267,7 +267,7 @@ const cfgDir = () => mkDir("foundry-cfg-");
     await call("foundry_agents_sync");
 
     n = await call("foundry_next");
-    eq(n.agent, "foundry:implementer", "after this process's own first sync, the plugin agent is still named: the new directory loads next session");
+    eq(n.agent, "kukulu:implementer", "after this process's own first sync, the plugin agent is still named: the new directory loads next session");
     eq(n.model, modelBefore, "the resolved model is unchanged by sync");
 
     s = await call("foundry_status");

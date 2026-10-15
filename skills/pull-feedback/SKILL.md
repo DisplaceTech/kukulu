@@ -1,6 +1,6 @@
 ---
 name: pull-feedback
-description: "Read another project's .foundry/feedback.jsonl and write it into this repo's docs/feedback/ as a new, properly numbered file, so a real flight's friction can feed the next Foundry release plan. Invoke by name or as /foundry:pull-feedback."
+description: "Read another project's .foundry/feedback.jsonl and write it into this repo's docs/feedback/ as a new, properly numbered file, so a real flight's friction can feed the next Foundry release plan. Invoke by name or as /kukulu:pull-feedback."
 allowed-tools: Read, Write, Bash, Glob
 ---
 
