@@ -82,6 +82,7 @@ Copyright in this project was assigned by Eric Mann to Displace Technologies LLC
 
 - New tool `kukulu_migrate` (22 tools in total).
 - `kukulu_status` and `kukulu_next` return a `deprecations` array.
+- The secret-scan workflow runs the pinned gitleaks 8.28.0 binary, verified against the release checksum, instead of `gitleaks-action`, which requires a license key in an organization-owned repository.
 - `scripts/check-names.mjs` runs in `npm run lint`: it fails on a macron letter outside the standalone name, on an ASCII spelling of the name in Markdown prose, and on an apostrophe where the ʻokina belongs.
 
 ## [0.5.0] — 2026-10-07
