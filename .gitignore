@@ -5,5 +5,3 @@ node_modules/
 # Claude Code local session settings
 .claude/settings.local.json
 .kukulu/implement.lock
-# Projects that have not migrated yet, this one until its own state moves.
-.foundry/implement.lock
