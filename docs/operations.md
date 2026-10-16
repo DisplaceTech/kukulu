@@ -1,6 +1,6 @@
 # Operations
 
-Running a flight, resuming one, and unsticking one. Everything Kūkulu knows is on disk and committed, so there is no hidden state to reason about: when something looks wrong, `kukulu_status` is the whole truth.
+How to run a flight, resume one, and unstick one. Everything Kūkulu knows is on disk and committed, so there is no hidden state: when something looks wrong, `kukulu_status` shows all of it.
 
 ## Running a flight
 
@@ -10,7 +10,7 @@ claude
 > /kukulu:go-flight
 ```
 
-The controller is model-invocable, so asking for it by name works too; the slash command is just the documented shortcut. It prints the stage it is entering, delegates, and repeats. Each stage is one `Agent` call that either blocks until the stage finishes or returns at once with the result delivered later as a completion notification — the controller treats both the same way and never polls in between. When it stops it prints the final stage, the number of reviews and fix rounds, the branch, and the path to `docs/SUMMARY.md` if one exists.
+The controller is model-invocable, so asking for it by name also works; the slash command is the documented shortcut. It prints the stage it is entering, delegates, and repeats. Each stage is one `Agent` call that either blocks until the stage finishes or returns at once and delivers its result later as a completion notification. The controller treats both the same way and never polls in between. When it stops, it prints the final stage, the number of reviews and fix rounds, the branch, and the path to `docs/SUMMARY.md` if one exists.
 
 ### Flight options
 
@@ -20,11 +20,11 @@ Text after the command is the flight's options:
 > /kukulu:go-flight max review rounds 6
 ```
 
-The review-loop bounds are the only options. "max review rounds N" (or "maximum review depth of N rounds", or any phrasing that plainly asks for at most N reviews) sets both `maxRounds` and `maxRoundsHard` to N. The controller applies the options with `kukulu_flight_options` as soon as `docs/kukulu.json` exists, that is, right after the plan stage. The tool commits them as `chore: flight options (…)`. Anything the controller cannot map, it prints as `ignored flight option: …` and carries on. It never asks.
+The review-loop bounds are the only options. "max review rounds N" (or "maximum review depth of N rounds", or any phrasing that plainly asks for at most N reviews) sets both `maxRounds` and `maxRoundsHard` to N. The controller applies the options with `kukulu_flight_options` as soon as `docs/kukulu.json` exists, that is, right after the plan stage. The tool commits them as `chore: flight options (…)`. The controller prints anything it cannot map as `ignored flight option: …` and carries on without asking.
 
 ### First flight in a project
 
-On a project's first flight, every stage runs on the plugin's own `kukulu:<role>` agent, with the routed model passed as an alias. The generated `kukulu-<role>` agents land in a `.claude/agents` directory this session created, and Claude Code loads a new agents directory only in the next session. `kukulu_next` names the plugin agent outright, so this is quiet. One difference matters: plugin agents ignore `permissionMode`, so the first flight's stages run under your session's own permission mode. Start the session in `acceptEdits` mode, or a stage may be refused the `Write` tool and fall back to writing files with a shell heredoc (cleanflate F-23). From the second flight on, the generated agents carry the routed `effort` and `permissionMode` themselves.
+On a project's first flight, every stage runs on the plugin's own `kukulu:<role>` agent, with the routed model passed as an alias. The generated `kukulu-<role>` agents land in a `.claude/agents` directory this session created, and Claude Code loads a new agents directory only in the next session. `kukulu_next` names the plugin agent outright, so this is quiet. One difference matters: plugin agents ignore `permissionMode`, so the first flight's stages run under your session's own permission mode. Start the session in `acceptEdits` mode, or a stage may be refused the `Write` tool and fall back to writing files with a shell heredoc. From the second flight on, the generated agents carry the routed `effort` and `permissionMode` themselves.
 
 An implementer that hits a permission prompt sits there until the guard's cap trips, hours later, having done nothing. The generated `kukulu-<role>` agents carry `permissionMode: acceptEdits`, which covers file edits.
 
@@ -34,7 +34,7 @@ MCP tool calls need one allow rule, since a subagent's permission mode does not 
 { "permissions": { "allow": ["mcp__plugin_kukulu_kukulu"] } }
 ```
 
-`kukulu_agents_sync` — which `/kukulu:go-flight` calls before its loop — writes this itself into the project's `.claude/settings.local.json` (F-03), read-merge-write, unless it is already covered there or in the committed `.claude/settings.json`. It never touches `~/.claude/settings.json`; put the rule there yourself if you want it to apply to every project instead of one. Its result's `permissions` field is `"added"`, `"present"`, or `"failed: <why>"` — a `settings.local.json` that fails to parse is reported, never overwritten. Without the rule, the first stage's first `kukulu_status` call is denied and the flight stalls silently.
+`/kukulu:go-flight` calls `kukulu_agents_sync` before its loop, and `kukulu_agents_sync` writes this rule into the project's `.claude/settings.local.json` itself, merging it into whatever the file already holds, unless the rule is already covered there or in the committed `.claude/settings.json`. It never touches `~/.claude/settings.json`; put the rule there yourself if you want it to apply to every project instead of one. Its result's `permissions` field is `"added"`, `"present"`, or `"failed: <why>"`. A `settings.local.json` that fails to parse is reported, never overwritten. Without the rule, the first stage's first `kukulu_status` call is denied and the flight stalls silently.
 
 ## Checking on a run
 
@@ -63,9 +63,9 @@ There is one command:
 > /kukulu:go-flight
 ```
 
-`kukulu_next` re-reads disk and continues from wherever the flight stopped — mid-task, mid-round, or between stages. A task left `[~]` by a crashed run is handed back with `resumed: true`; a run that died before its handoff is detected by its leftover lock and sent back to the implementer to finish.
+`kukulu_next` re-reads disk and continues from wherever the flight stopped: mid-task, mid-round, or between stages. A task left `[~]` by a crashed run is handed back with `resumed: true`; a run that died before its handoff is detected by its leftover lock and sent back to the implementer to finish.
 
-Resuming is the answer to a compacted context, a closed laptop, a killed session, and a subagent that errored out. It is not the answer to a halt.
+Resume after a compacted context, a closed laptop, a killed session, or a subagent that errored out. Resuming does not get a flight past a halt.
 
 ## Reopening a blocked task
 
@@ -75,13 +75,13 @@ A task blocks on something outside the flight's control, such as a download the 
 > use kukulu_task_reopen with id P0-08 and reason "corpus file supplied at data/cantrbry.tar.gz"
 ```
 
-Every task that was skipped because of it comes back too, transitively. A dependent that still waits on a different blocked task is just skipped again. The next `kukulu_task_next` picks the reopened task up. If the run had already finished, the next `/kukulu:go-flight` hands out an implement stage for the same round. Inside a flight, the reviewer does the same thing through `kukulu_review_submit`'s `unblock`. Do not flip checkboxes in `docs/PROGRESS.md` by hand (cleanflate F-03, F-18).
+Every task that was skipped because of it comes back too, transitively. A dependent that still waits on a different blocked task is skipped again. The next `kukulu_task_next` picks the reopened task up. If the run had already finished, the next `/kukulu:go-flight` hands out an implement stage for the same round. Inside a flight, the reviewer does the same thing through `kukulu_review_submit`'s `unblock`. Do not flip checkboxes in `docs/PROGRESS.md` by hand.
 
 ## Halts
 
 Four things halt a flight on purpose.
 
-**Round cap.** `kukulu_review_submit` writes a `halted` reason under either of two conditions (F-13, F-15): the round count reaches `maxRoundsHard` (default 6) regardless of how well the rounds are going, or the number of *non-converging* rounds — a round whose fix-task count did not shrink from the one before it — reaches `maxRounds` (default 3). A flight whose findings go 15 → 3 → 2 → 1 never trips the soft cap, however many rounds that takes; one that goes 4 → 4 → 4 does, on the third round, because none of them improved on the last. `kukulu_status`'s `state.rounds` has the count for every round so far, and the halt message includes the trail.
+**Round cap.** `kukulu_review_submit` writes a `halted` reason under either of two conditions: the round count reaches `maxRoundsHard` (default 6), however well the rounds are going, or the number of *non-converging* rounds (rounds whose fix-task count did not shrink from the one before) reaches `maxRounds` (default 3). A flight whose findings go 15 → 3 → 2 → 1 never trips the soft cap, however many rounds that takes; one that goes 4 → 4 → 4 does, on the third round, because none of them improved on the last. `kukulu_status`'s `state.rounds` has the count for every round so far, and the halt message includes the trail.
 
 ```bash
 # read the reviews first — docs/REVIEW.md is overwritten each round,
@@ -94,43 +94,43 @@ To continue anyway, make the call the halt message names: `kukulu_flight_options
 
 **Missing spec.** No `docs/SPEC.md` means there is nothing to build from. Write one; see [writing-specs.md](./writing-specs.md).
 
-**An operator-level problem.** `kukulu_run_halt` records a reason when the implementer hits something no task-level retry fixes: a signing agent that died, a full disk, a `verify` command that cannot even run, a vanished base branch (F-05). Nothing is reset or cleaned — read the branch exactly as the run left it.
+**An operator-level problem.** `kukulu_run_halt` records a reason when the implementer hits something no task-level retry fixes: a signing agent that died, a full disk, a `verify` command that cannot even run, a vanished base branch. Nothing is reset or cleaned up, so you can read the branch exactly as the run left it.
 
-To continue anyway, after fixing the actual problem: set `"halted": null` in `.kukulu/state.json`, commit it, and re-run the flight.
+To continue once the problem is fixed: set `"halted": null` in `.kukulu/state.json`, commit it, and re-run the flight.
 
-**A stream merge conflict.** When a parallel stream's branch conflicts on merge, `kukulu_stream_finish` aborts the merge, keeps the stream's branch and worktree, and halts with the conflicting paths in the reason — Kūkulu cannot guess a merge. See [Parallel streams](#parallel-streams) for the recovery.
+**A stream merge conflict.** When a parallel stream's branch conflicts on merge, `kukulu_stream_finish` aborts the merge, keeps the stream's branch and worktree, and halts with the conflicting paths in the reason. Kūkulu cannot guess a merge. See [Parallel streams](#parallel-streams) for the recovery.
 
 ## When something goes wrong
 
 | Symptom | What it means | What to do |
 |---|---|---|
-| Controller stops immediately with `halt` | Read the `reason` — missing spec, or `halted` in state | Fix the named cause, re-run |
-| The controller session itself gets blocked from stopping | Should not happen after 0.3.0 (F-07) — the guard only considers a stop it can attribute to the implementer | Check `hooks/hooks.json`'s `SubagentStop` matcher is intact and that no project override replaced it; file it as a bug otherwise |
-| Implementer stops with tasks open mid-task | The guard blocked and the agent still stopped, or the per-task stall cap tripped | Check `kukulu_status`'s `lockCounter` against the effective cap (`guardCap`, else `KUKULU_GUARD_CAP`, else 60); at the cap, something is genuinely wedged on one task — read its log and block it by hand |
-| Every task blocks with the same error | The plan assumes something that is not there | Stop the flight. Fix `SPEC.md`, re-plan; do not let it grind through 40 blocked tasks |
+| Controller stops immediately with `halt` | Read the `reason`: missing spec, or `halted` in state | Fix the named cause, re-run |
+| The controller session itself gets blocked from stopping | Should not happen after 0.3.0: the guard only considers a stop it can attribute to the implementer | Check that `hooks/hooks.json`'s `SubagentStop` matcher is intact and that no project override replaced it; otherwise, file a bug |
+| Implementer stops with tasks open mid-task | The guard blocked and the agent still stopped, or the per-task stall cap tripped | Check `kukulu_status`'s `lockCounter` against the effective cap (`guardCap`, else `KUKULU_GUARD_CAP`, else 60); at the cap, something is wedged on one task: read its log and block it by hand |
+| Every task blocks with the same error | The plan assumes something that is not there | Stop the flight. Fix `SPEC.md` and re-plan; do not let it grind through 40 blocked tasks |
 | `kukulu_task_done` keeps refusing | The implementer is not committing with `<ID>:` as the subject, or is leaving files uncommitted | The commit template lives in `CLAUDE.md`; check the planner wrote one |
-| `kukulu_verify` fails on a clean checkout | The commands in `docs/kukulu.json` are wrong | Fix them there — they came from `SPEC.md` §7, so fix that too |
+| `kukulu_verify` fails on a clean checkout | The commands in `docs/kukulu.json` are wrong | Fix them there. They came from `SPEC.md` §7, so fix that too |
 | Run finishes but nothing was pushed | No `origin`, or the push failed | `push` in the handoff output says which; the branch is local and reviewable either way |
 | No draft PR | `gh` is not installed or not authenticated | Optional by design; open one yourself |
 | Reviewer approves work that is wrong | `CLAUDE.md` `## Constraints` are unverifiable | Tighten `SPEC.md` §3 so each rule is a grep, then re-plan |
-| Controller prints `KUKULU: RESTART REQUIRED` and stops | The agents directory was populated for the first time in this project, and a changed role routes to a model the `Agent` tool cannot name directly | Expected, and rare after 0.3.0 — only the first sync of a router-routed role hits this. Run `/kukulu:go-flight` again in a new session |
+| Controller prints `KUKULU: RESTART REQUIRED` and stops | The agents directory was populated for the first time in this project, and a changed role routes to a model the `Agent` tool cannot name directly | Expected, and rare after 0.3.0: only the first sync of a router-routed role hits this. Run `/kukulu:go-flight` again in a new session |
 | `Agent` call fails with `Agent type 'kukulu-<role>' not found` | Same cause as above, hit mid-flight instead of at the start | Same fix: relaunch and re-run |
-| Flight stops immediately with a routing config error | The global file, a profile, or `docs/kukulu.json`'s `roles`/`permissionMode` is malformed | Run `kukulu_config_show` to see exactly what and where; fix it and re-run |
+| Flight stops immediately with a routing config error | The global file, a profile, or `docs/kukulu.json`'s `roles`/`permissionMode` is malformed | Run `kukulu_config_show` to see what is wrong and where; fix it and re-run |
 | `kukulu_run_start` refuses with a signing message | `policies.signing` is `"required"` and either signing is not configured or a real signed commit failed | Fix the signing agent, or set `policies.signing` to `"off"` in `docs/kukulu.json` |
-| Flight halts with a reason naming a dead tool or agent | `kukulu_run_halt` was called | Read the reason, fix the actual problem, clear `halted` in `.kukulu/state.json`, re-run |
-| Flight halts with "non-converging" or "hard cap" in the reason | Review findings stopped shrinking for `maxRounds` rounds, or the round count reached `maxRoundsHard` | Read `kukulu_status`'s `state.rounds` for the trail of counts; if the reviewer is genuinely still converging, raise `maxRounds`/`maxRoundsHard`; otherwise a human needs to look at why findings keep recurring |
+| Flight halts with a reason naming a dead tool or agent | `kukulu_run_halt` was called | Read the reason, fix the problem, clear `halted` in `.kukulu/state.json`, re-run |
+| Flight halts with "non-converging" or "hard cap" in the reason | Review findings stopped shrinking for `maxRounds` rounds, or the round count reached `maxRoundsHard` | Read `kukulu_status`'s `state.rounds` for the trail of counts; if the reviewer is still converging, raise `maxRounds`/`maxRoundsHard`; otherwise a human needs to look at why findings keep recurring |
 | `kukulu_review_submit` refuses over the `Round:` line | `docs/REVIEW.md`'s `Round:` line is missing or does not equal `reviewRound` | The error names the expected value; `kukulu_status`'s `reviewRound` always has it too |
 | `kukulu_next` keeps handing out the same stream | A stream's implementer stops before `kukulu_stream_finish` (the guard cap, a crash, a refused call) | Expected: `kukulu_run_start({ stream })` resumes its worktree. If it never makes progress, read that stream's task log; see [Parallel streams](#parallel-streams) to abandon it |
 | A stream's tool call times out while another stream is verifying | Tool calls are handled one at a time, so it queued behind the other stream's longest command | Raise Claude Code's `MCP_TOOL_TIMEOUT` above `kukulu_status`'s `longestCommandTimeoutMs`; see [Parallel streams](#parallel-streams) |
-| A wave ran serially though the plan declared streams | Its partition was invalid, its `parallel.setup` failed, or `parallel.maxStreams` is `1` | Read `kukulu_status`'s `waves[].reason` and `.kukulu/feedback.jsonl` for a `stream-partition`, `stream-setup` or `stream-exclusive` entry; it is a planning defect to fix in the next plan, not a stuck flight |
+| A wave ran serially though the plan declared streams | Its partition was invalid, its `parallel.setup` failed, or `parallel.maxStreams` is `1` | Read `kukulu_status`'s `waves[].reason` and `.kukulu/feedback.jsonl` for a `stream-partition`, `stream-setup` or `stream-exclusive` entry. That is a planning defect to fix in the next plan; the flight is not stuck |
 | A verify or mutate command ran away (an infinite loop, endless output) | Before 0.4.0 this could hang the reviewer for the whole timeout, leave test processes spinning, or disconnect the MCP server | Nothing, now: the command's whole process group is killed at its timeout or at 64 MiB of output, and the result says `timedOut` or `outputLimitExceeded`. A reviewer who suspects a hanging mutant passes `timeoutMs` to `kukulu_mutate` |
 | A step takes longer than the ten-minute limit on a foreground Bash call | Full benchmarks and heavy suites | Make it a `verify`/`extraVerify` command with its own `timeoutMs`, so it runs through `kukulu_verify`, and raise `MCP_TOOL_TIMEOUT` above `kukulu_status`'s `longestCommandTimeoutMs` |
 | A project hook denies a `git commit` whose message only mentions a forbidden word | The hook scans the whole Bash command line, including the quoted message | The implement skill commits with `git commit -F <file>`; Kūkulu's own bookkeeping commits never pass through Bash |
-| A subagent's first `kukulu_status` call is denied | The MCP allow rule is missing, or `kukulu_agents_sync` reported `permissions: "failed: ..."` | Run `kukulu_config_show` and check `permissionRule`; if a sync failed, the message names the broken `settings.local.json` — fix its JSON and re-run |
+| A subagent's first `kukulu_status` call is denied | The MCP allow rule is missing, or `kukulu_agents_sync` reported `permissions: "failed: ..."` | Run `kukulu_config_show` and check `permissionRule`; if a sync failed, the message names the broken `settings.local.json`. Fix its JSON and re-run |
 
 ## Clearing a wedged run by hand
 
-Nothing here is magic; it is all files.
+All of the run's state is in files you can edit.
 
 ```bash
 # stand the guard down (safe: the next run_start re-arms it)
@@ -147,7 +147,7 @@ git commit -am "progress: P3-07 blocked by hand"
 $EDITOR .kukulu/state.json   # implemented: true, reviewed: false
 ```
 
-The one file not to hand-edit casually is `docs/PROGRESS.md` while a run is armed — the guard counts its checkboxes, and the MCP rewrites it from its own parse. Edit it between stages, not during one.
+Do not hand-edit `docs/PROGRESS.md` casually while a run is armed: the guard counts its checkboxes, and the MCP rewrites it from its own parse. Edit it between stages, not during one.
 
 ## Running flight after flight
 
@@ -155,11 +155,11 @@ A repository usually runs more than one flight. Three things make the second one
 
 **Name the flight.** Set `"flight"` in `docs/kukulu.json` to a slug (`^[a-z0-9][a-z0-9-]{0,39}$`), or pass `flight=<slug>` to `/kukulu:go-flight` and the planner writes it for you. The slug names the flight's archive directory.
 
-**Archive it.** `kukulu_flight_archive` moves a summarized flight into `docs/flights/<slug>/`: `PLAN.md`, `PROGRESS.md`, `HANDOFF.md`, `REVIEW.md`, `SUMMARY.md`, `kukulu.json`, `.kukulu/state.json` and `.kukulu/feedback.jsonl`, each one that exists. It copies `docs/SPEC.md` there but leaves the live spec where it is, writes a fresh `.kukulu/state.json` recording the archive, and commits everything as `chore: archive flight <slug>`. It refuses unless the flight is summarized, no run is armed, the working tree is clean and the destination is free, and if its commit fails it puts every file back. By default the summarizer does not call it; set `policies.archive` to `true` (a ⚠️ ASSUMPTION, default `false`, until it has been proven in real flights) and the summarizer calls it after `kukulu_summary_commit`. Or call it yourself.
+**Archive it.** `kukulu_flight_archive` moves a summarized flight into `docs/flights/<slug>/`: `PLAN.md`, `PROGRESS.md`, `HANDOFF.md`, `REVIEW.md`, `SUMMARY.md`, `kukulu.json`, `.kukulu/state.json` and `.kukulu/feedback.jsonl`, each one that exists. It copies `docs/SPEC.md` there but leaves the live spec where it is, writes a fresh `.kukulu/state.json` recording the archive, and commits everything as `chore: archive flight <slug>`. It refuses unless the flight is summarized, no run is armed, the working tree is clean and the destination is free. If its commit fails, it puts every file back. By default the summarizer does not call it. Set `policies.archive` to `true` (a ⚠️ ASSUMPTION, default `false`, until it has been proven in real flights) and the summarizer calls it after `kukulu_summary_commit`, or call it yourself.
 
 **Edit the spec.** After an archive, `kukulu_next` reports `done` ("flight `<slug>` is archived in `docs/flights/<slug>`") for as long as `docs/SPEC.md` is byte-identical to the archived copy. Edit it for the next flight and `kukulu_next` returns `plan` again.
 
-`CLAUDE.md` outlives a flight. The planner creates it under 150 lines, but for the next flight it adds or replaces one `## Flight <slug> notes` section and leaves other flights' sections alone, merging only flight-agnostic facts into the shared sections. `/kukulu:pull-feedback` reads `docs/flights/*/feedback.jsonl` as well as the live log, so friction from archived flights is not lost. And when a flight halts on a round cap, the halt message names the call that lifts it: `kukulu_flight_options({ …, resume: true })` (see [Halts](#halts)).
+`CLAUDE.md` outlives a flight. The planner creates it under 150 lines, but for the next flight it adds or replaces one `## Flight <slug> notes` section and leaves other flights' sections alone, merging only flight-agnostic facts into the shared sections. `/kukulu:pull-feedback` reads `docs/flights/*/feedback.jsonl` as well as the live log, so friction from archived flights is not lost. When a flight halts on a round cap, the halt message names the call that lifts it: `kukulu_flight_options({ …, resume: true })` (see [Halts](#halts)).
 
 ## Signing
 
@@ -174,7 +174,7 @@ At the end of a flight, `kukulu_pr_finalize` looks at the commits themselves, ne
 - **All signed.** The draft PR is marked ready and, per `policies.finalize`, set to auto-merge. `"auto"` (the default) does both unless the flight is `breaking`; `"ready"` only marks it ready; `"draft"` leaves it alone. `policies.mergeMethod` (`"merge"`, `"squash"` or `"rebase"`) is the method passed to `gh pr merge --auto`. If auto-merge cannot be enabled the PR is left ready and the result says `unavailable: <why>`.
 - **Any unsigned commit.** The PR stays a draft. `state.awaitingSigning` records the count, the oldest unsigned sha and when it began; one `signing` feedback entry is logged; an `## Awaiting signing` section is appended to `SUMMARY.md`; the commit is `chore: awaiting signing`; and `kukulu_next` reports `done` with "awaiting signing: …" until it is resolved. The steps are, verbatim from the tool's `next` text: unlock the signing agent, then tell the flight controller to finalize with re-signing, `kukulu_pr_finalize({ resign: true })`; or by hand, `git rebase -f --rebase-merges --gpg-sign <merge-base>`, then `git push --force-with-lease`, then `kukulu_pr_finalize({})`.
 
-Telling go-flight "signing is unlocked, finish it" is the one way the controller calls `kukulu_pr_finalize({ resign: true })`; no agent ever passes `resign` on its own. A flight that finalizes cleanly leaves `chore: finalize flight` behind it, and re-enables the operator's own signing setting if a fallback had switched it off.
+The controller calls `kukulu_pr_finalize({ resign: true })` only when you tell go-flight "signing is unlocked, finish it"; no agent ever passes `resign` on its own. A flight that finalizes cleanly leaves `chore: finalize flight` behind it, and re-enables the operator's own signing setting if a fallback had switched it off.
 
 ## Configuration
 
@@ -217,9 +217,9 @@ Telling go-flight "signing is unlocked, finish it" is the one way the controller
 | `flight` | absent | A slug (`^[a-z0-9][a-z0-9-]{0,39}$`) naming this flight; the default `slug` for `kukulu_flight_archive` |
 | `policies.feedback` | `true` | `false` disables `kukulu_feedback_log` (it returns `{ logged: false }` without writing) and every internal auto-log point |
 | `parallel.maxStreams` | `3` | The most streams of one wave handed to implementers at once; `1` runs every wave serially, silently |
-| `parallel.setup` | `[]` | Commands (same entries as `verify`) run once in each newly created stream worktree, before its implementer starts — the dependency install a fresh checkout needs (`npm ci`, `composer install`) |
+| `parallel.setup` | `[]` | Commands (same entries as `verify`) run once in each newly created stream worktree, before its implementer starts, such as the dependency install a fresh checkout needs (`npm ci`, `composer install`) |
 | `mutation.targeted` | `{}` | Name → `{ cmd, timeoutMs }`: a test command with exactly one `{filter}` slot that `kukulu_mutate` can run instead of the whole verify set, e.g. `{ "php": { "cmd": "vendor/bin/phpunit --filter {filter}" } }`. The reviewer passes `targeted` and `filter`; the filter is limited to letters, digits and `_ . : / -` and is substituted as one single-quoted word. `timeoutMs` defaults to `commandTimeoutMs` |
-| `constraints` | `[]` | `CLAUDE.md` rules expressed as data and checked by `kukulu_verify` — see [Constraints](#constraints) below |
+| `constraints` | `[]` | `CLAUDE.md` rules expressed as data and checked by `kukulu_verify`; see [Constraints](#constraints) below |
 
 Environment variables:
 
@@ -236,7 +236,7 @@ The project layout follows the same rule. A project that has `.foundry/` or `doc
 
 ## Calibrating
 
-The defaults above are not guesses; they came from timing one real flight (a 76-task plan, four review rounds, on the `sonnet`/`fable` split) and are worth knowing when a plan of very different size or shape needs different numbers:
+The defaults above came from timing one real flight (a 76-task plan, four review rounds, on the `sonnet`/`fable` split). Knowing where they came from helps when a plan of very different size or shape needs different numbers:
 
 | Stage | Tasks / findings | Wall clock | Subagent tokens |
 |---|---|---|---|
@@ -253,13 +253,13 @@ The defaults above are not guesses; they came from timing one real flight (a 76-
 
 What each default came from:
 
-- **`guardCap: 60`.** The implementer naturally ends its turn several times per task (after each verify, after each commit); this flight averaged roughly six re-blocks per completed task. Sixty is ten tasks' worth of blocking with zero progress — comfortably past normal noise, tight enough to catch a genuinely wedged task quickly. Counting since the last task state change (rather than over the whole run) is what makes a single small number work for a 3-task plan and a 300-task one alike.
-- **`commandTimeoutMs: 600000` (10 minutes).** The default suits ordinary typecheck/lint/unit-test commands. This flight's browser- and container-driven tasks (`wp-env`, Playwright) needed 15 minutes; give those specific commands their own `{ cmd, timeoutMs }` (see per-command timeouts, above) rather than raising the default for everything.
-- **`maxRounds: 3` / `maxRoundsHard: 6`.** This flight's findings shrank 15 → 3 → 2 every round — textbook convergence — and would never have tripped the soft cap at any reasonable `maxRounds`. The hard cap exists for the flight that never converges at all; six rounds is generous headroom past three non-converging ones without letting a broken loop run forever.
+- **`guardCap: 60`.** The implementer ends its turn several times per task (after each verify, after each commit); this flight averaged roughly six re-blocks per completed task. Sixty is ten tasks' worth of blocking with no progress: well past normal noise, and low enough to catch a wedged task quickly. Counting since the last task state change, instead of over the whole run, lets one small number work for a 3-task plan and a 300-task one alike.
+- **`commandTimeoutMs: 600000` (10 minutes).** The default suits ordinary typecheck/lint/unit-test commands. This flight's browser- and container-driven tasks (`wp-env`, Playwright) needed 15 minutes; give those specific commands their own `{ cmd, timeoutMs }` (see per-command timeouts, above) instead of raising the default for everything.
+- **`maxRounds: 3` / `maxRoundsHard: 6`.** This flight's findings shrank every round (15 → 3 → 2), so it would never have tripped the soft cap at any reasonable `maxRounds`. The hard cap is for a flight that never converges at all; six rounds leaves room past three non-converging ones without letting a broken loop run forever.
 
 ## Constraints
 
-A `## Constraints` line in `CLAUDE.md` is prose a reviewer has to remember to check by hand, three review rounds running, and can still miss a shape a hand-written grep never covered (F-14). `docs/kukulu.json`'s `constraints` array turns a mechanically-checkable one into data with proof that its own check works:
+A `## Constraints` line in `CLAUDE.md` is prose. A reviewer has to remember to check it by hand, three review rounds running, and can still miss a shape a hand-written grep never covered. `docs/kukulu.json`'s `constraints` array turns a mechanically checkable constraint into data, with proof that its own check works:
 
 ```json
 {
@@ -283,19 +283,19 @@ A `## Constraints` line in `CLAUDE.md` is prose a reviewer has to remember to ch
 | `description` | no | For a human reading `docs/kukulu.json` |
 | `paths` | yes | Path prefixes to scan (matches `git ls-files`'s pathspec) |
 | `exclude` | no | Path prefixes to skip within `paths` |
-| `pattern` | yes | A JS `RegExp` source, checked line by line — no multi-line patterns |
+| `pattern` | yes | A JS `RegExp` source, checked line by line, so no multi-line patterns |
 | `flags` | no | `RegExp` flags, e.g. `"i"` |
 | `shouldMatch` | yes, ≥ 1 | Lines the pattern must catch |
 | `shouldNotMatch` | yes, ≥ 1 | Lines it must not |
 | `from` | no | A task id such as `P1-03`. The rule stays inactive (reported `inactive: "until P1-03"`, no scan) while that task is todo, blocked or skipped, and applies once it is in progress or done, or once no task is open. Its fixtures are self-tested either way. Use it for a rule that only becomes true when a task has run |
 
-`kukulu_verify` runs constraints before any shell command, always against the whole repo regardless of the `files` argument: first it self-tests every rule against its own `shouldMatch`/`shouldNotMatch` fixtures — a fixture that disagrees fails the rule outright, with `fixture` in the result naming which line, and no file is scanned for that rule — then it scans every file under `paths` minus `exclude` that is tracked, or untracked but not ignored (`git ls-files --cached --others --exclude-standard`), and reports each hit as `{ file, line, text }`. A new file the implementer has not committed yet is scanned, so a regression cannot slip past a verify run made before its commit; a gitignored file, or one that was already untracked when the run started (`preexistingUntracked`), never is. `kukulu_run_finish` runs the same scan over the whole tree at handoff and reports it as `constraints: { ok, failing }` (and in its ready line), without refusing the handoff, so the reviewer starts from it. A malformed rule (missing `id`/`paths`/`pattern`, no fixtures, an unparseable `pattern`, a duplicate `id`) refuses the whole call, naming the offending rule.
+`kukulu_verify` runs constraints before any shell command, always against the whole repo regardless of the `files` argument. First it self-tests every rule against its own `shouldMatch`/`shouldNotMatch` fixtures. A fixture that disagrees fails the rule outright, with `fixture` in the result naming which line, and no file is scanned for that rule. Then it scans every file under `paths` minus `exclude` that is tracked, or untracked but not ignored (`git ls-files --cached --others --exclude-standard`), and reports each hit as `{ file, line, text }`. A new file the implementer has not committed yet is scanned, so a regression cannot slip past a verify run made before its commit; a gitignored file, or one that was already untracked when the run started (`preexistingUntracked`), never is. `kukulu_run_finish` runs the same scan over the whole tree at handoff and reports it as `constraints: { ok, failing }` (and in its ready line), without refusing the handoff, so the reviewer starts from it. A malformed rule (missing `id`/`paths`/`pattern`, no fixtures, an unparseable `pattern`, a duplicate `id`) refuses the whole call, naming the offending rule.
 
-`templates/constraints.example.json` has three fully worked rules — a forbidden import, a hard-coded tunable in three different syntactic shapes, and a call forbidden outside the module that owns it — each with fixtures covering the shapes an implementer might reach for. The plan-build skill requires every mechanically-checkable `CLAUDE.md` constraint to have a matching entry here; the review-build skill treats a rule that missed a real violation as a defect in the rule, not just the code, and the fix task closes the blind spot by adding the missed shape to `shouldMatch`.
+`templates/constraints.example.json` has three worked rules, each with fixtures covering the shapes an implementer might reach for: a forbidden import, a hard-coded tunable in three different syntactic shapes, and a call forbidden outside the module that owns it. The plan-build skill requires every mechanically-checkable `CLAUDE.md` constraint to have a matching entry here; the review-build skill treats a rule that missed a real violation as a defect in the rule as well as the code, and the fix task closes the blind spot by adding the missed shape to `shouldMatch`.
 
 ## Routing
 
-Which model runs each role, and where that comes from, is [docs/routing.md](./routing.md)'s subject in full. The short version for unattended use: `/kukulu:go-flight` calls `kukulu_agents_sync` before its loop. Claude Code hot-reloads a routing change to an already-populated `.claude/agents/` directory within seconds, so most edits need no restart at all — `kukulu_next` falls back to the plugin's own agent with the resolved model until the change is picked up. Only a project's very first sync, and only for a role routed to a model the `Agent` tool cannot name directly, prints `KUKULU: RESTART REQUIRED` and stops. A plain re-run picks up where it left off. To make a headless launcher handle that restart itself:
+[docs/routing.md](./routing.md) covers which model runs each role and where that choice comes from. The short version for unattended use: `/kukulu:go-flight` calls `kukulu_agents_sync` before its loop. Claude Code hot-reloads a routing change to an already-populated `.claude/agents/` directory within seconds, so most edits need no restart: until the change is picked up, `kukulu_next` falls back to the plugin's own agent with the resolved model. Only a project's first sync, and only for a role routed to a model the `Agent` tool cannot name directly, prints `KUKULU: RESTART REQUIRED` and stops. A plain re-run picks up where it left off. To make a headless launcher handle that restart itself:
 
 ```bash
 out=$(claude -p "/kukulu:go-flight")
@@ -309,13 +309,13 @@ esac
 
 ## Parallel streams
 
-A plan may split independent tasks into streams that run on separate implementers at the same time, each in its own git worktree, and merge back as they finish — how and why is in [architecture.md](./architecture.md#parallel-workstreams). The operator's concerns are these.
+A plan may split independent tasks into streams that run on separate implementers at the same time, each in its own git worktree, and merge back as they finish; [architecture.md](./architecture.md#parallel-workstreams) explains how and why. This section covers what the operator has to handle.
 
-**Config** (`docs/kukulu.json`; see [Configuration](#configuration)). `parallel.maxStreams` caps how many streams of one wave run at once (default 3; `1` turns parallelism off, silently). `parallel.setup` lists commands run once in each new worktree before its implementer starts — a fresh checkout has none of the installed dependencies `verify` needs, so this is where `npm ci` or `composer install` goes. A command entry marked `"exclusive": true` starts something keyed to the directory or a port it runs from (wp-env, docker compose, a dev server) and only ever runs from the main checkout; any task that triggers one is kept out of waves, and an exclusive command in `verify` itself makes every wave serial.
+**Config** (`docs/kukulu.json`; see [Configuration](#configuration)). `parallel.maxStreams` caps how many streams of one wave run at once (default 3; `1` turns parallelism off, silently). `parallel.setup` lists commands run once in each new worktree before its implementer starts. A fresh checkout has none of the installed dependencies `verify` needs, so this is where `npm ci` or `composer install` goes. A command entry marked `"exclusive": true` starts something keyed to the directory or a port it runs from (wp-env, docker compose, a dev server) and only ever runs from the main checkout; any task that triggers one is kept out of waves, and an exclusive command in `verify` itself makes every wave serial.
 
-**The tool-call timeout.** The server handles one tool call at a time, so while one stream's `kukulu_verify` runs a long suite, a sibling stream's `kukulu_task_done` waits behind it — for up to that suite's timeout. Claude Code's MCP tool-call timeout (the `MCP_TOOL_TIMEOUT` environment variable) must therefore exceed the longest command timeout plus headroom, or the waiting call fails on the client side. `kukulu_status` reports `longestCommandTimeoutMs` (across `verify`, `extraVerify` and `parallel.setup`) to compare against. Verification is serialized on purpose: suites often share ports, containers or databases, and most of a stream's wall clock is model time, not test time.
+**The tool-call timeout.** The server handles one tool call at a time, so while one stream's `kukulu_verify` runs a long suite, a sibling stream's `kukulu_task_done` waits behind it, for up to that suite's timeout. Claude Code's MCP tool-call timeout (the `MCP_TOOL_TIMEOUT` environment variable) must therefore exceed the longest command timeout plus headroom, or the waiting call fails on the client side. `kukulu_status` reports `longestCommandTimeoutMs` (across `verify`, `extraVerify` and `parallel.setup`) to compare against. Verification is serialized on purpose: suites often share ports, containers or databases, and most of a stream's wall clock is model time, not test time.
 
-**A wave that ran serially.** Not a fault. An invalid partition, a failed `parallel.setup`, or an exclusive command each degrade the wave to serial and log one feedback entry — `stream-partition`, `stream-setup` or `stream-exclusive` — in `.kukulu/feedback.jsonl`. Pull it back with `/kukulu:pull-feedback`: it is material for the next plan.
+**A wave that ran serially.** This is not a fault. An invalid partition, a failed `parallel.setup`, or an exclusive command each degrade the wave to serial and log one feedback entry (`stream-partition`, `stream-setup` or `stream-exclusive`) in `.kukulu/feedback.jsonl`. Pull it back with `/kukulu:pull-feedback`: it is material for the next plan.
 
 **A stream that stopped early.** The next `kukulu_next` hands it out again; `kukulu_run_start({ stream })` resumes its worktree and `kukulu_task_next` resumes its in-progress task. Look at what is in flight with:
 
@@ -352,8 +352,8 @@ A `build/<date>` branch containing:
 - a draft PR, if `gh` was available and `policies.pr` is not `"none"`
 - `chore: finalize flight` or `chore: awaiting signing`, from `kukulu_pr_finalize`, and `chore: archive flight <slug>` when the flight was archived
 
-When there is an `origin`, every one of those commits is pushed as it lands — `kukulu_run_finish`, `kukulu_review_submit` and `kukulu_summary_commit` all push (unless `policies.push` is `false`) — and `kukulu_run_start` pushes the base branch itself before the first build branch is cut, so the base branch on the remote carries the planner's commits too and a PR's diff is the build, not the plan (F-18).
+When there is an `origin`, every one of those commits is pushed as it lands: `kukulu_run_finish`, `kukulu_review_submit` and `kukulu_summary_commit` all push (unless `policies.push` is `false`). `kukulu_run_start` also pushes the base branch itself before the first build branch is cut, so the base branch on the remote carries the planner's commits too and a PR's diff is the build, not the plan.
 
 Read `SUMMARY.md` first. It is written for someone who was not there: what was built, what was decided and by whom, which assumptions are still guesses, which spec issues need your edit, and what you still have to check by hand.
 
-Then look at the pull request. Kūkulu never merges synchronously: it never runs `gh pr merge` without `--auto`. At most, `kukulu_pr_finalize` asks GitHub to merge a signed, non-breaking flight's PR once CI is green (`policies.finalize: "auto"`), and GitHub does that, not Kūkulu. A breaking flight, or one with an unsigned commit, is yours to merge.
+Then look at the pull request. Kūkulu never merges synchronously: it never runs `gh pr merge` without `--auto`. At most, `kukulu_pr_finalize` asks GitHub to merge a signed, non-breaking flight's PR once CI is green (`policies.finalize: "auto"`); GitHub does the merge, not Kūkulu. A breaking flight, or one with an unsigned commit, is yours to merge.

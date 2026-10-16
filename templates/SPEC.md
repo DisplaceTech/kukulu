@@ -2,7 +2,7 @@
 
 Version: 0.1 Status: draft
 
-The Kūkulu planner reads this file in full and derives the build plan from it. Headings below are the ones the planner looks for by name; keep them, add whatever else you need. Mark any number you are guessing at with `⚠️ ASSUMPTION` and give it a config key, so it becomes tunable rather than hard-coded.
+The Kūkulu planner reads this file in full and derives the build plan from it. Headings below are the ones the planner looks for by name; keep them, and add whatever else you need. Mark any number you are guessing at with `⚠️ ASSUMPTION` and give it a config key, so it becomes tunable rather than hard-coded.
 
 ## 1. Overview
 
@@ -27,7 +27,7 @@ Config keys, their defaults, and which are `⚠️ ASSUMPTION`.
 
 ## 6. Interfaces
 
-APIs, message types, file formats, CLI surface — whatever the pieces use to talk to each other.
+APIs, message types, file formats, CLI surface: whatever the pieces use to talk to each other.
 
 ## 7. Commands
 
