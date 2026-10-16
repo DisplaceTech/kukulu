@@ -1,6 +1,6 @@
 # Architecture
 
-Foundry is four subagents, one flight controller, one MCP server and one Stop
+Kūkulu is four subagents, one flight controller, one MCP server and one Stop
 hook. The design rule behind all of it: **a language model decides what the
 code should be; nothing else.** Stage selection, task selection, checkbox
 edits, log entries, verification and commits are code, not prose, because
@@ -166,7 +166,7 @@ only through the MCP: `kukulu_mutate` applies one find/replace to one clean
 tracked file, runs that file's verify commands, and restores it from `HEAD`
 before returning, along with anything else those commands changed that was
 clean before (a new untracked file, a rewritten regressions file) — a sentinel in `.kukulu/mutation.json` lets the next
-Foundry call repair the file if the server dies in between. The reviewer
+Kūkulu call repair the file if the server dies in between. The reviewer
 holds no other way to edit source, and never commits one; a surviving
 mutation is a finding, and the fix still goes through the fix-task loop.
 
@@ -241,7 +241,7 @@ mechanisms keep it honest:
 sequenceDiagram
     participant IMP as implementer
     participant HOOK as implement-guard.mjs
-    participant MCP as foundry MCP
+    participant MCP as kukulu MCP
     participant DISK as PROGRESS.md + lock
 
     IMP->>IMP: tries to stop and report progress
@@ -325,7 +325,7 @@ did before.
   files, merging it back cannot conflict on bookkeeping.
 - **Merging back.** `kukulu_stream_finish` merges each stream when it
   finishes, not at the end of the wave, and removes its worktree and
-  branch. A merge conflict is the one stream failure that halts: Foundry
+  branch. A merge conflict is the one stream failure that halts: Kūkulu
   aborts the merge, keeps the stream, and records why. Serial work is
   refused while any stream worktree still exists, so nothing ever runs on a
   main checkout that lacks a finished stream's code.

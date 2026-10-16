@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Foundry MCP server — the deterministic half of the pipeline.
+// Kūkulu MCP server — the deterministic half of the pipeline.
 //
 // Zero dependencies: speaks MCP over stdio (newline-delimited JSON-RPC 2.0)
 // directly, so the plugin needs no npm install. Node >= 18.
@@ -102,7 +102,7 @@ const inLayoutNames = (message) => (legacyLayout ? message.replaceAll("docs/kuku
 const MCP_ALLOW_RULE = "mcp__plugin_kukulu_kukulu";
 
 // The plugin's own root — where agents/*.md ships — derived from this file's
-// own location rather than ROOT, because ROOT is the *project* Foundry is
+// own location rather than ROOT, because ROOT is the *project* Kūkulu is
 // operating on and is almost never the same directory as the installed
 // plugin.
 const PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -1432,7 +1432,7 @@ function countFeedback() {
 
 /**
  * The externally-callable half of feedback capture: a stage agent calls
- * this the moment something costs it time that is Foundry's own fault, not
+ * this the moment something costs it time that is Kūkulu's own fault, not
  * the project's. Unlike the MCP's internal auto-logging (which folds a
  * feedback entry into a commit it is already making), this commits on its
  * own every time, because the calling agent has no other commit happening
@@ -1462,7 +1462,7 @@ function gitFacts() {
 // ---------------------------------------------------------------- tools
 
 /**
- * The longest timeout any command Foundry runs on the model's behalf can
+ * The longest timeout any command Kūkulu runs on the model's behalf can
  * take (`verify`, `extraVerify`, `parallel.setup`), or null with none. Every
  * tool handler is synchronous, so a stream's bookkeeping call can wait
  * behind another stream's longest verify; Claude Code's MCP tool-call
@@ -1709,16 +1709,16 @@ function next() {
 
 const PROMPTS = {
   plan: () =>
-    "Run the Foundry plan stage for this repository. Read docs/SPEC.md and everything else in docs/ in full, then produce docs/PLAN.md, docs/PROGRESS.md, docs/kukulu.json and CLAUDE.md exactly as your plan-build instructions specify, commit them, and report. Do not write implementation code.",
+    "Run the Kūkulu plan stage for this repository. Read docs/SPEC.md and everything else in docs/ in full, then produce docs/PLAN.md, docs/PROGRESS.md, docs/kukulu.json and CLAUDE.md exactly as your plan-build instructions specify, commit them, and report. Do not write implementation code.",
   implement: (round, s, policies) =>
-    `Run the Foundry implement stage. ${round === 0 ? "This is the initial build." : `This is review-fix round ${round}; the open tasks are R${round}-* fix tasks queued by the reviewer.`} Call kukulu_run_start, then loop on kukulu_task_next until it reports done, then write docs/HANDOFF.md and call kukulu_run_finish. You are unattended; never ask a question and never stop with open tasks. ${s.counts ? `${s.counts.open} task(s) are open.` : ""} ${policies}`,
+    `Run the Kūkulu implement stage. ${round === 0 ? "This is the initial build." : `This is review-fix round ${round}; the open tasks are R${round}-* fix tasks queued by the reviewer.`} Call kukulu_run_start, then loop on kukulu_task_next until it reports done, then write docs/HANDOFF.md and call kukulu_run_finish. You are unattended; never ask a question and never stop with open tasks. ${s.counts ? `${s.counts.open} task(s) are open.` : ""} ${policies}`,
   // Not a stage of its own: one entry of `streams` in an implement result.
   implementStream: (stream, wave, policies) =>
-    `Run the Foundry implement stage for stream \`${stream}\` of wave ${wave}. Call kukulu_run_start with stream: "${stream}", and work only inside the cwd it returns: every file you read, edit or commit is under it. Pass stream: "${stream}" to every kukulu_task_next, kukulu_task_done, kukulu_task_block and kukulu_verify call. Loop on kukulu_task_next until it reports done, then call kukulu_stream_finish with stream: "${stream}". Do not write docs/HANDOFF.md and do not call kukulu_run_finish: another stage does. You are unattended; never ask a question and never stop with open tasks in your stream. ${policies}`,
+    `Run the Kūkulu implement stage for stream \`${stream}\` of wave ${wave}. Call kukulu_run_start with stream: "${stream}", and work only inside the cwd it returns: every file you read, edit or commit is under it. Pass stream: "${stream}" to every kukulu_task_next, kukulu_task_done, kukulu_task_block and kukulu_verify call. Loop on kukulu_task_next until it reports done, then call kukulu_stream_finish with stream: "${stream}". Do not write docs/HANDOFF.md and do not call kukulu_run_finish: another stage does. You are unattended; never ask a question and never stop with open tasks in your stream. ${policies}`,
   review: (round, s, policies, reviewRound) =>
-    `Run the Foundry review stage. This review is round ${reviewRound}; write \`Round: ${reviewRound}\` on the second line of docs/REVIEW.md, and use \`R${reviewRound}-<nn>\` when a fix task's dependsOn must reference another fix task in the same submission. Review the whole build branch against docs/SPEC.md and docs/PLAN.md as your review-build instructions specify, write docs/REVIEW.md, and call kukulu_review_submit exactly once with your verdict. Do not fix code yourself. ${policies}`,
+    `Run the Kūkulu review stage. This review is round ${reviewRound}; write \`Round: ${reviewRound}\` on the second line of docs/REVIEW.md, and use \`R${reviewRound}-<nn>\` when a fix task's dependsOn must reference another fix task in the same submission. Review the whole build branch against docs/SPEC.md and docs/PLAN.md as your review-build instructions specify, write docs/REVIEW.md, and call kukulu_review_submit exactly once with your verdict. Do not fix code yourself. ${policies}`,
   summarize: (round, s, policies) =>
-    `Run the Foundry summarize stage. The review is APPROVED. Compose docs/SUMMARY.md as your summarize instructions specify and pass its full text as \`content\` to kukulu_summary_commit, which writes and commits it; do not write the file yourself. After that, archive if kukulu_summary_commit reports archive: true, and end with kukulu_pr_finalize; never pass resign. Do not merge. ${policies}`,
+    `Run the Kūkulu summarize stage. The review is APPROVED. Compose docs/SUMMARY.md as your summarize instructions specify and pass its full text as \`content\` to kukulu_summary_commit, which writes and commits it; do not write the file yourself. After that, archive if kukulu_summary_commit reports archive: true, and end with kukulu_pr_finalize; never pass resign. Do not merge. ${policies}`,
 };
 
 /**
@@ -1820,7 +1820,7 @@ function startRun() {
   saveState(st);
   // Only the auto fallback is friction — an explicit "off" or an
   // unconfigured "none" is the operator's or the project's own choice
-  // working as intended, not something Foundry did wrong.
+  // working as intended, not something Kūkulu did wrong.
   if (c.policies.feedback && st.signing.startsWith("off (probe failed")) {
     appendFeedback("implement", `Signing disabled for this run: ${st.signing}`, "signing", "auto");
   }
@@ -1896,7 +1896,7 @@ function runStart({ stream } = {}) {
  * Merge a finished stream back into the build branch and remove its worktree
  * and branch. Refuses while the stream has open tasks or an uncommitted
  * worktree. A merge conflict — the partition check makes one unlikely, not
- * impossible — is the one stream failure that halts: Foundry aborts the
+ * impossible — is the one stream failure that halts: Kūkulu aborts the
  * merge, keeps the stream branch and worktree, and records why, because it
  * cannot guess a merge.
  */
@@ -2172,7 +2172,7 @@ function taskReopen({ id, reason } = {}) {
   return { id, reopenedDependents: dependents, commit, counts: counts(pr.tasks) };
 }
 
-// Every command Foundry runs for the model goes through mcp/run-command.mjs,
+// Every command Kūkulu runs for the model goes through mcp/run-command.mjs,
 // which runs it in its own process group so a timeout kills the whole tree,
 // and keeps only a bounded tail of its output (F-04, F-09, F-16 of the
 // 2026-09-30 cleanflate feedback: a runaway mutant hung the reviewer, left
@@ -2380,7 +2380,7 @@ function recoverMutation() {
     m = null;
   }
   if (!m || typeof m.file !== "string") {
-    throw new ToolError(`${rel(P.mutation)} exists but is unreadable, so Foundry cannot tell which file a crashed mutation left edited. Run \`git status\`, restore the file with \`git checkout HEAD -- <file>\`, then delete ${rel(P.mutation)}.`);
+    throw new ToolError(`${rel(P.mutation)} exists but is unreadable, so Kūkulu cannot tell which file a crashed mutation left edited. Run \`git status\`, restore the file with \`git checkout HEAD -- <file>\`, then delete ${rel(P.mutation)}.`);
   }
   const { rel: relPath } = projectFile(m.file);
   git(["checkout", "-q", "HEAD", "--", relPath]);
@@ -3481,7 +3481,7 @@ const TOOLS = [
   },
   {
     name: "kukulu_feedback_log",
-    description: "Record one pipeline-friction entry — something Foundry's own tooling cost time on, not the project it is building. Appends to .kukulu/feedback.jsonl and commits it immediately, so it survives even if the flight never reaches summarize. Call it the moment friction happens.",
+    description: "Record one pipeline-friction entry — something Kūkulu's own tooling cost time on, not the project it is building. Appends to .kukulu/feedback.jsonl and commits it immediately, so it survives even if the flight never reaches summarize. Call it the moment friction happens.",
     inputSchema: S(
       {
         stage: { type: "string", enum: FEEDBACK_STAGES, description: "which role is logging this" },

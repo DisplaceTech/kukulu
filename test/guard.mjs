@@ -150,7 +150,7 @@ for (const legacy of ["foundry-implementer", "foundry:implementer"]) {
 // the mention must not spend a re-block from the shared counter.
 {
   const repo = armed();
-  const prompt = "Run the Foundry implement stage. Call kukulu_run_start, then loop on kukulu_task_next until it reports done.";
+  const prompt = "Run the Kūkulu implement stage. Call kukulu_run_start, then loop on kukulu_task_next until it reports done.";
   writeFile(
     repo,
     "transcript.jsonl",

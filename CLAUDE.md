@@ -1,6 +1,6 @@
-# Foundry — working rules
+# Kūkulu — working rules
 
-Foundry is a Claude Code plugin: a dependency-free MCP server
+Kūkulu is a Claude Code plugin: a dependency-free MCP server
 (`mcp/server.mjs`) holds the mechanics, and the skills (`skills/*/SKILL.md`)
 hold the judgment. These rules apply to every change in this repository.
 
@@ -98,7 +98,7 @@ do). A working signer is `test/harness.mjs`'s `mkFakeGpg()` plus
 `commit.gpgsign` must give the server an isolated global config
 (`startServer(repo, { env: { GIT_CONFIG_GLOBAL: <temp file> } })`).
 
-**Commit-failure tests.** To make a Foundry commit fail without signing,
+**Commit-failure tests.** To make a Kūkulu commit fail without signing,
 write an executable `.git/hooks/commit-msg` that exits 1 when the message
 starts with the subject under test (for example `progress:`). Assert that
 every file the tool wrote is byte-identical afterwards, that `git diff

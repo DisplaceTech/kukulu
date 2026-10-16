@@ -1,6 +1,6 @@
 ---
 name: implement
-description: "Foundry pipeline stage — work through every open task in docs/PROGRESS.md unattended, then hand off for review-build. Invoked by go-flight through the kukulu-implementer agent; not for ordinary work."
+description: "Kūkulu pipeline stage — work through every open task in docs/PROGRESS.md unattended, then hand off for review-build. Invoked by go-flight through the kukulu-implementer agent; not for ordinary work."
 model: inherit
 ---
 
@@ -119,15 +119,15 @@ operator-level problems, not task problems; `kukulu_task_block` is for a
 task that cannot be finished, `kukulu_run_halt` is for a run that cannot
 continue at all. Never invent a third way to stop.
 
-## When Foundry itself costs you time
+## When Kūkulu itself costs you time
 
-The moment something costs time that is Foundry's own fault, not the
+The moment something costs time that is Kūkulu's own fault, not the
 project's — a tool refused, a prompt was ambiguous, a stall needed a
 workaround — call `kukulu_feedback_log` with `stage: "implement"` right
 then. Do not save it up for `docs/HANDOFF.md`: this entry has to survive a
 run that never reaches `kukulu_run_finish`.
 
-A lesson about the project is not Foundry friction: a framework footgun, a
+A lesson about the project is not Kūkulu friction: a framework footgun, a
 confusing library behavior, a test that needs a particular fixture. Put it in
 the task's log entry and under a `## Codebase notes` heading in
 `docs/HANDOFF.md`, and never in `kukulu_feedback_log`.
@@ -135,7 +135,7 @@ the task's log entry and under a `## Codebase notes` heading in
 ## Stream mode
 
 Your prompt may instead name one **stream** of a parallel wave ("Run the
-Foundry implement stage for stream `<s>` of wave `<n>`"). Other implementers
+Kūkulu implement stage for stream `<s>` of wave `<n>`"). Other implementers
 are working on the other streams at the same time, in their own worktrees;
 everything above still applies, with these changes:
 

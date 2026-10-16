@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Foundry implement guard — Stop / SubagentStop hook.
+// Kūkulu implement guard — Stop / SubagentStop hook.
 //
 // While .kukulu/implement.lock exists, an implementation run is in
 // progress. If docs/PROGRESS.md still has open tasks ([ ] or [~]), the run

@@ -119,7 +119,7 @@ for (const name of skillNames.filter((n) => n !== "pull-feedback")) {
     eq(fm["disable-model-invocation"], undefined, `skills/${name} stays preloadable: disable-model-invocation also blocks preloading`);
     eq(fm.model, "inherit", `skills/${name} lets its agent's routed model own the turn`);
     eq(fm.effort, undefined, `skills/${name} carries no effort of its own; the agent's does`);
-    like(fm.description, /^Foundry pipeline stage/, `skills/${name}'s description marks it as a pipeline stage`);
+    like(fm.description, /^Kūkulu pipeline stage/, `skills/${name}'s description marks it as a pipeline stage`);
   }
 }
 
@@ -248,7 +248,7 @@ for (const name of agentNames) {
   }
   ok(!tools.includes("Agent"), `agents/${name} cannot spawn further agents`);
   const mcpTools = tools.filter((t) => t.startsWith("mcp__"));
-  ok(mcpTools.length > 0, `agents/${name} names at least one foundry MCP tool`);
+  ok(mcpTools.length > 0, `agents/${name} names at least one kukulu MCP tool`);
   for (const t of mcpTools) {
     ok(t.startsWith("mcp__plugin_kukulu_kukulu__"), `agents/${name}'s MCP tool ${t} uses the plugin-prefixed form`);
     ok(toolNames.includes(t.replace("mcp__plugin_kukulu_kukulu__", "")), `agents/${name}'s MCP tool ${t} actually exists`);
@@ -278,12 +278,12 @@ for (const t of ["kukulu_status", "kukulu_next", "kukulu_agents_sync", "kukulu_r
   for (const p of MCP_PREFIXES) ok(allowed.includes(p + t), `the flight controller may call ${p}${t}`);
 }
 for (const t of allowed.filter((a) => a.startsWith("mcp__"))) {
-  ok(MCP_PREFIXES.some((p) => t.startsWith(p)), `the flight controller's allowed tool ${t} names the foundry server`);
+  ok(MCP_PREFIXES.some((p) => t.startsWith(p)), `the flight controller's allowed tool ${t} names the kukulu server`);
   ok(toolNames.includes(bareTool(t)), `the flight controller's allowed tool ${t} exists`);
 }
 ok(
   allowed.every((a) => a === "Agent" || MCP_PREFIXES.some((p) => a.startsWith(p))),
-  "the flight controller is allowed nothing beyond Agent, the read-only foundry tools, agents_sync, run_halt, flight_options and pr_finalize",
+  "the flight controller is allowed nothing beyond Agent, the read-only kukulu tools, agents_sync, run_halt, flight_options and pr_finalize",
 );
 ok(
   // run_halt is a deliberate exception: it records a clean halt reason when

@@ -1,6 +1,6 @@
 ---
 name: review-build
-description: "Foundry pipeline stage — review the completed build branch against SPEC and PLAN, then approve or queue fix tasks for implement. Invoked by go-flight through the kukulu-reviewer agent; not for ordinary work."
+description: "Kūkulu pipeline stage — review the completed build branch against SPEC and PLAN, then approve or queue fix tasks for implement. Invoked by go-flight through the kukulu-reviewer agent; not for ordinary work."
 model: inherit
 ---
 
@@ -113,7 +113,7 @@ Write `docs/REVIEW.md` with:
   instead of manufacturing a category-8 finding just to have somewhere to
   put an observation.
 
-The moment something costs you time during the review that is Foundry's own
+The moment something costs you time during the review that is Kūkulu's own
 fault, not the code under review's — a refused tool, an ambiguous
 instruction, a stall — call `kukulu_feedback_log` with `stage: "review"`
 right then, rather than saving it up for this document.

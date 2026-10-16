@@ -1,6 +1,6 @@
 ---
 name: summarize
-description: "Foundry pipeline stage — compose the summary after an APPROVED review and commit it through kukulu_summary_commit: what was built, what was decided, what a human still owes. Invoked by go-flight through the kukulu-summarizer agent; not for ordinary work."
+description: "Kūkulu pipeline stage — compose the summary after an APPROVED review and commit it through kukulu_summary_commit: what was built, what was decided, what a human still owes. Invoked by go-flight through the kukulu-summarizer agent; not for ordinary work."
 model: inherit
 ---
 
@@ -34,7 +34,7 @@ it to disk yourself (see below):
    files). Note any notes-only approval (an `APPROVED` round whose
    `REVIEW.md` carried a `## Notes` section) so a human sees what was
    flagged but not queued as work.
-8. **Pipeline friction**: anything the Foundry pipeline itself did that cost
+8. **Pipeline friction**: anything the Kūkulu pipeline itself did that cost
    time — a tool refusal worked around, a wrong or ambiguous prompt, a
    stall, a permission prompt, anything an implementer or reviewer had to
    route around rather than the project itself being hard. Call

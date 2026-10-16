@@ -1,6 +1,6 @@
 ---
 name: plan-build
-description: "Foundry pipeline stage — derive docs/PLAN.md, docs/PROGRESS.md, docs/kukulu.json and CLAUDE.md from docs/SPEC.md (run once, before implement). Invoked by go-flight through the kukulu-planner agent; not for ordinary work."
+description: "Kūkulu pipeline stage — derive docs/PLAN.md, docs/PROGRESS.md, docs/kukulu.json and CLAUDE.md from docs/SPEC.md (run once, before implement). Invoked by go-flight through the kukulu-planner agent; not for ordinary work."
 model: inherit
 ---
 
@@ -108,7 +108,7 @@ only where the tasks genuinely do not need each other.
   concrete backticked paths (`` `src/api/routes.ts` ``; a trailing `/` names a
   directory), and those paths must be **disjoint across the streams of a
   wave**. A task listing no backticked paths, or two streams naming the same
-  file or overlapping directories, makes Foundry run the whole wave serially.
+  file or overlapping directories, makes Kūkulu run the whole wave serially.
 - **Depend only backwards.** A streamed task may depend on tasks *before* its
   wave, or on earlier tasks of its *own* stream. It must never depend on a
   task of a different stream in the same wave.
@@ -291,7 +291,7 @@ earlier flight wrote it), do not rewrite it: add or replace exactly one
 `## Flight <slug> notes` section of at most 60 lines for this flight, and
 merge only flight-agnostic facts into the shared sections (Constraints,
 Commands, Task protocols). Leave every other flight's section untouched.
-Do not describe the Foundry workflow in CLAUDE.md.
+Do not describe the Kūkulu workflow in CLAUDE.md.
 
 ### `constraints` in `docs/kukulu.json`
 
@@ -342,6 +342,6 @@ bodies, and state the
 disagrees with the file it just wrote is worse than no report (F-06). Do
 not start implementation.
 
-If something about writing the plan was needlessly hard because of Foundry
+If something about writing the plan was needlessly hard because of Kūkulu
 itself, not because of SPEC, call `kukulu_feedback_log` with `stage:
 "plan"`.

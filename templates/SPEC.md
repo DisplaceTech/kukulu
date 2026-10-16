@@ -3,7 +3,7 @@
 Version: 0.1
 Status: draft
 
-The Foundry planner reads this file in full and derives the build plan from
+The Kūkulu planner reads this file in full and derives the build plan from
 it. Headings below are the ones the planner looks for by name; keep them, add
 whatever else you need. Mark any number you are guessing at with
 `⚠️ ASSUMPTION` and give it a config key, so it becomes tunable rather than

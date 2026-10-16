@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Run one shell command for the Foundry MCP server, bounded in time and in
+// Run one shell command for the Kūkulu MCP server, bounded in time and in
 // output, and print one JSON line describing what happened.
 //
 // The server's tool handlers are synchronous on purpose (one call at a time

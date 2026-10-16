@@ -1,6 +1,6 @@
 # Model routing
 
-Which model and effort level runs each of Foundry's four stages — `planner`,
+Which model and effort level runs each of Kūkulu's four stages — `planner`,
 `implementer`, `reviewer`, `summarizer` — is not fixed in the plugin. It is
 resolved per role, per key, from four layers, and turned into project-level
 agent files that Claude Code will actually spawn.
@@ -54,7 +54,7 @@ generating files rather than by editing `agents/*.md` in place.
 reference](https://code.claude.com/docs/en/sub-agents) documents `model` as
 accepting exactly those forms, "or `inherit`", with no mention of `effort`
 applying to anything else. When a role resolves to any other model string,
-Foundry drops its `effort` silently from the generated file and reports the
+Kūkulu drops its `effort` silently from the generated file and reports the
 drop in `effortDropped`, rather than emitting a key the far end would not
 understand.
 
@@ -102,7 +102,7 @@ has no `effort` parameter to carry it around. This costs at most one
 stage's worth of effort, since the generated file becomes usable from the
 very next session.
 
-A `claude-*` id of a family Foundry does not know is treated like a
+A `claude-*` id of a family Kūkulu does not know is treated like a
 non-Anthropic model: no fallback, so a restart.
 
 The generated files are excluded from git per clone, via
@@ -140,10 +140,10 @@ Copy it to `~/.config/kukulu/config.json` (or point `$KUKULU_CONFIG`
 somewhere else) and edit it there — it applies across every project on the
 machine, unless a project's own `docs/kukulu.json` overrides a role.
 
-`"Ollama"` and `"OpenRouter"` above are not special strings Foundry
+`"Ollama"` and `"OpenRouter"` above are not special strings Kūkulu
 understands; they are provider *names* you give claude-code-router when you
 add each provider (see below), and the model string is whatever that router
-expects for "this provider, this model". Foundry copies it into `model:`
+expects for "this provider, this model". Kūkulu copies it into `model:`
 verbatim and never parses it.
 
 To pick a profile without setting an environment variable — the common case
@@ -161,12 +161,12 @@ A project can still override any role for itself, in `docs/kukulu.json`:
 ```
 
 Only the keys you name change; everything else keeps coming from the
-profile or the defaults. Run `kukulu_config_show` in any Foundry-enabled
+profile or the defaults. Run `kukulu_config_show` in any Kūkulu-enabled
 session to see the fully resolved table and where each value came from.
 
 ## Routing through claude-code-router (v3)
 
-The model string Foundry writes is sent to Claude Code exactly as given, and
+The model string Kūkulu writes is sent to Claude Code exactly as given, and
 Claude Code sends it to whatever `ANTHROPIC_BASE_URL` the session is running
 under. A `provider/model` string therefore only means something when the
 session is launched through a router that understands that syntax — plain
@@ -213,24 +213,24 @@ relying on any of this in an unattended flight.
    using the `anthropic_messages` protocol
    ([source](https://ccrdesk.top/en/configuration/providers/)). This reuses
    your own Claude Code sign-in through a third-party local proxy; that is a
-   choice about your own credentials, and Foundry takes no position on it.
+   choice about your own credentials, and Kūkulu takes no position on it.
 
 3. **Create a Claude Code Agent Config profile.** Under *Agent Config →
-   Claude Code*, add a profile (call it `Foundry`). Set **Effect scope** to
+   Claude Code*, add a profile (call it `kukulu`). Set **Effect scope** to
    *"Only opened from CCR"* — CCR documents the alternative, *"System
    default"*, as making the profile "the system-default Claude Code
-   profile," which is the opposite of what you want here: only Foundry
+   profile," which is the opposite of what you want here: only Kūkulu
    sessions should go through the router
    ([source](https://ccrdesk.top/en/configuration/agents/claude-code/)).
    Leave the profile's own **Model** field and its per-tier **Fable / Opus /
    Sonnet / Haiku** overrides empty — those are a second routing layer CCR
-   offers and Foundry does not need; Foundry's own routing config already
+   offers and Kūkulu does not need; Kūkulu's own routing config already
    picks each role's model.
 
 4. **Launch through the profile.**
 
    ```bash
-   ccr Foundry
+   ccr kukulu
    ```
 
    which "[launches an enabled Agent Config
@@ -271,9 +271,9 @@ CCR also supports routing a subagent's request independently of the main
 session, via a literal `<CCR-SUBAGENT-MODEL>provider/model</CCR-SUBAGENT-MODEL>`
 tag CCR "extracts and removes ... from the system prompt or the first two
 user messages" before routing that one request
-([source](https://ccrdesk.top/en/routing/)). Foundry does not use this — one
+([source](https://ccrdesk.top/en/routing/)). Kūkulu does not use this — one
 routing mechanism only, per the design — but it exists if you want to wire
-something CCR-specific by hand outside Foundry.
+something CCR-specific by hand outside Kūkulu.
 
 ## Caching and effort
 

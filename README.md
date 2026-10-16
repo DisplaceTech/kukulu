@@ -1,11 +1,11 @@
-# Foundry
+# Kūkulu
 
 A Claude Code plugin that turns `docs/SPEC.md` into a merge-ready branch with
 nobody sitting between the stages. Plan, implement, review, fix, review again,
 summarize — a strong model does the judgment work, a cheap one does the
 mechanical work, and a zero-dependency MCP server does everything that should
 never be left to a language model at all. You write the spec and you merge the
-branch. Foundry does the part in between.
+branch. Kūkulu does the part in between.
 
 ## Quickstart
 
@@ -42,7 +42,7 @@ You need Node ≥ 22, git, and Claude Code. Nothing to `npm install`.
    ```
 
    `/kukulu:go-flight` is the documented entry point, but the controller is
-   model-invocable too — asking Claude to "run the foundry flight" reaches
+   model-invocable too — asking Claude to "run the kukulu flight" reaches
    the same instructions. It takes one option, the review depth:
    `/kukulu:go-flight max review rounds 6`.
 
@@ -50,7 +50,7 @@ You need Node ≥ 22, git, and Claude Code. Nothing to `npm install`.
    `policies.finalize: "auto"`, a flight whose commits are all signed and that
    is not marked breaking has its pull request marked ready and set to
    auto-merge once CI is green; a breaking flight, or one with an unsigned
-   commit, stays for you to merge or sign. Foundry never merges
+   commit, stays for you to merge or sign. Kūkulu never merges
    synchronously: the only merge it ever asks for is GitHub's own `--auto`.
 
 > **Optional — run a stage on a different model or backend.** By default the
@@ -129,7 +129,7 @@ itself:
 ```mermaid
 sequenceDiagram
     participant I as implementer
-    participant M as foundry MCP
+    participant M as kukulu MCP
     participant G as git
 
     I->>M: kukulu_task_next
@@ -167,7 +167,7 @@ flowchart LR
     B -->|"kukulu_stream_finish<br/>merge"| S2
 ```
 
-Foundry checks the partition and never trusts it: each streamed task must list
+Kūkulu checks the partition and never trusts it: each streamed task must list
 concrete backticked `Files touched`, disjoint across a wave's streams, with
 no dependency between streams of a wave. A wave that fails the check, or
 whose `parallel.setup` fails, simply runs serially and logs one feedback entry
@@ -426,7 +426,7 @@ PR, and `pre-commit install` runs the same checks locally that CI runs
 remotely. See [CONTRIBUTING.md](./CONTRIBUTING.md).
 
 **Feeding back.** Every stage calls `kukulu_feedback_log` the moment
-Foundry itself costs it time — a refused tool, an ambiguous prompt, a
+Kūkulu itself costs it time — a refused tool, an ambiguous prompt, a
 stall — and the MCP logs its own halts and fallbacks the same way. Each
 entry lands in `.kukulu/feedback.jsonl` and is committed immediately, so
 it survives even a flight that never reaches summarize. Run

@@ -494,7 +494,7 @@ export function splitFrontmatter(text) {
   return { frontmatter: frontmatter(text), body: m[2] };
 }
 
-/** Write a Foundry global routing-config fixture; returns its path. */
+/** Write a Kūkulu global routing-config fixture; returns its path. */
 export function writeGlobalConfig(dir, obj) {
   return writeFile(dir, "global-config.json", JSON.stringify(obj, null, 2) + "\n");
 }

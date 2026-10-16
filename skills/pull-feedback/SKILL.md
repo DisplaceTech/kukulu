@@ -1,10 +1,10 @@
 ---
 name: pull-feedback
-description: "Read another project's .kukulu/feedback.jsonl and write it into this repo's docs/feedback/ as a new, properly numbered file, so a real flight's friction can feed the next Foundry release plan. Invoke by name or as /kukulu:pull-feedback."
+description: "Read another project's .kukulu/feedback.jsonl and write it into this repo's docs/feedback/ as a new, properly numbered file, so a real flight's friction can feed the next Kūkulu release plan. Invoke by name or as /kukulu:pull-feedback."
 allowed-tools: Read, Write, Bash, Glob
 ---
 
-You are pulling one project's Foundry pipeline-friction log back into this
+You are pulling one project's Kūkulu pipeline-friction log back into this
 repo so it can feed a release plan. This is a maintainer tool, run
 interactively by a human — not a pipeline stage, and not unattended. If the
 user has not given you a path to the other project's checkout, ask for one;
@@ -33,7 +33,7 @@ appropriate.
 4. Before adding anything, read every existing file in `docs/feedback/*.md`
    and collect every entry's exact `at` timestamp string already recorded
    there (they appear in each `## F-<nn>` section's own text, alongside the
-   Foundry-JSON fields already rendered). An entry from the log whose `at`
+   Kūkulu-JSON fields already rendered). An entry from the log whose `at`
    already appears anywhere is a duplicate from an earlier pull — skip it
    silently, do not re-number it, and do not mention it beyond the final
    count.

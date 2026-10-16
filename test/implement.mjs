@@ -908,7 +908,7 @@ function failingSignerRepo(config) {
   await withServer(repo, async ({ call }) => {
     const r = await call("kukulu_feedback_log", { stage: "plan", message: "something slow" });
     eq(r.logged, true, "auto: the feedback entry is logged");
-    eq(subject(repo), "chore: pipeline friction (plan)", "auto: a Foundry commit whose signing fails is retried unsigned");
+    eq(subject(repo), "chore: pipeline friction (plan)", "auto: a Kūkulu commit whose signing fails is retried unsigned");
     const st = JSON.parse(git(repo, ["show", "HEAD:.kukulu/state.json"]));
     like(st.signing, /^off \(commit signing failed: /, "...the committed state records why");
     eq(st.signingOverride, true, "...and sets signingOverride");
@@ -924,7 +924,7 @@ function failingSignerRepo(config) {
   const repo = failingSignerRepo({ policies: { signing: "required" } });
   const head = git(repo, ["rev-parse", "HEAD"]);
   await withServer(repo, async ({ call }) => {
-    isError(await call("kukulu_flight_options", { maxRounds: 5 }), /'required'.*could not be signed/, "required: a Foundry commit whose signing fails throws");
+    isError(await call("kukulu_flight_options", { maxRounds: 5 }), /'required'.*could not be signed/, "required: a Kūkulu commit whose signing fails throws");
     eq(git(repo, ["rev-parse", "HEAD"]), head, "...and HEAD did not move");
   });
 }

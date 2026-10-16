@@ -114,7 +114,7 @@ prompt, streams? }`.
   a generated `agent` still fails with "not found"
 - `restartRequired` — true only when `agentFallback` is true **and** the
   resolved model is one the `Agent` tool cannot name (a non-Anthropic model,
-  or a `claude-*` id of a family Foundry does not know); `false` for `done`
+  or a `claude-*` id of a family Kūkulu does not know); `false` for `done`
   and `halt`
 - `model` — the resolved model string for that role from the routing config
   (see [routing.md](./routing.md)); `null` for `done` and `halt`. Display
@@ -613,12 +613,12 @@ a no-op (`mergeCommit: null`) and the worktree is cleaned up. Its blocked
 tasks go to review like any others.
 
 **On a merge conflict** — the partition check makes one unlikely, not
-impossible — Foundry runs `git merge --abort`, keeps the stream's branch and
+impossible — Kūkulu runs `git merge --abort`, keeps the stream's branch and
 worktree, sets `halted` in `.kukulu/state.json` with a reason naming the
 stream, the conflicting paths and the manual steps, auto-logs a
 `stream-merge` feedback entry, and commits both together as
 `chore: run halted (stream <s> merge conflict)`. This is the one stream
-failure that halts, because Foundry cannot guess a merge. It returns
+failure that halts, because Kūkulu cannot guess a merge. It returns
 `{ stream, merged: false, halted, conflicts }` and `kukulu_next` says `halt`.
 
 **Returns:** `{ stream, merged: true, mergeCommit, remainingStreams }` —
@@ -729,7 +729,7 @@ would not lift the cap that fired.
 
 ## `kukulu_feedback_log`
 
-Record one pipeline-friction entry: something Foundry's own tooling cost
+Record one pipeline-friction entry: something Kūkulu's own tooling cost
 time on, not the project it is building — a tool refused, a prompt was
 ambiguous, a stall needed a workaround. Any stage may call it, at the
 moment the friction happens, not saved up for end-of-stage prose. This is
@@ -932,7 +932,7 @@ before the run started).
 ## `kukulu_pr_finalize`
 
 End a flight: mark its draft pull request ready and, unless the flight is
-breaking, ask GitHub to merge it once its checks pass. Foundry never merges a
+breaking, ask GitHub to merge it once its checks pass. Kūkulu never merges a
 pull request itself; the only `gh pr merge` it ever runs carries `--auto`.
 
 **Arguments:** `{ breaking, resign? }`, booleans. `breaking` is required on

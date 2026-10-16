@@ -1,4 +1,4 @@
-# Writing a spec Foundry can build from
+# Writing a spec Kūkulu can build from
 
 The spec is the only part of this pipeline a human writes, and it is the part
 that decides whether the rest of it is worth running. The planner reads
@@ -148,8 +148,8 @@ longer needed, and it was a trap: it passed forever if `X` was never written.
 
 ## Provenance logging
 
-If a spec needs Foundry's own activity logged or tagged (an audit trail, a
-provenance record), do not try to change Foundry's commit subjects or its
+If a spec needs Kūkulu's own activity logged or tagged (an audit trail, a
+provenance record), do not try to change Kūkulu's commit subjects or its
 clean-tree checks. Both are part of how the pipeline tracks itself. Ask for a
 `commit-msg` hook instead: `.githooks/commit-msg`, enabled with
 `git config core.hooksPath .githooks`, which appends a trailer derived from the
@@ -158,11 +158,11 @@ subject. Keep a live log gitignored, and have a phase-end task snapshot it.
 ```sh
 #!/bin/sh
 # Append a trailer from the commit subject: "<ID>: ..." gets Task: <ID>;
-# progress:, review:, plan: and chore: commits get Stage: foundry.
+# progress:, review:, plan: and chore: commits get Stage: kukulu.
 subject=$(head -n 1 "$1")
 case "$subject" in
   [PR][0-9]*-[0-9]*:*) printf '\nTask: %s\n' "${subject%%:*}" >> "$1" ;;
-  progress:*|review:*|plan:*|chore:*) printf '\nStage: foundry\n' >> "$1" ;;
+  progress:*|review:*|plan:*|chore:*) printf '\nStage: kukulu\n' >> "$1" ;;
 esac
 ```
 

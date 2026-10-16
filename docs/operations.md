@@ -1,6 +1,6 @@
 # Operations
 
-Running a flight, resuming one, and unsticking one. Everything Foundry knows is
+Running a flight, resuming one, and unsticking one. Everything Kūkulu knows is
 on disk and committed, so there is no hidden state to reason about: when
 something looks wrong, `kukulu_status` is the whole truth.
 
@@ -170,7 +170,7 @@ To continue anyway, after fixing the actual problem: set `"halted": null` in
 
 **A stream merge conflict.** When a parallel stream's branch conflicts on
 merge, `kukulu_stream_finish` aborts the merge, keeps the stream's branch
-and worktree, and halts with the conflicting paths in the reason — Foundry
+and worktree, and halts with the conflicting paths in the reason — Kūkulu
 cannot guess a merge. See [Parallel streams](#parallel-streams) for the
 recovery.
 
@@ -199,7 +199,7 @@ recovery.
 | A wave ran serially though the plan declared streams | Its partition was invalid, its `parallel.setup` failed, or `parallel.maxStreams` is `1` | Read `kukulu_status`'s `waves[].reason` and `.kukulu/feedback.jsonl` for a `stream-partition`, `stream-setup` or `stream-exclusive` entry; it is a planning defect to fix in the next plan, not a stuck flight |
 | A verify or mutate command ran away (an infinite loop, endless output) | Before 0.4.0 this could hang the reviewer for the whole timeout, leave test processes spinning, or disconnect the MCP server | Nothing, now: the command's whole process group is killed at its timeout or at 64 MiB of output, and the result says `timedOut` or `outputLimitExceeded`. A reviewer who suspects a hanging mutant passes `timeoutMs` to `kukulu_mutate` |
 | A step takes longer than the ten-minute limit on a foreground Bash call | Full benchmarks and heavy suites | Make it a `verify`/`extraVerify` command with its own `timeoutMs`, so it runs through `kukulu_verify`, and raise `MCP_TOOL_TIMEOUT` above `kukulu_status`'s `longestCommandTimeoutMs` |
-| A project hook denies a `git commit` whose message only mentions a forbidden word | The hook scans the whole Bash command line, including the quoted message | The implement skill commits with `git commit -F <file>`; Foundry's own bookkeeping commits never pass through Bash |
+| A project hook denies a `git commit` whose message only mentions a forbidden word | The hook scans the whole Bash command line, including the quoted message | The implement skill commits with `git commit -F <file>`; Kūkulu's own bookkeeping commits never pass through Bash |
 | A subagent's first `kukulu_status` call is denied | The MCP allow rule is missing, or `kukulu_agents_sync` reported `permissions: "failed: ..."` | Run `kukulu_config_show` and check `permissionRule`; if a sync failed, the message names the broken `settings.local.json` — fix its JSON and re-run |
 
 ## Clearing a wedged run by hand
@@ -264,11 +264,11 @@ halt message names the call that lifts it:
 
 ## Signing
 
-`policies.signing` decides what Foundry does about commit signing:
+`policies.signing` decides what Kūkulu does about commit signing:
 
 - `"auto"` (the default) signs when signing works and falls back when it does
   not. At `kukulu_run_start` it makes a real signed object to prove the
-  agent answers. Later, every commit Foundry makes runs with no terminal
+  agent answers. Later, every commit Kūkulu makes runs with no terminal
   prompt and a 30-second bound; if one fails to sign, the commit is retried
   once unsigned, local `commit.gpgsign` is set to `false`, and
   `state.signing` (`off (commit signing failed: …)`) and
@@ -347,7 +347,7 @@ fallback had switched it off.
 | `policies.pr` | `"draft"` | `"none"` skips draft-PR creation in `kukulu_run_finish` even when `gh` is available |
 | `policies.archive` | `false` | ⚠️ ASSUMPTION. `true` makes the summarizer call `kukulu_flight_archive` after the summary, moving the finished flight into `docs/flights/<flight>/` so the repository can run another. Off until it has been proven in real flights |
 | `policies.finalize` | `"auto"` | What `kukulu_pr_finalize` does to a fully signed flight's draft pull request: `"auto"` marks it ready and, unless the flight is breaking, enables auto-merge; `"ready"` only marks it ready; `"draft"` leaves it alone |
-| `policies.mergeMethod` | `"merge"` | The method `kukulu_pr_finalize` passes to `gh pr merge --auto`: `"merge"`, `"squash"` or `"rebase"`. Foundry never merges without `--auto` |
+| `policies.mergeMethod` | `"merge"` | The method `kukulu_pr_finalize` passes to `gh pr merge --auto`: `"merge"`, `"squash"` or `"rebase"`. Kūkulu never merges without `--auto` |
 | `flight` | absent | A slug (`^[a-z0-9][a-z0-9-]{0,39}$`) naming this flight; the default `slug` for `kukulu_flight_archive` |
 | `policies.feedback` | `true` | `false` disables `kukulu_feedback_log` (it returns `{ logged: false }` without writing) and every internal auto-log point |
 | `parallel.maxStreams` | `3` | The most streams of one wave handed to implementers at once; `1` runs every wave serially, silently |
@@ -608,8 +608,8 @@ Read `SUMMARY.md` first. It is written for someone who was not there: what was
 built, what was decided and by whom, which assumptions are still guesses, which
 spec issues need your edit, and what you still have to check by hand.
 
-Then look at the pull request. Foundry never merges synchronously: it never
+Then look at the pull request. Kūkulu never merges synchronously: it never
 runs `gh pr merge` without `--auto`. At most, `kukulu_pr_finalize` asks
 GitHub to merge a signed, non-breaking flight's PR once CI is green
-(`policies.finalize: "auto"`), and GitHub does that, not Foundry. A breaking
+(`policies.finalize: "auto"`), and GitHub does that, not Kūkulu. A breaking
 flight, or one with an unsigned commit, is yours to merge.
