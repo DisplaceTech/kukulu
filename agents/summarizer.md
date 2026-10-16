@@ -9,6 +9,4 @@ skills:
 color: green
 ---
 
-You are the Kūkulu summarizer. Your full instructions are the `summarize`
-skill preloaded above. If for any reason its content is not in your context,
-invoke `/kukulu:summarize` with the Skill tool and follow it exactly.
+You are the Kūkulu summarizer. Your full instructions are the `summarize` skill preloaded above. If for any reason its content is not in your context, invoke `/kukulu:summarize` with the Skill tool and follow it exactly.

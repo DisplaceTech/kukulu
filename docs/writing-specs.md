@@ -1,21 +1,15 @@
 # Writing a spec Kūkulu can build from
 
-The spec is the only part of this pipeline a human writes, and it is the part
-that decides whether the rest of it is worth running. The planner reads
-`docs/SPEC.md` in full, resolves everything ambiguous in it, and emits a plan
-that a cheaper model executes without ever asking you a question. Anything you
-leave vague gets decided by a model at 3am and recorded in a log entry you will
-read later.
+The spec is the only part of this pipeline a human writes, and it is the part that decides whether the rest of it is worth running. The planner reads `docs/SPEC.md` in full, resolves everything ambiguous in it, and emits a plan that a cheaper model executes without ever asking you a question. Anything you leave vague gets decided by a model at 3am and recorded in a log entry you will read later.
 
-Start from [`templates/SPEC.md`](../templates/SPEC.md). The headings in it are
-the ones the planner looks for by name.
+Start from [`templates/SPEC.md`](../templates/SPEC.md). The headings in it are the ones the planner looks for by name.
 
 ## What each section is for
 
 | Section | What the planner does with it |
 |---|---|
-| **1. Overview** | Frames everything else. Three sentences, not three pages. |
-| **2. Goals and non-goals** | Non-goals become `**Out of scope:**` lines on individual tasks. An unstated non-goal is an invitation. |
+| **1. Overview** | Frames everything else. Keep it to three sentences. |
+| **2. Goals and non-goals** | Non-goals become `**Out of scope:**` lines on individual tasks. If you do not state a non-goal, a task may build it. |
 | **3. Engineering principles** | Becomes `## Constraints` in `CLAUDE.md`, and the first thing the reviewer checks. |
 | **4. Architecture** | Becomes the module map and the boundaries the reviewer enforces. |
 | **5. Data and configuration** | Config keys and defaults; every `⚠️ ASSUMPTION` becomes a tuning task. |
@@ -29,34 +23,21 @@ the ones the planner looks for by name.
 
 ### 1. Principles a reviewer can check mechanically
 
-Section 3 is the highest-leverage part of the document, because it is the only
-part that constrains *every* task. Write each principle so that checking it is
-a grep, not an opinion:
+Section 3 matters most, because it is the only part that constrains every task. Write each principle so that checking it takes a grep rather than a judgment call:
 
 - Good: "no `Date.now`, `Math.random` or `performance.now` under `src/core/`"
 - Good: "every tunable is a key in `config.ts`; no numeric literal outside it"
-- Good: "iteration order is deterministic — no `Object.keys` over a map that
-  callers can mutate"
+- Good: "iteration order is deterministic: no `Object.keys` over a map that callers can mutate"
 - Bad: "the core should be pure"
 - Bad: "write clean, idiomatic code"
 
-The reviewer treats a constraint violation as the most severe category of
-finding. A principle it cannot check is a principle that does not exist.
+The reviewer treats a constraint violation as the most severe category of finding. It cannot enforce a principle it cannot check.
 
-Better still: a principle phrased as a single-line pattern becomes an entry
-in `docs/kukulu.json`'s `constraints`, with fixture lines proving the
-pattern actually catches every shape you meant it to (a hard-coded tunable,
-for instance, can be `const x = 5;`, `'x' => 5,`, or `x: 5,` — a grep that
-only catches one shape passes silently past the other two for as many
-review rounds as it takes someone to notice by reading). `kukulu_verify`
-then checks it mechanically, every task, instead of the reviewer having to
-remember to grep for it by hand each round. See
-[operations.md](./operations.md#constraints).
+Better still, phrase a principle as a single-line pattern. It then becomes an entry in `docs/kukulu.json`'s `constraints`, with fixture lines proving the pattern catches every shape you meant it to. A hard-coded tunable, for instance, can be `const x = 5;`, `'x' => 5,`, or `x: 5,`, and a grep that catches only one shape silently misses the other two for as many review rounds as it takes someone to notice by reading. `kukulu_verify` then checks the rule mechanically on every task, so the reviewer does not have to remember to grep for it by hand each round. See [operations.md](./operations.md#constraints).
 
 ### 2. Commands that exit non-zero
 
-Section 7 becomes `verify` in `docs/kukulu.json`, and `kukulu_verify` runs it
-after every task. Each command must fail loudly:
+Section 7 becomes `verify` in `docs/kukulu.json`, and `kukulu_verify` runs it after every task. Each command must fail loudly:
 
 ```text
 npm run typecheck
@@ -64,21 +45,15 @@ npm run lint
 npm test -- --run
 ```
 
-A test runner in watch mode, a linter that only warns, or a script that ends in
-`|| true` will make every task pass and every review a surprise. If part of the
-suite is slow, that is what `extraVerify` is for — commands keyed by path
-prefix that only run when a task touches that area.
+A test runner in watch mode, a linter that only warns, or a script that ends in `|| true` will make every task pass and every review a surprise. If part of the suite is slow, put it in `extraVerify`: commands keyed by path prefix that run only when a task touches that area.
 
-If the runner can narrow to one test class or file, name that command too, with
-an unquoted `{filter}` placeholder where the class or path goes:
+If the runner can narrow to one test class or file, name that command too, with an unquoted `{filter}` placeholder where the class or path goes:
 
 ```text
 php artisan test --filter={filter}
 ```
 
-The planner copies it into `mutation.targeted` in `docs/kukulu.json`, and the
-reviewer then mutation-tests a single file in seconds instead of running the
-whole suite.
+The planner copies it into `mutation.targeted` in `docs/kukulu.json`, and the reviewer then mutation-tests a single file in seconds instead of running the whole suite.
 
 ### 3. Assumptions marked as assumptions
 
@@ -88,72 +63,35 @@ Any number you are guessing at gets `⚠️ ASSUMPTION` and a config key:
 Tick rate: 30 Hz ⚠️ ASSUMPTION — config key `sim.tickHz`, default 30.
 ```
 
-The planner is required to name the key and its default in the task that
-introduces it, forbid hard-coding the number anywhere else, and schedule a
-tuning task at the point the value first matters — one that measures before and
-after and records the result in the commit and the log. Unmarked guesses become
-magic numbers scattered across the codebase.
+The planner must name the key and its default in the task that introduces it, forbid hard-coding the number anywhere else, and schedule a tuning task at the point the value first matters. That task measures before and after and records the result in the commit and the log. Unmarked guesses become magic numbers scattered across the codebase.
 
 ### 4. Phases that end in something visible
 
-Each phase ends with a task that pushes the branch and writes down what a human
-must check by hand: a screen, a device, a printout, a recorded run. The
-implementer cannot do that check; it writes
-`Manual check: NOT VERIFIED (human)` in the log and moves on. Those lines are
-collected into `HANDOFF.md` and again into `SUMMARY.md`, so the list of what
-you still owe the project arrives with the branch.
+Each phase ends with a task that pushes the branch and writes down what a human must check by hand: a screen, a device, a printout, a recorded run. The implementer cannot do that check; it writes `Manual check: NOT VERIFIED (human)` in the log and moves on. Those lines are collected into `HANDOFF.md` and again into `SUMMARY.md`, so the list of what you still owe the project arrives with the branch.
 
-Never make a later task depend on a manual check. The run does not stop for
-you.
+Never make a later task depend on a manual check. The run does not stop for you.
 
 ## Ambiguity is the failure mode
 
-There is no human between tasks. Where a spec allows two readings, one of them
-gets chosen silently, implemented, tested against itself, and defended in
-review. The planner is instructed to pick a reading and record it, and the
-implementer to record an `Interpretation:` line whenever it does the same — but
-both of those are salvage. It is cheaper to write the sentence that had only
-one meaning.
+There is no human between tasks. Where a spec allows two readings, one of them gets chosen silently, implemented, tested against itself, and defended in review. The planner is instructed to pick a reading and record it, and the implementer to record an `Interpretation:` line whenever it does the same, but both are salvage. It is cheaper to write a sentence with only one meaning.
 
-Concretely, prefer:
+For example, prefer:
 
-- "Scores are integers; ties are broken by earliest submission time" over
-  "scores are ranked"
-- "Retries: 3 attempts, 250ms base, exponential, jitter ±20% — config key
-  `http.retry`" over "retry on failure"
-- "The cache is per-process and not shared between workers" over "cache
-  results"
+- "Scores are integers; ties are broken by earliest submission time" over "scores are ranked"
+- "Retries: 3 attempts, 250ms base, exponential, jitter ±20% — config key `http.retry`" over "retry on failure"
+- "The cache is per-process and not shared between workers" over "cache results"
 
 ## Independent components parallelize
 
-A flight can run independent tasks at the same time (see
-[architecture.md](./architecture.md#parallel-workstreams)), but only where
-the planner can prove they do not touch the same files. A spec helps by
-describing its components as separable units, each with a named module or
-directory and an interface to the others, rather than as one intertwined
-feature. Say where the shared wiring lives (the registry, the routes table,
-the manifest): that is the part the planner will keep serial. And name any
-command that starts a port- or container-bound environment, so the plan can
-mark it exclusive and keep its tasks out of the parallel part.
+A flight can run independent tasks at the same time (see [architecture.md](./architecture.md#parallel-workstreams)), but only where the planner can prove they do not touch the same files. A spec helps by describing its components as separable units, each with a named module or directory and an interface to the others, rather than as one intertwined feature. Say where the shared wiring lives (the registry, the routes table, the manifest): that is the part the planner will keep serial. And name any command that starts a port- or container-bound environment, so the plan can mark it exclusive and keep its tasks out of the parallel part.
 
 ## Rules that become true at a task
 
-Some rules cannot hold from the first commit: "no `TODO` left in `src/`" is
-false until the cleanup task has run, and a script a later task creates cannot
-be checked before it exists. Say which task makes the rule true. The planner
-then gives the rule `from: "<that task's id>"` in `docs/kukulu.json`: the rule
-stays inactive until that task is in progress, and still self-tests its own
-fixtures. The old idiom, wrapping a command in `test ! -f X || bash X`, is no
-longer needed, and it was a trap: it passed forever if `X` was never written.
+Some rules cannot hold from the first commit: "no `TODO` left in `src/`" is false until the cleanup task has run, and a script a later task creates cannot be checked before it exists. Say which task makes the rule true. The planner then gives the rule `from: "<that task's id>"` in `docs/kukulu.json`: the rule stays inactive until that task is in progress, and still self-tests its own fixtures. The old idiom, wrapping a command in `test ! -f X || bash X`, is no longer needed, and it was a trap: it passed forever if `X` was never written.
 
 ## Provenance logging
 
-If a spec needs Kūkulu's own activity logged or tagged (an audit trail, a
-provenance record), do not try to change Kūkulu's commit subjects or its
-clean-tree checks. Both are part of how the pipeline tracks itself. Ask for a
-`commit-msg` hook instead: `.githooks/commit-msg`, enabled with
-`git config core.hooksPath .githooks`, which appends a trailer derived from the
-subject. Keep a live log gitignored, and have a phase-end task snapshot it.
+If a spec needs Kūkulu's own activity logged or tagged (an audit trail, a provenance record), do not try to change Kūkulu's commit subjects or its clean-tree checks. Both are part of how the pipeline tracks itself. Ask for a `commit-msg` hook instead: `.githooks/commit-msg`, enabled with `git config core.hooksPath .githooks`, which appends a trailer derived from the subject. Keep a live log gitignored, and have a phase-end task snapshot it.
 
 ```sh
 #!/bin/sh
@@ -188,9 +126,7 @@ esac
 - extra, when `src/core/` is touched: `npm run test:invariants`
 ```
 
-That is enough for the planner to write a `kukulu.json` with a matching
-`extraVerify`, a `CLAUDE.md` with four checkable constraints, and a reviewer
-that can grep for violations rather than form an impression.
+That is enough for the planner to write a `kukulu.json` with a matching `extraVerify`, a `CLAUDE.md` with four checkable constraints, and a reviewer that can grep for violations rather than form an impression.
 
 ## Before you start the flight
 
@@ -207,7 +143,4 @@ claude
 > /kukulu:go-flight
 ```
 
-(The README's per-project section covers the one-time permission rule an
-unattended flight needs.) The planner will report the decisions it made and the spec issues it found
-before any code is written. Read that report. It is the cheapest moment to
-discover the spec meant something you did not intend.
+(The README's per-project section covers the one-time permission rule an unattended flight needs.) The planner will report the decisions it made and the spec issues it found before any code is written. Read that report: it is the cheapest point at which to find out the spec says something you did not mean.
