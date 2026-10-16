@@ -108,7 +108,7 @@ const MCP_ALLOW_RULE = "mcp__plugin_kukulu_kukulu";
 const PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 // Keep in sync with .claude-plugin/plugin.json and package.json; test/plugin.mjs checks it.
-const VERSION = "0.5.0";
+const VERSION = "0.6.0";
 
 const TASK_ID = /\b[PR]\d+-\d+\b/g;
 const TASK_LINE = /^- \[( |~|x|!|-)\] ([PR]\d+-\d+)(?: (.*))?$/;
