@@ -4,6 +4,15 @@ All notable changes to this plugin. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.1] — 2026-10-16
+
+Documentation only. No code or behavior change.
+
+- Joined hard-wrapped lines in the README, `docs/`, `CONTRIBUTING.md`, the agents and the skills so the Markdown renders and diffs cleanly.
+- Reworded the user-facing docs in plainer language and removed internal feedback IDs from prose.
+- Corrected the README: go-flight takes several options, four conditions halt a flight, and the suite has about 2,200 assertions.
+- Updated the wrapping rule in `CONTRIBUTING.md`.
+
 ## [0.6.0] — 2026-10-15
 
 ### Summary
