@@ -138,7 +138,7 @@ prompt, streams? }`.
   reason "flight <slug> is archived in <dir>; edit docs/SPEC.md for the next
   flight, then run /kukulu:go-flight", until `docs/SPEC.md` differs from the
   archived copy; then the stage is `plan` again, except on the pre-0.6.0
-  layout, where it is `halt` with "run /kukulu:go-flight migrate first". While
+  layout, where it is `halt` with "commit or discard any uncommitted change, run /kukulu:go-flight migrate, then run /kukulu:go-flight again". While
   `kukulu_pr_finalize` has recorded `state.awaitingSigning` the stage is
   `done` with the reason "awaiting signing: <n> unsigned commit(s), oldest
   <sha>." followed by the steps to take

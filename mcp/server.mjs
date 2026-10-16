@@ -1685,7 +1685,7 @@ function next() {
   }
   if (legacyLayout && (!s.planPresent || !s.progressPresent || !s.configPresent)) {
     // The planner would write docs/kukulu.json beside .foundry/, and every tool refuses a project holding both layouts.
-    return stage("halt", "this project is still on the pre-0.6.0 layout (.foundry/), and the plan stage would write docs/kukulu.json beside it; run /kukulu:go-flight migrate first, then run /kukulu:go-flight again");
+    return stage("halt", "this project is still on the pre-0.6.0 layout (.foundry/), and the plan stage would write docs/kukulu.json beside it; commit or discard any uncommitted change, run /kukulu:go-flight migrate, then run /kukulu:go-flight again");
   }
   if (!s.planPresent || !s.progressPresent || !s.configPresent) {
     return stage("plan", "no plan on disk (docs/PLAN.md, docs/PROGRESS.md and docs/kukulu.json are all required)");

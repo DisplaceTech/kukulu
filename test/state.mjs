@@ -703,7 +703,7 @@ for (const [label, patch] of [
   await withServer(repo, async ({ call }) => {
     const n = await call("kukulu_next");
     eq(n.stage, "halt", "on the old layout, an archived project with an edited spec halts instead of planning");
-    like(n.reason, /run \/kukulu:go-flight migrate first/, "...telling the controller to migrate");
+    like(n.reason, /run \/kukulu:go-flight migrate, then run/, "...telling the controller to migrate");
   });
 }
 

@@ -3,7 +3,7 @@ name: go-flight
 description: "Run the whole Kūkulu pipeline unattended: plan → implement → review → fix → … → summarize, switching model per stage. Requires docs/SPEC.md."
 model: sonnet
 effort: low
-argument-hint: "[max review rounds N] [continue, allow N rounds] [signing is unlocked, finish it] [flight=<slug>]"
+argument-hint: "[max review rounds N] [continue, allow N rounds] [signing is unlocked, finish it] [flight=<slug>] [migrate]"
 allowed-tools: Agent, mcp__plugin_kukulu_kukulu__kukulu_status, mcp__plugin_kukulu_kukulu__kukulu_next, mcp__plugin_kukulu_kukulu__kukulu_agents_sync, mcp__plugin_kukulu_kukulu__kukulu_run_halt, mcp__plugin_kukulu_kukulu__kukulu_flight_options, mcp__plugin_kukulu_kukulu__kukulu_pr_finalize, mcp__plugin_kukulu_kukulu__kukulu_feedback_log, mcp__plugin_kukulu_kukulu__kukulu_migrate, mcp__kukulu__kukulu_status, mcp__kukulu__kukulu_next, mcp__kukulu__kukulu_agents_sync, mcp__kukulu__kukulu_run_halt, mcp__kukulu__kukulu_flight_options, mcp__kukulu__kukulu_pr_finalize, mcp__kukulu__kukulu_feedback_log, mcp__kukulu__kukulu_migrate
 ---
 
