@@ -112,7 +112,7 @@ the base branch before a run can start.
 
 ## The global file
 
-`templates/foundry.config.example.json` is the shape:
+`templates/kukulu.config.example.json` is the shape:
 
 ```json
 {

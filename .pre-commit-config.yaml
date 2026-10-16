@@ -47,8 +47,8 @@ repos:
 
   - repo: local
     hooks:
-      - id: foundry-lint
-        name: foundry syntax + manifest lint
+      - id: kukulu-lint
+        name: Kūkulu syntax + manifest lint
         entry: ./scripts/lint.sh
         language: script
         pass_filenames: false

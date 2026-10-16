@@ -30,7 +30,7 @@ it.
 | `agents/*.md` | Stage agents: default model, effort, and the skill each preloads |
 | `skills/*/SKILL.md` | The prose each stage follows |
 | `templates/SPEC.md` | The spec skeleton users copy |
-| `templates/foundry.config.example.json`, `templates/ccr/` | The global routing config and claude-code-router provider manifests |
+| `templates/kukulu.config.example.json`, `templates/ccr/` | The global routing config and claude-code-router provider manifests |
 | `templates/constraints.example.json` | Three worked `docs/kukulu.json` `constraints` rules, with fixtures |
 | `test/` | Harness plus eleven suites |
 | `docs/` | Architecture, tool reference, routing guide, spec guide, runbook |
@@ -40,8 +40,8 @@ it.
 ## Setup
 
 ```bash
-git clone git@github.com:ericmann/foundry.git
-cd foundry
+git clone git@github.com:DisplaceTech/kukulu.git
+cd kukulu
 pre-commit install     # optional, but CI runs the same checks
 ```
 

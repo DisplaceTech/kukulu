@@ -20,7 +20,7 @@ flowchart LR
     end
 
     subgraph PL["plugin"]
-        MCP["foundry MCP server<br/>mcp/server.mjs"]
+        MCP["kukulu MCP server<br/>mcp/server.mjs"]
         HOOK["implement-guard.mjs<br/>Stop · SubagentStop (implementer only)"]
     end
 
@@ -131,7 +131,7 @@ flowchart TD
     REVIEWER["reviewer"] -->|writes| REVIEW["docs/REVIEW.md"]
     REVIEWER -->|"appends via kukulu_review_submit"| PLAN
     SUMMARIZER["summarizer"] -->|writes| SUMMARY["docs/SUMMARY.md"]
-    MCP["foundry MCP"] -->|"sole writer"| PROG
+    MCP["kukulu MCP"] -->|"sole writer"| PROG
     MCP -->|"sole writer"| ST[".kukulu/state.json"]
     MCP -->|"kukulu_plan_commit validates, then commits"| PLAN
     MCP -->|"kukulu_flight_archive moves the flight into"| FLIGHTS["docs/flights/slug/"]

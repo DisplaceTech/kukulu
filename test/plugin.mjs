@@ -417,13 +417,13 @@ like(template, /⚠️ ASSUMPTION/, "the template explains the assumption marker
 
 // ---------------------------------------------------------------- routing config templates
 
-const foundryConfigTemplate = json("templates/foundry.config.example.json");
+const kukuluConfigTemplate = json("templates/kukulu.config.example.json");
 eq(
-  Object.keys(foundryConfigTemplate.roles).sort().join(","),
+  Object.keys(kukuluConfigTemplate.roles).sort().join(","),
   ["implementer", "planner", "reviewer", "summarizer"].join(","),
   "the global config template covers exactly the four roles",
 );
-ok(Object.keys(foundryConfigTemplate.profiles).length >= 2, "the template shows more than one profile");
+ok(Object.keys(kukuluConfigTemplate.profiles).length >= 2, "the template shows more than one profile");
 for (const file of listDir("templates/ccr").filter((f) => f.endsWith(".json"))) {
   const provider = json(`templates/ccr/${file}`).provider;
   ok(provider?.name, `templates/ccr/${file} names a provider`);

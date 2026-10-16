@@ -4,7 +4,7 @@
 // .claude/agents/kukulu-<role>.md from the result. kukulu_config_show is
 // read-only; kukulu_agents_sync is the only tool that writes.
 //
-// Template validation (templates/foundry.config.example.json and
+// Template validation (templates/kukulu.config.example.json and
 // templates/ccr/*.json) is added alongside the templates themselves, not
 // here.
 
@@ -21,7 +21,7 @@ const AGENT_FILE = (role) => `.claude/agents/kukulu-${role}.md`;
 const pluginAgent = (role) => splitFrontmatter(readFile(ROOT, `agents/${role}.md`));
 
 /** A fresh directory to hold a global-config fixture, separate from any project repo. */
-const cfgDir = () => mkDir("foundry-cfg-");
+const cfgDir = () => mkDir("kukulu-cfg-");
 
 // ---------------------------------------------------------------- defaults, no global file
 
@@ -465,7 +465,7 @@ const cfgDir = () => mkDir("foundry-cfg-");
   }
 
   {
-    const p = writeFile(cfgDir(), "foundry-global.json", "{not json");
+    const p = writeFile(cfgDir(), "kukulu-global.json", "{not json");
     await withServer(repo, async ({ call }) => {
       isError(await call("kukulu_config_show"), /not valid JSON/, "invalid JSON in the global config");
     }, { env: { KUKULU_CONFIG: p } });
@@ -502,7 +502,7 @@ const cfgDir = () => mkDir("foundry-cfg-");
 // ---------------------------------------------------------------- not a git repository
 
 {
-  const dir = mkDir("foundry-plain-routing-");
+  const dir = mkDir("kukulu-plain-routing-");
   await withServer(dir, async ({ call }) => {
     const r = await call("kukulu_agents_sync");
     eq(r.changed.join(","), ROLES.join(","), "sync still writes the four files outside a git repository");
@@ -515,7 +515,7 @@ const cfgDir = () => mkDir("foundry-cfg-");
 
 {
   const repo = plannedRepo();
-  const templatePath = `${ROOT}/templates/foundry.config.example.json`;
+  const templatePath = `${ROOT}/templates/kukulu.config.example.json`;
 
   await withServer(repo, async ({ call }) => {
     const cfg = await call("kukulu_config_show");

@@ -523,7 +523,7 @@ const alive = (pid) => {
 {
   // A timeout kills the whole tree, not just the shell: the grandchild here is
   // what a spinning test binary under `make test` looks like.
-  const pidFile = path.join(mkDir("foundry-pid-"), "grandchild.pid");
+  const pidFile = path.join(mkDir("kukulu-pid-"), "grandchild.pid");
   const repo = plannedRepo({ config: { verify: [{ cmd: `sleep 60 & echo $! > ${pidFile}; wait`, timeoutMs: 500 }] } });
   await withServer(repo, async ({ call }) => {
     const v = await call("kukulu_verify");
@@ -665,7 +665,7 @@ const alive = (pid) => {
 {
   const repo = startedRepo();
   writeFile(repo, "docs/HANDOFF.md", "# handoff\n");
-  git(repo, ["remote", "add", "origin", "/nonexistent/foundry-remote.git"]);
+  git(repo, ["remote", "add", "origin", "/nonexistent/kukulu-remote.git"]);
   await withServer(repo, async ({ call }) => {
     const r = await call("kukulu_run_finish");
     like(r.push, /^failed: /, "a failed push is reported, not swallowed");
@@ -952,7 +952,7 @@ function failingSignerRepo(config) {
   // R2-03: the undo path must --unset a local commit.gpgsign that was unset before the fallback.
   const repo = failingSignerRepo({ policies: { signing: "auto" } });
   git(repo, ["config", "--local", "--unset", "commit.gpgsign"]);
-  const globalCfg = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "foundry-gitcfg-")), "gitconfig");
+  const globalCfg = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "kukulu-gitcfg-")), "gitconfig");
   fs.writeFileSync(globalCfg, "[commit]\n\tgpgsign = true\n[gpg]\n\tformat = openpgp\n[gpg \"openpgp\"]\n\tprogram = /nonexistent-signing-agent\n");
   const hook = path.join(repo, ".git", "hooks", "commit-msg");
   fs.mkdirSync(path.dirname(hook), { recursive: true });

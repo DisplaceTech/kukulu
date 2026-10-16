@@ -79,12 +79,12 @@ process.on("exit", () => {
 const gitIn = (dir, args) => execFileSync("git", args, { cwd: dir, encoding: "utf8" }).trim();
 
 /** A throwaway git repo with an identity configured and one empty commit. */
-export function mkRepo(prefix = "foundry-test-") {
+export function mkRepo(prefix = "kukulu-test-") {
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
   madeRepos.push(dir);
   gitIn(dir, ["init", "-q", "-b", "main"]);
-  gitIn(dir, ["config", "user.email", "test@foundry.invalid"]);
-  gitIn(dir, ["config", "user.name", "foundry test"]);
+  gitIn(dir, ["config", "user.email", "test@kukulu.invalid"]);
+  gitIn(dir, ["config", "user.name", "kukulu test"]);
   gitIn(dir, ["config", "commit.gpgsign", "false"]);
   gitIn(dir, ["commit", "-q", "--allow-empty", "-m", "init"]);
   if (KEEP) console.log(`# repo: ${dir}`);
@@ -92,7 +92,7 @@ export function mkRepo(prefix = "foundry-test-") {
 }
 
 /** A throwaway directory that is deliberately *not* a git repo. */
-export function mkDir(prefix = "foundry-plain-") {
+export function mkDir(prefix = "kukulu-plain-") {
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
   madeRepos.push(dir);
   return dir;
@@ -100,7 +100,7 @@ export function mkDir(prefix = "foundry-plain-") {
 
 /** A bare repo usable as an `origin` for push tests. */
 export function mkBareRemote() {
-  const dir = mkDir("foundry-remote-");
+  const dir = mkDir("kukulu-remote-");
   execFileSync("git", ["init", "-q", "--bare", dir], { encoding: "utf8" });
   return dir;
 }
@@ -110,7 +110,7 @@ export function mkBareRemote() {
  * pull-request path stays local and deterministic. Prepend it to PATH.
  */
 export function mkFailingGhBin() {
-  const dir = mkDir("foundry-bin-");
+  const dir = mkDir("kukulu-bin-");
   const gh = path.join(dir, "gh");
   fs.writeFileSync(gh, "#!/bin/sh\nexit 1\n");
   fs.chmodSync(gh, 0o755);
@@ -124,7 +124,7 @@ export function mkFailingGhBin() {
  * `<dir>/calls.log`. Prepend the directory to PATH.
  */
 export function mkFakeGhBin() {
-  const dir = mkDir("foundry-gh-");
+  const dir = mkDir("kukulu-gh-");
   const gh = path.join(dir, "gh");
   fs.writeFileSync(
     gh,
@@ -172,7 +172,7 @@ exit 1
  * been made. Returns the program's absolute path.
  */
 export function mkFakeGpg({ failAfter } = {}) {
-  const dir = mkDir("foundry-gpg-");
+  const dir = mkDir("kukulu-gpg-");
   const gpg = path.join(dir, "gpg");
   fs.writeFileSync(
     gpg,
@@ -183,9 +183,9 @@ for a in "$@"; do
   if [ "$a" = "--verify" ]; then
     echo "[GNUPG:] NEWSIG"
     case "\${FAKE_GPG_VERIFY:-good}" in
-      bad) echo "[GNUPG:] BADSIG 0123456789ABCDEF foundry test" ;;
+      bad) echo "[GNUPG:] BADSIG 0123456789ABCDEF kukulu test" ;;
       err) echo "[GNUPG:] ERRSIG 0123456789ABCDEF 1 10 00 1700000000 9 -"; echo "[GNUPG:] NO_PUBKEY 0123456789ABCDEF" ;;
-      *) echo "[GNUPG:] GOODSIG 0123456789ABCDEF foundry test" ;;
+      *) echo "[GNUPG:] GOODSIG 0123456789ABCDEF kukulu test" ;;
     esac
     exit 0
   fi

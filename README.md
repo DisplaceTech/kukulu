@@ -23,7 +23,7 @@ You need Node ≥ 22, git, and Claude Code. Nothing to `npm install`.
    ```bash
    cd myproject                      # a git repo on its base branch
    mkdir -p docs
-   curl -fsSL https://raw.githubusercontent.com/ericmann/foundry/main/templates/SPEC.md -o docs/SPEC.md
+   curl -fsSL https://raw.githubusercontent.com/DisplaceTech/kukulu/main/templates/SPEC.md -o docs/SPEC.md
    $EDITOR docs/SPEC.md              # docs/writing-specs.md says what the planner needs
    git add -A && git commit -m "spec"
    ```
@@ -58,7 +58,7 @@ You need Node ≥ 22, git, and Claude Code. Nothing to `npm install`.
 > your Anthropic account. To point any role somewhere else — `haiku`, a full
 > model id, or a local or hosted model through
 > [claude-code-router](https://github.com/musistudio/claude-code-router) —
-> copy [`templates/foundry.config.example.json`](./templates/foundry.config.example.json)
+> copy [`templates/kukulu.config.example.json`](./templates/kukulu.config.example.json)
 > to `~/.config/kukulu/config.json`, edit the roles or pick a profile with
 > `"profile": "local"`, and run `/kukulu:go-flight` again — it will ask for
 > one more restart only the first time a role not reachable by name (a
@@ -360,7 +360,7 @@ to unstick it.
 ├── skills/                      go-flight · plan-build · implement · review-build · summarize
 ├── templates/
 │   ├── SPEC.md                  the spec skeleton the planner reads
-│   ├── foundry.config.example.json   the global routing config, explained in docs/routing.md
+│   ├── kukulu.config.example.json   the global routing config, explained in docs/routing.md
 │   └── ccr/                     claude-code-router provider manifests
 ├── docs/                        architecture · MCP reference · routing · spec guide · runbook
 └── test/                        harness + eleven suites, run by test/run.mjs
