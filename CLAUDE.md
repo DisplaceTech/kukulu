@@ -48,8 +48,10 @@ hold the judgment. These rules apply to every change in this repository.
 
 ## Constraints
 
-Mechanical rules are in `docs/kukulu.json` `constraints` and run on every
-`kukulu_verify`:
+Mechanical rules are in the `constraints` of a flight's `docs/kukulu.json`,
+which the planner writes and the archive moves to `docs/flights/<slug>/` when
+the flight ends (the last set is `docs/flights/v0-5-0/foundry.json`). They run
+on every `kukulu_verify`:
 
 - `server-synchronous`: no `async` or `await` anywhere in `mcp/server.mjs`,
   including comments and strings. Long work uses `spawnSync`.
@@ -65,9 +67,11 @@ The reviewer checks these by reading, because no line pattern can express them:
 
 - Refusals before writes; rollback on a failed commit (principle 3).
 - `fable` stays a legal alias (`ANTHROPIC_ALIASES`, `AGENT_TOOL_ALIASES`).
-- `TASK_ID`, `TASK_LINE` and the guard's regexes are unchanged; only
-  `kukulu_plan_commit`'s renumber mode accepts a suffix such as `P1-02a`.
-- Nothing under `docs/plans/` changes; under `docs/feedback/` only the
+- `TASK_ID`, `TASK_LINE` and the guard's task regexes are unchanged; only
+  `kukulu_plan_commit`'s renumber mode accepts a suffix such as `P1-02a`. The
+  guard's `RUN_START_TOOL` and agent-type set accept both the `kukulu` and the
+  pre-0.6.0 `foundry` names until 0.7.0, and nothing else about them changes.
+- No existing file under `docs/plans/` changes (new plans may be added); under `docs/feedback/` only the
   "addressed in" header lines (P3-04). Never edit `docs/SPEC.md`, and never
   edit `docs/PLAN.md` or `docs/PROGRESS.md` by hand.
 - ⚠️ ASSUMPTION values each live in one place: `policies.archive`'s default
@@ -104,10 +108,10 @@ starts with the subject under test (for example `progress:`). Assert that
 every file the tool wrote is byte-identical afterwards, that `git diff
 --cached --name-only` is empty, and that HEAD did not move.
 
-**HANDOFF.md for this flight.** `kukulu_run_finish` uses
-`docs/HANDOFF.md` as the draft PR's body, so its first line must be:
-`**Not to be merged** until a human has run one 0.5.0 flight from the
-working tree (claude --plugin-dir .). Do not merge, tag or release.`
+**HANDOFF.md.** `kukulu_run_finish` uses `docs/HANDOFF.md` as the draft PR's
+body. When a flight's spec says its result must not be merged yet (the 0.5.0
+flight's did, until a human had run a flight from the working tree), put that
+instruction in the first line, in bold.
 
 ## Commit template
 
