@@ -35,8 +35,8 @@ is the operator's flight options. These are the options:
   This is the only way you ever call `kukulu_pr_finalize`, and the only
   `resign: true` anywhere in the pipeline: a human asks for it after unlocking
   the signing agent, you never decide it yourself.
-- "migrate", or plainly the same request: call `kukulu_migrate` once, print
-  its result, and stop. A project that still prints a `deprecations` line
+- "migrate", or plainly the same request: call `kukulu_migrate` once, before
+  anything else (before `kukulu_agents_sync`), print its result, and stop. A project that still prints a `deprecations` line
   about the Foundry layout needs it; you never run it on your own, because it
   commits a move the operator should have asked for.
 - `flight=<slug>`: when `kukulu_next` returns `plan`, append one space and the

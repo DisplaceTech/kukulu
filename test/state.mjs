@@ -687,6 +687,27 @@ for (const [label, patch] of [
 }
 
 {
+  // A 0.5.0 project after its flight was archived: only .foundry/state.json is left. Planning
+  // would write docs/kukulu.json beside it, and every tool refuses a project holding both
+  // layouts, so the controller is told to migrate first.
+  const repo = plannedRepo({ config: { flight: "w1" } });
+  setState(repo, { summarized: true, verdict: "APPROVED", reviewed: true, implemented: true });
+  git(repo, ["checkout", "-q", "-b", "build/2020-01-01"]);
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-qm", "chore: build summary"]);
+  await withServer(repo, async ({ call }) => {
+    await call("kukulu_flight_archive");
+  });
+  useLegacyLayout(repo);
+  writeFile(repo, "docs/SPEC.md", "# Next spec\n");
+  await withServer(repo, async ({ call }) => {
+    const n = await call("kukulu_next");
+    eq(n.stage, "halt", "on the old layout, an archived project with an edited spec halts instead of planning");
+    like(n.reason, /run \/kukulu:go-flight migrate first/, "...telling the controller to migrate");
+  });
+}
+
+{
   // Error messages name the files the project actually has.
   const repo = plannedRepo();
   setState(repo, { round: 0 });

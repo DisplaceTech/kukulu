@@ -67,7 +67,8 @@ Compatibility shims, removed in 0.7.0:
 - A project that has `.foundry/` or `docs/foundry.json` and none of `.kukulu/` or `docs/kukulu.json` is read and written in place under the old names. A project that has both is refused by every tool.
 - A non-empty `FOUNDRY_PROJECT_DIR`, `FOUNDRY_CONFIG`, `FOUNDRY_PROFILE` or `FOUNDRY_GUARD_CAP` is used when its `KUKULU_*` counterpart is unset or empty. The global routing config is read from the `foundry/` directory when `kukulu/config.json` does not exist.
 - The Stop and SubagentStop guard still recognizes the agents `foundry-implementer` and `foundry:implementer` and the tool `foundry_run_start` in transcripts.
-- Each shim adds a line to the `deprecations` array returned by `kukulu_status` and `kukulu_next`, and `/kukulu:go-flight` prints it. A `KUKULU_*` value always wins over its `FOUNDRY_*` counterpart.
+- Each of the server's shims (layout, environment variables, global config) adds a line to the `deprecations` array returned by `kukulu_status` and `kukulu_next`, and `/kukulu:go-flight` prints it; the guard hook reports nothing. A `KUKULU_*` value always wins over its `FOUNDRY_*` counterpart.
+- An old-layout project whose next stage is `plan` halts with an instruction to run `/kukulu:go-flight migrate`, because planning would create `docs/kukulu.json` beside `.foundry/`.
 
 ### Compatibility
 

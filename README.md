@@ -1,8 +1,7 @@
 <h1 align="center">Kūkulu</h1>
 
 <p align="center">
-  <strong>From specification to merge-ready branch.</strong><br>
-  A Claude Code plugin that plans, implements, reviews and summarizes a build with nobody sitting between the stages.
+  <strong>From specification to merge-ready branch.</strong>
 </p>
 
 <p align="center">
@@ -212,7 +211,7 @@ The [Quickstart](#quickstart) installs from the marketplace. To try a
 checkout for one session instead:
 
 ```bash
-claude --plugin-dir /path/to/foundry
+claude --plugin-dir /path/to/kukulu
 ```
 
 Plugin skills are namespaced, so the entry point is `/kukulu:go-flight`; the
@@ -223,7 +222,7 @@ bare `/go-flight` form does not resolve for plugin skills.
 ```bash
 mkdir myproject && cd myproject && git init -b main
 mkdir docs
-cp /path/to/foundry/templates/SPEC.md docs/SPEC.md   # then write the spec
+cp /path/to/kukulu/templates/SPEC.md docs/SPEC.md   # then write the spec
 # drop mockups, fixtures and diagrams next to it in docs/
 git add -A && git commit -m "spec"
 

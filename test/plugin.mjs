@@ -364,7 +364,7 @@ for (const file of PROSE) {
   for (const m of body.matchAll(/\bkukulu_[a-z_]+/g)) {
     if (!toolNames.includes(m[0]) && !unknownTool) unknownTool = `${file}: ${m[0]}`;
   }
-  for (const m of body.matchAll(/\bfoundry:([a-z-]+)/g)) {
+  for (const m of body.matchAll(/\bkukulu:([a-z-]+)/g)) {
     if (!skillNames.includes(m[1]) && !agentNames.includes(m[1]) && !unknownSkill) unknownSkill = `${file}: ${m[0]}`;
   }
 }

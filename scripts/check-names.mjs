@@ -22,7 +22,7 @@ const DISPLAY = `K${U}kulu`;
 
 // History is not rewritten: archived flights, earlier plans, feedback and the
 // 0.5.0 spec keep the names they were written with. CHANGELOG.md is history
-// below its newest entry (see `isHistoryText`). The rename plan itself quotes
+// below its newest entry. The rename plan itself quotes
 // the rules it describes, including a bare macron letter.
 const HISTORY = [/^docs\/flights\//, /^docs\/plans\//, /^docs\/feedback\//, /^docs\/SPEC\.md$/];
 const PLAN_EXEMPT = /^docs\/plans\/rename-kukulu\.md$/;

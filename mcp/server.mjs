@@ -688,7 +688,7 @@ function resolveRouting() {
     profileSource = "global";
   }
   if (profile !== null && !(profile in (global.data.profiles || {}))) {
-    const src = profileSource === "env" ? `KUKULU_PROFILE=${profile}` : `"profile": "${profile}" in ${global.path}`;
+    const src = profileSource === "env" ? `${process.env.KUKULU_PROFILE ? "KUKULU_PROFILE" : "FOUNDRY_PROFILE"}=${profile}` : `"profile": "${profile}" in ${global.path}`;
     const globalDesc = global.present ? global.path : `${global.path} (does not exist)`;
     throw new ToolError(`${src} selects a profile, but ${globalDesc} has no profiles.${profile} entry`);
   }
@@ -1682,6 +1682,10 @@ function next() {
   }
   if (st.archived && !s.planPresent && exists(path.join(ROOT, st.archived.dir, "SPEC.md")) && read(P.spec) === read(path.join(ROOT, st.archived.dir, "SPEC.md"))) {
     return stage("done", `flight ${st.archived.slug} is archived in ${st.archived.dir}; edit docs/SPEC.md for the next flight, then run /kukulu:go-flight`);
+  }
+  if (legacyLayout && (!s.planPresent || !s.progressPresent || !s.configPresent)) {
+    // The planner would write docs/kukulu.json beside .foundry/, and every tool refuses a project holding both layouts.
+    return stage("halt", "this project is still on the pre-0.6.0 layout (.foundry/), and the plan stage would write docs/kukulu.json beside it; run /kukulu:go-flight migrate first, then run /kukulu:go-flight again");
   }
   if (!s.planPresent || !s.progressPresent || !s.configPresent) {
     return stage("plan", "no plan on disk (docs/PLAN.md, docs/PROGRESS.md and docs/kukulu.json are all required)");
@@ -3141,15 +3145,26 @@ function migrate() {
   const tracked = (abs) => git(["ls-files", "--error-unmatch", "--", rel(abs)], { allowFail: true }).ok;
 
   // Ignore lines follow the files they name; a line that is already in its new form is just dropped.
-  const renamedLines = new Map([[rel(before.lock), rel(next.lock)], [`${rel(before.worktrees)}/`, `${rel(next.worktrees)}/`]]);
+  const renamedLines = new Map([
+    [rel(before.lock), rel(next.lock)],
+    [rel(before.mutation), rel(next.mutation)],
+    [`${rel(before.worktrees)}/`, `${rel(next.worktrees)}/`],
+  ]);
+  /** Rename the matching lines where they stand; a line whose new form is already present is dropped. */
+  const renameLines = (text) => {
+    const lines = text.split("\n");
+    const out = [];
+    for (const l of lines) {
+      if (!renamedLines.has(l)) out.push(l);
+      else if (!lines.includes(renamedLines.get(l)) && !out.includes(renamedLines.get(l))) out.push(renamedLines.get(l));
+    }
+    return out.join("\n");
+  };
   const ignoreBefore = exists(before.gitignore) ? read(before.gitignore) : null;
   let gitignore = "absent";
   let ignoreAfter = ignoreBefore;
   if (ignoreBefore !== null) {
-    const lines = ignoreBefore.split("\n");
-    const kept = lines.filter((l) => !renamedLines.has(l));
-    const added = lines.filter((l) => renamedLines.has(l)).map((l) => renamedLines.get(l)).filter((l) => !kept.includes(l));
-    ignoreAfter = added.length ? `${kept.join("\n").replace(/\s*$/, "")}\n${added.join("\n")}\n` : ignoreBefore;
+    ignoreAfter = renameLines(ignoreBefore);
     gitignore = ignoreAfter === ignoreBefore ? "unchanged" : "rewritten";
   }
   const ignoreTracked = ignoreAfter !== ignoreBefore && tracked(before.gitignore);
@@ -3198,11 +3213,14 @@ function migrate() {
     } else keptAgents.push(rel(file));
   }
   if (exists(excludeFile)) {
-    const lines = read(excludeFile).split("\n");
+    const current = read(excludeFile);
     const oldAgentsLine = ".claude/agents/foundry-*.md";
-    const kept = lines.filter((l) => !renamedLines.has(l) && !(l === oldAgentsLine && !keptAgents.length));
-    const text = kept.join("\n").replace(/\s*$/, "");
-    if (kept.length !== lines.length) write(excludeFile, text ? `${text}\n` : "");
+    const renamed = renameLines(current)
+      .split("\n")
+      .filter((l) => !(l === oldAgentsLine && !keptAgents.length))
+      .join("\n");
+    const text = renamed.replace(/\s*$/, "");
+    if (renamed !== current) write(excludeFile, text ? `${text}\n` : "");
   }
   for (const line of [`${rel(next.worktrees)}/`, ".claude/agents/kukulu-*.md"]) ensureLineInFile(excludeFile, line);
   const permissions = ensureMcpAllowRule();

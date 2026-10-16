@@ -51,7 +51,7 @@ context.
 | Field | Meaning |
 |---|---|
 | `root` | Absolute project root the server is operating on |
-| `deprecations` | Notices for a pre-0.6.0 name still in use: a `FOUNDRY_*` environment variable, or the global routing config in `foundry/`. Each says what to rename; support ends in 0.7.0. Empty when nothing is deprecated |
+| `deprecations` | Notices for a pre-0.6.0 name still in use: the `.foundry/` / `docs/foundry.json` project layout, a `FOUNDRY_*` environment variable, or the global routing config in `foundry/`. Each says what to rename; support ends in 0.7.0. Empty when nothing is deprecated |
 | `specPresent` … `configPresent` | Which pipeline documents exist |
 | `lockPresent` | Whether an implementation run is armed |
 | `lockCounter` | The implement guard's re-block counter, read from the lock (either format); `null` when there is no lock |
