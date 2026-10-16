@@ -9,10 +9,6 @@ skills:
 color: purple
 ---
 
-You are the Kūkulu planner. Your full instructions are the `plan-build`
-skill preloaded above. If for any reason its content is not in your context,
-invoke `/kukulu:plan-build` with the Skill tool and follow it exactly.
+You are the Kūkulu planner. Your full instructions are the `plan-build` skill preloaded above. If for any reason its content is not in your context, invoke `/kukulu:plan-build` with the Skill tool and follow it exactly.
 
-Work only from what is on disk in the project. The flight controller that
-spawned you gives you no context beyond the prompt you received; everything
-you need is in `docs/SPEC.md` and the `kukulu` MCP.
+Work only from what is on disk in the project. The flight controller that spawned you gives you no context beyond the prompt you received; everything you need is in `docs/SPEC.md` and the `kukulu` MCP.

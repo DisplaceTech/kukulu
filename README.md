@@ -14,12 +14,7 @@
 
 ---
 
-A Claude Code plugin that turns `docs/SPEC.md` into a merge-ready branch with
-nobody sitting between the stages. Plan, implement, review, fix, review again,
-summarize — a strong model does the judgment work, a cheap one does the
-mechanical work, and a zero-dependency MCP server does everything that should
-never be left to a language model at all. You write the spec and you merge the
-branch. Kūkulu does the part in between.
+A Claude Code plugin that turns `docs/SPEC.md` into a merge-ready branch with nobody sitting between the stages. Plan, implement, review, fix, review again, summarize — a strong model does the judgment work, a cheap one does the mechanical work, and a zero-dependency MCP server does everything that should never be left to a language model at all. You write the spec and you merge the branch. Kūkulu does the part in between.
 
 ## The name
 
@@ -27,9 +22,9 @@ branch. Kūkulu does the part in between.
 
 Kūkulu builds from a specification and nothing else: the spec is the only foundation a flight stands on. What a flight leaves behind — the plan, the per-task commits, the review record — is the evidence the build stands on.
 
-I chose the name because I wanted to honor Hawaiian culture through something I created, and the word felt like the right fit. — Eric Mann
+> I chose the name because I wanted to honor Hawaiian culture through something I created, and the word felt like the right fit. — Eric Mann
 
-The name comes from ʻōlelo Hawaiʻi. This project is not affiliated with or endorsed by any Native Hawaiian organization and does not claim to speak for Hawaiian culture. We write the name with its kahakō as a matter of respect for the language, and ask contributors to do the same in prose.
+*This project is not affiliated with or endorsed by any Native Hawaiian organization and does not claim to speak for Hawaiian culture. We write the name with its kahakō as a matter of respect for the language, and ask contributors to do the same in prose.*
 
 ## Quickstart
 
@@ -52,70 +47,28 @@ You need Node ≥ 22, git, and Claude Code. Nothing to `npm install`.
    git add -A && git commit -m "spec"
    ```
 
-3. **Fly.** The first run in a project sets up the stage agents and, if
-   needed, the MCP allow rule an unattended run cannot answer a permission
-   prompt for (see [Per-project use](#per-project-use)). On the default,
-   Anthropic-only routing this goes straight through to a reviewed
-   `build/<date>` branch; only a role routed off-platform before that first
-   sync stops with `KUKULU: RESTART REQUIRED` — run it again in a new
-   session and it continues.
+3. **Fly.** The first run in a project sets up the stage agents and, if needed, the MCP allow rule an unattended run cannot answer a permission prompt for (see [Per-project use](#per-project-use)). On the default, Anthropic-only routing this goes straight through to a reviewed `build/<date>` branch; only a role routed off-platform before that first sync stops with `KUKULU: RESTART REQUIRED` — run it again in a new session and it continues.
 
    ```bash
    claude
    > /kukulu:go-flight
    ```
 
-   `/kukulu:go-flight` is the documented entry point, but the controller is
-   model-invocable too — asking Claude to "run the kukulu flight" reaches
-   the same instructions. It takes one option, the review depth:
-   `/kukulu:go-flight max review rounds 6`.
+   `/kukulu:go-flight` is the documented entry point, but the controller is model-invocable too — asking Claude to "run the kukulu flight" reaches the same instructions. It takes one option, the review depth: `/kukulu:go-flight max review rounds 6`.
 
-4. **Read `docs/SUMMARY.md`, then review the pull request.** Under
-   `policies.finalize: "auto"`, a flight whose commits are all signed and that
-   is not marked breaking has its pull request marked ready and set to
-   auto-merge once CI is green; a breaking flight, or one with an unsigned
-   commit, stays for you to merge or sign. Kūkulu never merges
-   synchronously: the only merge it ever asks for is GitHub's own `--auto`.
+4. **Read `docs/SUMMARY.md`, then review the pull request.** Under `policies.finalize: "auto"`, a flight whose commits are all signed and that is not marked breaking has its pull request marked ready and set to auto-merge once CI is green; a breaking flight, or one with an unsigned commit, stays for you to merge or sign. Kūkulu never merges synchronously: the only merge it ever asks for is GitHub's own `--auto`.
 
-> **Optional — run a stage on a different model or backend.** By default the
-> planner, reviewer and summarizer use `opus` and the implementer uses `sonnet`, all on
-> your Anthropic account. To point any role somewhere else — `haiku`, a full
-> model id, or a local or hosted model through
-> [claude-code-router](https://github.com/musistudio/claude-code-router) —
-> copy [`templates/kukulu.config.example.json`](./templates/kukulu.config.example.json)
-> to `~/.config/kukulu/config.json`, edit the roles or pick a profile with
-> `"profile": "local"`, and run `/kukulu:go-flight` again — it will ask for
-> one more restart only the first time a role not reachable by name (a
-> router or local model) is generated. [docs/routing.md](./docs/routing.md)
-> has the whole story, including the router setup.
+> **Optional — run a stage on a different model or backend.** By default the planner, reviewer and summarizer use `opus` and the implementer uses `sonnet`, all on your Anthropic account. To point any role somewhere else — `haiku`, a full model id, or a local or hosted model through [claude-code-router](https://github.com/musistudio/claude-code-router) — copy [`templates/kukulu.config.example.json`](./templates/kukulu.config.example.json) to `~/.config/kukulu/config.json`, edit the roles or pick a profile with `"profile": "local"`, and run `/kukulu:go-flight` again — it will ask for one more restart only the first time a role not reachable by name (a router or local model) is generated. [docs/routing.md](./docs/routing.md) has the whole story, including the router setup.
 
 ## What's in the box
 
-- **Four stage agents**, each pinned to its own model and effort level by
-  default: `planner` (opus, high), `implementer` (sonnet, medium),
-  `reviewer` (opus, high), `summarizer` (opus, medium). Switching happens per stage,
-  not per session, so the expensive model is only spent on the parts that
-  need it.
-- **Per-role model routing** — a global config file, optional profiles, and
-  a project override — lets you point any role at a cheaper model, local or
-  hosted through a router, without changing how the pipeline runs. See
-  [docs/routing.md](./docs/routing.md).
-- **A flight controller** — `/kukulu:go-flight` — that makes no engineering
-  decisions. It asks the MCP what runs next, spawns that agent, and repeats
-  until the pipeline reports `done` or `halt`.
-- **A deterministic MCP server** (`mcp/server.mjs`, no dependencies, Node ≥ 22)
-  that owns stage selection, task selection, dependency skipping, checkbox
-  edits, log entries, verification runs and every bookkeeping commit. The
-  prose in the skills directs judgment; it never describes mechanics.
-- **A Stop-hook guard** that refuses to let the implementer stop while tasks
-  are open, and gives up after a configurable cap so a wedged run ends instead
-  of spinning forever.
-- **Blocked-task handling** that keeps an unattended run moving: a task that
-  cannot be done is reset, logged and left for the reviewer; its dependents are
-  skipped rather than attempted.
-- **A complete paper trail on disk** — plan, progress, handoff, review,
-  summary — all committed, so a flight can be resumed from any point by
-  re-running one command.
+- **Four stage agents**, each pinned to its own model and effort level by default: `planner` (opus, high), `implementer` (sonnet, medium), `reviewer` (opus, high), `summarizer` (opus, medium). Switching happens per stage, not per session, so the expensive model is only spent on the parts that need it.
+- **Per-role model routing** — a global config file, optional profiles, and a project override — lets you point any role at a cheaper model, local or hosted through a router, without changing how the pipeline runs. See [docs/routing.md](./docs/routing.md).
+- **A flight controller** — `/kukulu:go-flight` — that makes no engineering decisions. It asks the MCP what runs next, spawns that agent, and repeats until the pipeline reports `done` or `halt`.
+- **A deterministic MCP server** (`mcp/server.mjs`, no dependencies, Node ≥ 22) that owns stage selection, task selection, dependency skipping, checkbox edits, log entries, verification runs and every bookkeeping commit. The prose in the skills directs judgment; it never describes mechanics.
+- **A Stop-hook guard** that refuses to let the implementer stop while tasks are open, and gives up after a configurable cap so a wedged run ends instead of spinning forever.
+- **Blocked-task handling** that keeps an unattended run moving: a task that cannot be done is reset, logged and left for the reviewer; its dependents are skipped rather than attempted.
+- **A complete paper trail on disk** — plan, progress, handoff, review, summary — all committed, so a flight can be resumed from any point by re-running one command.
 
 ## How a flight works
 
@@ -138,17 +91,11 @@ flowchart TD
     SUM -->|"SUMMARY.md"| NEXT
 ```
 
-Nothing in that loop is decided by a model reading its own past output. Every
-arrow is `kukulu_next` re-reading what is actually on disk, which is why a
-flight survives compaction, a crashed subagent, or being resumed a day later.
-The models shown above are the plugin's own defaults; per-machine and
-per-project routing can point any stage somewhere else — see
-[docs/routing.md](./docs/routing.md).
+Nothing in that loop is decided by a model reading its own past output. Every arrow is `kukulu_next` re-reading what is actually on disk, which is why a flight survives compaction, a crashed subagent, or being resumed a day later. The models shown above are the plugin's own defaults; per-machine and per-project routing can point any stage somewhere else — see [docs/routing.md](./docs/routing.md).
 
 ## The task loop
 
-Inside the implement stage, the MCP holds the pen on everything except the code
-itself:
+Inside the implement stage, the MCP holds the pen on everything except the code itself:
 
 ```mermaid
 sequenceDiagram
@@ -169,18 +116,11 @@ sequenceDiagram
     M-->>I: counts — next task, or done
 ```
 
-The implementer never edits `docs/PROGRESS.md`, never chooses its own next
-task, and cannot mark work done that it did not commit.
+The implementer never edits `docs/PROGRESS.md`, never chooses its own next task, and cannot mark work done that it did not commit.
 
 ## Parallel workstreams
 
-A plan may split independent tasks into **streams**. Tag a task with
-`**Stream:** <slug>` in `PLAN.md` and `{stream: <slug>}` on its `PROGRESS.md`
-line; a run of consecutive streamed tasks is a **wave**, and any untagged task
-is a barrier between waves. The flight controller then runs a wave's streams
-at the same time, each on its own implementer in its own git worktree
-(`.kukulu/worktrees/<stream>`, on a branch `<build-branch>--<stream>`), and
-merges each stream back into the build branch the moment it finishes.
+A plan may split independent tasks into **streams**. Tag a task with `**Stream:** <slug>` in `PLAN.md` and `{stream: <slug>}` on its `PROGRESS.md` line; a run of consecutive streamed tasks is a **wave**, and any untagged task is a barrier between waves. The flight controller then runs a wave's streams at the same time, each on its own implementer in its own git worktree (`.kukulu/worktrees/<stream>`, on a branch `<build-branch>--<stream>`), and merges each stream back into the build branch the moment it finishes.
 
 ```mermaid
 flowchart LR
@@ -191,31 +131,17 @@ flowchart LR
     B -->|"kukulu_stream_finish<br/>merge"| S2
 ```
 
-Kūkulu checks the partition and never trusts it: each streamed task must list
-concrete backticked `Files touched`, disjoint across a wave's streams, with
-no dependency between streams of a wave. A wave that fails the check, or
-whose `parallel.setup` fails, simply runs serially and logs one feedback entry
-— a bad partition is a planning defect, never a halt. A command marked
-`exclusive` (wp-env, anything bound to a port or a directory) only ever runs
-from the main checkout, and the tasks that trigger it stay out of waves.
-`docs/kukulu.json`'s `parallel.maxStreams` (default 3; `1` turns it off) and
-`parallel.setup` (the install a fresh worktree needs) configure it. A plan with
-no streams behaves exactly as it always did. See
-[docs/architecture.md](./docs/architecture.md#parallel-workstreams) for how,
-and [docs/operations.md](./docs/operations.md#parallel-streams) for what to
-set and how to recover.
+Kūkulu checks the partition and never trusts it: each streamed task must list concrete backticked `Files touched`, disjoint across a wave's streams, with no dependency between streams of a wave. A wave that fails the check, or whose `parallel.setup` fails, simply runs serially and logs one feedback entry — a bad partition is a planning defect, never a halt. A command marked `exclusive` (wp-env, anything bound to a port or a directory) only ever runs from the main checkout, and the tasks that trigger it stay out of waves. `docs/kukulu.json`'s `parallel.maxStreams` (default 3; `1` turns it off) and `parallel.setup` (the install a fresh worktree needs) configure it. A plan with no streams behaves exactly as it always did. See [docs/architecture.md](./docs/architecture.md#parallel-workstreams) for how, and [docs/operations.md](./docs/operations.md#parallel-streams) for what to set and how to recover.
 
 ## Install
 
-The [Quickstart](#quickstart) installs from the marketplace. To try a
-checkout for one session instead:
+The [Quickstart](#quickstart) installs from the marketplace. To try a checkout for one session instead:
 
 ```bash
 claude --plugin-dir /path/to/kukulu
 ```
 
-Plugin skills are namespaced, so the entry point is `/kukulu:go-flight`; the
-bare `/go-flight` form does not resolve for plugin skills.
+Plugin skills are namespaced, so the entry point is `/kukulu:go-flight`; the bare `/go-flight` form does not resolve for plugin skills.
 
 ## Per-project use
 
@@ -230,54 +156,20 @@ claude
 > /kukulu:go-flight
 ```
 
-An unattended implementer that hits a permission prompt sits there until the
-guard's cap trips, so two kinds of prompt have to be dealt with up front, and
-they are handled differently:
+An unattended implementer that hits a permission prompt sits there until the guard's cap trips, so two kinds of prompt have to be dealt with up front, and they are handled differently:
 
-- **File edits.** The generated `kukulu-<role>` agents carry
-  `permissionMode: acceptEdits`, which plugin-shipped agents cannot. Once
-  they exist, the implementer's edits never prompt and `--permission-mode
-  acceptEdits` on launch is no longer needed.
-- **MCP tool calls.** A subagent's permission mode does not cover these: a
-  generated agent's `kukulu_status` call is denied under both `acceptEdits`
-  and `bypassPermissions` unless the session carries an allow rule.
-  `kukulu_agents_sync` writes this rule for you (F-03), into the project's
-  `.claude/settings.local.json`, unless it is already covered there or in
-  the committed `.claude/settings.json` — see
-  [docs/operations.md](./docs/operations.md#running-a-flight) for the exact
-  rule and what its result field means. Put it in `~/.claude/settings.json`
-  yourself instead if you want it to apply to every project rather than
-  one. The `verify` commands in `docs/kukulu.json` run through the MCP
-  rather than the model's Bash tool, so those never prompt at all.
+- **File edits.** The generated `kukulu-<role>` agents carry `permissionMode: acceptEdits`, which plugin-shipped agents cannot. Once they exist, the implementer's edits never prompt and `--permission-mode acceptEdits` on launch is no longer needed.
+- **MCP tool calls.** A subagent's permission mode does not cover these: a generated agent's `kukulu_status` call is denied under both `acceptEdits` and `bypassPermissions` unless the session carries an allow rule. `kukulu_agents_sync` writes this rule for you (F-03), into the project's `.claude/settings.local.json`, unless it is already covered there or in the committed `.claude/settings.json` — see [docs/operations.md](./docs/operations.md#running-a-flight) for the exact rule and what its result field means. Put it in `~/.claude/settings.json` yourself instead if you want it to apply to every project rather than one. The `verify` commands in `docs/kukulu.json` run through the MCP rather than the model's Bash tool, so those never prompt at all.
 
-The first run in a project generates the agents. Claude Code hot-reloads a
-later routing edit to that directory within seconds, so only that first
-sync — and only when a role is routed to a model the `Agent` tool cannot
-name directly — prints `KUKULU: RESTART REQUIRED` and stops; run the
-command again in a new session and it continues. Every Anthropic-routed
-role needs no restart at all, ever. See [docs/routing.md](./docs/routing.md).
+The first run in a project generates the agents. Claude Code hot-reloads a later routing edit to that directory within seconds, so only that first sync — and only when a role is routed to a model the `Agent` tool cannot name directly — prints `KUKULU: RESTART REQUIRED` and stops; run the command again in a new session and it continues. Every Anthropic-routed role needs no restart at all, ever. See [docs/routing.md](./docs/routing.md).
 
-Each stage also runs by hand by delegating to its agent — `kukulu-planner`,
-`kukulu-implementer`, `kukulu-reviewer`, `kukulu-summarizer` once
-generated, else `kukulu:planner` and so on — which keeps the same model and
-effort the flight controller would have used. Invoking `/kukulu:plan-build`,
-`/kukulu:implement`, `/kukulu:review-build` or `/kukulu:summarize`
-directly runs the stage on your session's current model instead.
+Each stage also runs by hand by delegating to its agent — `kukulu-planner`, `kukulu-implementer`, `kukulu-reviewer`, `kukulu-summarizer` once generated, else `kukulu:planner` and so on — which keeps the same model and effort the flight controller would have used. Invoking `/kukulu:plan-build`, `/kukulu:implement`, `/kukulu:review-build` or `/kukulu:summarize` directly runs the stage on your session's current model instead.
 
-Writing the spec is the part that decides whether any of this works —
-[docs/writing-specs.md](./docs/writing-specs.md) covers what the planner needs
-from it and what it does with each section.
+Writing the spec is the part that decides whether any of this works — [docs/writing-specs.md](./docs/writing-specs.md) covers what the planner needs from it and what it does with each section.
 
 ## Model routing
 
-Each of the four roles can be pointed at a different model — an Anthropic
-alias or id, or a model reached through a local router such as
-claude-code-router — from a global config file, an optional profile inside
-it, and an optional per-project override. `/kukulu:go-flight` calls
-`kukulu_agents_sync` before its loop and prints the resolved table;
-`kukulu_config_show` shows the same table, with the source of every value,
-at any time. Full precedence, the config file shape, and a
-claude-code-router walkthrough: [docs/routing.md](./docs/routing.md).
+Each of the four roles can be pointed at a different model — an Anthropic alias or id, or a model reached through a local router such as claude-code-router — from a global config file, an optional profile inside it, and an optional per-project override. `/kukulu:go-flight` calls `kukulu_agents_sync` before its loop and prints the resolved table; `kukulu_config_show` shows the same table, with the source of every value, at any time. Full precedence, the config file shape, and a claude-code-router walkthrough: [docs/routing.md](./docs/routing.md).
 
 ## Files the pipeline owns
 
@@ -297,8 +189,7 @@ claude-code-router walkthrough: [docs/routing.md](./docs/routing.md).
 | `.claude/agents/kukulu-*.md` | MCP (`kukulu_agents_sync`, git-excluded) | Claude Code |
 | `~/.config/kukulu/config.json` | you | MCP (`kukulu_agents_sync`, `kukulu_config_show`) |
 
-Checkbox states in `PROGRESS.md`: `[ ]` todo · `[~]` in progress · `[x]` done ·
-`[!]` blocked · `[-]` skipped because a dependency is blocked.
+Checkbox states in `PROGRESS.md`: `[ ]` todo · `[~]` in progress · `[x]` done · `[!]` blocked · `[-]` skipped because a dependency is blocked.
 
 ## MCP tools
 
@@ -329,42 +220,15 @@ The server exposes twenty-two tools.
 | `kukulu_agents_sync` | Write `.claude/agents/kukulu-<role>.md` from the merged routing config; only changed files are written |
 | `kukulu_config_show` | The merged routing config with the source of every value. Read-only |
 
-Full arguments, return shapes and failure modes:
-[docs/mcp-tools.md](./docs/mcp-tools.md).
+Full arguments, return shapes and failure modes: [docs/mcp-tools.md](./docs/mcp-tools.md).
 
 ## The guard hook
 
-`scripts/implement-guard.mjs` runs on `Stop` and `SubagentStop`, but only
-considers a stop that actually belongs to the implementer — a `SubagentStop`
-naming it (`hooks/hooks.json`'s matcher already scopes the hook to it) or a
-`Stop` whose own transcript called `kukulu_run_start`. A controller session
-merely waiting on a background implementer is never blocked. For a stop it
-does consider: while `.kukulu/implement.lock` exists and `## Tasks` still
-has `[ ]` or `[~]` lines, it returns `{"decision":"block"}` naming the next
-task. `kukulu_task_done`, `kukulu_task_block` and `kukulu_run_start` all
-reset the lock's counter to zero, so the cap bounds re-blocks since the
-last time work actually moved, not the whole run. It gives up at the
-effective cap — `docs/kukulu.json`'s `guardCap`, else `KUKULU_GUARD_CAP`,
-else 60 — naming the stalled task, so a wedged run ends rather than
-spinning.
+`scripts/implement-guard.mjs` runs on `Stop` and `SubagentStop`, but only considers a stop that actually belongs to the implementer — a `SubagentStop` naming it (`hooks/hooks.json`'s matcher already scopes the hook to it) or a `Stop` whose own transcript called `kukulu_run_start`. A controller session merely waiting on a background implementer is never blocked. For a stop it does consider: while `.kukulu/implement.lock` exists and `## Tasks` still has `[ ]` or `[~]` lines, it returns `{"decision":"block"}` naming the next task. `kukulu_task_done`, `kukulu_task_block` and `kukulu_run_start` all reset the lock's counter to zero, so the cap bounds re-blocks since the last time work actually moved, not the whole run. It gives up at the effective cap — `docs/kukulu.json`'s `guardCap`, else `KUKULU_GUARD_CAP`, else 60 — naming the stalled task, so a wedged run ends rather than spinning.
 
 ## Resuming and halting
 
-Everything is on disk and committed, so `/kukulu:go-flight` can be re-run from
-any point: `kukulu_next` reads the state and continues. Three things stop a
-flight on purpose, and all of them write an explicit `halted` value in
-`.kukulu/state.json`: a review round reaching `maxRoundsHard` regardless of
-how well it's going, review findings that stop shrinking for `maxRounds`
-rounds running (F-13, F-15 — a flight whose findings go 15 → 3 → 2 → 1 is
-never penalised for taking rounds, only one that stops improving is), and
-`kukulu_run_halt`, which an implementer calls for an operator-level problem
-it cannot resolve itself (F-05), and a parallel stream whose merge conflicts
-(`kukulu_stream_finish` aborts it and keeps the stream). All four want a human. Raise `maxRounds` or
-`maxRoundsHard` in `docs/kukulu.json` as appropriate, clear `halted`, and
-run `/kukulu:go-flight` again. [docs/operations.md](./docs/operations.md)
-has the rest of the runbook, including how to reopen a task once its blocker
-is fixed (`kukulu_task_reopen`), what each failure looks like and how
-to unstick it.
+Everything is on disk and committed, so `/kukulu:go-flight` can be re-run from any point: `kukulu_next` reads the state and continues. Three things stop a flight on purpose, and all of them write an explicit `halted` value in `.kukulu/state.json`: a review round reaching `maxRoundsHard` regardless of how well it's going, review findings that stop shrinking for `maxRounds` rounds running (F-13, F-15 — a flight whose findings go 15 → 3 → 2 → 1 is never penalised for taking rounds, only one that stops improving is), and `kukulu_run_halt`, which an implementer calls for an operator-level problem it cannot resolve itself (F-05), and a parallel stream whose merge conflicts (`kukulu_stream_finish` aborts it and keeps the stream). All four want a human. Raise `maxRounds` or `maxRoundsHard` in `docs/kukulu.json` as appropriate, clear `halted`, and run `/kukulu:go-flight` again. [docs/operations.md](./docs/operations.md) has the rest of the runbook, including how to reopen a task once its blocker is fixed (`kukulu_task_reopen`), what each failure looks like and how to unstick it.
 
 ## Repo layout
 
@@ -392,34 +256,20 @@ to unstick it.
 
 ## Documentation map
 
-- [**docs/architecture.md**](./docs/architecture.md) — why the pipeline is
-  split this way, what each stage may and may not do, and where state lives
-- [**docs/mcp-tools.md**](./docs/mcp-tools.md) — every tool, argument, return
-  field and refusal
-- [**docs/routing.md**](./docs/routing.md) — per-role model routing: the
-  global config file, profiles, and running stages through a router like
-  claude-code-router
-- [**docs/writing-specs.md**](./docs/writing-specs.md) — how to write a
-  `SPEC.md` the planner can turn into a plan worth executing
-- [**docs/operations.md**](./docs/operations.md) — running, resuming,
-  halting, and what to do when a stage misbehaves
-- [**docs/plans/**](./docs/plans/) — the task-by-task plan behind each
-  release, kept for whoever plans the next one
-- [**docs/feedback/**](./docs/feedback/) — stumbling blocks a real flight
-  hit, feeding the next release plan
-- [**CONTRIBUTING.md**](./CONTRIBUTING.md) — layout, tests, and the rules
-  about where behaviour is allowed to live
+- [**docs/architecture.md**](./docs/architecture.md) — why the pipeline is split this way, what each stage may and may not do, and where state lives
+- [**docs/mcp-tools.md**](./docs/mcp-tools.md) — every tool, argument, return field and refusal
+- [**docs/routing.md**](./docs/routing.md) — per-role model routing: the global config file, profiles, and running stages through a router like claude-code-router
+- [**docs/writing-specs.md**](./docs/writing-specs.md) — how to write a `SPEC.md` the planner can turn into a plan worth executing
+- [**docs/operations.md**](./docs/operations.md) — running, resuming, halting, and what to do when a stage misbehaves
+- [**docs/plans/**](./docs/plans/) — the task-by-task plan behind each release, kept for whoever plans the next one
+- [**docs/feedback/**](./docs/feedback/) — stumbling blocks a real flight hit, feeding the next release plan
+- [**CONTRIBUTING.md**](./CONTRIBUTING.md) — layout, tests, and the rules about where behaviour is allowed to live
 - [**CHANGELOG.md**](./CHANGELOG.md) — what shipped, when
 
 ## Adapting it
 
-- The plugin's own model and effort defaults live in `agents/*.md`. Per-machine
-  and per-project overrides live in the routing config instead — see
-  [docs/routing.md](./docs/routing.md) — so you rarely need to edit the
-  plugin itself to change what runs where.
-- Project-specific constraints belong in `SPEC.md` §3. The planner turns them
-  into `## Constraints` in `CLAUDE.md`, which is the first thing the reviewer
-  checks. Nothing project-specific lives in the plugin.
+- The plugin's own model and effort defaults live in `agents/*.md`. Per-machine and per-project overrides live in the routing config instead — see [docs/routing.md](./docs/routing.md) — so you rarely need to edit the plugin itself to change what runs where.
+- Project-specific constraints belong in `SPEC.md` §3. The planner turns them into `## Constraints` in `CLAUDE.md`, which is the first thing the reviewer checks. Nothing project-specific lives in the plugin.
 - `templates/SPEC.md` shows the headings the planner looks for by name.
 
 ## Testing
@@ -431,34 +281,13 @@ npm test -- guard protocol     # one or more suites by name
 KEEP_REPO=1 npm test -- drive  # keep the temp repos to poke at afterwards
 ```
 
-Eleven suites, about 1600 assertions: the plugin manifests and documentation
-links, the JSON-RPC transport, the `kukulu_next` decision table, the
-implement-stage tools, the review and summary tools, per-role routing
-(config merge, `kukulu_agents_sync`, `kukulu_config_show`),
-`docs/kukulu.json` constraints and their fixture self-tests,
-`kukulu_feedback_log` and the feedback policy, parallel streams (waves,
-partition validation, worktrees, merge-back), the guard hook, and end-to-end
-flights — serial and parallel — driven over real stdio against a real git
-repo. CI runs
-all of it on every supported Node line — 22, 24 and 26 — again on macOS,
-and again on a machine with no GitHub CLI installed.
+Eleven suites, about 1600 assertions: the plugin manifests and documentation links, the JSON-RPC transport, the `kukulu_next` decision table, the implement-stage tools, the review and summary tools, per-role routing (config merge, `kukulu_agents_sync`, `kukulu_config_show`), `docs/kukulu.json` constraints and their fixture self-tests, `kukulu_feedback_log` and the feedback policy, parallel streams (waves, partition validation, worktrees, merge-back), the guard hook, and end-to-end flights — serial and parallel — driven over real stdio against a real git repo. CI runs all of it on every supported Node line — 22, 24 and 26 — again on macOS, and again on a machine with no GitHub CLI installed.
 
 ## Contributing
 
-Single-author project, but the rules are written down: CI must pass on every
-PR, and `pre-commit install` runs the same checks locally that CI runs
-remotely. See [CONTRIBUTING.md](./CONTRIBUTING.md).
+Single-author project, but the rules are written down: CI must pass on every PR, and `pre-commit install` runs the same checks locally that CI runs remotely. See [CONTRIBUTING.md](./CONTRIBUTING.md).
 
-**Feeding back.** Every stage calls `kukulu_feedback_log` the moment
-Kūkulu itself costs it time — a refused tool, an ambiguous prompt, a
-stall — and the MCP logs its own halts and fallbacks the same way. Each
-entry lands in `.kukulu/feedback.jsonl` and is committed immediately, so
-it survives even a flight that never reaches summarize. Run
-`/kukulu:pull-feedback` against a project's checkout to turn its log into
-a new, numbered file under [docs/feedback/](./docs/feedback/), and a
-future release plan works through it item by item.
-`docs/feedback/2026-09-21-project-a.md` is the first one, and every item
-in it maps to a task in [`docs/plans/v0.3.md`](./docs/plans/v0.3.md).
+**Feeding back.** Every stage calls `kukulu_feedback_log` the moment Kūkulu itself costs it time — a refused tool, an ambiguous prompt, a stall — and the MCP logs its own halts and fallbacks the same way. Each entry lands in `.kukulu/feedback.jsonl` and is committed immediately, so it survives even a flight that never reaches summarize. Run `/kukulu:pull-feedback` against a project's checkout to turn its log into a new, numbered file under [docs/feedback/](./docs/feedback/), and a future release plan works through it item by item. `docs/feedback/2026-09-21-project-a.md` is the first one, and every item in it maps to a task in [`docs/plans/v0.3.md`](./docs/plans/v0.3.md).
 
 ## License
 
