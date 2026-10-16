@@ -1,4 +1,19 @@
-# Kūkulu
+<h1 align="center">Kūkulu</h1>
+
+<p align="center">
+  <strong>From specification to merge-ready branch.</strong><br>
+  A Claude Code plugin that plans, implements, reviews and summarizes a build with nobody sitting between the stages.
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/License-Apache%202.0-blue" alt="Apache License 2.0" />
+  <img src="https://img.shields.io/badge/version-0.6.0-informational" alt="Version 0.6.0" />
+  <img src="https://img.shields.io/badge/Node-%E2%89%A5%2022-339933?logo=nodedotjs&logoColor=white" alt="Node 22 or later" />
+  <img src="https://img.shields.io/badge/Claude%20Code-plugin-D97757" alt="Claude Code plugin" />
+  <img src="https://img.shields.io/badge/dependencies-none-brightgreen" alt="No dependencies" />
+</p>
+
+---
 
 A Claude Code plugin that turns `docs/SPEC.md` into a merge-ready branch with
 nobody sitting between the stages. Plan, implement, review, fix, review again,
@@ -13,7 +28,7 @@ branch. Kūkulu does the part in between.
 
 Kūkulu builds from a specification and nothing else: the spec is the only foundation a flight stands on. What a flight leaves behind — the plan, the per-task commits, the review record — is the evidence the build stands on.
 
-\[PLACEHOLDER — Eric: a sentence or two, in your own words, on why you chose the name.\]
+I chose the name because I wanted to honor Hawaiian culture through something I created, and the word felt like the right fit. — Eric Mann
 
 The name comes from ʻōlelo Hawaiʻi. This project is not affiliated with or endorsed by any Native Hawaiian organization and does not claim to speak for Hawaiian culture. We write the name with its kahakō as a matter of respect for the language, and ask contributors to do the same in prose.
 
