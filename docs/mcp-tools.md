@@ -1,23 +1,23 @@
 # MCP tool reference
 
-Twenty-one tools, served over stdio by `mcp/server.mjs` with no dependencies.
+Twenty-two tools, served over stdio by `mcp/server.mjs` with no dependencies.
 The server is launched by Claude Code from [`.mcp.json`](../.mcp.json) with
-`FOUNDRY_PROJECT_DIR` set to the project root; every path below is relative to
+`KUKULU_PROJECT_DIR` set to the project root; every path below is relative to
 that root.
 
-Three of them — `foundry_status`, `foundry_next` and `foundry_config_show` —
+Three of them — `kukulu_status`, `kukulu_next` and `kukulu_config_show` —
 are read-only. The flight controller is allowed those plus
-`foundry_agents_sync`, which writes only the generated agent files, the MCP
+`kukulu_agents_sync`, which writes only the generated agent files, the MCP
 allow rule and a `.git/info/exclude` line, never a task or a verdict; and
-`foundry_run_halt`, which it may call itself if it cannot even spawn a
+`kukulu_run_halt`, which it may call itself if it cannot even spawn a
 stage, so the next flight sees a clean halt instead of retrying blindly;
-and `foundry_flight_options`, which applies the operator's own go-flight
+and `kukulu_flight_options`, which applies the operator's own go-flight
 options to the review-loop bounds (and, with `resume`, lifts a round-cap
-halt); and `foundry_pr_finalize`, for the human-initiated re-sign only
-(`resign: true`, when the operator says signing is unlocked). Everything else changes project state and belongs to a stage agent. (`foundry_mutate` changes a source file only for the length of one call and always restores it, and a stream's tools work in that stream's own worktree.)
+halt); and `kukulu_pr_finalize`, for the human-initiated re-sign only
+(`resign: true`, when the operator says signing is unlocked). Everything else changes project state and belongs to a stage agent. (`kukulu_mutate` changes a source file only for the length of one call and always restores it, and a stream's tools work in that stream's own worktree.)
 
-`foundry_next`, `foundry_status`, `foundry_config_show` and
-`foundry_agents_sync` all resolve the merged routing config (see
+`kukulu_next`, `kukulu_status`, `kukulu_config_show` and
+`kukulu_agents_sync` all resolve the merged routing config (see
 [routing.md](./routing.md)) as part of answering, so a malformed global
 config, profile or project override is a refusal from any of the four —
 deliberately: a flight must not run with a half-understood routing config.
@@ -38,7 +38,7 @@ read it, fix what it did, and try again.
 
 ---
 
-## `foundry_status`
+## `kukulu_status`
 
 Everything the pipeline knows from disk. Read-only, safe to call at any time,
 and the right first call for any stage that has just been spawned with no
@@ -51,37 +51,38 @@ context.
 | Field | Meaning |
 |---|---|
 | `root` | Absolute project root the server is operating on |
+| `deprecations` | Notices for a pre-0.6.0 name still in use: the `.foundry/` / `docs/foundry.json` project layout, a `FOUNDRY_*` environment variable, or the global routing config in `foundry/`. Each says what to rename; support ends in 0.7.0. Empty when nothing is deprecated |
 | `specPresent` … `configPresent` | Which pipeline documents exist |
 | `lockPresent` | Whether an implementation run is armed |
 | `lockCounter` | The implement guard's re-block counter, read from the lock (either format); `null` when there is no lock |
 | `git` | `{ inRepo, branch, head, base, dirty, hasOrigin }` — `base` is the merge-base with `baseBranch` |
-| `state` | `{ round, implemented, reviewed, verdict, summarized, halted, preexistingUntracked, policies, signing }` from `.foundry/state.json` |
+| `state` | `{ round, implemented, reviewed, verdict, summarized, halted, preexistingUntracked, policies, signing }` from `.kukulu/state.json` |
 | `round` | Fix rounds already queued (0 = initial build) |
 | `reviewRound` | Always `round + 1` — the number the *next* review must stamp on `docs/REVIEW.md`'s `Round:` line (F-10, F-11) |
 | `preexistingUntracked` | Paths that were already untracked before the current run started — invisible to every dirty-tree check (F-09) |
-| `policies`, `signing` | The run's resolved policies and signing outcome, from `foundry_run_start` — see [operations.md](./operations.md#configuration) |
+| `policies`, `signing` | The run's resolved policies and signing outcome, from `kukulu_run_start` — see [operations.md](./operations.md#configuration) |
 | `longestCommandTimeoutMs` | The longest timeout of any `verify`, `extraVerify` or `parallel.setup` command (`null` with none). Every tool call is handled one at a time, so a parallel stream's bookkeeping call can wait behind another stream's longest verify; Claude Code's MCP tool-call timeout (`MCP_TOOL_TIMEOUT`) must exceed this plus headroom — see [operations.md](./operations.md#parallel-streams) |
-| `feedbackCount` | Number of entries in `.foundry/feedback.jsonl` so far, so a human watching a transcript can see friction accumulate without opening the file |
+| `feedbackCount` | Number of entries in `.kukulu/feedback.jsonl` so far, so a human watching a transcript can see friction accumulate without opening the file |
 | `reviewRoundsInPlan` | How many `## Review fixes (round N)` sections `PLAN.md` carries |
 | `branch`, `started` | The `Branch:` and `Started:` headers in `PROGRESS.md` |
 | `counts` | `{ todo, inProgress, done, blocked, skipped, total, open }`; `open = todo + inProgress` |
 | `blocked`, `skipped` | Task ids in those states |
 | `waves` | The plan's parallel waves, numbered from 1: `[{ index, streams: [{ stream, tasks, open }], valid, reason }]`. A wave is a maximal run of consecutive tasks that all carry a `{stream: <slug>}` tag on their `PROGRESS.md` line; `valid` is false, with a `reason`, when its partition cannot be proven safe (see [architecture.md](./architecture.md#parallel-workstreams)). `[]` for a plan with no streams |
-| `artifacts` | Where each of `docs/`'s `SPEC.md`, `PLAN.md`, `PROGRESS.md`, `HANDOFF.md`, `REVIEW.md`, `SUMMARY.md` and `foundry.json` stands: `"absent"`, `"untracked"` (on disk, not in git), `"modified"` (tracked, with uncommitted changes) or `"tracked"` |
+| `artifacts` | Where each of `docs/`'s `SPEC.md`, `PLAN.md`, `PROGRESS.md`, `HANDOFF.md`, `REVIEW.md`, `SUMMARY.md` and `kukulu.json` stands: `"absent"`, `"untracked"` (on disk, not in git), `"modified"` (tracked, with uncommitted changes) or `"tracked"` |
 | `strayArtifacts` | The artifacts that are `"untracked"` while `PLAN.md` is `"absent"`: what an interrupted plan run leaves behind. `[]` otherwise |
 | `lastReviewCommit` | Short sha of the newest `review:` commit between `baseBranch` and `HEAD`; `null` when there is none |
 | `reviewVerdictInFile` | The verdict parsed out of `REVIEW.md`, if one exists |
-| `agentsGenerated` | Role names whose `.claude/agents/foundry-<role>.md` currently exists |
-| `agentsGeneratedThisSession` | Role names this MCP server process itself wrote — diagnostic only, for understanding why `foundry_next` reported `agentFallback` |
+| `agentsGenerated` | Role names whose `.claude/agents/kukulu-<role>.md` currently exists |
+| `agentsGeneratedThisSession` | Role names this MCP server process itself wrote — diagnostic only, for understanding why `kukulu_next` reported `agentFallback` |
 
 **Refuses when:** `PROGRESS.md` exists but has no `## Tasks` section,
-`foundry.json` is not valid JSON, or the merged routing config is malformed
+`kukulu.json` is not valid JSON, or the merged routing config is malformed
 (see [routing.md](./routing.md)). All three are corruption, not absence, and
 guessing past them would produce confident nonsense.
 
 ---
 
-## `foundry_next`
+## `kukulu_next`
 
 The stage machine. A pure function of disk state — it never sees a subagent's
 report. Its one write is recording, once, that a parallel wave must run
@@ -90,14 +91,15 @@ serially (see `streams` below).
 **Arguments:** none.
 
 **Returns:** `{ stage, agent, agentFallback, fallbackAgent, restartRequired,
-model, agentModel, agentModelExact, round, reviewRound, reason, prompt,
-streams? }`.
+model, agentModel, agentModelExact, round, deprecations, reviewRound, reason,
+prompt, streams? }`.
 
 - `stage` — `plan` · `implement` · `review` · `summarize` · `done` · `halt`
-- `agent` — the subagent to spawn: the generated `foundry-<role>` name when
+- `deprecations` — the same array `kukulu_status` returns, so the flight controller can print it
+- `agent` — the subagent to spawn: the generated `kukulu-<role>` name when
   it can be trusted to spawn (`agentFallback` is false), else the plugin's
-  own `foundry:planner` / `foundry:implementer` / `foundry:reviewer` /
-  `foundry:summarizer`; `null` for `done`, `halt`, and whenever
+  own `kukulu:planner` / `kukulu:implementer` / `kukulu:reviewer` /
+  `kukulu:summarizer`; `null` for `done`, `halt`, and whenever
   `restartRequired` is true. On a project's first flight, when this session
   created the agents directory, that means the plugin agent outright,
   rather than a generated name that fails with "not found" and is retried
@@ -107,12 +109,12 @@ streams? }`.
   `.claude/agents` directory itself (see [routing.md](./routing.md) for why
   that one case needs a restart and a routing *change* to an existing
   directory does not)
-- `fallbackAgent` — the plugin's own `foundry:<role>` name, always present
+- `fallbackAgent` — the plugin's own `kukulu:<role>` name, always present
   for a stage that has a role, so a controller can retry with it if spawning
   a generated `agent` still fails with "not found"
 - `restartRequired` — true only when `agentFallback` is true **and** the
   resolved model is one the `Agent` tool cannot name (a non-Anthropic model,
-  or a `claude-*` id of a family Foundry does not know); `false` for `done`
+  or a `claude-*` id of a family Kūkulu does not know); `false` for `done`
   and `halt`
 - `model` — the resolved model string for that role from the routing config
   (see [routing.md](./routing.md)); `null` for `done` and `halt`. Display
@@ -126,28 +128,29 @@ streams? }`.
   id: an alias means the latest of that family, which may not be the version
   pinned in routing. Always true otherwise
 - `reviewRound` — always `round + 1`; the review stage's prompt states it
-  explicitly and `foundry_review_submit` refuses a `Round:` line that
+  explicitly and `kukulu_review_submit` refuses a `Round:` line that
   disagrees with it (F-10, F-11) — see
   [architecture.md](./architecture.md#review-rounds)
 - `reason` — one sentence, written for a human reading the transcript. A
   `done` reason counts reviews and fix rounds separately: "flight complete
   after 2 reviews (1 fix round); …" (cleanflate F-21). After
-  [`foundry_flight_archive`](#foundry_flight_archive) it is `done` with the
+  [`kukulu_flight_archive`](#kukulu_flight_archive) it is `done` with the
   reason "flight <slug> is archived in <dir>; edit docs/SPEC.md for the next
-  flight, then run /foundry:go-flight", until `docs/SPEC.md` differs from the
-  archived copy; then the stage is `plan` again. While
-  `foundry_pr_finalize` has recorded `state.awaitingSigning` the stage is
+  flight, then run /kukulu:go-flight", until `docs/SPEC.md` differs from the
+  archived copy; then the stage is `plan` again, except on the pre-0.6.0
+  layout, where it is `halt` with "commit or discard any uncommitted change, run /kukulu:go-flight migrate, then run /kukulu:go-flight again". While
+  `kukulu_pr_finalize` has recorded `state.awaitingSigning` the stage is
   `done` with the reason "awaiting signing: <n> unsigned commit(s), oldest
   <sha>." followed by the steps to take
 - `prompt` — the text to hand the subagent **verbatim**; the implement,
   review and summarize prompts each end with a sentence stating this run's
-  policies (see `foundry_run_start`)
+  policies (see `kukulu_run_start`)
 - `streams` — present only on an `implement` result that is a parallel wave:
   `[{ stream, agent, agentFallback, fallbackAgent, agentModel,
   agentModelExact, prompt }]`, one entry per stream to run concurrently. The
   controller spawns one implementer per entry, all at once, passes each
   entry's `prompt` verbatim, and waits for all of them before calling
-  `foundry_next` again. The list holds, in order: streams already in flight
+  `kukulu_next` again. The list holds, in order: streams already in flight
   (a worktree exists — an unfinished one is re-handed out, a finished one is
   offered so it gets merged), then streams with open tasks in plan order,
   capped at `parallel.maxStreams`; the rest go out on a later call. It is
@@ -157,7 +160,7 @@ streams? }`.
 
   A wave whose partition is invalid (see
   [architecture.md](./architecture.md#parallel-workstreams)) runs serially.
-  Once a build branch exists, `foundry_next` records that in
+  Once a build branch exists, `kukulu_next` records that in
   `state.serialWaves` with one `stream-partition` feedback entry
   (`stage: "plan"`, a bad partition being a planning defect), committed as
   `chore: wave <n> runs serially`; it is never a halt. Before a run has
@@ -169,7 +172,7 @@ The full decision order is in [architecture.md](./architecture.md#the-stage-mach
 
 ---
 
-## `foundry_plan_commit`
+## `kukulu_plan_commit`
 
 Validate the plan as a whole and commit it. The planner calls it last, in
 place of `git add` and `git commit`.
@@ -179,13 +182,13 @@ that split a task and gave the new half a temporary suffix such as `P1-02a`:
 it renumbers every phase's `P` ids to `P<n>-01, P<n>-02, …` in document order,
 and rewrites each changed id everywhere it appears (all of `PLAN.md` and
 `PROGRESS.md` as whole words in one pass, never chained, plus the `"from"`
-values in `docs/foundry.json`), then validates the rewritten texts and commits.
+values in `docs/kukulu.json`), then validates the rewritten texts and commits.
 `R` ids are never renumbered. It is refused once a run has started (a
 `Started:` stamp in `PROGRESS.md`, or any task that is not `[ ]`), and when
 problems remain after the rewrite it writes nothing. Without `renumber`, a
 suffixed id is a `heading` problem whose message suggests it.
 
-**Does:** reads `docs/PLAN.md`, `docs/PROGRESS.md`, `docs/foundry.json` and
+**Does:** reads `docs/PLAN.md`, `docs/PROGRESS.md`, `docs/kukulu.json` and
 `CLAUDE.md`, checks them together, and, only when nothing is wrong, commits
 them as `plan: derive build plan from SPEC` (through the same commit helper as
 every other tool, so an unsignable commit falls back to unsigned under
@@ -195,7 +198,7 @@ The checks, by the name each problem carries in `check`:
 
 | `check` | Problem |
 |---|---|
-| `files` | `PLAN.md`, `PROGRESS.md` or `foundry.json` is missing |
+| `files` | `PLAN.md`, `PROGRESS.md` or `kukulu.json` is missing |
 | `heading` | A line like a task heading (`## P0-02 …`, `### P0-02 - Title`) that is not exactly `### <ID>: <title>` |
 | `duplicate` | An id with two headings |
 | `sequence` | Within a phase, `P` ids are not `P<n>-01, P<n>-02, …` in document order with no gap (`R` ids are exempt) |
@@ -203,7 +206,7 @@ The checks, by the name each problem carries in `check`:
 | `cycle` | A dependency cycle, reported once |
 | `progress` | `PROGRESS.md`'s task ids differ from `PLAN.md`'s as a set or in order |
 | `streams` | A malformed `**Stream:**` value, or any parallel wave judged invalid (`wave <n>: <reason>`) |
-| `config` | `docs/foundry.json` is not valid JSON or fails the same validation `cfg()` applies |
+| `config` | `docs/kukulu.json` is not valid JSON or fails the same validation `cfg()` applies |
 | `from` | A `from` (on a constraint, `verify` or `extraVerify` entry) names an id with no heading |
 | `claude` | `CLAUDE.md` does not exist at the repository root |
 
@@ -220,7 +223,7 @@ committed.
 
 ---
 
-## `foundry_run_start`
+## `kukulu_run_start`
 
 Begin or resume an implementation run. Idempotent: calling it on a run already
 in progress returns `{ alreadyStarted: true }` and changes nothing.
@@ -232,10 +235,10 @@ that stream of the current parallel wave — see
 **Does:**
 
 1. Records every currently untracked path as `preexistingUntracked` in
-   `.foundry/state.json` — nothing this run finds already lying around is
+   `.kukulu/state.json` — nothing this run finds already lying around is
    ever this run's business (F-09). Skipped on an idempotent resume, so the
    list is fixed at the start of each round, not re-scanned mid-run.
-2. Resolves `foundry.json`'s `policies` (`signing`, `push`, `pr`) and records
+2. Resolves `kukulu.json`'s `policies` (`signing`, `push`, `pr`) and records
    them in state, and — skipped on an idempotent resume — probes signing:
    `off` disables `commit.gpgsign` locally; `auto`/`required` with signing
    configured actually attempt a signed object (`git commit-tree -S`, not a
@@ -249,9 +252,9 @@ that stream of the current parallel wave — see
    (F-18). A failed or skipped base push is reported, never fatal.
 4. Creates `build/<date>` from `baseBranch` (or `build/<date>-2`, `-3`, … if
    that name is taken), or reuses the current `branchPrefix*` branch.
-5. Adds `.foundry/implement.lock` to `.gitignore` if it is not already there.
+5. Adds `.kukulu/implement.lock` to `.gitignore` if it is not already there.
 6. Writes the lock as JSON — `{ count: 0, armedAt, round, cap }`, `cap` from
-   `foundry.json`'s `guardCap` — arming the guard hook.
+   `kukulu.json`'s `guardCap` — arming the guard hook.
 7. Fills in `Branch:` and `Started:` in `PROGRESS.md` if they are placeholders.
 8. Commits as `chore: start implementation run`, or
    `chore: start review-fix round N`.
@@ -262,7 +265,7 @@ configured), or `"off (probe failed: <reason>)"`. `basePush` is present only
 when a new build branch was created — `"pushed"`, `"skipped: policy"`,
 `"skipped: no origin remote"`, or `"failed: <git's first line>"`.
 
-**Refuses when:** any of `SPEC.md`, `PLAN.md`, `PROGRESS.md` or `foundry.json`
+**Refuses when:** any of `SPEC.md`, `PLAN.md`, `PROGRESS.md` or `kukulu.json`
 is missing; the directory is not a git repository; `policies` is malformed;
 `policies.signing` is `"required"` and signing is not configured or the
 probe fails; a *tracked* file has uncommitted changes on the base branch (an
@@ -272,14 +275,14 @@ neither the base branch nor a
 
 ### Stream mode
 
-`foundry_run_start({ stream })` first does the ordinary start above (a no-op
+`kukulu_run_start({ stream })` first does the ordinary start above (a no-op
 when the run is already going), then:
 
 1. Refuses unless `stream` is one of the current wave's streams with open
    tasks (or already has a worktree). The current wave is the one holding the
    first open task, when that task is streamed. The refusal lists the legal
    streams.
-2. Creates `.foundry/worktrees/<stream>` on a new branch
+2. Creates `.kukulu/worktrees/<stream>` on a new branch
    `<build-branch>--<stream>` cut from the build branch's HEAD, and runs
    `parallel.setup` in it — a fresh checkout has none of the installed
    dependencies `verify` needs. The worktree lives inside the project, so the
@@ -303,11 +306,11 @@ Every other stream-scoped tool works the same way: `PROGRESS.md`,
 `PLAN.md` and `state.json` are read and written only in the main checkout,
 and the progress commits land on the build branch, never a stream branch.
 Stream implementers never edit `docs/PROGRESS.md`, `docs/HANDOFF.md` or
-anything under `.foundry/`.
+anything under `.kukulu/`.
 
 ---
 
-## `foundry_task_next`
+## `kukulu_task_next`
 
 Select the next task. This is the only legitimate way to choose what to work
 on.
@@ -315,18 +318,18 @@ on.
 **Arguments:** `{ stream? }`. With `stream`, only that stream's tasks in the
 current wave are considered, and the result also carries `stream`; a
 stream with nothing left returns `{ done: true, stream, … }` — the cue to call
-[`foundry_stream_finish`](#foundry_stream_finish).
+[`kukulu_stream_finish`](#kukulu_stream_finish).
 
 Without `stream`, when the next open task belongs to a wave that runs in
 parallel and no stream worktree exists yet, the call returns
 `{ done: true, paused: true, wave, streams, counts, skipped, message }`: a
 serial implementer has done everything it can before the wave, and is told —
 in `message` — to stop without writing a handoff or calling
-`foundry_run_finish`. It also flags `.foundry/implement.lock` with
+`kukulu_run_finish`. It also flags `.kukulu/implement.lock` with
 `paused: <wave>`, which the guard hook honours (any task state change clears
 it). While stream worktrees exist (streams running, or finished and
 unmerged), a stream-less call refuses instead: merge each back with
-`foundry_stream_finish` first.
+`kukulu_stream_finish` first.
 
 **Does:** picks the first `[~]` task (a resume), else the first `[ ]`. Before
 handing it over, it checks the task's `**Depends on:**` list; if any dependency
@@ -342,7 +345,7 @@ task is marked `[~]` on disk before it is returned.
 | `done` | `false` |
 | `id`, `title` | Task identity |
 | `text` | The task's full `### <ID>: <title>` block from `PLAN.md` |
-| `files` | The `**Files touched:**` line, for `foundry_verify` |
+| `files` | The `**Files touched:**` line, for `kukulu_verify` |
 | `dependsOn` | Dependency ids |
 | `dependencyLogs` | Those dependencies' log entries from `PROGRESS.md` — the only context carried between tasks |
 | `skipped` | Tasks skipped on the way to this one |
@@ -356,7 +359,7 @@ task is marked `[~]` on disk before it is returned.
 
 ---
 
-## `foundry_task_done`
+## `kukulu_task_done`
 
 Mark a task complete and write its log entry.
 
@@ -377,13 +380,13 @@ the implement guard's re-block counter to zero (F-08).
 **Refuses when:** the id is unknown; the task is not `[~]` (nobody selected
 it); HEAD's commit subject does not start with `<ID>:`; or anything other than
 `docs/PROGRESS.md` is uncommitted — a path already recorded as
-`preexistingUntracked` at `foundry_run_start` never counts (F-09). The last
+`preexistingUntracked` at `kukulu_run_start` never counts (F-09). The last
 two are the load-bearing ones — a task is done when there is a commit, not
 when a model says so.
 
 ---
 
-## `foundry_task_block`
+## `kukulu_task_block`
 
 Give up on a task without ending the run.
 
@@ -405,7 +408,7 @@ implement guard's re-block counter to zero (F-08).
 
 ---
 
-## `foundry_task_reopen`
+## `kukulu_task_reopen`
 
 Reopen a blocked or skipped task once whatever stopped it is resolved — an
 operator supplied a file the sandbox could not download, a flaky service
@@ -423,8 +426,8 @@ log entry naming its cause. It commits `PROGRESS.md` as
 `progress: reopen <ID>`, or `progress: reopen <ID> (+N dependents)` when there were any, and
 resets the guard's re-block counter. A reopened dependent that still has a
 *different* blocked dependency is skipped again by the next
-`foundry_task_next`, so reopening generously is safe. After a finished run
-(`implemented: true`), the open tasks make `foundry_next` hand out an
+`kukulu_task_next`, so reopening generously is safe. After a finished run
+(`implemented: true`), the open tasks make `kukulu_next` hand out an
 implement stage for the same round again.
 
 **Returns:** `{ id, reopenedDependents, commit, counts }`.
@@ -435,7 +438,7 @@ stream worktree still exists.
 
 ---
 
-## `foundry_verify`
+## `kukulu_verify`
 
 Run the project's verification commands through the server rather than through
 the model's Bash tool — which is what keeps an unattended run from stopping at
@@ -448,7 +451,7 @@ refuses if the selected commands include an `exclusive` one (a command that
 only ever runs from the main checkout: validation keeps the tasks that
 trigger one out of waves, so reaching this is a bug to report).
 
-**Does:** first, for every rule in `docs/foundry.json`'s `constraints`,
+**Does:** first, for every rule in `docs/kukulu.json`'s `constraints`,
 self-tests it against its own `shouldMatch`/`shouldNotMatch` fixtures and —
 only if that passes — scans every file under its `paths` minus `exclude`
 that is tracked or untracked-but-not-ignored, skipping files that were
@@ -460,10 +463,10 @@ entirely and always covers the whole repo. Then runs every command in
 with, appends its commands (skipping duplicates by command text). Each
 command runs in a shell from the project root with its own timeout:
 `commandTimeoutMs` (default 10 minutes) unless the command was given as
-`{ cmd, timeoutMs }` in `docs/foundry.json`, which overrides it for that
+`{ cmd, timeoutMs }` in `docs/kukulu.json`, which overrides it for that
 command alone.
 
-Every command — here, in `foundry_mutate` and in `parallel.setup` — runs
+Every command — here, in `kukulu_mutate` and in `parallel.setup` — runs
 under `mcp/run-command.mjs`, in its own process group. A timeout kills the
 whole tree, not just the shell, so a test binary spinning under `make test`
 does not survive it. A command that writes more than 64 MiB of output in
@@ -477,7 +480,7 @@ where a rule with an unreached `from` carries `inactive: "until <id>"` and a
 command with one appears as exactly `{ cmd, skipped: "inactive until <id>" }`
 (neither is ever a failure),
 plus `recoveredMutation` (a path) when it first had to restore a file a
-crashed [`foundry_mutate`](#foundry_mutate) left edited.
+crashed [`kukulu_mutate`](#kukulu_mutate) left edited.
 The tails are the last 60 lines of each stream, and never more than 4000
 characters; `timeoutMs` is whichever timeout that command actually ran with.
 A result may also carry `truncated: true` (a tail was cut),
@@ -490,7 +493,7 @@ that fails its own test is never trusted to scan); `hits` is
 `{ file, line, text }` for each real match. Top-level `ok` is true only when
 every constraint and every command passed.
 
-**Refuses when:** `foundry.json` is missing or has no `verify` commands; any
+**Refuses when:** `kukulu.json` is missing or has no `verify` commands; any
 `verify`/`extraVerify`/`build` entry is malformed — neither a string nor
 `{ cmd, timeoutMs }`, missing `cmd`, or `timeoutMs` not a positive integer;
 or any `constraints` entry is malformed — missing `id`, `paths`, `pattern`,
@@ -499,7 +502,7 @@ or any `constraints` entry is malformed — missing `id`, `paths`, `pattern`,
 
 ---
 
-## `foundry_mutate`
+## `kukulu_mutate`
 
 Mutation-test one file: prove that a test fails without the mechanic it
 covers. Used by the reviewer in place of hand-editing source and restoring it
@@ -515,9 +518,9 @@ suites bound to the repo root (wp-env).
   once (the refusal says how many times it did and asks for more context)
 - `replace` — the mutated text; `""` deletes the match
 - `commands` — optional: run only these commands, each spelled exactly as
-  in `docs/foundry.json`'s `verify` or `extraVerify`
+  in `docs/kukulu.json`'s `verify` or `extraVerify`
 - `targeted`, `filter` — optional, together: run the named
-  `mutation.targeted` command from `docs/foundry.json` instead of the file's
+  `mutation.targeted` command from `docs/kukulu.json` instead of the file's
   verify commands, with `{filter}` replaced by `filter` as one single-quoted
   shell word. `filter` is 1 to 200 characters from letters, digits and
   `_ . : / -`. Refused, before the file is touched, when only one of the two
@@ -532,10 +535,10 @@ suites bound to the repo root (wp-env).
   ever shortens a configured timeout, never raises one; it is for a mutant you
   suspect makes a test hang (cleanflate F-06)
 
-**Does:** writes `.foundry/mutation.json` (a sentinel naming the file), applies
+**Does:** writes `.kukulu/mutation.json` (a sentinel naming the file), applies
 the one replacement, runs the commands, and then — whatever happened,
 including a timeout — restores the file from `HEAD` and deletes the
-sentinel. Commands default to what `foundry_verify` would run for that file:
+sentinel. Commands default to what `kukulu_verify` would run for that file:
 every `verify` command plus the `extraVerify` commands whose prefix the file
 falls under. Constraints are not run. It commits nothing, and the sentinel is
 excluded through `.git/info/exclude`, never `.gitignore`, so the tree under
@@ -554,8 +557,8 @@ command to run by hand), leaves the sentinel, and auto-logs a
 `mutation-restore` feedback entry under the usual `policies.feedback` guard.
 
 **Crash recovery:** if the server died between mutating and restoring, the
-sentinel is still there. `foundry_mutate`, `foundry_verify` and
-`foundry_review_submit` each restore the file from it before doing anything
+sentinel is still there. `kukulu_mutate`, `kukulu_verify` and
+`kukulu_review_submit` each restore the file from it before doing anything
 else and report the path as `recoveredMutation`, and log a
 `mutation-recovered` feedback entry, committed on its own as
 `chore: pipeline friction (review)` so the tree is never left dirty. An unreadable sentinel is a refusal
@@ -571,11 +574,11 @@ inactive until a `from` task never counts) — the tests noticed (a
 timeout counts). `verdict` is `"killed: the tests caught the mutation"` or
 `"survived: no command failed — the mechanic is untested"`; a survivor is a
 category-3 review finding. `results` has the same per-command shape as
-`foundry_verify`. Run `foundry_verify` first: on a tree that already fails,
+`kukulu_verify`. Run `kukulu_verify` first: on a tree that already fails,
 every mutation looks killed.
 
 **Refuses when:** an implementation run is in progress
-(`.foundry/implement.lock` exists) — this is a review-stage tool; `file` is
+(`.kukulu/implement.lock` exists) — this is a review-stage tool; `file` is
 outside the project, missing, a symlink, untracked, binary, or has
 uncommitted changes; `find` is empty, or matches zero or several times, or
 equals `replace`; `timeoutMs` is not a positive integer; `commands` names something that is not a configured
@@ -584,11 +587,11 @@ config has no `verify` commands.
 
 ---
 
-## `foundry_stream_finish`
+## `kukulu_stream_finish`
 
 Finish one stream of a parallel wave: merge its branch back into the build
 branch and clean up. Called by a stream's implementer when
-`foundry_task_next({ stream })` reports `done`.
+`kukulu_task_next({ stream })` reports `done`.
 
 **Arguments:** `{ stream }`.
 
@@ -611,29 +614,29 @@ a no-op (`mergeCommit: null`) and the worktree is cleaned up. Its blocked
 tasks go to review like any others.
 
 **On a merge conflict** — the partition check makes one unlikely, not
-impossible — Foundry runs `git merge --abort`, keeps the stream's branch and
-worktree, sets `halted` in `.foundry/state.json` with a reason naming the
+impossible — Kūkulu runs `git merge --abort`, keeps the stream's branch and
+worktree, sets `halted` in `.kukulu/state.json` with a reason naming the
 stream, the conflicting paths and the manual steps, auto-logs a
 `stream-merge` feedback entry, and commits both together as
 `chore: run halted (stream <s> merge conflict)`. This is the one stream
-failure that halts, because Foundry cannot guess a merge. It returns
-`{ stream, merged: false, halted, conflicts }` and `foundry_next` says `halt`.
+failure that halts, because Kūkulu cannot guess a merge. It returns
+`{ stream, merged: false, halted, conflicts }` and `kukulu_next` says `halt`.
 
 **Returns:** `{ stream, merged: true, mergeCommit, remainingStreams }` —
 `remainingStreams` names the wave's other streams that still have open tasks
 or an unmerged worktree.
 
 **Refuses when:** `stream` is not one of the current wave's streams (see
-[`foundry_run_start`](#stream-mode)); it has no worktree; it still has open
+[`kukulu_run_start`](#stream-mode)); it has no worktree; it still has open
 tasks (they are named); its worktree has uncommitted changes (they are
 listed); the main checkout is not on the build branch or has uncommitted
 tracked changes; or its branch is missing.
 
-`foundry_run_finish` refuses while any stream worktree exists, naming each.
+`kukulu_run_finish` refuses while any stream worktree exists, naming each.
 
 ---
 
-## `foundry_run_finish`
+## `kukulu_run_finish`
 
 End an implementation run and hand off to review.
 
@@ -642,14 +645,14 @@ End an implementation run and hand off to review.
 **Does:**
 
 1. Commits `docs/HANDOFF.md` as `chore: handoff for review`.
-2. Records the round as implemented in `.foundry/state.json` and commits it as
+2. Records the round as implemented in `.kukulu/state.json` and commits it as
    `chore: round N implemented`.
 3. Pushes to `origin` if `policies.push` is true and there is one, and — if
    `policies.pr` is not `"none"` and `gh` is on `PATH` — opens a draft PR
    against `baseBranch` (`--base`, always; cleanflate F-24) with
    `HANDOFF.md` as the body, or reports the existing one.
 4. Deletes the lock, standing the guard hook down.
-5. Runs every constraint over the whole tree, as `foundry_verify` does, and
+5. Runs every constraint over the whole tree, as `kukulu_verify` does, and
    reports the result without refusing on it (cleanflate F-26).
 
 **Returns:** `{ branch, base, head, handoffCommit, stateCommit, push, pr, counts, round, constraints, readyLine }`.
@@ -668,18 +671,18 @@ recorded as `preexistingUntracked` (F-09).
 
 ---
 
-## `foundry_run_halt`
+## `kukulu_run_halt`
 
 Stop the flight for an operator-level reason the implementer cannot resolve
 itself: a signing agent that died mid-run, a full disk, a `verify` command
 that cannot even run, a base branch that vanished (F-05). Distinct from
-`foundry_task_block`, which is for a single task the implementer cannot
+`kukulu_task_block`, which is for a single task the implementer cannot
 finish — this is for a run that cannot continue at all.
 
 **Arguments:** `{ reason }` — one sentence a human will read.
 
 **Does:** records `reason` as `state.halted`, deletes the lock, and commits
-`.foundry/state.json` and `docs/PROGRESS.md` together as `chore: run halted`
+`.kukulu/state.json` and `docs/PROGRESS.md` together as `chore: run halted`
 if either changed. Never resets or cleans the working tree — whatever state
 the run was in when it could not continue is left exactly as it is.
 
@@ -688,16 +691,16 @@ anything is left uncommitted, which after a halt is expected, not an error.
 
 **Refuses when:** `reason` is missing.
 
-The next `foundry_next` call returns `{ stage: "halt", reason }` with the
+The next `kukulu_next` call returns `{ stage: "halt", reason }` with the
 same reason. Clearing it is the same hand edit as any other halt — see
 [operations.md](./operations.md#halts).
 
 ---
 
-## `foundry_flight_options`
+## `kukulu_flight_options`
 
-Apply the operator's flight options to `docs/foundry.json`. go-flight calls
-it when `/foundry:go-flight` was given options such as "maximum review depth
+Apply the operator's flight options to `docs/kukulu.json`. go-flight calls
+it when `/kukulu:go-flight` was given options such as "maximum review depth
 of 6 rounds", so the controller never hand-edits the config (cleanflate
 F-20).
 
@@ -705,7 +708,7 @@ F-20).
 least one; `resume` is a boolean. See [operations.md](./operations.md#configuration) for what each
 bounds.
 
-**Does:** sets the given keys in `docs/foundry.json`, leaving every other key
+**Does:** sets the given keys in `docs/kukulu.json`, leaving every other key
 as it was, and commits the file as
 `chore: flight options (maxRounds=6, maxRoundsHard=6)`. Applying the same
 values twice commits nothing. A flight halted on a round cap stays halted
@@ -718,21 +721,21 @@ count), the same commit also clears `halted` and `haltCap` in state, subject
 `before` and `after` are the effective bounds, defaults included.
 
 **Refuses when:** neither key is given; a value is not a positive integer;
-`docs/foundry.json` does not exist yet (before the plan stage); or, with
+`docs/kukulu.json` does not exist yet (before the plan stage); or, with
 `resume`, the flight is not halted, the halt is not a round-cap halt (a
 stream-merge or operator halt is never cleared this way), or the bound passed
 would not lift the cap that fired.
 
 ---
 
-## `foundry_feedback_log`
+## `kukulu_feedback_log`
 
-Record one pipeline-friction entry: something Foundry's own tooling cost
+Record one pipeline-friction entry: something Kūkulu's own tooling cost
 time on, not the project it is building — a tool refused, a prompt was
 ambiguous, a stall needed a workaround. Any stage may call it, at the
 moment the friction happens, not saved up for end-of-stage prose. This is
 what makes friction capture survive a flight that halts, blocks, or gets
-abandoned before ever reaching `foundry_summary_commit`.
+abandoned before ever reaching `kukulu_summary_commit`.
 
 **Arguments:** `{ stage, message, category? }` — `stage` is one of
 `plan` · `implement` · `review` · `summarize` · `controller`; `message` is
@@ -741,14 +744,14 @@ one or two sentences; `category` is a short free-form label (e.g.
 `"other"`.
 
 **Does:** unless `policies.feedback` is `false`, appends one JSON line to
-`.foundry/feedback.jsonl` — `{ at, stage, round, category, message, source:
+`.kukulu/feedback.jsonl` — `{ at, stage, round, category, message, source:
 "agent" }`, with `at` an ISO timestamp and `round` filled in from
-`.foundry/state.json` — and commits that file alone as
+`.kukulu/state.json` — and commits that file alone as
 `chore: pipeline friction (<stage>)`. Unlike every other write tool, this
 one commits on every call rather than waiting for some later checkpoint:
 friction is rare by nature, so one small commit per entry is the right
 amount of noise, and it means the file is never a *pending* uncommitted
-change by the time `foundry_task_done` or `foundry_run_finish` run their
+change by the time `kukulu_task_done` or `kukulu_run_finish` run their
 dirty-tree checks.
 
 **Returns:** `{ logged: true, count, commit }` normally; `{ logged: false,
@@ -760,7 +763,7 @@ logging is allowed before calling it.
 is missing or empty; `policies.feedback` is present but not a boolean.
 
 Some events are logged automatically, without any model calling this tool
-at all: a `foundry_run_halt`, a review round-cap halt, and a signing
+at all: a `kukulu_run_halt`, a review round-cap halt, and a signing
 auto-fallback each fold a `source: "auto"` entry into the commit they are
 already making. See [operations.md](./operations.md#configuration) for
 `policies.feedback` and [architecture.md](./architecture.md) for the full
@@ -768,7 +771,7 @@ list of what logs itself.
 
 ---
 
-## `foundry_review_submit`
+## `kukulu_review_submit`
 
 Record a verdict. Call it exactly once per review. It is all-or-nothing: if its
 commit fails, every file it wrote is restored, nothing stays staged, and
@@ -809,7 +812,7 @@ lines to `PROGRESS.md` above `## Log`, resets unblocked tasks to `[ ]` with
 their reasons logged — along with every task skipped because of them,
 transitively, each logged with its cause (cleanflate F-05) — bumps the round, appends an entry to `state.rounds`,
 commits everything as `review: round N`, and pushes the branch per
-`policies.push`. Halts (writes a `halted` reason into `.foundry/state.json`,
+`policies.push`. Halts (writes a `halted` reason into `.kukulu/state.json`,
 which stops the next flight) when the new round reaches `maxRoundsHard`, or
 when the count of non-converging rounds so far reaches `maxRounds` — see
 [architecture.md](./architecture.md#review-rounds) for exactly what
@@ -819,11 +822,11 @@ when the count of non-converging rounds so far reaches `maxRounds` — see
 `{ verdict, round, fixTasks, unblocked, reopenedDependents, commit, halted, counts, push }` for
 changes. `round` is always the number this review was stamped with (`N`),
 never the count of fix rounds; for an approval, `fixRounds` is that count
-(cleanflate F-21). `push` is the same shape `foundry_run_finish` returns. `counts`
+(cleanflate F-21). `push` is the same shape `kukulu_run_finish` returns. `counts`
 describes `PROGRESS.md` as this call left it, including the fix tasks it
 just queued. Either shape also carries `recoveredMutation` (a path) when the
 call first had to restore a file a crashed
-[`foundry_mutate`](#foundry_mutate) left edited.
+[`kukulu_mutate`](#kukulu_mutate) left edited.
 
 **Refuses when:** the verdict is neither legal value; `REVIEW.md` does not
 exist; no implementation handoff has been recorded for this round;
@@ -836,7 +839,7 @@ task that does not exist or is not blocked or skipped.
 
 ---
 
-## `foundry_summary_commit`
+## `kukulu_summary_commit`
 
 **Arguments:** `content` (optional string): the full text of `docs/SUMMARY.md`.
 This is the preferred form: the tool writes the file itself (adding a final
@@ -848,7 +851,7 @@ under 1 MiB. Without it the tool commits the file already on disk, as in 0.4.0.
 
 **Returns:** `{ commit, branch, base, head, reviews, fixRounds, push, pr, archive }`.
 `archive` is `policies.archive`, so the summarizer reads the policy from the
-result: when it is true, call [`foundry_flight_archive`](#foundry_flight_archive)
+result: when it is true, call [`kukulu_flight_archive`](#kukulu_flight_archive)
 next. `reviews` is how many reviews the flight took and `fixRounds` how many fix
 rounds came between them; after an approval, reviews = fixRounds + 1. `pr`
 is the branch's pull request from `gh pr view`, as `{ url, state, draft,
@@ -862,25 +865,25 @@ more; or `content` is absent and `SUMMARY.md` does not exist.
 
 ---
 
-## `foundry_flight_archive`
+## `kukulu_flight_archive`
 
 Archive a summarized flight so the repository can run its next one.
 
 **Arguments:** `{ slug? }`, lowercase letters, digits and `-`, at most 40
-characters. It defaults to the `flight` key in `docs/foundry.json`; with
+characters. It defaults to the `flight` key in `docs/kukulu.json`; with
 neither, the tool refuses.
 
 **Does:** moves `docs/PLAN.md`, `docs/PROGRESS.md`, `docs/HANDOFF.md`,
-`docs/REVIEW.md`, `docs/SUMMARY.md`, `docs/foundry.json`,
-`.foundry/state.json` and `.foundry/feedback.jsonl` (each one that exists)
+`docs/REVIEW.md`, `docs/SUMMARY.md`, `docs/kukulu.json`,
+`.kukulu/state.json` and `.kukulu/feedback.jsonl` (each one that exists)
 into `docs/flights/<slug>/` (`git mv` for a tracked file, a plain rename for
 an untracked one), copies `docs/SPEC.md` there (the live spec stays), writes
-a fresh `.foundry/state.json` that records `archived: { slug, dir, at }` and
+a fresh `.kukulu/state.json` that records `archived: { slug, dir, at }` and
 carries `signingOverride` over, commits everything as `chore: archive flight
 <slug>`, and pushes the branch per the push policy. If the commit fails,
 every file is put back and the empty archive directory removed.
 
-After it, `foundry_next` reports `done` until `docs/SPEC.md` is edited, then
+After it, `kukulu_next` reports `done` until `docs/SPEC.md` is edited, then
 `plan`.
 
 **Returns:** `{ slug, dir, moved, copied, commit, push }`.
@@ -892,10 +895,45 @@ the run started); or `docs/flights/<slug>/` already exists.
 
 ---
 
-## `foundry_pr_finalize`
+## `kukulu_migrate`
+
+Move a project from the pre-0.6.0 Foundry layout to the current one. Until
+0.7.0 a project that has not migrated keeps working in place; this tool ends
+the deprecation notice.
+
+**Arguments:** none.
+
+**Does:** moves `.foundry/state.json`, `.foundry/feedback.jsonl` and
+`docs/foundry.json` (each one that exists) to `.kukulu/state.json`,
+`.kukulu/feedback.jsonl` and `docs/kukulu.json` (`git mv` for a tracked file, a
+plain rename for an untracked one), rewrites the `.foundry/implement.lock` and
+`.foundry/worktrees/` lines of `.gitignore`, removes the empty `.foundry/`,
+and commits `chore: migrate .foundry layout to .kukulu`. If the commit fails,
+every path is put back. Nothing under `docs/flights/` is touched: archived
+flights keep the names they were written with. After the commit it deletes the
+generated `.claude/agents/foundry-<role>.md` files (a file without the
+generated marker is kept and listed), replaces the matching lines of
+`.git/info/exclude`, and ensures the `mcp__plugin_kukulu_kukulu` allow rule in
+`.claude/settings.local.json`. The old `mcp__plugin_foundry_foundry` rule is
+left where it is; remove it by hand.
+
+**Returns:** `{ moved, gitignore, removedAgents, keptAgents, permissions,
+commit }`: `moved` is `[from, to]` pairs, `gitignore` is `rewritten`,
+`unchanged` or `absent`.
+
+**Refuses when** (before anything moves): the project holds both layouts
+(every tool refuses that); it is already on `.kukulu/` or has neither layout;
+it is not a git repository; the implement lock is armed; `mutation.json`
+exists; a stream worktree exists; `.foundry/` holds a file this tool does not
+know; or the working tree is dirty (apart from files that were untracked
+before the run started).
+
+---
+
+## `kukulu_pr_finalize`
 
 End a flight: mark its draft pull request ready and, unless the flight is
-breaking, ask GitHub to merge it once its checks pass. Foundry never merges a
+breaking, ask GitHub to merge it once its checks pass. Kūkulu never merges a
 pull request itself; the only `gh pr merge` it ever runs carries `--auto`.
 
 **Arguments:** `{ breaking, resign? }`, booleans. `breaking` is required on
@@ -905,7 +943,7 @@ human-initiated only: no agent passes it on its own (see below).
 **Refuses when** (before anything is written): the summary is not committed
 (`state.summarized`, or, after an archive, the archived `state.json`); `breaking` is
 not a boolean or was never given; or there is no merge base with `baseBranch`.
-After an archive it reads `docs/flights/<slug>/foundry.json` for the config.
+After an archive it reads `docs/flights/<slug>/kukulu.json` for the config.
 
 **`resign: true`** is for an operator who has unlocked the signing agent after
 an awaiting-signing result. After the preconditions and before the signed
@@ -932,7 +970,7 @@ commits themselves, never `state.signing`.
 calls), logs one `signing` feedback entry the first time, appends an
 `## Awaiting signing` section with the steps to the flight's `SUMMARY.md`
 (once), commits as `chore: awaiting signing`, and pushes per policy.
-`foundry_next` then reports `done` with the reason `awaiting signing: …`.
+`kukulu_next` then reports `done` with the reason `awaiting signing: …`.
 Returns `{ signed, unsigned, ready: false, merge: "skipped: awaiting signing",
 breaking, awaitingSigning, resigned: false, push, pr, next }`; `next` is
 the instruction to unlock the signing agent and finalize again.
@@ -952,10 +990,10 @@ not a draft. `merge` is `"enabled"`, `"skipped: breaking"`, `"skipped: policy"`,
 
 ---
 
-## `foundry_agents_sync`
+## `kukulu_agents_sync`
 
-Generate `.claude/agents/foundry-<role>.md` for each of the four roles from
-the merged routing config. This is what `/foundry:go-flight` calls, once,
+Generate `.claude/agents/kukulu-<role>.md` for each of the four roles from
+the merged routing config. This is what `/kukulu:go-flight` calls, once,
 before its loop; see [routing.md](./routing.md) for the full precedence.
 
 **Arguments:** none.
@@ -963,21 +1001,21 @@ before its loop; see [routing.md](./routing.md) for the full precedence.
 **Does:**
 
 1. Resolves the routing config (plugin defaults < global file < profile <
-   `docs/foundry.json` `roles`), per role, per key.
+   `docs/kukulu.json` `roles`), per role, per key.
 2. Renders each role's agent file — frontmatter copied from the plugin's own
    `agents/<role>.md` (`description`, `tools`, `skills`, `color`), plus the
    resolved `model`, `effort` (only when the model is a known Anthropic
    alias or a `claude-*` id) and `permissionMode` — and writes it only when
    the rendered text differs from what is already on disk.
 3. Ensures the MCP allow rule (`{ "permissions": { "allow":
-   ["mcp__plugin_foundry_foundry"] } }`) is covered by either
+   ["mcp__plugin_kukulu_kukulu"] } }`) is covered by either
    `.claude/settings.json` or `.claude/settings.local.json` (F-03):
    read-merge-write on the local file, preserving every other key and allow
    entry, creating the file only if neither already covers it. A
    `settings.local.json` that exists but fails to parse is never
    overwritten. See [operations.md](./operations.md#running-a-flight) for
    why this rule matters.
-4. In a git repository, ensures both `.claude/agents/foundry-*.md` and
+4. In a git repository, ensures both `.claude/agents/kukulu-*.md` and
    `.claude/settings.local.json` are present in `.git/info/exclude` (not
    `.gitignore` — both encode a person's own machine, not the project, and
    this way needs no commit). Outside a git repository, this step is
@@ -1001,25 +1039,25 @@ permissions, restartRequired, exclude, table }`.
   least one changed role's model is not one the `Agent` tool can name
   directly. Claude Code hot-reloads a change to an already-populated agents
   directory within seconds, so every other case — including every later
-  routing edit — needs no restart; `foundry_next` falls back to the
+  routing edit — needs no restart; `kukulu_next` falls back to the
   plugin's own agent with the resolved model in the meantime. See
   [routing.md](./routing.md).
 - `exclude` — `"added"` | `"present"` | `"skipped: not a git repository"`
 - `table` — the same information as a ready-to-print Markdown table
 
-`/foundry:go-flight` checks `restartRequired` and stops with a fixed message
+`/kukulu:go-flight` checks `restartRequired` and stops with a fixed message
 rather than spawning a stage against a model it cannot reach; see
 [operations.md](./operations.md#routing).
 
 **Refuses when:** the merged routing config is malformed — an unknown role
 or role key, an invalid `effort` or `permissionMode` value, an unknown
-top-level key in the global file, or a `FOUNDRY_PROFILE` (or the global
+top-level key in the global file, or a `KUKULU_PROFILE` (or the global
 file's own `"profile"` key) naming a profile that does not exist. Nothing is
 written on a refusal.
 
 ---
 
-## `foundry_config_show`
+## `kukulu_config_show`
 
 The merged routing config, read-only, with the source of every value.
 
@@ -1029,15 +1067,15 @@ The merged routing config, read-only, with the source of every value.
 projectOverride, permissionMode, permissionModeSource, roles, effortDropped,
 agentsGenerated, agentsStale, permissionRule, table }`.
 
-`agentsGenerated` is the same field `foundry_status` returns.
+`agentsGenerated` is the same field `kukulu_status` returns.
 `agentsStale` lists roles whose generated file exists but no longer matches
-what `foundry_agents_sync` would write for the current config — this tool
+what `kukulu_agents_sync` would write for the current config — this tool
 never writes anything itself, so staleness is reported, not fixed.
 `permissionRule` is `"present"` when either settings file already covers
 the MCP allow rule, else `"missing"` — again reported, not fixed; only
-`foundry_agents_sync` writes.
+`kukulu_agents_sync` writes.
 
-**Refuses when:** the same conditions as `foundry_agents_sync`, with the
+**Refuses when:** the same conditions as `kukulu_agents_sync`, with the
 same messages.
 
 ---
@@ -1048,9 +1086,9 @@ It speaks newline-delimited JSON-RPC 2.0 on stdin/stdout, so it can be driven
 from a shell for debugging:
 
 ```bash
-FOUNDRY_PROJECT_DIR=/path/to/project node mcp/server.mjs <<'EOF'
+KUKULU_PROJECT_DIR=/path/to/project node mcp/server.mjs <<'EOF'
 {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{}}}
-{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"foundry_status","arguments":{}}}
+{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"kukulu_status","arguments":{}}}
 EOF
 ```
 

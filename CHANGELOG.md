@@ -4,6 +4,87 @@ All notable changes to this plugin. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] — 2026-10-15
+
+### Summary
+
+Foundry is renamed Kūkulu, and the repository moved from `ericmann/foundry` to `DisplaceTech/kukulu`.
+
+### Breaking changes
+
+Plugin, marketplace and repository:
+
+| Old | New |
+|---|---|
+| plugin id `foundry` | `kukulu` |
+| marketplace `ericmann` | `displacetech` |
+| `claude plugin install foundry@ericmann` | `claude plugin install kukulu@displacetech` |
+| `claude plugin marketplace add ericmann/foundry` | `claude plugin marketplace add DisplaceTech/kukulu` |
+| `https://github.com/ericmann/foundry` | `https://github.com/DisplaceTech/kukulu` |
+| npm package `foundry-claude-plugin` | `kukulu-claude-plugin` |
+
+Commands, agents and MCP:
+
+| Old | New |
+|---|---|
+| `/foundry:go-flight`, `/foundry:plan-build`, `/foundry:implement`, `/foundry:review-build`, `/foundry:summarize`, `/foundry:pull-feedback` | `/kukulu:go-flight`, `/kukulu:plan-build`, `/kukulu:implement`, `/kukulu:review-build`, `/kukulu:summarize`, `/kukulu:pull-feedback` |
+| plugin agents `foundry:planner`, `foundry:implementer`, `foundry:reviewer`, `foundry:summarizer` | `kukulu:planner`, `kukulu:implementer`, `kukulu:reviewer`, `kukulu:summarizer` |
+| generated agents `.claude/agents/foundry-<role>.md` | `.claude/agents/kukulu-<role>.md` |
+| MCP server `foundry` | `kukulu` |
+| MCP tools `foundry_<name>` (all 21) | `kukulu_<name>` |
+| allow rule `mcp__plugin_foundry_foundry` | `mcp__plugin_kukulu_kukulu` |
+| restart line `FOUNDRY: RESTART REQUIRED` | `KUKULU: RESTART REQUIRED` |
+
+Environment variables, paths and files:
+
+| Old | New |
+|---|---|
+| `FOUNDRY_PROJECT_DIR`, `FOUNDRY_CONFIG`, `FOUNDRY_PROFILE`, `FOUNDRY_GUARD_CAP` | `KUKULU_PROJECT_DIR`, `KUKULU_CONFIG`, `KUKULU_PROFILE`, `KUKULU_GUARD_CAP` |
+| `FOUNDRY_TEST_TIMEOUT_MS` (tests only) | `KUKULU_TEST_TIMEOUT_MS` |
+| `.foundry/` (`state.json`, `feedback.jsonl`, `implement.lock`, `mutation.json`, `worktrees/`) | `.kukulu/` |
+| `docs/foundry.json` | `docs/kukulu.json` |
+| `~/.config/foundry/config.json`, `$XDG_CONFIG_HOME/foundry/config.json` | `~/.config/kukulu/config.json`, `$XDG_CONFIG_HOME/kukulu/config.json` |
+| `templates/foundry.config.example.json` | `templates/kukulu.config.example.json` |
+
+The plugin id is the slash-command and agent namespace, so the old `/foundry:*` commands, the `foundry_*` tools and the `foundry:*` agents stop resolving when `foundry` is uninstalled. They cannot be aliased.
+
+### Migration
+
+1. Install the new plugin and remove the old one:
+
+   ```bash
+   claude plugin marketplace add DisplaceTech/kukulu
+   claude plugin install kukulu@displacetech
+   claude plugin uninstall foundry@ericmann
+   ```
+
+2. In each project that has `.foundry/` or `docs/foundry.json`, run `/kukulu:go-flight migrate`. It calls `kukulu_migrate`, which moves the state, feedback and config files, rewrites the `.gitignore` lines, deletes the generated `foundry-<role>` agents, adds the new allow rule, and commits `chore: migrate .foundry layout to .kukulu`. It refuses unless the tree is clean and no run, mutation or stream worktree is in progress, and it restores every path if the commit fails.
+3. Rename `FOUNDRY_*` variables in your shell and `.mcp.json` overrides to `KUKULU_*`, and move the global routing config to `~/.config/kukulu/config.json`.
+4. Remove the old `mcp__plugin_foundry_foundry` entry from `.claude/settings.local.json`; `kukulu_migrate` leaves it in place.
+
+Compatibility shims, removed in 0.7.0:
+
+- A project that has `.foundry/` or `docs/foundry.json` and none of `.kukulu/` or `docs/kukulu.json` is read and written in place under the old names. A project that has both is refused by every tool.
+- A non-empty `FOUNDRY_PROJECT_DIR`, `FOUNDRY_CONFIG`, `FOUNDRY_PROFILE` or `FOUNDRY_GUARD_CAP` is used when its `KUKULU_*` counterpart is unset or empty. The global routing config is read from the `foundry/` directory when `kukulu/config.json` does not exist.
+- The Stop and SubagentStop guard still recognizes the agents `foundry-implementer` and `foundry:implementer` and the tool `foundry_run_start` in transcripts.
+- Each of the server's shims (layout, environment variables, global config) adds a line to the `deprecations` array returned by `kukulu_status` and `kukulu_next`, and `/kukulu:go-flight` prints it; the guard hook reports nothing. A `KUKULU_*` value always wins over its `FOUNDRY_*` counterpart.
+- An old-layout project whose next stage is `plan` halts with an instruction to run `/kukulu:go-flight migrate`, because planning would create `docs/kukulu.json` beside `.foundry/`.
+
+### Compatibility
+
+Archives, logs and feedback produced by earlier versions remain readable and are not modified. A flight archived as `docs/flights/<slug>/foundry.json` is still read by `kukulu_pr_finalize`, and `/kukulu:pull-feedback` reads `.foundry/feedback.jsonl` as well as `.kukulu/feedback.jsonl`. The record formats (`state.json`, `feedback.jsonl`) did not change and contain no product name. The test suite pins the SHA-256 of every file in `docs/flights/v0-5-0/` and loads that archive on the old layout. Git tags, commits and past changelog entries are unchanged.
+
+### Licensing
+
+Copyright in this project was assigned by Eric Mann to Displace Technologies LLC, effective October 15, 2026. Releases from 0.6.0 onward are published by Displace Technologies LLC under the Apache License 2.0. Licenses granted with earlier releases are unaffected.
+
+### Other changes
+
+- New tool `kukulu_migrate` (22 tools in total).
+- `kukulu_status` and `kukulu_next` return a `deprecations` array.
+- The secret-scan workflow runs the pinned gitleaks 8.28.0 binary, verified against the release checksum, instead of `gitleaks-action`, which requires a license key in an organization-owned repository.
+- `scripts/check-names.mjs` runs in `npm run lint`: it fails on a macron letter outside the standalone name, on an ASCII spelling of the name in Markdown prose, and on an apostrophe where the ʻokina belongs.
+
 ## [0.5.0] — 2026-10-07
 
 The end of a flight, finished: three new tools, new config keys, and the fixes

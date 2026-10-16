@@ -1,12 +1,13 @@
-// foundry_status and foundry_next: the decision table that decides which agent
+// kukulu_status and kukulu_next: the decision table that decides which agent
 // runs next. Every branch of `next()` gets a case here, because a wrong answer
 // sends an unattended flight down the wrong stage.
 
 import fs from "node:fs";
 import path from "node:path";
+import { createHash } from "node:crypto";
 import {
-  finish, ok, eq, like, isError,
-  mkDir, specRepo, plannedRepo, withServer,
+  ROOT, finish, ok, eq, like, isError,
+  mkDir, specRepo, plannedRepo, withServer, useLegacyLayout,
   writeFile, readFile, setState, markTasks, git, subject, planDoc, progressDoc,
 } from "./harness.mjs";
 
@@ -15,11 +16,11 @@ const ALL_DONE = { "P0-01": "x", "P0-02": "x", "P0-03": "x" };
 // -------------------------------------------------------------- outside a repo
 
 await withServer(mkDir(), async ({ call }) => {
-  const s = await call("foundry_status");
+  const s = await call("kukulu_status");
   eq(s.git.inRepo, false, "status reports a non-repository honestly");
   eq(s.specPresent, false, "status reports a missing SPEC");
   eq(s.counts, null, "status has no counts without PROGRESS.md");
-  const n = await call("foundry_next");
+  const n = await call("kukulu_next");
   eq(n.stage, "halt", "no SPEC anywhere → halt");
   like(n.reason, /SPEC\.md/, "the halt reason names the missing SPEC");
   eq(n.agent, null, "a halt has no agent to delegate to");
@@ -28,29 +29,29 @@ await withServer(mkDir(), async ({ call }) => {
 // -------------------------------------------------------------- plan stage
 
 await withServer(specRepo(), async ({ call }) => {
-  let n = await call("foundry_next");
+  let n = await call("kukulu_next");
   eq(n.stage, "plan", "SPEC alone → plan");
-  eq(n.agent, "foundry:planner", "the plan stage delegates to the planner");
+  eq(n.agent, "kukulu:planner", "the plan stage delegates to the planner");
   eq(n.agentFallback, true, "with nothing generated yet, the stage falls back to the plugin agent");
-  eq(n.fallbackAgent, "foundry:planner", "the fallback agent is always named");
+  eq(n.fallbackAgent, "kukulu:planner", "the fallback agent is always named");
   eq(n.restartRequired, false, "an Anthropic-routed role never needs a restart");
   eq(n.round, 0, "a fresh flight is round 0");
   like(n.prompt, /docs\/SPEC\.md/, "the planner prompt points at the spec");
   like(n.prompt, /Do not write implementation code/, "the planner prompt forbids coding");
 
-  await call("foundry_agents_sync");
-  n = await call("foundry_next");
+  await call("kukulu_agents_sync");
+  n = await call("kukulu_next");
   eq(n.agentFallback, true, "this process created the agents directory itself, so fallback stays in effect");
-  eq(n.agent, "foundry:planner", "...and next names the plugin agent outright, not a generated one that cannot load yet (cleanflate F-22)");
+  eq(n.agent, "kukulu:planner", "...and next names the plugin agent outright, not a generated one that cannot load yet (cleanflate F-22)");
   eq(n.restartRequired, false, "still no restart needed for an Anthropic-routed role");
 });
 
 // A role routed to a model the Agent tool cannot name, with nothing generated yet.
 {
   const repo = specRepo();
-  writeFile(repo, "docs/foundry.json", JSON.stringify({ verify: ["true"], roles: { planner: { model: "Ollama/x" } } }, null, 2) + "\n");
+  writeFile(repo, "docs/kukulu.json", JSON.stringify({ verify: ["true"], roles: { planner: { model: "Ollama/x" } } }, null, 2) + "\n");
   await withServer(repo, async ({ call }) => {
-    const n = await call("foundry_next");
+    const n = await call("kukulu_next");
     eq(n.agent, null, "a router-routed role with nothing generated has no agent to spawn");
     eq(n.agentFallback, true, "the file is absent, so fallback would apply if it could");
     eq(n.restartRequired, true, "but the Agent tool cannot name the model directly, so a restart is required");
@@ -62,9 +63,9 @@ await withServer(specRepo(), async ({ call }) => {
 // must be handed the alias — and told it is an approximation.
 const routedReviewRepo = (model) => {
   const repo = plannedRepo();
-  const cfgPath = path.join(repo, "docs/foundry.json");
+  const cfgPath = path.join(repo, "docs/kukulu.json");
   const c = JSON.parse(fs.readFileSync(cfgPath, "utf8"));
-  writeFile(repo, "docs/foundry.json", JSON.stringify({ ...c, roles: { reviewer: { model } } }, null, 2) + "\n");
+  writeFile(repo, "docs/kukulu.json", JSON.stringify({ ...c, roles: { reviewer: { model } } }, null, 2) + "\n");
   markTasks(repo, ALL_DONE);
   setState(repo, { implemented: true });
   return repo;
@@ -77,7 +78,7 @@ for (const [model, agentModel, exact, label] of [
   ["inherit", null, true, "inherit means pass no model"],
 ]) {
   await withServer(routedReviewRepo(model), async ({ call }) => {
-    const n = await call("foundry_next");
+    const n = await call("kukulu_next");
     eq(n.stage, "review", `${model}: at the review stage`);
     eq(n.agentFallback, true, `${model}: nothing generated, so fallback applies`);
     eq(n.agentModel, agentModel, `${model}: ${label}`);
@@ -88,23 +89,23 @@ for (const [model, agentModel, exact, label] of [
 }
 
 await withServer(routedReviewRepo("claude-mystery-9"), async ({ call }) => {
-  const n = await call("foundry_next");
+  const n = await call("kukulu_next");
   eq(n.restartRequired, true, "a claude-* id of an unknown family is unreachable under fallback, like a non-Anthropic model");
   eq(n.agent, null, "...and has no agent to spawn");
 });
 
 await withServer(plannedRepo(), async ({ call }) => {
-  await call("foundry_agents_sync");
-  const done = await call("foundry_next");
+  await call("kukulu_agents_sync");
+  const done = await call("kukulu_next");
   ok("agentModel" in done && "agentModelExact" in done, "every stage result carries agentModel and agentModelExact");
 });
 
 // A half-written plan is not a plan.
-for (const missing of ["docs/PLAN.md", "docs/PROGRESS.md", "docs/foundry.json"]) {
+for (const missing of ["docs/PLAN.md", "docs/PROGRESS.md", "docs/kukulu.json"]) {
   const repo = plannedRepo();
   fs.rmSync(path.join(repo, missing));
   await withServer(repo, async ({ call }) => {
-    const n = await call("foundry_next");
+    const n = await call("kukulu_next");
     eq(n.stage, "plan", `missing ${missing} → back to plan`);
   });
 }
@@ -112,15 +113,15 @@ for (const missing of ["docs/PLAN.md", "docs/PROGRESS.md", "docs/foundry.json"])
 // -------------------------------------------------------------- implement stage
 
 await withServer(plannedRepo(), async ({ call }) => {
-  const s = await call("foundry_status");
+  const s = await call("kukulu_status");
   eq(s.counts.total, 3, "status counts every task");
   eq(s.counts.open, 3, "open counts todo plus in-progress");
   eq(s.branch, "(set by implement)", "status reads the Branch header verbatim");
   eq(s.reviewRoundsInPlan, 0, "a fresh plan has no review-fix sections");
 
-  const n = await call("foundry_next");
+  const n = await call("kukulu_next");
   eq(n.stage, "implement", "open tasks → implement");
-  eq(n.agent, "foundry:implementer", "the implement stage delegates to the implementer");
+  eq(n.agent, "kukulu:implementer", "the implement stage delegates to the implementer");
   like(n.reason, /3 open task/, "the reason counts the open tasks");
   like(n.prompt, /initial build/, "round 0's prompt says this is the initial build");
   like(n.prompt, /never ask a question/i, "the implementer prompt states the unattended contract");
@@ -131,7 +132,7 @@ await withServer(plannedRepo(), async ({ call }) => {
   const repo = plannedRepo();
   setState(repo, { round: 2 });
   await withServer(repo, async ({ call }) => {
-    const n = await call("foundry_next");
+    const n = await call("kukulu_next");
     eq(n.round, 2, "next reports the current round");
     eq(n.reviewRound, 3, "reviewRound is always round + 1");
     like(n.prompt, /review-fix round 2/, "a fix round's prompt names the round");
@@ -140,13 +141,13 @@ await withServer(plannedRepo(), async ({ call }) => {
 }
 
 // reviewRound tracks round + 1 everywhere in the decision table, including
-// foundry_status, not only the implement-stage prompt above.
+// kukulu_status, not only the implement-stage prompt above.
 for (const round of [0, 1, 5]) {
   const repo = plannedRepo();
   setState(repo, { round });
   await withServer(repo, async ({ call }) => {
-    eq((await call("foundry_status")).reviewRound, round + 1, `status reports reviewRound as round + 1 at round ${round}`);
-    eq((await call("foundry_next")).reviewRound, round + 1, `next reports reviewRound as round + 1 at round ${round}`);
+    eq((await call("kukulu_status")).reviewRound, round + 1, `status reports reviewRound as round + 1 at round ${round}`);
+    eq((await call("kukulu_next")).reviewRound, round + 1, `next reports reviewRound as round + 1 at round ${round}`);
   });
 }
 
@@ -156,7 +157,7 @@ for (const round of [0, 1, 5]) {
   markTasks(repo, ALL_DONE);
   setState(repo, { implemented: true });
   await withServer(repo, async ({ call }) => {
-    const n = await call("foundry_next");
+    const n = await call("kukulu_next");
     eq(n.stage, "review", "implemented and unreviewed → review");
     eq(n.reviewRound, 1, "the first review is round 1");
     like(n.prompt, /This review is round 1/, "the review prompt states its own round");
@@ -169,21 +170,21 @@ for (const round of [0, 1, 5]) {
 {
   const repo = plannedRepo();
   await withServer(repo, async ({ call }) => {
-    eq((await call("foundry_status")).lockCounter, null, "no lock means no counter to report");
+    eq((await call("kukulu_status")).lockCounter, null, "no lock means no counter to report");
   });
 }
 {
   const repo = plannedRepo();
-  writeFile(repo, ".foundry/implement.lock", "3\n");
+  writeFile(repo, ".kukulu/implement.lock", "3\n");
   await withServer(repo, async ({ call }) => {
-    eq((await call("foundry_status")).lockCounter, 3, "a legacy bare-number lock still reads back its count");
+    eq((await call("kukulu_status")).lockCounter, 3, "a legacy bare-number lock still reads back its count");
   });
 }
 {
   const repo = plannedRepo();
-  writeFile(repo, ".foundry/implement.lock", '{"count":7,"round":1}\n');
+  writeFile(repo, ".kukulu/implement.lock", '{"count":7,"round":1}\n');
   await withServer(repo, async ({ call }) => {
-    eq((await call("foundry_status")).lockCounter, 7, "a JSON lock's count is read directly");
+    eq((await call("kukulu_status")).lockCounter, 7, "a JSON lock's count is read directly");
   });
 }
 
@@ -191,11 +192,11 @@ for (const round of [0, 1, 5]) {
 {
   const repo = plannedRepo();
   markTasks(repo, ALL_DONE);
-  writeFile(repo, ".foundry/implement.lock", "3\n");
+  writeFile(repo, ".kukulu/implement.lock", "3\n");
   await withServer(repo, async ({ call }) => {
-    const n = await call("foundry_next");
+    const n = await call("kukulu_next");
     eq(n.stage, "implement", "a stale lock sends the flight back to implement");
-    like(n.reason, /before foundry_run_finish/, "the reason explains the stale lock");
+    like(n.reason, /before kukulu_run_finish/, "the reason explains the stale lock");
   });
 }
 
@@ -204,7 +205,7 @@ for (const round of [0, 1, 5]) {
   const repo = plannedRepo();
   markTasks(repo, ALL_DONE);
   await withServer(repo, async ({ call }) => {
-    const n = await call("foundry_next");
+    const n = await call("kukulu_next");
     eq(n.stage, "implement", "zero open tasks but no handoff → implement");
     like(n.reason, /no handoff recorded/, "the reason names the missing handoff");
   });
@@ -217,18 +218,18 @@ for (const round of [0, 1, 5]) {
   markTasks(repo, ALL_DONE);
   setState(repo, { implemented: true });
   await withServer(repo, async ({ call }) => {
-    let n = await call("foundry_next");
+    let n = await call("kukulu_next");
     eq(n.stage, "review", "implemented and unreviewed → review");
-    eq(n.agent, "foundry:reviewer", "the review stage delegates to the reviewer");
+    eq(n.agent, "kukulu:reviewer", "the review stage delegates to the reviewer");
     like(n.prompt, /exactly once/, "the reviewer prompt caps the verdict at one submission");
 
     setState(repo, { reviewed: true, verdict: "APPROVED" });
-    n = await call("foundry_next");
+    n = await call("kukulu_next");
     eq(n.stage, "summarize", "approved and unsummarized → summarize");
-    eq(n.agent, "foundry:summarizer", "the summarize stage delegates to the summarizer");
+    eq(n.agent, "kukulu:summarizer", "the summarize stage delegates to the summarizer");
 
     setState(repo, { summarized: true });
-    n = await call("foundry_next");
+    n = await call("kukulu_next");
     eq(n.stage, "done", "summarized → done");
     like(n.reason, /ready for a human to merge/, "done tells the human what is theirs to do");
   });
@@ -240,15 +241,15 @@ for (const round of [0, 1, 5]) {
   markTasks(repo, ALL_DONE);
   setState(repo, { implemented: true, reviewed: true, verdict: "CHANGES REQUESTED" });
   await withServer(repo, async ({ call }) => {
-    const n = await call("foundry_next");
+    const n = await call("kukulu_next");
     eq(n.stage, "halt", "changes requested with no fix tasks → halt");
-    like(n.reason, /foundry_review_submit should have queued them/, "the halt reason names the culprit");
+    like(n.reason, /kukulu_review_submit should have queued them/, "the halt reason names the culprit");
   });
 }
 
 // -------------------------------------------------------------- round caps
 
-// The round-cap decision belongs solely to foundry_review_submit (V3-10);
+// The round-cap decision belongs solely to kukulu_review_submit (V3-10);
 // next() never re-derives it from round/maxRounds — open tasks past a round
 // review_submit did *not* itself halt are still just the next implement
 // stage, exactly like any other round. See test/review.mjs for the actual
@@ -257,7 +258,7 @@ for (const round of [0, 1, 5]) {
   const repo = plannedRepo({ config: { maxRounds: 2 } });
   setState(repo, { round: 3 });
   await withServer(repo, async ({ call }) => {
-    const n = await call("foundry_next");
+    const n = await call("kukulu_next");
     eq(n.stage, "implement", "open tasks send the flight to implement regardless of round or maxRounds; only state.halted can stop it");
   });
 }
@@ -266,7 +267,7 @@ for (const round of [0, 1, 5]) {
   const repo = plannedRepo();
   setState(repo, { halted: "stopped by hand" });
   await withServer(repo, async ({ call }) => {
-    const n = await call("foundry_next");
+    const n = await call("kukulu_next");
     eq(n.stage, "halt", "a halted state stays halted");
     eq(n.reason, "stopped by hand", "the recorded halt reason is passed through");
   });
@@ -288,7 +289,7 @@ for (const [body, expected, label] of [
   const repo = plannedRepo();
   writeFile(repo, "docs/REVIEW.md", body);
   await withServer(repo, async ({ call }) => {
-    const s = await call("foundry_status");
+    const s = await call("kukulu_status");
     eq(s.reviewVerdictInFile, expected, `status reads the ${label} from REVIEW.md`);
   });
 }
@@ -298,16 +299,16 @@ for (const [body, expected, label] of [
 {
   const repo = plannedRepo();
   await withServer(repo, async ({ call }) => {
-    isError(await call("foundry_flight_options", {}), /pass at least one of maxRounds, maxRoundsHard/, "an empty options call is refused");
-    isError(await call("foundry_flight_options", { maxRounds: 0 }), /maxRounds must be a positive integer/, "a non-positive bound is refused");
-    const r = await call("foundry_flight_options", { maxRounds: 6, maxRoundsHard: 6 });
+    isError(await call("kukulu_flight_options", {}), /pass at least one of maxRounds, maxRoundsHard/, "an empty options call is refused");
+    isError(await call("kukulu_flight_options", { maxRounds: 0 }), /maxRounds must be a positive integer/, "a non-positive bound is refused");
+    const r = await call("kukulu_flight_options", { maxRounds: 6, maxRoundsHard: 6 });
     eq(JSON.stringify(r.before), JSON.stringify({ maxRounds: 3, maxRoundsHard: 6 }), "the previous bounds are reported");
     eq(JSON.stringify(r.after), JSON.stringify({ maxRounds: 6, maxRoundsHard: 6 }), "...and the new ones");
     eq(git(repo, ["log", "-1", "--format=%s"]), "chore: flight options (maxRounds=6, maxRoundsHard=6)", "the change is one commit");
-    const c = JSON.parse(readFile(repo, "docs/foundry.json"));
-    eq(c.maxRounds, 6, "docs/foundry.json carries the new bound");
+    const c = JSON.parse(readFile(repo, "docs/kukulu.json"));
+    eq(c.maxRounds, 6, "docs/kukulu.json carries the new bound");
     eq(JSON.stringify(c.verify), JSON.stringify(["true"]), "...and keeps everything else");
-    const again = await call("foundry_flight_options", { maxRounds: 6 });
+    const again = await call("kukulu_flight_options", { maxRounds: 6 });
     eq(again.commit, null, "applying the same options twice commits nothing");
   });
 }
@@ -321,22 +322,22 @@ for (const [body, expected, label] of [
   git(repo, ["add", "-A"]);
   git(repo, ["commit", "-qm", "chore: halted"]);
   await withServer(repo, async ({ call }) => {
-    const cfgBefore = readFile(repo, "docs/foundry.json");
-    const stateBefore = readFile(repo, ".foundry/state.json");
-    isError(await call("foundry_flight_options", { maxRounds: 3, resume: true }), /pass maxRounds: 4 or more/, "resume with a bound that does not lift the cap is refused, naming 4");
-    eq(readFile(repo, "docs/foundry.json"), cfgBefore, "...docs/foundry.json is unchanged");
-    eq(readFile(repo, ".foundry/state.json"), stateBefore, "...and so is state");
-    isError(await call("foundry_flight_options", { resume: true }), /pass at least one of/, "resume alone is refused");
-    isError(await call("foundry_flight_options", { maxRounds: 4, resume: "yes" }), /resume must be a boolean/, "a non-boolean resume is refused");
+    const cfgBefore = readFile(repo, "docs/kukulu.json");
+    const stateBefore = readFile(repo, ".kukulu/state.json");
+    isError(await call("kukulu_flight_options", { maxRounds: 3, resume: true }), /pass maxRounds: 4 or more/, "resume with a bound that does not lift the cap is refused, naming 4");
+    eq(readFile(repo, "docs/kukulu.json"), cfgBefore, "...docs/kukulu.json is unchanged");
+    eq(readFile(repo, ".kukulu/state.json"), stateBefore, "...and so is state");
+    isError(await call("kukulu_flight_options", { resume: true }), /pass at least one of/, "resume alone is refused");
+    isError(await call("kukulu_flight_options", { maxRounds: 4, resume: "yes" }), /resume must be a boolean/, "a non-boolean resume is refused");
     const head = git(repo, ["rev-list", "--count", "HEAD"]);
-    const r = await call("foundry_flight_options", { maxRounds: 4, resume: true });
+    const r = await call("kukulu_flight_options", { maxRounds: 4, resume: true });
     eq(r.resumed, true, "a lifting resume succeeds");
     eq(Number(git(repo, ["rev-list", "--count", "HEAD"])) - Number(head), 1, "...in one commit");
     eq(subject(repo), "chore: flight options (maxRounds=4, resume)", "...with the resume subject");
-    const st = JSON.parse(readFile(repo, ".foundry/state.json"));
+    const st = JSON.parse(readFile(repo, ".kukulu/state.json"));
     ok(st.halted === null && st.haltCap === undefined, "...and halted and haltCap are cleared");
-    eq((await call("foundry_next")).stage, "implement", "the flight goes on to implement");
-    isError(await call("foundry_flight_options", { maxRounds: 5, resume: true }), /not halted; there is nothing to resume/, "resume when not halted is refused");
+    eq((await call("kukulu_next")).stage, "implement", "the flight goes on to implement");
+    isError(await call("kukulu_flight_options", { maxRounds: 5, resume: true }), /not halted; there is nothing to resume/, "resume when not halted is refused");
   });
 }
 
@@ -344,7 +345,7 @@ for (const [body, expected, label] of [
   const repo = plannedRepo();
   setState(repo, { halted: "stopped by hand" });
   await withServer(repo, async ({ call }) => {
-    isError(await call("foundry_flight_options", { maxRounds: 9, resume: true }), /not a round-cap halt.*stopped by hand/, "an operator halt is never cleared by resume, and the refusal names the reason");
+    isError(await call("kukulu_flight_options", { maxRounds: 9, resume: true }), /not a round-cap halt.*stopped by hand/, "an operator halt is never cleared by resume, and the refusal names the reason");
   });
 }
 
@@ -352,14 +353,14 @@ for (const [body, expected, label] of [
   const repo = plannedRepo();
   setState(repo, { halted: "hard", haltCap: { cap: "maxRoundsHard", round: 4 } });
   await withServer(repo, async ({ call }) => {
-    isError(await call("foundry_flight_options", { maxRoundsHard: 3, resume: true }), /maxRoundsHard: 4 or more/, "a hard cap needs maxRoundsHard >= the round");
-    const r = await call("foundry_flight_options", { maxRoundsHard: 4, resume: true });
+    isError(await call("kukulu_flight_options", { maxRoundsHard: 3, resume: true }), /maxRoundsHard: 4 or more/, "a hard cap needs maxRoundsHard >= the round");
+    const r = await call("kukulu_flight_options", { maxRoundsHard: 4, resume: true });
     eq(r.resumed, true, "maxRoundsHard: 4 lifts a hard cap at round 4");
   });
 }
 
 await withServer(specRepo(), async ({ call }) => {
-  isError(await call("foundry_flight_options", { maxRoundsHard: 4 }), /does not exist yet[\s\S]*plan stage/, "options are refused before the plan exists");
+  isError(await call("kukulu_flight_options", { maxRoundsHard: 4 }), /does not exist yet[\s\S]*plan stage/, "options are refused before the plan exists");
 });
 
 // -------------------------------------------------------------- counts and config
@@ -368,31 +369,31 @@ await withServer(specRepo(), async ({ call }) => {
   const repo = plannedRepo();
   markTasks(repo, { "P0-01": "x", "P0-02": "!", "P0-03": "-" });
   await withServer(repo, async ({ call }) => {
-    const s = await call("foundry_status");
+    const s = await call("kukulu_status");
     eq(s.counts.done, 1, "done is counted");
     eq(s.counts.blocked, 1, "blocked is counted");
     eq(s.counts.skipped, 1, "skipped is counted");
     eq(s.counts.open, 0, "blocked and skipped are not open");
     eq(s.blocked.join(","), "P0-02", "status lists blocked ids");
     eq(s.skipped.join(","), "P0-03", "status lists skipped ids");
-    const n = await call("foundry_next");
+    const n = await call("kukulu_next");
     eq(n.stage, "implement", "blocked tasks do not hold the flight open");
   });
 }
 
 {
   const repo = plannedRepo();
-  writeFile(repo, "docs/foundry.json", "{ this is not json }");
+  writeFile(repo, "docs/kukulu.json", "{ this is not json }");
   await withServer(repo, async ({ call }) => {
-    isError(await call("foundry_status"), /not valid JSON/, "a corrupt foundry.json is reported, not swallowed");
+    isError(await call("kukulu_status"), /not valid JSON/, "a corrupt kukulu.json is reported, not swallowed");
   });
 }
 
 {
   const repo = plannedRepo();
-  writeFile(repo, ".foundry/state.json", "{ truncated");
+  writeFile(repo, ".kukulu/state.json", "{ truncated");
   await withServer(repo, async ({ call }) => {
-    const s = await call("foundry_status");
+    const s = await call("kukulu_status");
     eq(s.state.round, 0, "a corrupt state.json falls back to defaults rather than failing");
   });
 }
@@ -402,7 +403,7 @@ await withServer(specRepo(), async ({ call }) => {
   const repo = plannedRepo();
   writeFile(repo, "docs/PROGRESS.md", "# progress\nno sections here\n");
   await withServer(repo, async ({ call }) => {
-    isError(await call("foundry_status"), /no '## Tasks' section/, "a PROGRESS.md with no Tasks section is rejected");
+    isError(await call("kukulu_status"), /no '## Tasks' section/, "a PROGRESS.md with no Tasks section is rejected");
   });
 }
 
@@ -412,7 +413,7 @@ await withServer(specRepo(), async ({ call }) => {
   const p = path.join(repo, "docs/PROGRESS.md");
   fs.writeFileSync(p, fs.readFileSync(p, "utf8") + "\n### P0-01 — abc1234\n- [ ] P9-99 not a task\n");
   await withServer(repo, async ({ call }) => {
-    const s = await call("foundry_status");
+    const s = await call("kukulu_status");
     eq(s.counts.total, 3, "checkbox lines under ## Log are not tasks");
   });
 }
@@ -424,7 +425,7 @@ await withServer(specRepo(), async ({ call }) => {
   git(repo, ["checkout", "-q", "-b", "build/2020-01-01"]);
   writeFile(repo, "dirty.txt", "x");
   await withServer(repo, async ({ call }) => {
-    const s = await call("foundry_status");
+    const s = await call("kukulu_status");
     eq(s.git.branch, "build/2020-01-01", "status reports the current branch");
     eq(s.git.dirty, true, "status notices an unclean tree");
     eq(s.git.hasOrigin, false, "status notices there is no origin");
@@ -435,16 +436,16 @@ await withServer(specRepo(), async ({ call }) => {
 // ---------------------------------------------------------------- artifacts (S-08)
 
 {
-  // an untracked foundry.json with no plan is a stray artifact (project-c F-04)
+  // an untracked kukulu.json with no plan is a stray artifact (project-c F-04)
   const repo = specRepo();
-  writeFile(repo, "docs/foundry.json", "{}\n");
+  writeFile(repo, "docs/kukulu.json", "{}\n");
   await withServer(repo, async ({ call }) => {
-    const s = await call("foundry_status");
-    eq(s.artifacts["foundry.json"], "untracked", "an unstaged foundry.json is untracked");
+    const s = await call("kukulu_status");
+    eq(s.artifacts["kukulu.json"], "untracked", "an unstaged kukulu.json is untracked");
     eq(s.artifacts["PLAN.md"], "absent", "...PLAN.md is absent");
     eq(s.artifacts["SPEC.md"], "tracked", "...SPEC.md is tracked");
-    eq(Object.keys(s.artifacts).join(","), "SPEC.md,PLAN.md,PROGRESS.md,HANDOFF.md,REVIEW.md,SUMMARY.md,foundry.json", "...and the keys are exactly the seven artifacts");
-    eq(s.strayArtifacts.join(","), "foundry.json", "...so it is a stray artifact");
+    eq(Object.keys(s.artifacts).join(","), "SPEC.md,PLAN.md,PROGRESS.md,HANDOFF.md,REVIEW.md,SUMMARY.md,kukulu.json", "...and the keys are exactly the seven artifacts");
+    eq(s.strayArtifacts.join(","), "kukulu.json", "...so it is a stray artifact");
   });
 }
 
@@ -453,7 +454,7 @@ await withServer(specRepo(), async ({ call }) => {
   const repo = plannedRepo();
   writeFile(repo, "docs/HANDOFF.md", "# handoff\n");
   await withServer(repo, async ({ call }) => {
-    const s = await call("foundry_status");
+    const s = await call("kukulu_status");
     eq(s.artifacts["HANDOFF.md"], "untracked", "an untracked artifact beside a present plan is not stray: it is untracked");
     eq(s.strayArtifacts.length, 0, "...and strayArtifacts is empty");
   });
@@ -463,7 +464,7 @@ await withServer(specRepo(), async ({ call }) => {
   const repo = plannedRepo();
   writeFile(repo, "docs/PLAN.md", readFile(repo, "docs/PLAN.md") + "\nedit\n");
   await withServer(repo, async ({ call }) => {
-    const s = await call("foundry_status");
+    const s = await call("kukulu_status");
     eq(s.artifacts["PLAN.md"], "modified", "a modified tracked artifact is modified");
     eq(s.strayArtifacts.length, 0, "...and nothing is stray");
   });
@@ -476,11 +477,11 @@ await withServer(specRepo(), async ({ call }) => {
   git(repo, ["commit", "-qm", "review: round 1 (on main)"]);
   git(repo, ["checkout", "-q", "-b", "build/2020-01-01"]);
   await withServer(repo, async ({ call }) => {
-    eq((await call("foundry_status")).lastReviewCommit, null, "lastReviewCommit is null with no review on the branch (main's own review: commit is not reported)");
+    eq((await call("kukulu_status")).lastReviewCommit, null, "lastReviewCommit is null with no review on the branch (main's own review: commit is not reported)");
     writeFile(repo, "docs/REVIEW.md", "# later\n");
     git(repo, ["add", "-A"]);
     git(repo, ["commit", "-qm", "review: round 1"]);
-    eq((await call("foundry_status")).lastReviewCommit, git(repo, ["rev-parse", "--short", "HEAD"]), "after a review commit on the branch, its short sha");
+    eq((await call("kukulu_status")).lastReviewCommit, git(repo, ["rev-parse", "--short", "HEAD"]), "after a review commit on the branch, its short sha");
   });
 }
 
@@ -493,12 +494,12 @@ await withServer(specRepo(), async ({ call }) => {
   git(repo, ["add", "-A"]);
   git(repo, ["commit", "-qm", "chore: build summary"]);
   await withServer(repo, async ({ call }) => {
-    await call("foundry_flight_archive");
-    const n = await call("foundry_next");
-    eq(n.stage, "done", "after an archive, foundry_next is done");
+    await call("kukulu_flight_archive");
+    const n = await call("kukulu_next");
+    eq(n.stage, "done", "after an archive, kukulu_next is done");
     like(n.reason, /flight w1 is archived in docs\/flights\/w1/, "...and the reason names the slug");
     writeFile(repo, "docs/SPEC.md", "# Next spec\n");
-    eq((await call("foundry_next")).stage, "plan", "once SPEC.md changes, the stage is plan");
+    eq((await call("kukulu_next")).stage, "plan", "once SPEC.md changes, the stage is plan");
   });
 }
 
@@ -510,7 +511,7 @@ for (const [config, re, label] of [
 ]) {
   const repo = plannedRepo({ config });
   await withServer(repo, async ({ call }) => {
-    isError(await call("foundry_status"), re, `${label} is refused`);
+    isError(await call("kukulu_status"), re, `${label} is refused`);
   });
 }
 
@@ -521,14 +522,14 @@ for (const [config, re, label] of [
   const plan = plannedRepo(); // only for its generated texts
   writeFile(repo, "docs/PLAN.md", readFile(plan, "docs/PLAN.md"));
   writeFile(repo, "docs/PROGRESS.md", readFile(plan, "docs/PROGRESS.md"));
-  writeFile(repo, "docs/foundry.json", readFile(plan, "docs/foundry.json"));
+  writeFile(repo, "docs/kukulu.json", readFile(plan, "docs/kukulu.json"));
   writeFile(repo, "CLAUDE.md", "# rules\n");
   await withServer(repo, async ({ call }) => {
-    const r = await call("foundry_plan_commit");
+    const r = await call("kukulu_plan_commit");
     eq(r.tasks, 3, "a valid plan commits: three tasks");
     eq(JSON.stringify(r.phases), JSON.stringify([{ phase: 0, tasks: 3 }]), "...in one phase");
     eq(subject(repo), "plan: derive build plan from SPEC", "...as plan: derive build plan from SPEC");
-    eq((await call("foundry_plan_commit")).commit, null, "a second call commits nothing");
+    eq((await call("kukulu_plan_commit")).commit, null, "a second call commits nothing");
   });
 }
 
@@ -556,10 +557,10 @@ for (const [config, re, label] of [
   ].join("\n");
   writeFile(repo, "docs/PLAN.md", planText);
   writeFile(repo, "docs/PROGRESS.md", ["# P", "Branch: (x)", "Started: (x)", "", "## Tasks", "- [ ] P0-05 Five", "- [ ] P0-03 Three", "- [ ] P0-01 One", "", "## Log", ""].join("\n"));
-  writeFile(repo, "docs/foundry.json", JSON.stringify({ verify: ["true"], constraints: [{ id: "c", paths: ["src/"], pattern: "x", shouldMatch: ["x"], shouldNotMatch: ["y"], from: "P9-01" }] }));
+  writeFile(repo, "docs/kukulu.json", JSON.stringify({ verify: ["true"], constraints: [{ id: "c", paths: ["src/"], pattern: "x", shouldMatch: ["x"], shouldNotMatch: ["y"], from: "P9-01" }] }));
   const head = git(repo, ["rev-parse", "HEAD"]);
   await withServer(repo, async ({ rpc }) => {
-    const e = (await rpc("tools/call", { name: "foundry_plan_commit", arguments: {} })).result;
+    const e = (await rpc("tools/call", { name: "kukulu_plan_commit", arguments: {} })).result;
     eq(e.isError, true, "a broken plan is refused");
     const text = e.content[0].text;
     like(text, /^\d+ problems? in the plan/, "...with a one-line count first");
@@ -582,7 +583,7 @@ function splitPlanRepo(progressPatch = (t) => t) {
   ];
   writeFile(repo, "docs/PLAN.md", planDoc(tasks));
   writeFile(repo, "docs/PROGRESS.md", progressPatch(progressDoc(tasks)));
-  writeFile(repo, "docs/foundry.json", JSON.stringify({ verify: ["true"], constraints: [{ id: "c", paths: ["src/"], pattern: "x", shouldMatch: ["x"], shouldNotMatch: ["y"], from: "P1-03" }] }, null, 2) + "\n");
+  writeFile(repo, "docs/kukulu.json", JSON.stringify({ verify: ["true"], constraints: [{ id: "c", paths: ["src/"], pattern: "x", shouldMatch: ["x"], shouldNotMatch: ["y"], from: "P1-03" }] }, null, 2) + "\n");
   writeFile(repo, "CLAUDE.md", "# rules\n");
   return repo;
 }
@@ -590,7 +591,7 @@ function splitPlanRepo(progressPatch = (t) => t) {
 {
   const repo = splitPlanRepo();
   await withServer(repo, async ({ call }) => {
-    const r = await call("foundry_plan_commit", { renumber: true });
+    const r = await call("kukulu_plan_commit", { renumber: true });
     eq(JSON.stringify(r.renumbered), JSON.stringify({ "P1-02a": "P1-03", "P1-03": "P1-04" }), "renumber rewrites a split task: the map");
     const plan = readFile(repo, "docs/PLAN.md");
     like(plan, /### P1-03: Two and a half/, "...the split heading takes its clean number");
@@ -598,7 +599,7 @@ function splitPlanRepo(progressPatch = (t) => t) {
     like(plan, /see P1-03, and not P1-02/, "...prose is rewritten too, and P1-02 is untouched");
     ok(!/P1-02a/.test(plan), "...no suffixed id is left in PLAN.md");
     like(readFile(repo, "docs/PROGRESS.md"), /- \[ \] P1-03 Two and a half\n- \[ \] P1-04 Three/, "...PROGRESS.md's lines are rewritten");
-    like(readFile(repo, "docs/foundry.json"), /"from": "P1-04"/, "...and the from value follows its task");
+    like(readFile(repo, "docs/kukulu.json"), /"from": "P1-04"/, "...and the from value follows its task");
     eq(subject(repo), "plan: derive build plan from SPEC", "...in the plan commit");
     ok(plan.includes("### P1-02: Two"), "...P1-02 keeps its heading");
   });
@@ -607,8 +608,8 @@ function splitPlanRepo(progressPatch = (t) => t) {
 {
   const repo = splitPlanRepo();
   await withServer(repo, async ({ call }) => {
-    isError(await call("foundry_plan_commit"), /renumber: true/, "a suffix without renumber is refused, suggesting renumber");
-    isError(await call("foundry_plan_commit", { renumber: "yes" }), /renumber must be a boolean/, "a non-boolean renumber is refused");
+    isError(await call("kukulu_plan_commit"), /renumber: true/, "a suffix without renumber is refused, suggesting renumber");
+    isError(await call("kukulu_plan_commit", { renumber: "yes" }), /renumber must be a boolean/, "a non-boolean renumber is refused");
   });
 }
 
@@ -617,18 +618,114 @@ for (const [label, patch] of [
   ["a task that is not [ ]", (t) => t.replace("- [ ] P1-01", "- [x] P1-01")],
 ]) {
   const repo = splitPlanRepo(patch);
-  const before = { plan: readFile(repo, "docs/PLAN.md"), progress: readFile(repo, "docs/PROGRESS.md"), cfg: readFile(repo, "docs/foundry.json") };
+  const before = { plan: readFile(repo, "docs/PLAN.md"), progress: readFile(repo, "docs/PROGRESS.md"), cfg: readFile(repo, "docs/kukulu.json") };
   await withServer(repo, async ({ call }) => {
-    isError(await call("foundry_plan_commit", { renumber: true }), /only for a plan no run has touched/, `renumber is refused once a run has started: ${label}`);
-    ok(readFile(repo, "docs/PLAN.md") === before.plan && readFile(repo, "docs/PROGRESS.md") === before.progress && readFile(repo, "docs/foundry.json") === before.cfg, "...and every file is unchanged");
+    isError(await call("kukulu_plan_commit", { renumber: true }), /only for a plan no run has touched/, `renumber is refused once a run has started: ${label}`);
+    ok(readFile(repo, "docs/PLAN.md") === before.plan && readFile(repo, "docs/PROGRESS.md") === before.progress && readFile(repo, "docs/kukulu.json") === before.cfg, "...and every file is unchanged");
   });
 }
 
 {
   const repo = plannedRepo({ config: { policies: { signing: "sometimes" } } });
   await withServer(repo, async ({ rpc }) => {
-    const e = (await rpc("tools/call", { name: "foundry_plan_commit", arguments: {} })).result;
+    const e = (await rpc("tools/call", { name: "kukulu_plan_commit", arguments: {} })).result;
     eq(e.structuredContent.problems.filter((p) => p.check === "config").length, 1, "a broken config is one config problem");
+  });
+}
+
+// ---------------------------------------------------------------- pre-0.6.0 layout and recorded flights (RN-06)
+
+{
+  // The 0.5.0 flight archive is recorded evidence. Its bytes are pinned here, so
+  // a rename that touches them fails the suite instead of passing silently.
+  const FLIGHT = "docs/flights/v0-5-0";
+  const PINNED = {
+    "HANDOFF.md": "9863d227bda6e2ed78e06b636d126bb51d6d601cbdd155106aeccc7cee1316dd",
+    "PLAN.md": "d19b22535ee8c15991ade980fc21c59e94e299b25aee2a2a7fd9a317cda508a4",
+    "PROGRESS.md": "052741b07c57deb3d8f42128efbd68ffe496b045e15be0469946790f84091f93",
+    "REVIEW.md": "ebe811b9a0a8f33089d11908ddd09e15e8e9c741108322db3a941225c93fcc3a",
+    "SPEC.md": "5573578c6720ac37d8ad3ebf9dad7bed98ae578bcb87537833982dc659da8f7f",
+    "SUMMARY.md": "5daee8277cf18e5ead6fd1fa0cd42ecb5fbbce7b8aaa6120b10ad06ce27e5b33",
+    "feedback.jsonl": "cf70939964c3ad6882a755fbd04b63c40c21ca682fa4ec1e65c0952eb7a9b9e0",
+    "foundry.json": "fe937f3a9f406e774639d17b0573eec8f8192cbfa7f34c521816b0682f09e756",
+    "state.json": "21e3cd2fe3f8b88acccb4d00013b97ab42ce3a11738d946f68d747518092fd4c",
+  };
+  const sha = (file) => createHash("sha256").update(fs.readFileSync(file)).digest("hex");
+  for (const [name, hash] of Object.entries(PINNED)) {
+    eq(sha(path.join(ROOT, FLIGHT, name)), hash, `${FLIGHT}/${name} is byte-identical to the recorded flight`);
+  }
+  eq(fs.readdirSync(path.join(ROOT, FLIGHT)).sort().join(","), Object.keys(PINNED).sort().join(","), `${FLIGHT} holds exactly the recorded files`);
+
+  // A project on the old layout that archived that flight is still understood.
+  const repo = specRepo();
+  fs.mkdirSync(path.join(repo, FLIGHT), { recursive: true });
+  for (const name of Object.keys(PINNED)) fs.copyFileSync(path.join(ROOT, FLIGHT, name), path.join(repo, FLIGHT, name));
+  fs.copyFileSync(path.join(ROOT, FLIGHT, "SPEC.md"), path.join(repo, "docs", "SPEC.md"));
+  writeFile(repo, ".foundry/state.json", JSON.stringify({ ...JSON.parse(readFile(repo, `${FLIGHT}/state.json`)), summarized: false, archived: { slug: "v0-5-0", dir: FLIGHT, at: "2026-10-07T20:54:01.917Z" } }));
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-qm", "chore: archive flight v0-5-0"]);
+  await withServer(repo, async ({ call }) => {
+    const st = await call("kukulu_status");
+    eq(st.state.archived.slug, "v0-5-0", "status reads the archive record of a flight archived before 0.6.0");
+    like(st.deprecations.join("\n"), /Foundry layout \(\.foundry\/, docs\/foundry\.json\); run kukulu_migrate\. Support ends in 0\.7\.0/, "...and says the project is on the old layout");
+    const n = await call("kukulu_next");
+    eq(n.stage, "done", "kukulu_next recognizes the archived flight");
+    like(n.reason, /flight v0-5-0 is archived in docs\/flights\/v0-5-0/, "...and names it");
+  });
+  for (const name of Object.keys(PINNED)) {
+    eq(sha(path.join(repo, FLIGHT, name)), PINNED[name], `...and left ${name} byte-identical`);
+  }
+}
+
+{
+  const repo = useLegacyLayout(plannedRepo());
+  await withServer(repo, async ({ call }) => {
+    const st = await call("kukulu_status");
+    eq(st.configPresent, true, "a project with docs/foundry.json and .foundry/ is read in place");
+    eq(st.deprecations.length, 1, "...with exactly one layout notice");
+  });
+}
+
+{
+  // A 0.5.0 project after its flight was archived: only .foundry/state.json is left. Planning
+  // would write docs/kukulu.json beside it, and every tool refuses a project holding both
+  // layouts, so the controller is told to migrate first.
+  const repo = plannedRepo({ config: { flight: "w1" } });
+  setState(repo, { summarized: true, verdict: "APPROVED", reviewed: true, implemented: true });
+  git(repo, ["checkout", "-q", "-b", "build/2020-01-01"]);
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-qm", "chore: build summary"]);
+  await withServer(repo, async ({ call }) => {
+    await call("kukulu_flight_archive");
+  });
+  useLegacyLayout(repo);
+  writeFile(repo, "docs/SPEC.md", "# Next spec\n");
+  await withServer(repo, async ({ call }) => {
+    const n = await call("kukulu_next");
+    eq(n.stage, "halt", "on the old layout, an archived project with an edited spec halts instead of planning");
+    like(n.reason, /run \/kukulu:go-flight migrate, then run/, "...telling the controller to migrate");
+  });
+}
+
+{
+  // Error messages name the files the project actually has.
+  const repo = plannedRepo();
+  setState(repo, { round: 0 });
+  useLegacyLayout(repo);
+  fs.rmSync(path.join(repo, "docs/foundry.json"));
+  await withServer(repo, async ({ call }) => {
+    isError(await call("kukulu_verify"), /docs\/foundry\.json is missing/, "on the old layout a refusal names docs/foundry.json, not docs/kukulu.json");
+  });
+}
+
+{
+  const repo = plannedRepo();
+  writeFile(repo, "docs/foundry.json", "{}");
+  setState(repo, { round: 0 });
+  writeFile(repo, ".foundry/state.json", "{}");
+  await withServer(repo, async ({ call }) => {
+    isError(await call("kukulu_status"), /both the pre-0\.6\.0 layout .* and the current one .* exist/, "a project holding both layouts is refused, since either would hide the other");
+    isError(await call("kukulu_next"), /Keep the one you use and remove the other/, "...for every tool, with what to do");
   });
 }
 

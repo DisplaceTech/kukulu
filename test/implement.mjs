@@ -9,7 +9,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import {
   finish, ok, eq, like, isError,
-  mkDir, plannedRepo, withServer, readFile, writeFile, hasFile, subject,
+  mkDir, plannedRepo, withServer, readFile, writeFile, hasFile, subject, useLegacyLayout,
   commitTask, markTasks, setState, git, mkBareRemote, mkFailingGhBin, mkFakeGhBin,
 } from "./harness.mjs";
 
@@ -24,8 +24,8 @@ function startedRepo(opts) {
   const repo = plannedRepo(opts);
   git(repo, ["checkout", "-q", "-b", `build/${TODAY}`]);
   markTasks(repo, ALL_DONE);
-  writeFile(repo, ".gitignore", ".foundry/implement.lock\n");
-  writeFile(repo, ".foundry/implement.lock", "0\n");
+  writeFile(repo, ".gitignore", ".kukulu/implement.lock\n");
+  writeFile(repo, ".kukulu/implement.lock", "0\n");
   setState(repo, { round: 0 });
   git(repo, ["add", "-A"]);
   git(repo, ["commit", "-qm", "chore: start implementation run"]);
@@ -34,22 +34,22 @@ function startedRepo(opts) {
 
 // ---------------------------------------------------------------- run_start
 
-for (const missing of ["docs/SPEC.md", "docs/PLAN.md", "docs/PROGRESS.md", "docs/foundry.json"]) {
+for (const missing of ["docs/SPEC.md", "docs/PLAN.md", "docs/PROGRESS.md", "docs/kukulu.json"]) {
   const repo = plannedRepo();
   fs.rmSync(path.join(repo, missing));
   await withServer(repo, async ({ call }) => {
     const escaped = missing.replace(/[/.]/g, "\\$&");
-    isError(await call("foundry_run_start"), new RegExp(`${escaped} is missing`), `run_start refuses without ${missing}`);
+    isError(await call("kukulu_run_start"), new RegExp(`${escaped} is missing`), `run_start refuses without ${missing}`);
   });
 }
 
 {
   const dir = mkDir();
   for (const f of ["docs/SPEC.md", "docs/PLAN.md"]) writeFile(dir, f, "x");
-  writeFile(dir, "docs/foundry.json", '{ "verify": ["true"] }');
+  writeFile(dir, "docs/kukulu.json", '{ "verify": ["true"] }');
   writeFile(dir, "docs/PROGRESS.md", "# p\n\n## Tasks\n\n## Log\n");
   await withServer(dir, async ({ call }) => {
-    isError(await call("foundry_run_start"), /not a git repository/, "run_start refuses outside a git repository");
+    isError(await call("kukulu_run_start"), /not a git repository/, "run_start refuses outside a git repository");
   });
 }
 
@@ -59,7 +59,7 @@ for (const missing of ["docs/SPEC.md", "docs/PLAN.md", "docs/PROGRESS.md", "docs
   const repo = plannedRepo();
   writeFile(repo, "CLAUDE.md", "# rules\nedited, not committed\n");
   await withServer(repo, async ({ call }) => {
-    isError(await call("foundry_run_start"), /working tree is dirty on main/, "run_start refuses to branch from a dirty main");
+    isError(await call("kukulu_run_start"), /working tree is dirty on main/, "run_start refuses to branch from a dirty main");
   });
 }
 
@@ -69,7 +69,7 @@ for (const missing of ["docs/SPEC.md", "docs/PLAN.md", "docs/PROGRESS.md", "docs
   const repo = plannedRepo();
   writeFile(repo, "stray.txt", "sitting here untracked\n");
   await withServer(repo, async ({ call }) => {
-    const r = await call("foundry_run_start");
+    const r = await call("kukulu_run_start");
     eq(r.alreadyStarted, false, "an untracked file alone does not stop the run from starting");
   });
 }
@@ -78,36 +78,36 @@ for (const missing of ["docs/SPEC.md", "docs/PLAN.md", "docs/PROGRESS.md", "docs
   const repo = plannedRepo();
   git(repo, ["checkout", "-q", "-b", "feature/side-quest"]);
   await withServer(repo, async ({ call }) => {
-    isError(await call("foundry_run_start"), /runs start from 'main' or an existing 'build\/\*' branch/, "run_start refuses to hijack an unrelated branch");
+    isError(await call("kukulu_run_start"), /runs start from 'main' or an existing 'build\/\*' branch/, "run_start refuses to hijack an unrelated branch");
   });
 }
 
 {
   const repo = plannedRepo();
   await withServer(repo, async ({ call }) => {
-    const r = await call("foundry_run_start");
+    const r = await call("kukulu_run_start");
     eq(r.alreadyStarted, false, "run_start reports a fresh start");
     eq(r.branch, `build/${TODAY}`, "run_start names the branch after the date");
     eq(r.round, 0, "a fresh run is round 0");
     eq(r.counts.open, 3, "run_start reports the open task count");
-    ok(hasFile(repo, ".foundry/implement.lock"), "run_start arms the Stop-hook lock");
-    const lock = JSON.parse(readFile(repo, ".foundry/implement.lock"));
+    ok(hasFile(repo, ".kukulu/implement.lock"), "run_start arms the Stop-hook lock");
+    const lock = JSON.parse(readFile(repo, ".kukulu/implement.lock"));
     eq(lock.count, 0, "the lock starts its re-block counter at zero");
     eq(lock.round, 0, "the lock records the round it was armed for");
     eq(lock.cap, 60, "the lock carries the default guard cap");
     ok(lock.armedAt, "the lock records when it was armed");
-    eq((await call("foundry_status")).lockCounter, 0, "status reads the lock's counter");
-    like(readFile(repo, ".gitignore"), /^\.foundry\/implement\.lock$/m, "run_start gitignores the lock");
+    eq((await call("kukulu_status")).lockCounter, 0, "status reads the lock's counter");
+    like(readFile(repo, ".gitignore"), /^\.kukulu\/implement\.lock$/m, "run_start gitignores the lock");
     like(readFile(repo, "docs/PROGRESS.md"), new RegExp(`^Branch: build/${TODAY}$`, "m"), "run_start stamps the branch into PROGRESS.md");
     like(readFile(repo, "docs/PROGRESS.md"), /^Started: \d{4}-\d\d-\d\dT/m, "run_start stamps a start timestamp");
     eq(subject(repo), "chore: start implementation run", "run_start commits the stamp");
     eq(git(repo, ["status", "--porcelain"]), "", "run_start leaves a clean tree");
 
-    writeFile(repo, ".foundry/implement.lock", JSON.stringify({ ...JSON.parse(readFile(repo, ".foundry/implement.lock")), count: 40 }));
-    const again = await call("foundry_run_start");
+    writeFile(repo, ".kukulu/implement.lock", JSON.stringify({ ...JSON.parse(readFile(repo, ".kukulu/implement.lock")), count: 40 }));
+    const again = await call("kukulu_run_start");
     eq(again.alreadyStarted, true, "run_start is idempotent while the lock is held");
     eq(subject(repo), "chore: start implementation run", "the idempotent call commits nothing new");
-    eq(JSON.parse(readFile(repo, ".foundry/implement.lock")).count, 0, "resuming an already-started run resets the guard's counter");
+    eq(JSON.parse(readFile(repo, ".kukulu/implement.lock")).count, 0, "resuming an already-started run resets the guard's counter");
   });
 }
 
@@ -116,7 +116,7 @@ for (const missing of ["docs/SPEC.md", "docs/PLAN.md", "docs/PROGRESS.md", "docs
   const repo = plannedRepo();
   git(repo, ["branch", `build/${TODAY}`]);
   await withServer(repo, async ({ call }) => {
-    eq((await call("foundry_run_start")).branch, `build/${TODAY}-2`, "run_start sidesteps an existing branch for today");
+    eq((await call("kukulu_run_start")).branch, `build/${TODAY}-2`, "run_start sidesteps an existing branch for today");
   });
 }
 
@@ -124,11 +124,11 @@ for (const missing of ["docs/SPEC.md", "docs/PLAN.md", "docs/PROGRESS.md", "docs
 {
   const repo = plannedRepo();
   git(repo, ["checkout", "-q", "-b", `build/${TODAY}`]);
-  writeFile(repo, ".gitignore", ".foundry/implement.lock\n");
+  writeFile(repo, ".gitignore", ".kukulu/implement.lock\n");
   git(repo, ["add", "-A"]);
   git(repo, ["commit", "-qm", "chore: pre-existing"]);
   await withServer(repo, async ({ call }) => {
-    const r = await call("foundry_run_start");
+    const r = await call("kukulu_run_start");
     eq(r.alreadyStarted, false, "run_start resumes on an existing build branch");
     eq(r.branch, `build/${TODAY}`, "the existing build branch is reused");
     eq(readFile(repo, ".gitignore").match(/implement\.lock/g).length, 1, "the gitignore entry is not duplicated");
@@ -138,15 +138,15 @@ for (const missing of ["docs/SPEC.md", "docs/PLAN.md", "docs/PROGRESS.md", "docs
 {
   const repo = plannedRepo({ config: { branchPrefix: "wip/", baseBranch: "main" } });
   await withServer(repo, async ({ call }) => {
-    eq((await call("foundry_run_start")).branch, `wip/${TODAY}`, "branchPrefix from foundry.json is honoured");
+    eq((await call("kukulu_run_start")).branch, `wip/${TODAY}`, "branchPrefix from kukulu.json is honoured");
   });
 }
 
 {
   const repo = plannedRepo({ config: { guardCap: 200 } });
   await withServer(repo, async ({ call }) => {
-    await call("foundry_run_start");
-    eq(JSON.parse(readFile(repo, ".foundry/implement.lock")).cap, 200, "a configured guardCap is carried into the lock");
+    await call("kukulu_run_start");
+    eq(JSON.parse(readFile(repo, ".kukulu/implement.lock")).cap, 200, "a configured guardCap is carried into the lock");
   });
 }
 
@@ -157,7 +157,7 @@ for (const missing of ["docs/SPEC.md", "docs/PLAN.md", "docs/PROGRESS.md", "docs
   git(repo, ["add", "-A"]);
   git(repo, ["commit", "-qm", "chore: state"]);
   await withServer(repo, async ({ call }) => {
-    await call("foundry_run_start");
+    await call("kukulu_run_start");
     eq(subject(repo), "chore: start review-fix round 2", "a fix round's start commit names the round");
   });
 }
@@ -168,7 +168,7 @@ for (const missing of ["docs/SPEC.md", "docs/PLAN.md", "docs/PROGRESS.md", "docs
   const repo = plannedRepo();
   git(repo, ["remote", "add", "origin", mkBareRemote()]);
   await withServer(repo, async ({ call }) => {
-    const r = await call("foundry_run_start");
+    const r = await call("kukulu_run_start");
     eq(r.basePush, "pushed", "run_start pushes the base branch before branching off it (F-18)");
     eq(git(repo, ["rev-parse", "origin/main"]), git(repo, ["rev-parse", "main"]), "the remote's main matches local main, including the plan commits");
   });
@@ -177,7 +177,7 @@ for (const missing of ["docs/SPEC.md", "docs/PLAN.md", "docs/PROGRESS.md", "docs
 {
   const repo = plannedRepo();
   await withServer(repo, async ({ call }) => {
-    eq((await call("foundry_run_start")).basePush, "skipped: no origin remote", "without a remote, basePush says so");
+    eq((await call("kukulu_run_start")).basePush, "skipped: no origin remote", "without a remote, basePush says so");
   });
 }
 
@@ -185,7 +185,7 @@ for (const missing of ["docs/SPEC.md", "docs/PLAN.md", "docs/PROGRESS.md", "docs
   const repo = plannedRepo({ config: { policies: { push: false } } });
   git(repo, ["remote", "add", "origin", mkBareRemote()]);
   await withServer(repo, async ({ call }) => {
-    eq((await call("foundry_run_start")).basePush, "skipped: policy", "push: false skips the base branch push too");
+    eq((await call("kukulu_run_start")).basePush, "skipped: policy", "push: false skips the base branch push too");
   });
 }
 
@@ -194,11 +194,11 @@ for (const missing of ["docs/SPEC.md", "docs/PLAN.md", "docs/PROGRESS.md", "docs
   // basePush belongs only to the creation path.
   const repo = plannedRepo();
   git(repo, ["checkout", "-q", "-b", `build/${TODAY}`]);
-  writeFile(repo, ".gitignore", ".foundry/implement.lock\n");
+  writeFile(repo, ".gitignore", ".kukulu/implement.lock\n");
   git(repo, ["add", "-A"]);
   git(repo, ["commit", "-qm", "chore: pre-existing"]);
   await withServer(repo, async ({ call }) => {
-    ok(!("basePush" in await call("foundry_run_start")), "resuming an existing build branch reports no basePush at all");
+    ok(!("basePush" in await call("kukulu_run_start")), "resuming an existing build branch reports no basePush at all");
   });
 }
 
@@ -207,8 +207,8 @@ for (const missing of ["docs/SPEC.md", "docs/PLAN.md", "docs/PROGRESS.md", "docs
 {
   const repo = plannedRepo();
   await withServer(repo, async ({ call }) => {
-    await call("foundry_run_start");
-    const t = await call("foundry_task_next");
+    await call("kukulu_run_start");
+    const t = await call("kukulu_task_next");
     eq(t.done, false, "task_next hands back a task");
     eq(t.id, "P0-01", "task_next picks the first todo task");
     eq(t.title, "Create hello", "task_next returns the task title");
@@ -219,7 +219,7 @@ for (const missing of ["docs/SPEC.md", "docs/PLAN.md", "docs/PROGRESS.md", "docs
     eq(t.counts.inProgress, 1, "task_next marks the task in progress");
     like(readFile(repo, "docs/PROGRESS.md"), /^- \[~\] P0-01 /m, "the checkbox becomes [~] on disk");
 
-    const same = await call("foundry_task_next");
+    const same = await call("kukulu_task_next");
     eq(same.id, "P0-01", "task_next re-hands the in-progress task after a crash");
     eq(same.resumed, true, "the re-handed task is flagged as a resume");
   });
@@ -229,11 +229,11 @@ for (const missing of ["docs/SPEC.md", "docs/PLAN.md", "docs/PROGRESS.md", "docs
 {
   const repo = plannedRepo();
   await withServer(repo, async ({ call }) => {
-    await call("foundry_run_start");
-    await call("foundry_task_next");
+    await call("kukulu_run_start");
+    await call("kukulu_task_next");
     commitTask(repo, "P0-01", "Create hello", { "hello.txt": "hi\n" });
-    await call("foundry_task_done", { id: "P0-01", log: "Added hello.txt.\nInterpretation: greeting is lowercase." });
-    const t = await call("foundry_task_next");
+    await call("kukulu_task_done", { id: "P0-01", log: "Added hello.txt.\nInterpretation: greeting is lowercase." });
+    const t = await call("kukulu_task_next");
     eq(t.id, "P0-02", "the loop advances to the next task");
     eq(t.dependsOn.join(","), "P0-01", "task_next reports declared dependencies");
     like(t.dependencyLogs["P0-01"], /greeting is lowercase/, "task_next carries the dependency's log entry");
@@ -251,10 +251,10 @@ for (const missing of ["docs/SPEC.md", "docs/PLAN.md", "docs/PROGRESS.md", "docs
   ];
   const repo = plannedRepo({ tasks });
   await withServer(repo, async ({ call }) => {
-    await call("foundry_run_start");
-    await call("foundry_task_next");
-    await call("foundry_task_block", { id: "P0-01", reason: "tried A / fails B / fix C" });
-    const t = await call("foundry_task_next");
+    await call("kukulu_run_start");
+    await call("kukulu_task_next");
+    await call("kukulu_task_block", { id: "P0-01", reason: "tried A / fails B / fix C" });
+    const t = await call("kukulu_task_next");
     eq(t.done, true, "nothing is left once the chain collapses");
     eq(t.skipped.map((s) => s.id).join(","), "P0-02,P0-03,P0-04", "every dependent is skipped transitively");
     eq(t.skipped[1].dependsOn, "P0-02", "each skip records which dependency stopped it");
@@ -270,8 +270,8 @@ for (const missing of ["docs/SPEC.md", "docs/PLAN.md", "docs/PROGRESS.md", "docs
   git(repo, ["add", "-A"]);
   git(repo, ["commit", "-qm", "break the plan"]);
   await withServer(repo, async ({ call }) => {
-    await call("foundry_run_start");
-    isError(await call("foundry_task_next"), /no '### P0-01: <title>' heading/, "a task with no PLAN.md heading is a hard error");
+    await call("kukulu_run_start");
+    isError(await call("kukulu_task_next"), /no '### P0-01: <title>' heading/, "a task with no PLAN.md heading is a hard error");
   });
 }
 
@@ -280,27 +280,27 @@ for (const missing of ["docs/SPEC.md", "docs/PLAN.md", "docs/PROGRESS.md", "docs
 {
   const repo = plannedRepo();
   await withServer(repo, async ({ call }) => {
-    await call("foundry_run_start");
-    isError(await call("foundry_task_done", {}), /id and log are required/, "task_done needs both arguments");
-    isError(await call("foundry_task_done", { id: "P9-99", log: "x" }), /not in docs\/PROGRESS\.md/, "task_done rejects an unknown id");
-    isError(await call("foundry_task_done", { id: "P0-01", log: "x" }), /is 'todo', not in progress/, "task_done refuses a task that was never selected");
+    await call("kukulu_run_start");
+    isError(await call("kukulu_task_done", {}), /id and log are required/, "task_done needs both arguments");
+    isError(await call("kukulu_task_done", { id: "P9-99", log: "x" }), /not in docs\/PROGRESS\.md/, "task_done rejects an unknown id");
+    isError(await call("kukulu_task_done", { id: "P0-01", log: "x" }), /is 'todo', not in progress/, "task_done refuses a task that was never selected");
 
-    await call("foundry_task_next");
-    isError(await call("foundry_task_done", { id: "P0-01", log: "x" }), /HEAD commit .* is not this task's commit/, "task_done refuses without the task's own commit");
+    await call("kukulu_task_next");
+    isError(await call("kukulu_task_done", { id: "P0-01", log: "x" }), /HEAD commit .* is not this task's commit/, "task_done refuses without the task's own commit");
 
     // Simulate blocked stops piling up the guard's counter before the task lands.
-    writeFile(repo, ".foundry/implement.lock", JSON.stringify({ ...JSON.parse(readFile(repo, ".foundry/implement.lock")), count: 12 }));
+    writeFile(repo, ".kukulu/implement.lock", JSON.stringify({ ...JSON.parse(readFile(repo, ".kukulu/implement.lock")), count: 12 }));
 
     commitTask(repo, "P0-01", "Create hello", { "hello.txt": "hi\n" });
     writeFile(repo, "leftover.txt", "forgotten\n");
-    isError(await call("foundry_task_done", { id: "P0-01", log: "x" }), /uncommitted changes remain[\s\S]*leftover\.txt/, "task_done refuses to leave work uncommitted");
-    eq(JSON.parse(readFile(repo, ".foundry/implement.lock")).count, 12, "a refused task_done does not touch the guard's counter");
+    isError(await call("kukulu_task_done", { id: "P0-01", log: "x" }), /uncommitted changes remain[\s\S]*leftover\.txt/, "task_done refuses to leave work uncommitted");
+    eq(JSON.parse(readFile(repo, ".kukulu/implement.lock")).count, 12, "a refused task_done does not touch the guard's counter");
 
     fs.rmSync(path.join(repo, "leftover.txt"));
-    const r = await call("foundry_task_done", { id: "P0-01", log: "Added hello.txt." });
+    const r = await call("kukulu_task_done", { id: "P0-01", log: "Added hello.txt." });
     eq(r.counts.done, 1, "task_done marks the task done");
     eq(r.guardReset, true, "task_done reports that it reset the guard's counter");
-    eq(JSON.parse(readFile(repo, ".foundry/implement.lock")).count, 0, "...and the lock's counter is actually back to zero");
+    eq(JSON.parse(readFile(repo, ".kukulu/implement.lock")).count, 0, "...and the lock's counter is actually back to zero");
     eq(r.taskCommit, git(repo, ["rev-parse", "--short", "HEAD~1"]), "task_done records the task's commit sha");
     like(readFile(repo, "docs/PROGRESS.md"), /^### P0-01 — [0-9a-f]{7,}\nAdded hello\.txt\.$/m, "the log entry is stamped with that sha");
     eq(subject(repo), "progress: P0-01 done", "the bookkeeping commit is separate from the task commit");
@@ -313,20 +313,20 @@ for (const missing of ["docs/SPEC.md", "docs/PLAN.md", "docs/PROGRESS.md", "docs
 {
   const repo = plannedRepo();
   await withServer(repo, async ({ call }) => {
-    await call("foundry_run_start");
-    isError(await call("foundry_task_block", { id: "P0-01" }), /id and reason are required/, "task_block needs a reason");
-    isError(await call("foundry_task_block", { id: "P9-99", reason: "x" }), /not in docs\/PROGRESS\.md/, "task_block rejects an unknown id");
+    await call("kukulu_run_start");
+    isError(await call("kukulu_task_block", { id: "P0-01" }), /id and reason are required/, "task_block needs a reason");
+    isError(await call("kukulu_task_block", { id: "P9-99", reason: "x" }), /not in docs\/PROGRESS\.md/, "task_block rejects an unknown id");
 
-    await call("foundry_task_next");
+    await call("kukulu_task_next");
     writeFile(repo, "half-done.txt", "debris\n");
     writeFile(repo, "docs/SPEC.md", "# Spec\nedited by mistake\n");
-    writeFile(repo, ".foundry/implement.lock", JSON.stringify({ ...JSON.parse(readFile(repo, ".foundry/implement.lock")), count: 9 }));
-    const r = await call("foundry_task_block", { id: "P0-01", reason: "tried A / fails B / fix C" });
+    writeFile(repo, ".kukulu/implement.lock", JSON.stringify({ ...JSON.parse(readFile(repo, ".kukulu/implement.lock")), count: 9 }));
+    const r = await call("kukulu_task_block", { id: "P0-01", reason: "tried A / fails B / fix C" });
     eq(r.counts.blocked, 1, "task_block marks the task blocked");
-    eq(JSON.parse(readFile(repo, ".foundry/implement.lock")).count, 0, "task_block resets the guard's counter too");
+    eq(JSON.parse(readFile(repo, ".kukulu/implement.lock")).count, 0, "task_block resets the guard's counter too");
     ok(!hasFile(repo, "half-done.txt"), "task_block deletes untracked debris");
     eq(readFile(repo, "docs/SPEC.md"), "# Spec\n", "task_block reverts tracked edits");
-    ok(hasFile(repo, ".foundry/implement.lock"), "task_block keeps the run's lock armed");
+    ok(hasFile(repo, ".kukulu/implement.lock"), "task_block keeps the run's lock armed");
     like(readFile(repo, "docs/PROGRESS.md"), /### P0-01 — blocked\nBLOCKED: tried A \/ fails B \/ fix C/, "the block reason is logged verbatim");
     eq(subject(repo), "progress: P0-01 blocked", "the block is committed");
   });
@@ -350,11 +350,11 @@ for (const missing of ["docs/SPEC.md", "docs/PLAN.md", "docs/PROGRESS.md", "docs
   git(repo, ["add", "-A"]);
   git(repo, ["commit", "-qm", "chore: round 0 implemented"]);
   await withServer(repo, async ({ call }) => {
-    isError(await call("foundry_task_reopen", { id: "P0-02" }), /id and reason are required/, "a reopen without a reason is refused");
-    isError(await call("foundry_task_reopen", { id: "P9-99", reason: "x" }), /not in docs\/PROGRESS\.md/, "an unknown task is refused");
-    isError(await call("foundry_task_reopen", { id: "P0-01", reason: "x" }), /'done'; only a blocked or skipped task/, "a done task cannot be reopened");
+    isError(await call("kukulu_task_reopen", { id: "P0-02" }), /id and reason are required/, "a reopen without a reason is refused");
+    isError(await call("kukulu_task_reopen", { id: "P9-99", reason: "x" }), /not in docs\/PROGRESS\.md/, "an unknown task is refused");
+    isError(await call("kukulu_task_reopen", { id: "P0-01", reason: "x" }), /'done'; only a blocked or skipped task/, "a done task cannot be reopened");
 
-    const r = await call("foundry_task_reopen", { id: "P0-02", reason: "the operator supplied the corpus file" });
+    const r = await call("kukulu_task_reopen", { id: "P0-02", reason: "the operator supplied the corpus file" });
     eq(r.reopenedDependents.join(","), "P0-03,P0-04", "the tasks skipped because of it come back too, transitively");
     eq(r.counts.todo, 3, "three tasks are open again");
     eq(r.counts.skipped, 1, "a task skipped for an unrelated blocker stays skipped");
@@ -365,21 +365,21 @@ for (const missing of ["docs/SPEC.md", "docs/PLAN.md", "docs/PROGRESS.md", "docs
     like(prog, /### P0-02 — reopened\nREOPENED: the operator supplied the corpus file/, "the reason is logged");
     like(prog, /### P0-04 — reopened\nreopened: it was skipped because of P0-03, which is open again/, "a transitive dependent's log names its cause");
 
-    const n = await call("foundry_next");
+    const n = await call("kukulu_next");
     eq(n.stage, "implement", "a finished round with reopened tasks goes back to implement");
 
-    const skippedOnly = await call("foundry_task_reopen", { id: "P0-06", reason: "try it anyway" });
+    const skippedOnly = await call("kukulu_task_reopen", { id: "P0-06", reason: "try it anyway" });
     eq(skippedOnly.reopenedDependents.length, 0, "a skipped task can be reopened on its own");
     eq(subject(repo), "progress: reopen P0-06", "...with a plain commit subject");
-    await call("foundry_run_start");
+    await call("kukulu_run_start");
     const picked = [];
     for (;;) {
-      const t = await call("foundry_task_next");
+      const t = await call("kukulu_task_next");
       for (const sk of t.skipped) picked.push(`skip:${sk.id}`);
       if (t.done) break;
       picked.push(t.id);
       commitTask(repo, t.id, t.title, { [`${t.id}.txt`]: "ok\n" });
-      await call("foundry_task_done", { id: t.id, log: "done" });
+      await call("kukulu_task_done", { id: t.id, log: "done" });
     }
     eq(picked.join(","), "P0-02,P0-03,P0-04,skip:P0-06", "reopened tasks run in plan order, and one whose blocker is still blocked is skipped again");
   });
@@ -390,7 +390,7 @@ for (const missing of ["docs/SPEC.md", "docs/PLAN.md", "docs/PROGRESS.md", "docs
   markTasks(repo, { "P0-01": "x", "P0-02": "!", "P0-03": "-" });
   setState(repo, { summarized: true });
   await withServer(repo, async ({ call }) => {
-    isError(await call("foundry_task_reopen", { id: "P0-02", reason: "x" }), /flight is complete/, "a summarized flight refuses a reopen");
+    isError(await call("kukulu_task_reopen", { id: "P0-02", reason: "x" }), /flight is complete/, "a summarized flight refuses a reopen");
   });
 }
 
@@ -398,16 +398,16 @@ for (const missing of ["docs/SPEC.md", "docs/PLAN.md", "docs/PROGRESS.md", "docs
 
 {
   const repo = plannedRepo();
-  fs.rmSync(path.join(repo, "docs/foundry.json"));
+  fs.rmSync(path.join(repo, "docs/kukulu.json"));
   await withServer(repo, async ({ call }) => {
-    isError(await call("foundry_verify"), /docs\/foundry\.json is missing/, "verify needs a config");
+    isError(await call("kukulu_verify"), /docs\/kukulu\.json is missing/, "verify needs a config");
   });
 }
 
 {
   const repo = plannedRepo({ config: { verify: [] } });
   await withServer(repo, async ({ call }) => {
-    isError(await call("foundry_verify"), /no 'verify' commands/, "verify needs at least one command");
+    isError(await call("kukulu_verify"), /no 'verify' commands/, "verify needs at least one command");
   });
 }
 
@@ -416,22 +416,22 @@ for (const missing of ["docs/SPEC.md", "docs/PLAN.md", "docs/PROGRESS.md", "docs
     config: { verify: ["echo base"], extraVerify: { "src/": ["echo base", "echo extra"], "docs/": ["echo docs"] } },
   });
   await withServer(repo, async ({ call }) => {
-    let v = await call("foundry_verify");
+    let v = await call("kukulu_verify");
     eq(v.ok, true, "verify passes when its commands pass");
     eq(v.results.length, 1, "with no files touched, only the base commands run");
     eq(v.results[0].stdoutTail, "base", "verify captures stdout");
 
-    v = await call("foundry_verify", { files: ["src/a.js"] });
+    v = await call("kukulu_verify", { files: ["src/a.js"] });
     eq(v.results.length, 2, "extraVerify adds commands for a matching prefix");
     eq(v.results[1].command, "echo extra", "the extra command is the one configured for that prefix");
 
-    v = await call("foundry_verify", { files: ["src/a.js", "docs/b.md"] });
+    v = await call("kukulu_verify", { files: ["src/a.js", "docs/b.md"] });
     eq(v.results.length, 3, "several prefixes can match at once");
 
-    v = await call("foundry_verify", { files: "src/a.js, docs/b.md" });
+    v = await call("kukulu_verify", { files: "src/a.js, docs/b.md" });
     eq(v.results.length, 3, "files may arrive as a delimited string");
 
-    v = await call("foundry_verify", { files: ["README.md"] });
+    v = await call("kukulu_verify", { files: ["README.md"] });
     eq(v.results.length, 1, "a non-matching path adds nothing");
   });
 }
@@ -440,11 +440,11 @@ for (const missing of ["docs/SPEC.md", "docs/PLAN.md", "docs/PROGRESS.md", "docs
   // from gates an extraVerify command
   const repo = plannedRepo({ config: { verify: ["true"], extraVerify: { "src/": [{ cmd: "false", from: "P0-02" }] } } });
   await withServer(repo, async ({ call }) => {
-    let v = await call("foundry_verify", { files: ["src/a.js"] });
+    let v = await call("kukulu_verify", { files: ["src/a.js"] });
     eq(v.ok, true, "an extraVerify command gated on an unstarted task does not fail verify");
     ok(v.results.some((r) => r.cmd === "false" && r.skipped === "inactive until P0-02" && Object.keys(r).length === 2), "...and is reported as skipped in its place");
     markTasks(repo, { "P0-01": "x", "P0-02": "~" });
-    v = await call("foundry_verify", { files: ["src/a.js"] });
+    v = await call("kukulu_verify", { files: ["src/a.js"] });
     eq(v.ok, false, "once the task is in progress, the command runs and fails verify");
   });
 }
@@ -454,7 +454,7 @@ for (const missing of ["docs/SPEC.md", "docs/PLAN.md", "docs/PROGRESS.md", "docs
     config: { verify: [{ cmd: "sleep 2", timeoutMs: 200 }, "echo fast"], commandTimeoutMs: 60_000 },
   });
   await withServer(repo, async ({ call }) => {
-    const v = await call("foundry_verify");
+    const v = await call("kukulu_verify");
     eq(v.ok, false, "the slow command's own short timeout still fails the whole verify");
     eq(v.results[0].timedOut, true, "the object-form command times out on its own timeoutMs");
     eq(v.results[0].timeoutMs, 200, "...and reports which timeout it was given");
@@ -473,14 +473,14 @@ for (const [config, re] of [
 ]) {
   const repo = plannedRepo({ config });
   await withServer(repo, async ({ call }) => {
-    isError(await call("foundry_verify"), re, `a malformed command entry refuses: ${JSON.stringify(config)}`);
+    isError(await call("kukulu_verify"), re, `a malformed command entry refuses: ${JSON.stringify(config)}`);
   });
 }
 
 {
   const repo = plannedRepo({ config: { verify: ["echo out; echo boom >&2; exit 3"] } });
   await withServer(repo, async ({ call }) => {
-    const v = await call("foundry_verify");
+    const v = await call("kukulu_verify");
     eq(v.ok, false, "a failing command fails the whole verify");
     eq(v.results[0].exitCode, 3, "the exit code is reported");
     eq(v.results[0].stderrTail, "boom", "stderr is reported");
@@ -491,7 +491,7 @@ for (const [config, re] of [
 {
   const repo = plannedRepo({ config: { verify: ["seq 1 100"] } });
   await withServer(repo, async ({ call }) => {
-    const v = await call("foundry_verify");
+    const v = await call("kukulu_verify");
     eq(v.results[0].stdoutTail.split("\n").length, 60, "output is trimmed to the last 60 lines");
     eq(v.results[0].stdoutTail.split("\n")[0], "41", "the tail is the end of the output, not the start");
   });
@@ -500,7 +500,7 @@ for (const [config, re] of [
 {
   const repo = plannedRepo({ config: { verify: ["sleep 30"], commandTimeoutMs: 300 } });
   await withServer(repo, async ({ call }) => {
-    const v = await call("foundry_verify");
+    const v = await call("kukulu_verify");
     eq(v.ok, false, "a hung command fails rather than hanging the flight");
     eq(v.results[0].timedOut, true, "the timeout is reported as such");
   });
@@ -523,10 +523,10 @@ const alive = (pid) => {
 {
   // A timeout kills the whole tree, not just the shell: the grandchild here is
   // what a spinning test binary under `make test` looks like.
-  const pidFile = path.join(mkDir("foundry-pid-"), "grandchild.pid");
+  const pidFile = path.join(mkDir("kukulu-pid-"), "grandchild.pid");
   const repo = plannedRepo({ config: { verify: [{ cmd: `sleep 60 & echo $! > ${pidFile}; wait`, timeoutMs: 500 }] } });
   await withServer(repo, async ({ call }) => {
-    const v = await call("foundry_verify");
+    const v = await call("kukulu_verify");
     eq(v.results[0].timedOut, true, "a command that outlives its timeout is reported as timed out");
     const pid = Number(fs.readFileSync(pidFile, "utf8").trim());
     await new Promise((r) => setTimeout(r, 200));
@@ -537,12 +537,12 @@ const alive = (pid) => {
 {
   const repo = plannedRepo({ config: { verify: ["yes"] } });
   await withServer(repo, async ({ call }) => {
-    const v = await call("foundry_verify");
+    const v = await call("kukulu_verify");
     eq(v.ok, false, "a command that never stops writing fails");
     eq(v.results[0].outputLimitExceeded, true, "...because it exceeded the output limit");
     eq(v.results[0].truncated, true, "...and its output is marked truncated");
     ok(v.results[0].stdoutTail.length <= 4000, "the tail stays bounded");
-    const s = await call("foundry_status");
+    const s = await call("kukulu_status");
     ok(!s.error && s.root, "the server is still up and answering afterwards");
   });
 }
@@ -552,7 +552,7 @@ const alive = (pid) => {
   const repo = plannedRepo({ config: { verify: ["sleep 60 & echo started"] } });
   await withServer(repo, async ({ call }) => {
     const t0 = Date.now();
-    const v = await call("foundry_verify");
+    const v = await call("kukulu_verify");
     ok(Date.now() - t0 < 15_000, "a leftover child holding stdout does not hang the call");
     eq(v.ok, true, "the command itself succeeded, so verify passes");
     eq(v.results[0].orphansKilled, true, "...and the leftover child is reported as killed");
@@ -563,7 +563,7 @@ const alive = (pid) => {
 {
   const repo = plannedRepo({ config: { verify: [`node -e "process.stdout.write('x'.repeat(100000))"`] } });
   await withServer(repo, async ({ call }) => {
-    const v = await call("foundry_verify");
+    const v = await call("kukulu_verify");
     eq(v.ok, true, "a long single line is not a failure");
     eq(v.results[0].stdoutTail.length, 4000, "...but only its last 4000 characters are returned");
     eq(v.results[0].truncated, true, "...and the result says it was truncated");
@@ -574,45 +574,45 @@ const alive = (pid) => {
 
 {
   const repo = plannedRepo();
-  writeFile(repo, "FOUNDRY_FEEDBACK.md", "notes predating this run\n");
+  writeFile(repo, "KUKULU_FEEDBACK.md", "notes predating this run\n");
   await withServer(repo, async ({ call }) => {
-    await call("foundry_run_start");
-    const s = await call("foundry_status");
-    eq(s.preexistingUntracked.join(","), "FOUNDRY_FEEDBACK.md", "run_start records what was already untracked");
+    await call("kukulu_run_start");
+    const s = await call("kukulu_status");
+    eq(s.preexistingUntracked.join(","), "KUKULU_FEEDBACK.md", "run_start records what was already untracked");
 
-    await call("foundry_task_next");
+    await call("kukulu_task_next");
     commitTask(repo, "P0-01", "Create hello", { "hello.txt": "hi\n" });
-    const r = await call("foundry_task_done", { id: "P0-01", log: "Added hello.txt." });
+    const r = await call("kukulu_task_done", { id: "P0-01", log: "Added hello.txt." });
     eq(r.counts.done, 1, "task_done succeeds with the pre-existing file still untracked");
-    ok(hasFile(repo, "FOUNDRY_FEEDBACK.md"), "the file is untouched");
+    ok(hasFile(repo, "KUKULU_FEEDBACK.md"), "the file is untouched");
 
-    await call("foundry_task_next");
-    const blocked = await call("foundry_task_block", { id: "P0-02", reason: "tried A / fails B / fix C" });
+    await call("kukulu_task_next");
+    const blocked = await call("kukulu_task_block", { id: "P0-02", reason: "tried A / fails B / fix C" });
     eq(blocked.counts.blocked, 1, "task_block succeeds with the pre-existing file present");
-    ok(hasFile(repo, "FOUNDRY_FEEDBACK.md"), "task_block's git clean spares it, rather than deleting it");
+    ok(hasFile(repo, "KUKULU_FEEDBACK.md"), "task_block's git clean spares it, rather than deleting it");
 
-    await call("foundry_task_next"); // P0-03, skipped as a dependent of the blocked P0-02
+    await call("kukulu_task_next"); // P0-03, skipped as a dependent of the blocked P0-02
     writeFile(repo, "docs/HANDOFF.md", "# handoff\n");
-    const f = await call("foundry_run_finish");
+    const f = await call("kukulu_run_finish");
     ok(f.readyLine, "run_finish succeeds with the pre-existing file still present");
-    ok(hasFile(repo, "FOUNDRY_FEEDBACK.md"), "...and it is still there afterwards");
+    ok(hasFile(repo, "KUKULU_FEEDBACK.md"), "...and it is still there afterwards");
   });
 }
 
 {
   const repo = plannedRepo();
   await withServer(repo, async ({ call }) => {
-    await call("foundry_run_start");
-    await call("foundry_task_next");
+    await call("kukulu_run_start");
+    await call("kukulu_task_next");
     commitTask(repo, "P0-01", "Create hello", { "hello.txt": "hi\n" });
     writeFile(repo, "surprise.txt", "created mid-task, not before the run\n");
     isError(
-      await call("foundry_task_done", { id: "P0-01", log: "x" }),
+      await call("kukulu_task_done", { id: "P0-01", log: "x" }),
       /uncommitted changes remain[\s\S]*surprise\.txt/,
       "a file created *after* run_start still fails task_done, listing it by name",
     );
     isError(
-      await call("foundry_task_done", { id: "P0-01", log: "x" }),
+      await call("kukulu_task_done", { id: "P0-01", log: "x" }),
       /git checkout --.*git clean/,
       "the refusal says to commit, checkout or clean it - never to move or tidy it away",
     );
@@ -624,29 +624,29 @@ const alive = (pid) => {
 {
   const repo = plannedRepo();
   await withServer(repo, async ({ call }) => {
-    await call("foundry_run_start");
-    isError(await call("foundry_run_finish"), /3 task\(s\) still open/, "run_finish refuses with open tasks");
+    await call("kukulu_run_start");
+    isError(await call("kukulu_run_finish"), /3 task\(s\) still open/, "run_finish refuses with open tasks");
   });
 }
 
 {
   const repo = startedRepo();
   await withServer(repo, async ({ call }) => {
-    isError(await call("foundry_run_finish"), /docs\/HANDOFF\.md does not exist/, "run_finish requires a handoff");
+    isError(await call("kukulu_run_finish"), /docs\/HANDOFF\.md does not exist/, "run_finish requires a handoff");
 
     writeFile(repo, "docs/HANDOFF.md", "# handoff\n");
     writeFile(repo, "surprise.txt", "not committed\n");
-    isError(await call("foundry_run_finish"), /working tree is not clean[\s\S]*surprise\.txt/, "run_finish refuses to hand off a dirty tree");
+    isError(await call("kukulu_run_finish"), /working tree is not clean[\s\S]*surprise\.txt/, "run_finish refuses to hand off a dirty tree");
 
     fs.rmSync(path.join(repo, "surprise.txt"));
-    const r = await call("foundry_run_finish");
+    const r = await call("kukulu_run_finish");
     eq(r.push, "skipped: no origin remote", "run_finish says so when there is nowhere to push");
     eq(r.pr, null, "no remote means no pull request");
     eq(r.counts.done, 3, "run_finish reports the final counts");
     like(r.readyLine, /^READY FOR REVIEW — branch build\/.*3 done \/ 0 blocked \/ 0 skipped of 3$/, "the ready line summarises the run");
-    ok(!hasFile(repo, ".foundry/implement.lock"), "run_finish disarms the Stop-hook lock");
+    ok(!hasFile(repo, ".kukulu/implement.lock"), "run_finish disarms the Stop-hook lock");
     eq(subject(repo), "chore: round 0 implemented", "run_finish records the round as implemented");
-    eq(JSON.parse(readFile(repo, ".foundry/state.json")).implemented, true, "the implemented flag is persisted");
+    eq(JSON.parse(readFile(repo, ".kukulu/state.json")).implemented, true, "the implemented flag is persisted");
     eq(git(repo, ["status", "--porcelain"]), "", "run_finish leaves a clean tree");
   });
 }
@@ -656,7 +656,7 @@ const alive = (pid) => {
   writeFile(repo, "docs/HANDOFF.md", "# handoff\n");
   git(repo, ["remote", "add", "origin", mkBareRemote()]);
   await withServer(repo, async ({ call }) => {
-    const r = await call("foundry_run_finish");
+    const r = await call("kukulu_run_finish");
     eq(r.push, "pushed", "run_finish pushes when an origin exists");
     eq(git(repo, ["rev-parse", `origin/build/${TODAY}`]), git(repo, ["rev-parse", "HEAD"]), "the remote has the branch");
   }, noGh);
@@ -665,11 +665,11 @@ const alive = (pid) => {
 {
   const repo = startedRepo();
   writeFile(repo, "docs/HANDOFF.md", "# handoff\n");
-  git(repo, ["remote", "add", "origin", "/nonexistent/foundry-remote.git"]);
+  git(repo, ["remote", "add", "origin", "/nonexistent/kukulu-remote.git"]);
   await withServer(repo, async ({ call }) => {
-    const r = await call("foundry_run_finish");
+    const r = await call("kukulu_run_finish");
     like(r.push, /^failed: /, "a failed push is reported, not swallowed");
-    ok(!hasFile(repo, ".foundry/implement.lock"), "a failed push still ends the run cleanly");
+    ok(!hasFile(repo, ".kukulu/implement.lock"), "a failed push still ends the run cleanly");
   }, noGh);
 }
 
@@ -678,12 +678,12 @@ const alive = (pid) => {
 {
   const repo = plannedRepo();
   await withServer(repo, async ({ call }) => {
-    const r = await call("foundry_run_start");
+    const r = await call("kukulu_run_start");
     eq(r.policies.signing, "auto", "policies.signing defaults to auto");
     eq(r.policies.push, true, "policies.push defaults to true");
     eq(r.policies.pr, "draft", "policies.pr defaults to draft");
     eq(r.signing, "none", "with commit.gpgsign unset (the test fixture's default), the outcome is none");
-    eq((await call("foundry_status")).policies.signing, "auto", "status reports the recorded policies");
+    eq((await call("kukulu_status")).policies.signing, "auto", "status reports the recorded policies");
   });
 }
 
@@ -695,8 +695,8 @@ for (const [bad, re] of [
 ]) {
   const repo = plannedRepo({ config: bad });
   await withServer(repo, async ({ call }) => {
-    isError(await call("foundry_run_start"), re, `run_start refuses a malformed policies.${Object.keys(bad.policies)[0]}`);
-    isError(await call("foundry_status"), re, "...and so does status, since cfg() validates on every read");
+    isError(await call("kukulu_run_start"), re, `run_start refuses a malformed policies.${Object.keys(bad.policies)[0]}`);
+    isError(await call("kukulu_status"), re, "...and so does status, since cfg() validates on every read");
   });
 }
 
@@ -704,11 +704,11 @@ for (const [bad, re] of [
   const repo = plannedRepo({ config: { policies: { signing: "off" } } });
   git(repo, ["config", "commit.gpgsign", "true"]); // as if a global/local signing setup were already active
   await withServer(repo, async ({ call }) => {
-    const r = await call("foundry_run_start");
+    const r = await call("kukulu_run_start");
     eq(r.signing, "off", "policies.signing: off records off without even probing");
-    ok(JSON.parse(readFile(repo, ".foundry/state.json")).signingOverride !== true, "an explicit off does not set signingOverride");
+    ok(JSON.parse(readFile(repo, ".kukulu/state.json")).signingOverride !== true, "an explicit off does not set signingOverride");
     eq(git(repo, ["config", "--local", "commit.gpgsign"]), "false", "...and disables signing locally");
-    ok(!hasFile(repo, ".foundry/feedback.jsonl"), "an explicit off is the operator's own choice, not friction — no feedback entry");
+    ok(!hasFile(repo, ".kukulu/feedback.jsonl"), "an explicit off is the operator's own choice, not friction — no feedback entry");
   });
 }
 
@@ -717,9 +717,9 @@ for (const [bad, re] of [
   // friction: only the auto-fallback path logs.
   const repo = plannedRepo();
   await withServer(repo, async ({ call }) => {
-    const r = await call("foundry_run_start");
+    const r = await call("kukulu_run_start");
     eq(r.signing, "none", "no signing configured at all");
-    ok(!hasFile(repo, ".foundry/feedback.jsonl"), "no feedback entry for an unconfigured signer");
+    ok(!hasFile(repo, ".kukulu/feedback.jsonl"), "no feedback entry for an unconfigured signer");
   });
 }
 
@@ -731,7 +731,7 @@ for (const [bad, re] of [
   git(repo, ["config", "gpg.format", "openpgp"]); // override the host's own signing format so the probe below is deterministic
   git(repo, ["config", "gpg.program", "/nonexistent-signing-agent"]);
   await withServer(repo, async ({ call }) => {
-    isError(await call("foundry_run_start"), /policies\.signing is 'required'.*signing probe failed/s, "required signing that cannot actually sign refuses to start");
+    isError(await call("kukulu_run_start"), /policies\.signing is 'required'.*signing probe failed/s, "required signing that cannot actually sign refuses to start");
   });
 }
 
@@ -741,18 +741,18 @@ for (const [bad, re] of [
   git(repo, ["config", "gpg.format", "openpgp"]);
   git(repo, ["config", "gpg.program", "/nonexistent-signing-agent"]);
   await withServer(repo, async ({ call }) => {
-    const r = await call("foundry_run_start");
+    const r = await call("kukulu_run_start");
     like(r.signing, /^off \(probe failed: /, "auto falls back to off and records why, rather than refusing");
-    eq(JSON.parse(readFile(repo, ".foundry/state.json")).signingOverride, true, "a failed probe sets signingOverride");
+    eq(JSON.parse(readFile(repo, ".kukulu/state.json")).signingOverride, true, "a failed probe sets signingOverride");
     eq(git(repo, ["config", "--local", "commit.gpgsign"]), "false", "...and disables signing locally so the first task commit does not hang");
 
-    const lines = readFile(repo, ".foundry/feedback.jsonl").trim().split("\n");
+    const lines = readFile(repo, ".kukulu/feedback.jsonl").trim().split("\n");
     eq(lines.length, 1, "the auto fallback is the one case that logs itself as friction");
     const entry = JSON.parse(lines[0]);
     eq(entry.category, "signing", "...tagged with the signing category");
     eq(entry.source, "auto", "...and recorded as an auto entry, not one the agent called explicitly");
     like(entry.message, /off \(probe failed:/, "the message carries the same fallback reason");
-    like(git(repo, ["show", "--stat", "--format=", "HEAD"]), /\.foundry\/feedback\.jsonl/, "it lands in the same commit as the run-start stamp");
+    like(git(repo, ["show", "--stat", "--format=", "HEAD"]), /\.kukulu\/feedback\.jsonl/, "it lands in the same commit as the run-start stamp");
   });
 }
 
@@ -764,9 +764,9 @@ for (const [bad, re] of [
   git(repo, ["config", "gpg.format", "openpgp"]);
   git(repo, ["config", "gpg.program", "/nonexistent-signing-agent"]);
   await withServer(repo, async ({ call }) => {
-    const r = await call("foundry_run_start");
+    const r = await call("kukulu_run_start");
     like(r.signing, /^off \(probe failed: /, "the fallback itself still happens");
-    ok(!hasFile(repo, ".foundry/feedback.jsonl"), "...but policies.feedback: false suppresses even the auto entry");
+    ok(!hasFile(repo, ".kukulu/feedback.jsonl"), "...but policies.feedback: false suppresses even the auto entry");
   });
 }
 
@@ -774,14 +774,14 @@ for (const [bad, re] of [
   const repo = plannedRepo({ config: { policies: { push: false } } });
   git(repo, ["remote", "add", "origin", mkBareRemote()]);
   await withServer(repo, async ({ call }) => {
-    await call("foundry_run_start");
-    await call("foundry_task_next");
+    await call("kukulu_run_start");
+    await call("kukulu_task_next");
     commitTask(repo, "P0-01", "Create hello", { "hello.txt": "hi\n" });
-    await call("foundry_task_done", { id: "P0-01", log: "x" });
-    await call("foundry_task_block", { id: "P0-02", reason: "x / y / z" });
-    await call("foundry_task_next"); // skips P0-03, the blocked task's dependent
+    await call("kukulu_task_done", { id: "P0-01", log: "x" });
+    await call("kukulu_task_block", { id: "P0-02", reason: "x / y / z" });
+    await call("kukulu_task_next"); // skips P0-03, the blocked task's dependent
     writeFile(repo, "docs/HANDOFF.md", "# handoff\n");
-    const r = await call("foundry_run_finish");
+    const r = await call("kukulu_run_finish");
     eq(r.push, "skipped: policy", "push: false skips the push even though a remote exists");
     eq(r.pr, null, "no push means no pull request either");
   }, noGh);
@@ -791,14 +791,14 @@ for (const [bad, re] of [
   const repo = plannedRepo({ config: { policies: { pr: "none" } } });
   git(repo, ["remote", "add", "origin", mkBareRemote()]);
   await withServer(repo, async ({ call }) => {
-    await call("foundry_run_start");
-    await call("foundry_task_next");
+    await call("kukulu_run_start");
+    await call("kukulu_task_next");
     commitTask(repo, "P0-01", "Create hello", { "hello.txt": "hi\n" });
-    await call("foundry_task_done", { id: "P0-01", log: "x" });
-    await call("foundry_task_block", { id: "P0-02", reason: "x / y / z" });
-    await call("foundry_task_next"); // skips P0-03, the blocked task's dependent
+    await call("kukulu_task_done", { id: "P0-01", log: "x" });
+    await call("kukulu_task_block", { id: "P0-02", reason: "x / y / z" });
+    await call("kukulu_task_next"); // skips P0-03, the blocked task's dependent
     writeFile(repo, "docs/HANDOFF.md", "# handoff\n");
-    const r = await call("foundry_run_finish");
+    const r = await call("kukulu_run_finish");
     eq(r.push, "pushed", "push still happens; only the PR is policy-gated");
     eq(r.pr, "skipped: policy", "pr: none skips PR creation, reported explicitly");
   });
@@ -812,20 +812,20 @@ for (const [bad, re] of [
   git(repo, ["remote", "add", "origin", mkBareRemote()]);
   const ghDir = mkFakeGhBin();
   await withServer(repo, async ({ call }) => {
-    await call("foundry_run_start");
-    await call("foundry_task_next");
+    await call("kukulu_run_start");
+    await call("kukulu_task_next");
     commitTask(repo, "P0-01", "Create hello", { "hello.txt": "hi\n" });
-    await call("foundry_task_done", { id: "P0-01", log: "x" });
-    await call("foundry_task_block", { id: "P0-02", reason: "x / y / z" });
-    await call("foundry_task_next");
+    await call("kukulu_task_done", { id: "P0-01", log: "x" });
+    await call("kukulu_task_block", { id: "P0-02", reason: "x / y / z" });
+    await call("kukulu_task_next");
     writeFile(repo, "docs/HANDOFF.md", "# handoff\n");
-    const r = await call("foundry_run_finish");
+    const r = await call("kukulu_run_finish");
     eq(r.pr, "https://github.invalid/pull/1", "run_finish reports the draft PR it opened");
     like(readFile(ghDir, "calls.log"), /pr create --draft --base feature\/perf /, "...opened against baseBranch, not the default branch");
 
     setState(repo, { reviewed: true, verdict: "APPROVED", rounds: [{ round: 1, fixTasks: 0, unblocked: 0, verdict: "APPROVED" }] });
     writeFile(repo, "docs/SUMMARY.md", "# summary\n");
-    const sum = await call("foundry_summary_commit");
+    const sum = await call("kukulu_summary_commit");
     eq(JSON.stringify(sum.pr), JSON.stringify({ url: "https://github.invalid/pull/1", state: "OPEN", draft: true, base: "feature/perf" }), "summary_commit reports the PR's url, state, draft flag and base");
   }, { env: { PATH: `${ghDir}:${process.env.PATH}` } });
 }
@@ -839,7 +839,7 @@ for (const [bad, re] of [
   setState(repo, { reviewed: true, verdict: "APPROVED", policies: { signing: "auto", push: false, pr: "draft", feedback: true } });
   writeFile(repo, "docs/SUMMARY.md", "# summary\n");
   await withServer(repo, async ({ call }) => {
-    const sum = await call("foundry_summary_commit");
+    const sum = await call("kukulu_summary_commit");
     eq(sum.pr.expectedBase, "feature/perf", "a PR against the wrong base is flagged with the base it should have");
   }, { env: { PATH: `${ghDir}:${process.env.PATH}` } });
 }
@@ -849,7 +849,7 @@ for (const [bad, re] of [
   setState(repo, { reviewed: true, verdict: "APPROVED" });
   writeFile(repo, "docs/SUMMARY.md", "# summary\n");
   await withServer(repo, async ({ call }) => {
-    eq((await call("foundry_summary_commit")).pr, "none", "with no remote, summary_commit says there is no PR");
+    eq((await call("kukulu_summary_commit")).pr, "none", "with no remote, summary_commit says there is no PR");
   }, noGh);
 }
 
@@ -859,26 +859,26 @@ for (const [bad, re] of [
   const repo = startedRepo();
   writeFile(repo, "half-finished.txt", "in-flight work, not this tool's business to touch\n");
   await withServer(repo, async ({ call }) => {
-    isError(await call("foundry_run_halt", {}), /reason is required/, "run_halt needs a reason");
+    isError(await call("kukulu_run_halt", {}), /reason is required/, "run_halt needs a reason");
 
-    const r = await call("foundry_run_halt", { reason: "signing agent died: connection refused" });
+    const r = await call("kukulu_run_halt", { reason: "signing agent died: connection refused" });
     eq(r.halted, "signing agent died: connection refused", "run_halt reports the reason it recorded");
-    ok(!hasFile(repo, ".foundry/implement.lock"), "run_halt disarms the lock");
-    eq(JSON.parse(readFile(repo, ".foundry/state.json")).halted, "signing agent died: connection refused", "the reason is persisted in state");
+    ok(!hasFile(repo, ".kukulu/implement.lock"), "run_halt disarms the lock");
+    eq(JSON.parse(readFile(repo, ".kukulu/state.json")).halted, "signing agent died: connection refused", "the reason is persisted in state");
     ok(hasFile(repo, "half-finished.txt"), "run_halt never resets or cleans the tree");
     ok(r.dirty, "run_halt reports that the tree is still dirty");
 
     eq(subject(repo), "chore: run halted", "one commit, not two, carries both the halt and its feedback entry");
     const changed = git(repo, ["show", "--stat", "--format=", "HEAD"]);
-    like(changed, /\.foundry\/state\.json/, "...touching state");
-    like(changed, /\.foundry\/feedback\.jsonl/, "...and the feedback log, in the same commit");
-    const entry = JSON.parse(readFile(repo, ".foundry/feedback.jsonl").trim());
+    like(changed, /\.kukulu\/state\.json/, "...touching state");
+    like(changed, /\.kukulu\/feedback\.jsonl/, "...and the feedback log, in the same commit");
+    const entry = JSON.parse(readFile(repo, ".kukulu/feedback.jsonl").trim());
     eq(entry.stage, "controller", "the halt is logged from the controller's own vantage point");
     eq(entry.category, "halt", "...tagged as a halt");
     eq(entry.source, "auto", "...recorded as an auto entry");
     like(entry.message, /signing agent died: connection refused/, "...carrying the halt reason verbatim");
 
-    const n = await call("foundry_next");
+    const n = await call("kukulu_next");
     eq(n.stage, "halt", "the flight now halts");
     eq(n.reason, "signing agent died: connection refused", "...with the recorded reason");
   });
@@ -887,9 +887,9 @@ for (const [bad, re] of [
 {
   const repo = startedRepo({ config: { policies: { feedback: false } } });
   await withServer(repo, async ({ call }) => {
-    const r = await call("foundry_run_halt", { reason: "operator intervened" });
+    const r = await call("kukulu_run_halt", { reason: "operator intervened" });
     eq(r.halted, "operator intervened", "the halt itself still works");
-    ok(!hasFile(repo, ".foundry/feedback.jsonl"), "policies.feedback: false skips even the auto entry");
+    ok(!hasFile(repo, ".kukulu/feedback.jsonl"), "policies.feedback: false skips even the auto entry");
   });
 }
 
@@ -906,14 +906,14 @@ function failingSignerRepo(config) {
 {
   const repo = failingSignerRepo({ policies: { signing: "auto" } });
   await withServer(repo, async ({ call }) => {
-    const r = await call("foundry_feedback_log", { stage: "plan", message: "something slow" });
+    const r = await call("kukulu_feedback_log", { stage: "plan", message: "something slow" });
     eq(r.logged, true, "auto: the feedback entry is logged");
-    eq(subject(repo), "chore: pipeline friction (plan)", "auto: a Foundry commit whose signing fails is retried unsigned");
-    const st = JSON.parse(git(repo, ["show", "HEAD:.foundry/state.json"]));
+    eq(subject(repo), "chore: pipeline friction (plan)", "auto: a Kūkulu commit whose signing fails is retried unsigned");
+    const st = JSON.parse(git(repo, ["show", "HEAD:.kukulu/state.json"]));
     like(st.signing, /^off \(commit signing failed: /, "...the committed state records why");
     eq(st.signingOverride, true, "...and sets signingOverride");
     eq(git(repo, ["config", "--local", "commit.gpgsign"]), "false", "...and signing is off locally");
-    const entries = git(repo, ["show", "HEAD:.foundry/feedback.jsonl"]).trim().split("\n").map((l) => JSON.parse(l));
+    const entries = git(repo, ["show", "HEAD:.kukulu/feedback.jsonl"]).trim().split("\n").map((l) => JSON.parse(l));
     eq(entries.filter((e) => e.category === "signing").length, 1, "...with exactly one signing entry");
     ok(entries.some((e) => e.message === "something slow"), "...beside the logged entry");
     eq(git(repo, ["status", "--porcelain"]), "", "...and the tree is clean");
@@ -924,7 +924,7 @@ function failingSignerRepo(config) {
   const repo = failingSignerRepo({ policies: { signing: "required" } });
   const head = git(repo, ["rev-parse", "HEAD"]);
   await withServer(repo, async ({ call }) => {
-    isError(await call("foundry_flight_options", { maxRounds: 5 }), /'required'.*could not be signed/, "required: a Foundry commit whose signing fails throws");
+    isError(await call("kukulu_flight_options", { maxRounds: 5 }), /'required'.*could not be signed/, "required: a Kūkulu commit whose signing fails throws");
     eq(git(repo, ["rev-parse", "HEAD"]), head, "...and HEAD did not move");
   });
 }
@@ -936,11 +936,11 @@ function failingSignerRepo(config) {
   fs.writeFileSync(hook, '#!/bin/sh\nc="$(dirname "$0")/../hook-count"\nif [ -e "$c" ]; then echo "rejected by test hook" >&2; exit 1; fi\ntouch "$c"\nexit 0\n');
   fs.chmodSync(hook, 0o755);
   const rec = (f) => (hasFile(repo, f) ? readFile(repo, f) : null);
-  const files = ["docs/foundry.json", ".foundry/state.json", ".foundry/feedback.jsonl"];
+  const files = ["docs/kukulu.json", ".kukulu/state.json", ".kukulu/feedback.jsonl"];
   const before = files.map(rec);
   const head = git(repo, ["rev-parse", "HEAD"]);
   await withServer(repo, async ({ call }) => {
-    isError(await call("foundry_flight_options", { maxRounds: 5 }), /failed even unsigned/, "auto: a failed unsigned retry leaves the tree as it found it: the call is an error");
+    isError(await call("kukulu_flight_options", { maxRounds: 5 }), /failed even unsigned/, "auto: a failed unsigned retry leaves the tree as it found it: the call is an error");
     files.forEach((f, i) => eq(rec(f), before[i], `...${f} is unchanged`));
     eq(git(repo, ["diff", "--cached", "--name-only"]), "", "...nothing is staged");
     eq(git(repo, ["rev-parse", "HEAD"]), head, "...HEAD did not move");
@@ -952,18 +952,18 @@ function failingSignerRepo(config) {
   // R2-03: the undo path must --unset a local commit.gpgsign that was unset before the fallback.
   const repo = failingSignerRepo({ policies: { signing: "auto" } });
   git(repo, ["config", "--local", "--unset", "commit.gpgsign"]);
-  const globalCfg = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "foundry-gitcfg-")), "gitconfig");
+  const globalCfg = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "kukulu-gitcfg-")), "gitconfig");
   fs.writeFileSync(globalCfg, "[commit]\n\tgpgsign = true\n[gpg]\n\tformat = openpgp\n[gpg \"openpgp\"]\n\tprogram = /nonexistent-signing-agent\n");
   const hook = path.join(repo, ".git", "hooks", "commit-msg");
   fs.mkdirSync(path.dirname(hook), { recursive: true });
   fs.writeFileSync(hook, '#!/bin/sh\nc="$(dirname "$0")/../hook-count"\nif [ -e "$c" ]; then echo "rejected by test hook" >&2; exit 1; fi\ntouch "$c"\nexit 0\n');
   fs.chmodSync(hook, 0o755);
   const rec = (f) => (hasFile(repo, f) ? readFile(repo, f) : null);
-  const files = ["docs/foundry.json", ".foundry/state.json", ".foundry/feedback.jsonl"];
+  const files = ["docs/kukulu.json", ".kukulu/state.json", ".kukulu/feedback.jsonl"];
   const before = files.map(rec);
   const head = git(repo, ["rev-parse", "HEAD"]);
   await withServer(repo, async ({ call }) => {
-    isError(await call("foundry_flight_options", { maxRounds: 5 }), /failed even unsigned/, "auto: a failed unsigned retry leaves an unset local commit.gpgsign unset: the call is an error");
+    isError(await call("kukulu_flight_options", { maxRounds: 5 }), /failed even unsigned/, "auto: a failed unsigned retry leaves an unset local commit.gpgsign unset: the call is an error");
     files.forEach((f, i) => eq(rec(f), before[i], `...${f} is unchanged (unset case)`));
     eq(git(repo, ["diff", "--cached", "--name-only"]), "", "...nothing is staged (unset case)");
     eq(git(repo, ["rev-parse", "HEAD"]), head, "...HEAD did not move (unset case)");
@@ -986,15 +986,15 @@ function rejectCommitsStarting(repo, prefix) {
   const repo = plannedRepo();
   git(repo, ["checkout", "-q", "-b", `build/${TODAY}`]);
   await withServer(repo, async ({ call }) => {
-    await call("foundry_run_start");
-    await call("foundry_task_next");
+    await call("kukulu_run_start");
+    await call("kukulu_task_next");
     writeFile(repo, "hello.txt", "hi\n");
     git(repo, ["add", "hello.txt"]);
     git(repo, ["commit", "-qm", "P0-01: hello"]);
     const head = git(repo, ["rev-parse", "HEAD"]);
     const before = readFile(repo, "docs/PROGRESS.md");
     rejectCommitsStarting(repo, "progress:");
-    isError(await call("foundry_task_done", { id: "P0-01", log: "done" }), /commit failed/, "task_done rolls back when its progress commit fails: the call is an error");
+    isError(await call("kukulu_task_done", { id: "P0-01", log: "done" }), /commit failed/, "task_done rolls back when its progress commit fails: the call is an error");
     eq(readFile(repo, "docs/PROGRESS.md"), before, "...PROGRESS.md is byte-identical (still in progress)");
     eq(git(repo, ["diff", "--cached", "--name-only"]), "", "...nothing is staged");
     eq(git(repo, ["rev-parse", "HEAD"]), head, "...and HEAD is the task commit");
@@ -1004,11 +1004,29 @@ function rejectCommitsStarting(repo, prefix) {
 {
   const repo = plannedRepo();
   rejectCommitsStarting(repo, "chore: flight options");
-  const before = readFile(repo, "docs/foundry.json");
+  const before = readFile(repo, "docs/kukulu.json");
   await withServer(repo, async ({ call }) => {
-    isError(await call("foundry_flight_options", { maxRounds: 7 }), /commit failed/, "flight_options rolls back when its commit fails: the call is an error");
-    eq(readFile(repo, "docs/foundry.json"), before, "...docs/foundry.json is byte-identical");
+    isError(await call("kukulu_flight_options", { maxRounds: 7 }), /commit failed/, "flight_options rolls back when its commit fails: the call is an error");
+    eq(readFile(repo, "docs/kukulu.json"), before, "...docs/kukulu.json is byte-identical");
     eq(git(repo, ["diff", "--cached", "--name-only"]), "", "...nothing is staged");
+  });
+}
+
+// ---------------------------------------------------------------- pre-0.6.0 layout (RN-06)
+
+{
+  // A project that has not migrated keeps its lock, ignore line and state in
+  // .foundry/, and no .kukulu/ appears beside them.
+  const repo = plannedRepo();
+  setState(repo, { round: 0 });
+  useLegacyLayout(repo);
+  await withServer(repo, async ({ call }) => {
+    const r = await call("kukulu_run_start");
+    eq(r.alreadyStarted, false, "run_start works on the pre-0.6.0 layout");
+    ok(hasFile(repo, ".foundry/implement.lock"), "...arming the lock under .foundry/");
+    ok(!hasFile(repo, ".kukulu"), "...without creating .kukulu/");
+    like(readFile(repo, ".gitignore"), /^\.foundry\/implement\.lock$/m, "...and ignoring the lock under its .foundry/ name");
+    eq(git(repo, ["status", "--porcelain"]), "", "...leaving the tree clean");
   });
 }
 

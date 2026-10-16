@@ -5,27 +5,28 @@
 import { finish, ok, eq, like, mkRepo, startServer } from "./harness.mjs";
 
 const EXPECTED_TOOLS = [
-  "foundry_status",
-  "foundry_next",
-  "foundry_plan_commit",
-  "foundry_run_start",
-  "foundry_task_next",
-  "foundry_task_done",
-  "foundry_task_block",
-  "foundry_task_reopen",
-  "foundry_verify",
-  "foundry_stream_finish",
-  "foundry_run_finish",
-  "foundry_run_halt",
-  "foundry_flight_options",
-  "foundry_feedback_log",
-  "foundry_mutate",
-  "foundry_review_submit",
-  "foundry_summary_commit",
-  "foundry_flight_archive",
-  "foundry_pr_finalize",
-  "foundry_agents_sync",
-  "foundry_config_show",
+  "kukulu_status",
+  "kukulu_next",
+  "kukulu_plan_commit",
+  "kukulu_run_start",
+  "kukulu_task_next",
+  "kukulu_task_done",
+  "kukulu_task_block",
+  "kukulu_task_reopen",
+  "kukulu_verify",
+  "kukulu_stream_finish",
+  "kukulu_run_finish",
+  "kukulu_run_halt",
+  "kukulu_flight_options",
+  "kukulu_feedback_log",
+  "kukulu_mutate",
+  "kukulu_review_submit",
+  "kukulu_summary_commit",
+  "kukulu_flight_archive",
+  "kukulu_migrate",
+  "kukulu_pr_finalize",
+  "kukulu_agents_sync",
+  "kukulu_config_show",
 ];
 
 const repo = mkRepo();
@@ -39,7 +40,7 @@ const init = await s.rpc("initialize", {
   clientInfo: { name: "protocol-suite", version: "0" },
 });
 eq(init.jsonrpc, "2.0", "initialize reply is JSON-RPC 2.0");
-eq(init.result.serverInfo.name, "foundry", "serverInfo.name is foundry");
+eq(init.result.serverInfo.name, "kukulu", "serverInfo.name is kukulu");
 like(init.result.serverInfo.version, /^\d+\.\d+\.\d+$/, "serverInfo.version is semver");
 eq(init.result.protocolVersion, "2025-06-18", "initialize echoes the client's protocol version");
 ok(init.result.capabilities && init.result.capabilities.tools, "server advertises the tools capability");
@@ -76,39 +77,39 @@ ok(describedOk, "every tool carries a description the model can act on");
 ok(leakedOk, "tools/list does not leak the server-side handler");
 
 const byName = Object.fromEntries(list.map((t) => [t.name, t]));
-eq(byName.foundry_status.inputSchema.required, undefined, "read-only tools take no required arguments");
-eq(byName.foundry_task_done.inputSchema.required.join(","), "id,log", "task_done requires id and log");
-eq(byName.foundry_task_block.inputSchema.required.join(","), "id,reason", "task_block requires id and reason");
-eq(byName.foundry_review_submit.inputSchema.required.join(","), "verdict", "review_submit requires a verdict");
+eq(byName.kukulu_status.inputSchema.required, undefined, "read-only tools take no required arguments");
+eq(byName.kukulu_task_done.inputSchema.required.join(","), "id,log", "task_done requires id and log");
+eq(byName.kukulu_task_block.inputSchema.required.join(","), "id,reason", "task_block requires id and reason");
+eq(byName.kukulu_review_submit.inputSchema.required.join(","), "verdict", "review_submit requires a verdict");
 eq(
-  byName.foundry_review_submit.inputSchema.properties.verdict.enum.join("|"),
+  byName.kukulu_review_submit.inputSchema.properties.verdict.enum.join("|"),
   "APPROVED|CHANGES REQUESTED",
   "review_submit constrains the verdict to the two legal values",
 );
 eq(
-  byName.foundry_review_submit.inputSchema.properties.tasks.items.required.join(","),
+  byName.kukulu_review_submit.inputSchema.properties.tasks.items.required.join(","),
   "title,goal,files,tests",
   "fix tasks require title, goal, files and tests",
 );
 
 // -------------------------------------------------------------- error mapping
 
-const unknownTool = await s.rpc("tools/call", { name: "foundry_nope", arguments: {} });
+const unknownTool = await s.rpc("tools/call", { name: "kukulu_nope", arguments: {} });
 eq(unknownTool.error.code, -32602, "unknown tool is an invalid-params error");
-like(unknownTool.error.message, /foundry_nope/, "unknown tool error names the tool");
+like(unknownTool.error.message, /kukulu_nope/, "unknown tool error names the tool");
 
 const unknownMethod = await s.rpc("resources/list", {});
 eq(unknownMethod.error.code, -32601, "unknown method is a method-not-found error");
 
 // A tool that throws a ToolError is a *result* with isError, not a transport
 // error: the model is supposed to read the message and correct itself.
-const toolFailure = await s.rpc("tools/call", { name: "foundry_task_next", arguments: {} });
+const toolFailure = await s.rpc("tools/call", { name: "kukulu_task_next", arguments: {} });
 ok(!toolFailure.error, "a failing tool is not reported as a transport error");
 eq(toolFailure.result.isError, true, "a failing tool sets isError on the result");
 like(toolFailure.result.content[0].text, /PROGRESS\.md/, "the tool error explains what is missing");
 ok(toolFailure.result.structuredContent === undefined, "an ordinary refusal carries no structuredContent");
 
-const planFailure = await s.rpc("tools/call", { name: "foundry_plan_commit", arguments: {} });
+const planFailure = await s.rpc("tools/call", { name: "kukulu_plan_commit", arguments: {} });
 eq(planFailure.result.isError, true, "plan_commit with no plan is a refusal");
 ok(Array.isArray(planFailure.result.structuredContent?.problems), "...carrying structuredContent.problems as an array");
 ok(!/\bat \S+:\d+:\d+/.test(toolFailure.result.content[0].text), "an expected tool error carries no stack trace");

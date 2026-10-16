@@ -1,6 +1,6 @@
-# Foundry — working rules
+# Kūkulu — working rules
 
-Foundry is a Claude Code plugin: a dependency-free MCP server
+Kūkulu is a Claude Code plugin: a dependency-free MCP server
 (`mcp/server.mjs`) holds the mechanics, and the skills (`skills/*/SKILL.md`)
 hold the judgment. These rules apply to every change in this repository.
 
@@ -15,7 +15,7 @@ hold the judgment. These rules apply to every change in this repository.
   asserts its message.
 - Tools validate, then mutate: a refusal comes before any file is written, and
   a tool whose final commit fails leaves the tree as it found it.
-- Config never silently defaults a bad value: every new `docs/foundry.json`
+- Config never silently defaults a bad value: every new `docs/kukulu.json`
   key is validated like `validatePolicies`, `validateParallel` and
   `validateConstraints`, with an unknown-key refusal.
 - Documentation moves with the code: a task that adds or changes a tool
@@ -48,8 +48,10 @@ hold the judgment. These rules apply to every change in this repository.
 
 ## Constraints
 
-Mechanical rules are in `docs/foundry.json` `constraints` and run on every
-`foundry_verify`:
+Mechanical rules are in the `constraints` of a flight's `docs/kukulu.json`,
+which the planner writes and the archive moves to `docs/flights/<slug>/` when
+the flight ends (the last set is `docs/flights/v0-5-0/foundry.json`). They run
+on every `kukulu_verify`:
 
 - `server-synchronous`: no `async` or `await` anywhere in `mcp/server.mjs`,
   including comments and strings. Long work uses `spawnSync`.
@@ -65,9 +67,11 @@ The reviewer checks these by reading, because no line pattern can express them:
 
 - Refusals before writes; rollback on a failed commit (principle 3).
 - `fable` stays a legal alias (`ANTHROPIC_ALIASES`, `AGENT_TOOL_ALIASES`).
-- `TASK_ID`, `TASK_LINE` and the guard's regexes are unchanged; only
-  `foundry_plan_commit`'s renumber mode accepts a suffix such as `P1-02a`.
-- Nothing under `docs/plans/` changes; under `docs/feedback/` only the
+- `TASK_ID`, `TASK_LINE` and the guard's task regexes are unchanged; only
+  `kukulu_plan_commit`'s renumber mode accepts a suffix such as `P1-02a`. The
+  guard's `RUN_START_TOOL` and agent-type set accept both the `kukulu` and the
+  pre-0.6.0 `foundry` names until 0.7.0, and nothing else about them changes.
+- No existing file under `docs/plans/` changes (new plans may be added); under `docs/feedback/` only the
   "addressed in" header lines (P3-04). Never edit `docs/SPEC.md`, and never
   edit `docs/PLAN.md` or `docs/PROGRESS.md` by hand.
 - ⚠️ ASSUMPTION values each live in one place: `policies.archive`'s default
@@ -78,13 +82,13 @@ The reviewer checks these by reading, because no line pattern can express them:
 
 **Adding a tool.** Insert its `TOOLS` entry at the position the task names,
 and the name at the same position in `test/protocol.mjs`'s `EXPECTED_TOOLS`.
-Set the count in `test/plugin.mjs` to the number of `name: "foundry_` entries
+Set the count in `test/plugin.mjs` to the number of `name: "kukulu_` entries
 in `TOOLS`, and spell the same number in words on the first line of
 `docs/mcp-tools.md` ("Nineteen tools", "Twenty tools", "Twenty-one tools").
-Append `mcp__plugin_foundry_foundry__<tool>` to the `tools:` line of the agent
+Append `mcp__plugin_kukulu_kukulu__<tool>` to the `tools:` line of the agent
 the task names. Add a `## <tool>` section to `docs/mcp-tools.md`.
 
-**Adding a `docs/foundry.json` key.** Validate it in the config validator with
+**Adding a `docs/kukulu.json` key.** Validate it in the config validator with
 a refusal for every bad shape. Add a row to `docs/operations.md`'s
 configuration table, and make sure `test/plugin.mjs`'s "config keys
 documented" loop covers it (it reads `cfg()`'s top-level keys; a nested key
@@ -98,16 +102,16 @@ do). A working signer is `test/harness.mjs`'s `mkFakeGpg()` plus
 `commit.gpgsign` must give the server an isolated global config
 (`startServer(repo, { env: { GIT_CONFIG_GLOBAL: <temp file> } })`).
 
-**Commit-failure tests.** To make a Foundry commit fail without signing,
+**Commit-failure tests.** To make a Kūkulu commit fail without signing,
 write an executable `.git/hooks/commit-msg` that exits 1 when the message
 starts with the subject under test (for example `progress:`). Assert that
 every file the tool wrote is byte-identical afterwards, that `git diff
 --cached --name-only` is empty, and that HEAD did not move.
 
-**HANDOFF.md for this flight.** `foundry_run_finish` uses
-`docs/HANDOFF.md` as the draft PR's body, so its first line must be:
-`**Not to be merged** until a human has run one 0.5.0 flight from the
-working tree (claude --plugin-dir .). Do not merge, tag or release.`
+**HANDOFF.md.** `kukulu_run_finish` uses `docs/HANDOFF.md` as the draft PR's
+body. When a flight's spec says its result must not be merged yet (the 0.5.0
+flight's did, until a human had run a flight from the working tree), put that
+instruction in the first line, in bold.
 
 ## Commit template
 

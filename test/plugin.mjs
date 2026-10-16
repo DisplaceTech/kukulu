@@ -6,7 +6,9 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { finish, ok, eq, like, ROOT, frontmatter } from "./harness.mjs";
+import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { finish, ok, eq, like, ROOT, frontmatter, mkDir } from "./harness.mjs";
 
 const read = (rel) => fs.readFileSync(path.join(ROOT, rel), "utf8");
 const json = (rel) => JSON.parse(read(rel));
@@ -22,7 +24,7 @@ const plugin = json(".claude-plugin/plugin.json");
 const pkg = json("package.json");
 const market = json(".claude-plugin/marketplace.json");
 
-eq(plugin.name, "foundry", "the plugin is named foundry");
+eq(plugin.name, "kukulu", "the plugin is named kukulu");
 ok(plugin.description && plugin.description.length > 40, "the plugin describes itself in the marketplace listing");
 like(plugin.version, /^\d+\.\d+\.\d+$/, "the plugin version is semver");
 ok(plugin.author?.name, "the plugin names an author");
@@ -42,20 +44,25 @@ like(pkg.engines.node, /^>=\d+$/, "package.json states a Node floor");
 eq(market.plugins.length, 1, "the marketplace lists exactly this plugin");
 eq(market.plugins[0].name, plugin.name, "the marketplace entry matches the plugin name");
 ok(exists(market.plugins[0].source), "the marketplace source path resolves");
-ok(market.owner?.name, "the marketplace names an owner");
+eq(market.owner?.name, "Displace Technologies LLC", "the marketplace names Displace Technologies LLC as its owner");
+eq(read("NOTICE"), "K\u016bkulu\nCopyright 2026 Displace Technologies LLC\n\nOriginally developed by Eric Mann. Copyright in this project was\nassigned to Displace Technologies LLC effective October 15, 2026.\n", "NOTICE names the copyright holder and records the assignment");
+like(read("LICENSE"), /Apache License\s+Version 2\.0, January 2004/, "LICENSE is still the unmodified Apache-2.0 text");
+eq(createHash("sha256").update(fs.readFileSync(path.join(ROOT, "LICENSE"))).digest("hex"), "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30", "...byte-identical to the 0.5.0 file");
 
 // ---------------------------------------------------------------- MCP wiring
 
 eq(plugin.mcpServers, "./.mcp.json", "the plugin points at .mcp.json for its MCP server");
 const mcp = json(".mcp.json");
-const server = mcp.mcpServers.foundry;
-ok(server, "the MCP config defines a server called foundry");
+const server = mcp.mcpServers.kukulu;
+ok(server, "the MCP config defines a server called kukulu");
 eq(server.command, "node", "the server runs under node, with no install step");
 like(server.args[0], /^\$\{CLAUDE_PLUGIN_ROOT\}/, "the server path is resolved from CLAUDE_PLUGIN_ROOT");
 ok(exists(server.args[0].replace("${CLAUDE_PLUGIN_ROOT}/", "")), "the server file the config names exists");
-eq(server.env.FOUNDRY_PROJECT_DIR, "${CLAUDE_PROJECT_DIR}", "the server is told which project it is operating on");
-eq(server.env.FOUNDRY_CONFIG, "${FOUNDRY_CONFIG:-}", "the global routing config path passes through, empty by default");
-eq(server.env.FOUNDRY_PROFILE, "${FOUNDRY_PROFILE:-}", "the routing profile passes through, empty by default");
+eq(server.env.KUKULU_PROJECT_DIR, "${CLAUDE_PROJECT_DIR}", "the server is told which project it is operating on");
+eq(server.env.KUKULU_CONFIG, "${KUKULU_CONFIG:-}", "the global routing config path passes through, empty by default");
+eq(server.env.KUKULU_PROFILE, "${KUKULU_PROFILE:-}", "the routing profile passes through, empty by default");
+eq(server.env.FOUNDRY_CONFIG, "${FOUNDRY_CONFIG:-}", "the pre-0.6.0 config variable still passes through, until 0.7.0");
+eq(server.env.FOUNDRY_PROFILE, "${FOUNDRY_PROFILE:-}", "the pre-0.6.0 profile variable still passes through, until 0.7.0");
 
 // ---------------------------------------------------------------- hooks
 
@@ -74,7 +81,8 @@ for (const [event, entries] of Object.entries(hooks.hooks)) {
 }
 // SubagentStop is scoped to the implementer at the hook-registration level
 // (F-07): the harness never even runs the guard for any other subagent.
-like(hooks.hooks.SubagentStop[0].matcher, /foundry.implementer/, "SubagentStop's matcher names the implementer");
+like(hooks.hooks.SubagentStop[0].matcher, /kukulu.implementer/, "SubagentStop's matcher names the implementer");
+like(hooks.hooks.SubagentStop[0].matcher, /foundry.implementer/, "...and still names the pre-0.6.0 implementer, until 0.7.0");
 ok(!hooks.hooks.Stop[0].matcher, "Stop carries no matcher — a Stop event has no agent to match against");
 
 // ---------------------------------------------------------------- agents and skills
@@ -108,14 +116,14 @@ for (const name of skillNames.filter((n) => n !== "pull-feedback")) {
     ok(MODELS.includes(fm.model), `skills/${name} pins a known model (${fm.model})`);
     ok(EFFORTS.includes(fm.effort), `skills/${name} pins an effort level (${fm.effort})`);
   } else {
-    // The four stage skills are preloaded into their foundry-<role> agent, and
+    // The four stage skills are preloaded into their kukulu-<role> agent, and
     // disable-model-invocation also blocks preloading — so a stage skill must
     // never set it. Model and effort belong solely to the agent that routing
     // generates; the skill inherits whatever the agent is running as.
     eq(fm["disable-model-invocation"], undefined, `skills/${name} stays preloadable: disable-model-invocation also blocks preloading`);
     eq(fm.model, "inherit", `skills/${name} lets its agent's routed model own the turn`);
     eq(fm.effort, undefined, `skills/${name} carries no effort of its own; the agent's does`);
-    like(fm.description, /^Foundry pipeline stage/, `skills/${name}'s description marks it as a pipeline stage`);
+    like(fm.description, /^Kūkulu pipeline stage/, `skills/${name}'s description marks it as a pipeline stage`);
   }
 }
 
@@ -144,14 +152,14 @@ like(read("skills/pull-feedback/SKILL.md"), /how many items came from each/, "..
 {
   const im = read("skills/implement/SKILL.md");
   like(im, /## Codebase notes/, "the implement skill keeps project lessons out of the feedback log (project-c F-08, F-09): it names ## Codebase notes");
-  like(im, /never in `foundry_feedback_log`/, "...and says project lessons never go to foundry_feedback_log");
+  like(im, /never in `kukulu_feedback_log`/, "...and says project lessons never go to kukulu_feedback_log");
   like(im, /heredoc/, "...and keeps the heredoc fallback");
 }
 
 {
   const pb = read("skills/plan-build/SKILL.md");
-  like(pb, /foundry_plan_commit/, "plan-build commits through foundry_plan_commit (project-d F-03)");
-  ok(!pb.includes("Commit PLAN.md, PROGRESS.md, foundry.json and CLAUDE.md as"), "...and no longer tells the planner to commit by hand");
+  like(pb, /kukulu_plan_commit/, "plan-build commits through kukulu_plan_commit (project-d F-03)");
+  ok(!pb.includes("Commit PLAN.md, PROGRESS.md, kukulu.json and CLAUDE.md as"), "...and no longer tells the planner to commit by hand");
   like(pb, /renumber: true/, "plan-build renumbers with renumber: true (project-c F-07)");
   like(pb, /"from": "<that task's id>"/, "plan-build gates late rules with from (project-d F-01)");
   like(pb, /test ! -f X \|\| bash X/, "...and forbids the test-or-skip guard");
@@ -178,11 +186,11 @@ like(read("skills/pull-feedback/SKILL.md"), /how many items came from each/, "..
 {
   const sum = read("skills/summarize/SKILL.md");
   ok(!/heredoc/i.test(sum), "the summarize skill passes content and never writes SUMMARY.md itself (project-c F-03): no heredoc");
-  for (const word of ["content", "foundry_summary_commit"]) like(sum, new RegExp(word), `...it names ${word}`);
+  for (const word of ["content", "kukulu_summary_commit"]) like(sum, new RegExp(word), `...it names ${word}`);
   like(sum, /Never call `Write`/, "...and forbids writing the file itself");
-  like(sum, /foundry_flight_archive/, "the summarize skill archives when policies.archive is true");
+  like(sum, /kukulu_flight_archive/, "the summarize skill archives when policies.archive is true");
   like(sum, /archive: true/, "...keyed on the archive field of the summary result");
-  like(sum, /foundry_pr_finalize\(\{ breaking \}\)/, "the summarize skill ends with foundry_pr_finalize");
+  like(sum, /kukulu_pr_finalize\(\{ breaking \}\)/, "the summarize skill ends with kukulu_pr_finalize");
   like(sum, /Never pass `resign`/, "...and never passes resign");
   for (const status of ["AWAITING SIGNING", "AUTO-MERGE ON", "READY"]) like(sum, new RegExp(status), `...its final message can say ${status}`);
   like(sum, /Codebase notes/, "the summarize skill lifts Codebase notes");
@@ -200,8 +208,8 @@ for (const name of agentNames) {
   ok(fm.color, `agents/${name} has a colour`);
   const skills = Array.isArray(fm.skills) ? fm.skills : [];
   eq(skills.length, 1, `agents/${name} preloads exactly one skill`);
-  like(skills[0], /^foundry:/, `agents/${name}'s skill is namespaced`);
-  ok(skillNames.includes(skills[0].replace("foundry:", "")), `agents/${name}'s skill exists`);
+  like(skills[0], /^kukulu:/, `agents/${name}'s skill is namespaced`);
+  ok(skillNames.includes(skills[0].replace("kukulu:", "")), `agents/${name}'s skill exists`);
   like(body, new RegExp(`/${skills[0]}`), `agents/${name} tells the model how to reload its skill by name`);
 }
 
@@ -209,17 +217,17 @@ for (const name of agentNames) {
 const serverSrc = read("mcp/server.mjs");
 const AGENT_MAP = serverSrc.match(/const AGENT = \{([^}]+)\}/)[1];
 for (const name of agentNames) {
-  like(AGENT_MAP, new RegExp(`foundry:${name}`), `the server's stage table names foundry:${name}`);
+  like(AGENT_MAP, new RegExp(`kukulu:${name}`), `the server's stage table names kukulu:${name}`);
 }
-eq((AGENT_MAP.match(/foundry:/g) || []).length, agentNames.length, "the stage table has no agent the plugin does not ship");
+eq((AGENT_MAP.match(/kukulu:/g) || []).length, agentNames.length, "the stage table has no agent the plugin does not ship");
 
 // ---------------------------------------------------------------- the flight controller
 
 const goFlight = read("skills/go-flight/SKILL.md");
 const fmGo = frontmatter(goFlight);
 const allowed = String(fmGo["allowed-tools"]).split(",").map((s) => s.trim());
-const toolNames = Array.from(serverSrc.matchAll(/name: "(foundry_[a-z_]+)"/g), (m) => m[1]);
-eq(toolNames.length, 21, "the server defines twenty-one tools");
+const toolNames = Array.from(serverSrc.matchAll(/name: "(kukulu_[a-z_]+)"/g), (m) => m[1]);
+eq(toolNames.length, 22, "the server defines twenty-two tools");
 
 const COUNT_WORDS = { 18: "Eighteen", 19: "Nineteen", 20: "Twenty", 21: "Twenty-one", 22: "Twenty-two", 23: "Twenty-three", 24: "Twenty-four", 25: "Twenty-five" };
 like(read("docs/mcp-tools.md").split("\n")[2], new RegExp(`^${COUNT_WORDS[toolNames.length]} tools,`), "docs/mcp-tools.md states the tool count in words");
@@ -244,18 +252,18 @@ for (const name of agentNames) {
   }
   ok(!tools.includes("Agent"), `agents/${name} cannot spawn further agents`);
   const mcpTools = tools.filter((t) => t.startsWith("mcp__"));
-  ok(mcpTools.length > 0, `agents/${name} names at least one foundry MCP tool`);
+  ok(mcpTools.length > 0, `agents/${name} names at least one kukulu MCP tool`);
   for (const t of mcpTools) {
-    ok(t.startsWith("mcp__plugin_foundry_foundry__"), `agents/${name}'s MCP tool ${t} uses the plugin-prefixed form`);
-    ok(toolNames.includes(t.replace("mcp__plugin_foundry_foundry__", "")), `agents/${name}'s MCP tool ${t} actually exists`);
+    ok(t.startsWith("mcp__plugin_kukulu_kukulu__"), `agents/${name}'s MCP tool ${t} uses the plugin-prefixed form`);
+    ok(toolNames.includes(t.replace("mcp__plugin_kukulu_kukulu__", "")), `agents/${name}'s MCP tool ${t} actually exists`);
   }
-  ok(mcpTools.some((t) => t.endsWith("foundry_status")), `agents/${name} can call foundry_status to re-orient itself`);
-  ok(tools.includes("mcp__plugin_foundry_foundry__foundry_feedback_log"), `agents/${name} can log pipeline friction the moment it happens`);
+  ok(mcpTools.some((t) => t.endsWith("kukulu_status")), `agents/${name} can call kukulu_status to re-orient itself`);
+  ok(tools.includes("mcp__plugin_kukulu_kukulu__kukulu_feedback_log"), `agents/${name} can log pipeline friction the moment it happens`);
 }
 const agentTools = (n) => frontmatter(read(`agents/${n}.md`)).tools.split(",").map((t) => t.trim());
-const PFX = "mcp__plugin_foundry_foundry__";
-ok(agentTools("planner").includes(`${PFX}foundry_plan_commit`), "agents/planner names foundry_plan_commit");
-for (const t of ["foundry_summary_commit", "foundry_flight_archive", "foundry_pr_finalize"]) {
+const PFX = "mcp__plugin_kukulu_kukulu__";
+ok(agentTools("planner").includes(`${PFX}kukulu_plan_commit`), "agents/planner names kukulu_plan_commit");
+for (const t of ["kukulu_summary_commit", "kukulu_flight_archive", "kukulu_pr_finalize"]) {
   ok(agentTools("summarizer").includes(PFX + t), `agents/summarizer names ${t}`);
 }
 for (const name of agentNames) {
@@ -267,19 +275,19 @@ for (const name of agentNames) {
 // the bare mcp__<server>__<tool> a project .mcp.json would give. The
 // controller lists both, so it is allowed its tools whichever way the server
 // was loaded.
-const MCP_PREFIXES = ["mcp__plugin_foundry_foundry__", "mcp__foundry__"];
+const MCP_PREFIXES = ["mcp__plugin_kukulu_kukulu__", "mcp__kukulu__"];
 const bareTool = (t) => MCP_PREFIXES.reduce((s, p) => s.replace(p, ""), t);
 ok(allowed.includes("Agent"), "the flight controller may spawn agents");
-for (const t of ["foundry_status", "foundry_next", "foundry_agents_sync", "foundry_run_halt", "foundry_feedback_log"]) {
+for (const t of ["kukulu_status", "kukulu_next", "kukulu_agents_sync", "kukulu_run_halt", "kukulu_feedback_log"]) {
   for (const p of MCP_PREFIXES) ok(allowed.includes(p + t), `the flight controller may call ${p}${t}`);
 }
 for (const t of allowed.filter((a) => a.startsWith("mcp__"))) {
-  ok(MCP_PREFIXES.some((p) => t.startsWith(p)), `the flight controller's allowed tool ${t} names the foundry server`);
+  ok(MCP_PREFIXES.some((p) => t.startsWith(p)), `the flight controller's allowed tool ${t} names the kukulu server`);
   ok(toolNames.includes(bareTool(t)), `the flight controller's allowed tool ${t} exists`);
 }
 ok(
   allowed.every((a) => a === "Agent" || MCP_PREFIXES.some((p) => a.startsWith(p))),
-  "the flight controller is allowed nothing beyond Agent, the read-only foundry tools, agents_sync, run_halt, flight_options and pr_finalize",
+  "the flight controller is allowed nothing beyond Agent, the read-only kukulu tools, agents_sync, run_halt, flight_options and pr_finalize",
 );
 ok(
   // run_halt is a deliberate exception: it records a clean halt reason when
@@ -289,18 +297,18 @@ ok(
   !allowed.some((a) => /run_start|task_|run_finish|review_submit|summary_commit/.test(a)),
   "the flight controller cannot touch the tools that change project state",
 );
-like(goFlight, /resume: true/, "go-flight resumes a round-cap halt with foundry_flight_options (project-c F-13, F-18)");
-like(goFlight, /foundry_pr_finalize\(\{ resign: true \}\)/, "go-flight finishes a signing-blocked flight only with foundry_pr_finalize({ resign: true })");
+like(goFlight, /resume: true/, "go-flight resumes a round-cap halt with kukulu_flight_options (project-c F-13, F-18)");
+like(goFlight, /kukulu_pr_finalize\(\{ resign: true \}\)/, "go-flight finishes a signing-blocked flight only with kukulu_pr_finalize({ resign: true })");
 like(goFlight, /`flight=<slug>`/, "go-flight passes flight=<slug> to the planner");
 like(goFlight, /Flight slug: <slug>\./, "...as the sentence the planner skill looks for");
-for (const name of agentNames) like(goFlight, new RegExp(`foundry:${name}`), `go-flight names foundry:${name}`);
+for (const name of agentNames) like(goFlight, new RegExp(`kukulu:${name}`), `go-flight names kukulu:${name}`);
 like(goFlight, /notification/, "go-flight describes the loop as event-driven, not a blocking wait");
 like(goFlight, /do not poll/, "go-flight says not to poll while a stage is running");
 // F-04: the reviewer mutation-tests through the MCP, never by hand-editing source.
-ok(String(frontmatter(read("agents/reviewer.md")).tools).includes("mcp__plugin_foundry_foundry__foundry_mutate"), "agents/reviewer can call foundry_mutate");
+ok(String(frontmatter(read("agents/reviewer.md")).tools).includes("mcp__plugin_kukulu_kukulu__kukulu_mutate"), "agents/reviewer can call kukulu_mutate");
 {
   const reviewSkill = read("skills/review-build/SKILL.md");
-  like(reviewSkill, /foundry_mutate/, "review-build tells the reviewer to mutation-test with foundry_mutate");
+  like(reviewSkill, /kukulu_mutate/, "review-build tells the reviewer to mutation-test with kukulu_mutate");
   ok(!reviewSkill.includes("git checkout -- <file>"), "review-build no longer tells the reviewer to hand-edit source and git checkout it");
 }
 // V4-06: the planner carves streams, and only where they are safe.
@@ -321,12 +329,12 @@ ok(String(frontmatter(read("agents/reviewer.md")).tools).includes("mcp__plugin_f
 // V4-04: parallel waves.
 like(goFlight, /streams/, "go-flight describes the streams a parallel wave returns");
 like(goFlight, /in a single message/, "go-flight spawns a wave's streams in a single message so they run concurrently");
-like(goFlight, /every\*\* spawned stream has finished|all of\s+them have returned/, "go-flight waits for every stream before calling foundry_next again");
-like(goFlight, /Exactly one `foundry_next` result is in\s+flight at a time/, "go-flight's one-at-a-time rule is restated per foundry_next result");
+like(goFlight, /every\*\* spawned stream has finished|all of\s+them have returned/, "go-flight waits for every stream before calling kukulu_next again");
+like(goFlight, /Exactly one `kukulu_next` result is in\s+flight at a time/, "go-flight's one-at-a-time rule is restated per kukulu_next result");
 {
   const implSkill = read("skills/implement/SKILL.md");
   like(implSkill, /## Stream mode/, "the implement skill has a Stream mode section");
-  like(implSkill, /foundry_stream_finish/, "...naming foundry_stream_finish");
+  like(implSkill, /kukulu_stream_finish/, "...naming kukulu_stream_finish");
   like(implSkill, /STREAM NOT\s+STARTED/, "...and telling a stream implementer to stop, not retry, when run_start refuses");
   like(implSkill, /never `cd` out of `cwd`|`cd <cwd> &&`/, "...and telling the implementer to work only inside its cwd");
   like(implSkill, /docs\/PROGRESS\.md`,\s+`docs\/PLAN\.md`,\s+`docs\/HANDOFF\.md`/, "...and to leave the shared files to the MCP");
@@ -353,15 +361,15 @@ let unknownSkill = null;
 for (const file of PROSE) {
   if (FLIGHT_ARTIFACTS.includes(file)) continue;
   const body = read(file);
-  for (const m of body.matchAll(/\bfoundry_[a-z_]+/g)) {
+  for (const m of body.matchAll(/\bkukulu_[a-z_]+/g)) {
     if (!toolNames.includes(m[0]) && !unknownTool) unknownTool = `${file}: ${m[0]}`;
   }
-  for (const m of body.matchAll(/\bfoundry:([a-z-]+)/g)) {
+  for (const m of body.matchAll(/\bkukulu:([a-z-]+)/g)) {
     if (!skillNames.includes(m[1]) && !agentNames.includes(m[1]) && !unknownSkill) unknownSkill = `${file}: ${m[0]}`;
   }
 }
-eq(unknownTool, null, "every foundry_* tool named in prose exists on the server");
-eq(unknownSkill, null, "every foundry:* skill or agent named in prose exists");
+eq(unknownTool, null, "every kukulu_* tool named in prose exists on the server");
+eq(unknownSkill, null, "every kukulu:* skill or agent named in prose exists");
 
 // Documentation links have to land somewhere.
 let brokenLink = null;
@@ -408,18 +416,18 @@ for (const heading of [
   ok(template.includes(heading), `the SPEC template keeps "${heading}"`);
 }
 like(read("skills/plan-build/SKILL.md"), /⚠️ ASSUMPTION/, "the planner knows the template's assumption marker");
-like(read("skills/plan-build/SKILL.md"), /cat\s+docs\/foundry\.json/, "the planner is told to quote foundry.json from disk, not from memory, in its report (F-06)");
+like(read("skills/plan-build/SKILL.md"), /cat\s+docs\/kukulu\.json/, "the planner is told to quote kukulu.json from disk, not from memory, in its report (F-06)");
 like(template, /⚠️ ASSUMPTION/, "the template explains the assumption marker");
 
 // ---------------------------------------------------------------- routing config templates
 
-const foundryConfigTemplate = json("templates/foundry.config.example.json");
+const kukuluConfigTemplate = json("templates/kukulu.config.example.json");
 eq(
-  Object.keys(foundryConfigTemplate.roles).sort().join(","),
+  Object.keys(kukuluConfigTemplate.roles).sort().join(","),
   ["implementer", "planner", "reviewer", "summarizer"].join(","),
   "the global config template covers exactly the four roles",
 );
-ok(Object.keys(foundryConfigTemplate.profiles).length >= 2, "the template shows more than one profile");
+ok(Object.keys(kukuluConfigTemplate.profiles).length >= 2, "the template shows more than one profile");
 for (const file of listDir("templates/ccr").filter((f) => f.endsWith(".json"))) {
   const provider = json(`templates/ccr/${file}`).provider;
   ok(provider?.name, `templates/ccr/${file} names a provider`);
@@ -522,15 +530,15 @@ ok(exists("docs/plans"), "docs/plans/ exists");
 ok(readme.includes("docs/feedback/"), "docs/feedback/ is linked from the README");
 ok(readme.includes("docs/plans/"), "docs/plans/ is linked from the README");
 // V3.1-03: the old "write a heading and hope the summarizer reads it"
-// convention is retired in favor of calling foundry_feedback_log the
+// convention is retired in favor of calling kukulu_feedback_log the
 // moment friction happens, so it survives a flight that never summarizes.
 ok(!read("skills/implement/SKILL.md").includes("## Pipeline friction"), "the implement skill no longer collects friction into a HANDOFF.md heading");
 ok(!read("skills/review-build/SKILL.md").includes("## Pipeline friction"), "the review-build skill no longer collects friction into a REVIEW.md heading");
-like(read("skills/implement/SKILL.md"), /foundry_feedback_log/, "the implement skill calls foundry_feedback_log directly");
-like(read("skills/review-build/SKILL.md"), /foundry_feedback_log/, "the review-build skill calls foundry_feedback_log directly");
-like(read("skills/plan-build/SKILL.md"), /foundry_feedback_log/, "the plan-build skill calls foundry_feedback_log directly");
+like(read("skills/implement/SKILL.md"), /kukulu_feedback_log/, "the implement skill calls kukulu_feedback_log directly");
+like(read("skills/review-build/SKILL.md"), /kukulu_feedback_log/, "the review-build skill calls kukulu_feedback_log directly");
+like(read("skills/plan-build/SKILL.md"), /kukulu_feedback_log/, "the plan-build skill calls kukulu_feedback_log directly");
 like(read("skills/summarize/SKILL.md"), /feedbackCount/, "the summarize skill reads feedbackCount rather than scanning headings");
-like(read("skills/summarize/SKILL.md"), /\.foundry\/feedback\.jsonl/, "...and reads the feedback log itself for the entries");
+like(read("skills/summarize/SKILL.md"), /\.kukulu\/feedback\.jsonl/, "...and reads the feedback log itself for the entries");
 like(read("docs/feedback/README.md"), /foundry_feedback_log/, "docs/feedback/README.md documents the tool that produces the source log");
 like(read("docs/feedback/README.md"), /\/foundry:pull-feedback/, "...and the skill that pulls it back here");
 
@@ -544,5 +552,76 @@ const glRev = /repo:\s*https:\/\/github\.com\/gitleaks\/gitleaks\s*\n\s*rev:\s*v
 const scanYml = read(".github/workflows/secret-scan.yml");
 const glPin = /^\s*GITLEAKS_VERSION:\s*"?([^"\s#]+)"?/m.exec(scanYml)?.[1];
 ok(glRev && glPin === glRev, "secret-scan.yml pins GITLEAKS_VERSION to the pre-commit gitleaks rev");
+
+// RN-12: the README explains the name, gives the maintainer's reason, and no longer mentions the MIT releases.
+{
+  const readme = read("README.md");
+  like(readme, /^## The name$/m, "the README has a \"The name\" section");
+  ok(!/PLACEHOLDER/i.test(readme), "...with no placeholder left in it");
+  like(readme, /I chose the name because I wanted to honor Hawaiian culture/, "...carrying the maintainer's own sentence about why the name was chosen");
+  like(readme, /^<h1 align="center">K\u016bkulu<\/h1>$/m, "the README title is centered");
+  like(readme, /not affiliated with or endorsed by any Native Hawaiian organization/, "...stating there is no affiliation or endorsement");
+  ok(!/MIT License/.test(readme), "the README no longer carries the MIT footer");
+  ok(readme.indexOf("## The name") < readme.indexOf("## Quickstart"), "...and the name section comes before the Quickstart");
+}
+
+// RN-01: the name check. Fixtures are built from escapes so this file is itself
+// clean: the display name has a macron over the first u (U+016B), identifiers
+// are ASCII, and the okina in a Hawaiian word is U+02BB.
+{
+  const U = "\u016b";
+  const display = `K${U}kulu`;
+  const ascii = "K" + "ukulu";
+  const run = (files) => {
+    const dir = mkDir("kukulu-names-");
+    for (const [rel, text] of Object.entries(files)) {
+      fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true });
+      fs.writeFileSync(path.join(dir, rel), text);
+    }
+    return spawnSync(process.execPath, [path.join(ROOT, "scripts", "check-names.mjs"), dir], { encoding: "utf8" });
+  };
+
+  const clean = spawnSync(process.execPath, [path.join(ROOT, "scripts", "check-names.mjs")], { encoding: "utf8" });
+  eq(clean.status, 0, `check-names passes on this repository (${(clean.stderr || clean.stdout).trim()})`);
+
+  const good = run({ "README.md": `# ${display}\n\n${display} is built from a spec. Run \`${ascii}\` or see https://github.com/DisplaceTech/${ascii.toLowerCase()}.\n` });
+  eq(good.status, 0, "check-names accepts the display name in prose and the ASCII spelling in code and URLs");
+
+  const inPath = run({ [`docs/${U}x.md`]: "x\n" });
+  eq(inPath.status, 1, "check-names refuses a non-ASCII path");
+  like(inPath.stderr, /path contains non-ASCII characters/, "...and says paths use the ASCII identifier");
+
+  const inIdent = run({ "server.mjs": `const name = "${display.toLowerCase()}_status";\n` });
+  eq(inIdent.status, 1, "check-names refuses the macron letter in an identifier");
+  like(inIdent.stderr, /server\.mjs:1: a .* outside the standalone word/, "...and names the file and line");
+
+  const inUrl = run({ "README.md": `See https://example.com/${display}/x for it.\n` });
+  eq(inUrl.status, 1, "check-names refuses the display name inside a URL");
+
+  const nfd = run({ "README.md": `${display.replace(U, "u\u0304")} is decomposed.\n` });
+  eq(nfd.status, 1, "check-names refuses a decomposed u + U+0304");
+  like(nfd.stderr, /single NFC character U\+016B/, "...and says to store U+016B");
+
+  const prose = run({ "docs/guide.md": `${ascii} builds from a spec.\n` });
+  eq(prose.status, 1, "check-names refuses the ASCII spelling in prose");
+  like(prose.stderr, /docs\/guide\.md:1: the display name is written/, "...and names the file and line");
+
+  const fenced = run({ "docs/guide.md": `Text.\n\n\`\`\`bash\n${ascii} --help\n\`\`\`\n\nInline \`${ascii}\` too.\n` });
+  eq(fenced.status, 0, "check-names allows the ASCII spelling in fenced blocks and inline code");
+
+  const history = run({ "docs/flights/old/SUMMARY.md": `${ascii} history.\n`, "docs/feedback/a.md": `${ascii} history.\n` });
+  eq(history.status, 0, "check-names leaves history paths alone");
+
+  const changelog = run({ "CHANGELOG.md": `## [0.6.0]\n\n${display} is new.\n\n## [0.5.0]\n\n${ascii} was Foundry.\n` });
+  eq(changelog.status, 0, "check-names treats CHANGELOG.md as history from the 0.5.0 entry down");
+  const changelogNew = run({ "CHANGELOG.md": `## [0.6.0]\n\n${ascii} is new.\n\n## [0.5.0]\n` });
+  eq(changelogNew.status, 1, "...but not the entries above it");
+
+  const apostrophe = run({ "README.md": "Hawai'i and '\u014dlelo.\n" });
+  eq(apostrophe.status, 1, "check-names refuses an apostrophe where the okina belongs");
+  like(apostrophe.stderr, /\u02bbokina/, "...and names the okina");
+  const okina = run({ "README.md": "Hawai\u02bbi and \u02bb\u014dlelo.\n" });
+  eq(okina.status, 0, "check-names accepts the okina");
+}
 
 finish();

@@ -1,4 +1,4 @@
-title = "foundry gitleaks config"
+title = "kukulu gitleaks config"
 
 [extend]
 useDefault = true

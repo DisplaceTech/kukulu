@@ -27,6 +27,10 @@ for f in package.json .mcp.json .claude-plugin/*.json hooks/*.json templates/*.j
   check node -e 'JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"))' "$f"
 done
 
+# The display name is written with its kahakō in prose and ASCII in every
+# identifier; see CONTRIBUTING.md "Names".
+check node scripts/check-names.mjs
+
 # Scripts the hook system executes directly must stay executable.
 for f in scripts/*.sh scripts/implement-guard.mjs; do
   if [ ! -x "$f" ]; then

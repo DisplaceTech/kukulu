@@ -1,6 +1,6 @@
 ---
 name: review-build
-description: "Foundry pipeline stage — review the completed build branch against SPEC and PLAN, then approve or queue fix tasks for implement. Invoked by go-flight through the foundry-reviewer agent; not for ordinary work."
+description: "Kūkulu pipeline stage — review the completed build branch against SPEC and PLAN, then approve or queue fix tasks for implement. Invoked by go-flight through the kukulu-reviewer agent; not for ordinary work."
 model: inherit
 ---
 
@@ -8,7 +8,7 @@ You are reviewing an implementation run that a smaller model completed
 unattended. You have not seen this code being written; do not assume it does
 what the log says.
 
-Call `foundry_status` first: it tells you the branch, base, task counts, and
+Call `kukulu_status` first: it tells you the branch, base, task counts, and
 `reviewRound` — the number *this* review is stamped with. Your own prompt
 already states it too ("This review is round N"); both agree, always trust
 whichever you read, never compute it yourself. Then read, in order:
@@ -23,10 +23,10 @@ then the SPEC sections it cites. Check, in order, and report findings most
 severe first:
 
 1. **Constraints**: every rule under `## Constraints` in CLAUDE.md. Call
-   `foundry_verify` yourself and read its `constraints` result — the tool
+   `kukulu_verify` yourself and read its `constraints` result — the tool
    self-tests each rule against its own fixtures before scanning, so a
    `fixture` failure there means the rule itself is broken, not the code.
-   For any rule expressed in `docs/foundry.json`'s `constraints`, trust the
+   For any rule expressed in `docs/kukulu.json`'s `constraints`, trust the
    tool's `hits`, not your own re-derivation of the grep. Then read the
    diff yourself for anything the mechanical rules cannot express, and for
    any constraint you find violated that the tool's rule *missed* — if it
@@ -42,7 +42,7 @@ severe first:
    have left alone.
 3. **Tests**: do the acceptance tests named in the task exist, do they test
    the mechanic in isolation rather than re-deriving the formula, and would
-   they fail if the mechanic were removed? Run `foundry_verify` yourself. Do
+   they fail if the mechanic were removed? Run `kukulu_verify` yourself. Do
    not trust the log.
 4. **Performance**: whatever SPEC's principles call out (allocation in hot
    paths, quadratic scans, rebuilt buffers). Skip if SPEC is silent.
@@ -54,7 +54,7 @@ severe first:
    real, and what unblocks it (a fix task, a plan change, or a spec change).
 8. Only then: readability and naming.
 
-Sample at least one test per module by calling `foundry_mutate` with a
+Sample at least one test per module by calling `kukulu_mutate` with a
 `file` and an exact `find`/`replace` that deletes or inverts the mechanic.
 The tool runs the verify commands that file triggers (including any
 `extraVerify` suite bound to the repo root), restores the file itself, and
@@ -69,8 +69,8 @@ Never edit source in the working tree yourself, not even temporarily — you
 are not to fix code, and the tool restores the file where you cannot
 guarantee you would.
 
-**Targeted mutants.** When `docs/foundry.json` has `mutation.targeted`, prefer
-`foundry_mutate({ file, find, replace, targeted: <name>, filter: <the test
+**Targeted mutants.** When `docs/kukulu.json` has `mutation.targeted`, prefer
+`kukulu_mutate({ file, find, replace, targeted: <name>, filter: <the test
 class or path that covers the file> })` over the full verify set: it runs
 only the tests that matter, in seconds instead of minutes.
 
@@ -85,7 +85,7 @@ sweep the same file with at least three further mutations of neighbouring
 mechanics, then queue one R-task per file, listing every survivor found there,
 instead of one task per survivor.
 
-**Round 2 and later**: read `lastReviewCommit` from `foundry_status` and
+**Round 2 and later**: read `lastReviewCommit` from `kukulu_status` and
 mutate only the files in `git diff --name-only <lastReviewCommit>..HEAD`. A
 survivor outside that diff is not a fix task: put it under `## Notes` in
 `docs/REVIEW.md` as advisory, and the summarizer carries it into SUMMARY.md.
@@ -98,7 +98,7 @@ Write `docs/REVIEW.md` with:
 
 - `Round: N` on the second line, where N is `reviewRound` — never `round`,
   which is one less (the count of fix rounds already queued, not the round
-  you are writing). `foundry_review_submit` refuses a mismatched or missing
+  you are writing). `kukulu_review_submit` refuses a mismatched or missing
   `Round:` line before it commits anything (F-10, F-11).
 - **Verdict**: `APPROVED` or `CHANGES REQUESTED`. Approve only if categories
   1–3 are clean across the entire branch and there are no blocked tasks.
@@ -113,12 +113,12 @@ Write `docs/REVIEW.md` with:
   instead of manufacturing a category-8 finding just to have somewhere to
   put an observation.
 
-The moment something costs you time during the review that is Foundry's own
+The moment something costs you time during the review that is Kūkulu's own
 fault, not the code under review's — a refused tool, an ambiguous
-instruction, a stall — call `foundry_feedback_log` with `stage: "review"`
+instruction, a stall — call `kukulu_feedback_log` with `stage: "review"`
 right then, rather than saving it up for this document.
 
-Then call `foundry_review_submit` exactly once:
+Then call `kukulu_review_submit` exactly once:
 
 - If `CHANGES REQUESTED`: pass `verdict: "CHANGES REQUESTED"` and a `tasks`
   array. Each entry has `title`, `goal`, `files`, `constraints`, `tests`,

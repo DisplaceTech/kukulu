@@ -25,12 +25,13 @@ it.
 | `mcp/run-command.mjs` | Runs one verify/mutate/setup command in its own process group, bounded in time and output, for the synchronous server |
 | `scripts/implement-guard.mjs` | The Stop / SubagentStop hook |
 | `scripts/lint.sh` | Dependency-free syntax and manifest lint |
+| `scripts/check-names.mjs` | Fails on a misplaced kahakō or an ASCII spelling of the display name in prose; run by `scripts/lint.sh` |
 | `scripts/check-diagrams.mjs` | Parses every Mermaid block; CI-only, needs mermaid + jsdom |
 | `agents/*.md` | Stage agents: default model, effort, and the skill each preloads |
 | `skills/*/SKILL.md` | The prose each stage follows |
 | `templates/SPEC.md` | The spec skeleton users copy |
-| `templates/foundry.config.example.json`, `templates/ccr/` | The global routing config and claude-code-router provider manifests |
-| `templates/constraints.example.json` | Three worked `docs/foundry.json` `constraints` rules, with fixtures |
+| `templates/kukulu.config.example.json`, `templates/ccr/` | The global routing config and claude-code-router provider manifests |
+| `templates/constraints.example.json` | Three worked `docs/kukulu.json` `constraints` rules, with fixtures |
 | `test/` | Harness plus eleven suites |
 | `docs/` | Architecture, tool reference, routing guide, spec guide, runbook |
 | `docs/plans/` | The task-by-task plan behind each release |
@@ -39,8 +40,8 @@ it.
 ## Setup
 
 ```bash
-git clone git@github.com:ericmann/foundry.git
-cd foundry
+git clone git@github.com:DisplaceTech/kukulu.git
+cd kukulu
 pre-commit install     # optional, but CI runs the same checks
 ```
 
@@ -48,6 +49,23 @@ There is nothing to install. The server, the tests and the lint script have no
 dependencies; `package.json` has no `dependencies` block and there is no
 lockfile, on purpose — a plugin that needs `npm install` before it works is a
 plugin that fails on someone else's machine.
+
+## Names
+
+The display name is **Kūkulu**, with the macron (kahakō) over the first u,
+U+016B, stored NFC. Use it in prose: docs, README, titles, release notes and
+messages a person reads. Everything a machine reads is ASCII: `kukulu` for ids,
+namespaces, tool names, paths, keys and URLs, and `KUKULU_` for environment
+variables. Never put the macron in an identifier, path, key or URL. The word
+ʻōlelo Hawaiʻi is written with the ʻokina, U+02BB, not an apostrophe.
+
+`node scripts/check-names.mjs` enforces this and runs inside `npm run lint`,
+pre-commit and CI. It fails on a macron outside the standalone word, a
+decomposed u + U+0304, a non-ASCII path, the ASCII spelling of the display name
+in Markdown prose (code spans, fenced blocks and URLs are exempt), and an
+apostrophe where the ʻokina belongs. Archived flights, `docs/plans/`,
+`docs/feedback/`, `docs/SPEC.md` and the changelog below its newest entry are
+history and are not checked for prose.
 
 ## Tests
 
@@ -66,13 +84,13 @@ npm install --no-save mermaid jsdom && node scripts/check-diagrams.mjs
 |---|---|
 | `plugin` | Manifests, agent and skill frontmatter, hook wiring, cross-references, documentation links, diagram style, CI pinning |
 | `protocol` | JSON-RPC framing, handshake, tool discovery, error mapping |
-| `state` | `foundry_status` and every branch of the `foundry_next` decision table; `foundry_plan_commit` (every check, `renumber`) |
+| `state` | `kukulu_status` and every branch of the `kukulu_next` decision table; `kukulu_plan_commit` (every check, `renumber`) |
 | `implement` | `run_start`, `task_next`, `task_done`, `task_block`, `verify`, `run_finish`; the commit helper's signing fallback |
-| `review` | `review_submit` and `summary_commit`, including every refusal and rollback on a failed commit; `foundry_flight_archive`; `foundry_pr_finalize` |
-| `routing` | Config merge and precedence, `foundry_agents_sync`, `foundry_config_show`, every refusal |
-| `constraints` | `docs/foundry.json` constraints, fixture self-tests, the scan, every refusal |
-| `feedback` | `foundry_feedback_log`, `.foundry/feedback.jsonl`, and the `policies.feedback` opt-out |
-| `streams` | Parallel workstreams: stream tags, waves, partition validation, stream-scoped tools, worktrees, `foundry_stream_finish`, `foundry_next`'s `streams`, pausing at a wave |
+| `review` | `review_submit` and `summary_commit`, including every refusal and rollback on a failed commit; `kukulu_flight_archive`; `kukulu_pr_finalize` |
+| `routing` | Config merge and precedence, `kukulu_agents_sync`, `kukulu_config_show`, every refusal |
+| `constraints` | `docs/kukulu.json` constraints, fixture self-tests, the scan, every refusal |
+| `feedback` | `kukulu_feedback_log`, `.kukulu/feedback.jsonl`, and the `policies.feedback` opt-out |
+| `streams` | Parallel workstreams: stream tags, waves, partition validation, stream-scoped tools, worktrees, `kukulu_stream_finish`, `kukulu_next`'s `streams`, pausing at a wave |
 | `guard` | The Stop / SubagentStop hook: scoping, blocking, counting, giving up, environment handling |
 | `drive` | Complete flights end to end over real stdio: one serial, and parallel ones (a wave, `maxStreams: 1`, an overlapping partition) |
 
@@ -102,7 +120,7 @@ is set per-repo.
 Three workflows, all of which must be green:
 
 - **ci** — the suite on Node 22, 24 and 26; again on macOS; again with the
-  GitHub CLI removed, since `foundry_run_finish` treats `gh` as optional.
+  GitHub CLI removed, since `kukulu_run_finish` treats `gh` as optional.
   EOL Node lines are not tested and not supported; the floor in
   `package.json` moves up as they age out.
 - **lint** — `pre-commit` (yamllint, shellcheck, markdownlint, gitleaks, JSON
@@ -122,7 +140,7 @@ three, add a `CHANGELOG.md` entry, and tag.
 
 ## License
 
-Foundry is licensed under the [Apache License 2.0](./LICENSE) from 0.4.0
+Kūkulu is licensed under the [Apache License 2.0](./LICENSE) from 0.4.0
 on. Contributions are accepted under the same license (inbound = outbound):
 by submitting a contribution you agree it is licensed under Apache 2.0, as
 section 5 of the license describes, with no additional terms.

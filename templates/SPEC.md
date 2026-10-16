@@ -3,7 +3,7 @@
 Version: 0.1
 Status: draft
 
-The Foundry planner reads this file in full and derives the build plan from
+The Kūkulu planner reads this file in full and derives the build plan from
 it. Headings below are the ones the planner looks for by name; keep them, add
 whatever else you need. Mark any number you are guessing at with
 `⚠️ ASSUMPTION` and give it a config key, so it becomes tunable rather than
@@ -42,7 +42,7 @@ talk to each other.
 ## 7. Commands
 
 The exact commands for typecheck, lint, test, build, and any headless or
-smoke run. The planner copies these into `docs/foundry.json`; every one must
+smoke run. The planner copies these into `docs/kukulu.json`; every one must
 exit non-zero on failure. If the test runner can run one class or file, give
 that command too with an unquoted `{filter}` placeholder where the class or
 path goes (for example `php artisan test --filter={filter}`), so the planner

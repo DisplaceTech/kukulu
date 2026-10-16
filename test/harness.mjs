@@ -15,7 +15,7 @@ export const SERVER = path.join(ROOT, "mcp", "server.mjs");
 export const GUARD = path.join(ROOT, "scripts", "implement-guard.mjs");
 
 const KEEP = Boolean(process.env.KEEP_REPO);
-const RPC_TIMEOUT_MS = Number(process.env.FOUNDRY_TEST_TIMEOUT_MS || 60_000);
+const RPC_TIMEOUT_MS = Number(process.env.KUKULU_TEST_TIMEOUT_MS || 60_000);
 
 // ---------------------------------------------------------------- assertions
 
@@ -79,12 +79,12 @@ process.on("exit", () => {
 const gitIn = (dir, args) => execFileSync("git", args, { cwd: dir, encoding: "utf8" }).trim();
 
 /** A throwaway git repo with an identity configured and one empty commit. */
-export function mkRepo(prefix = "foundry-test-") {
+export function mkRepo(prefix = "kukulu-test-") {
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
   madeRepos.push(dir);
   gitIn(dir, ["init", "-q", "-b", "main"]);
-  gitIn(dir, ["config", "user.email", "test@foundry.invalid"]);
-  gitIn(dir, ["config", "user.name", "foundry test"]);
+  gitIn(dir, ["config", "user.email", "test@kukulu.invalid"]);
+  gitIn(dir, ["config", "user.name", "kukulu test"]);
   gitIn(dir, ["config", "commit.gpgsign", "false"]);
   gitIn(dir, ["commit", "-q", "--allow-empty", "-m", "init"]);
   if (KEEP) console.log(`# repo: ${dir}`);
@@ -92,7 +92,7 @@ export function mkRepo(prefix = "foundry-test-") {
 }
 
 /** A throwaway directory that is deliberately *not* a git repo. */
-export function mkDir(prefix = "foundry-plain-") {
+export function mkDir(prefix = "kukulu-plain-") {
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
   madeRepos.push(dir);
   return dir;
@@ -100,7 +100,7 @@ export function mkDir(prefix = "foundry-plain-") {
 
 /** A bare repo usable as an `origin` for push tests. */
 export function mkBareRemote() {
-  const dir = mkDir("foundry-remote-");
+  const dir = mkDir("kukulu-remote-");
   execFileSync("git", ["init", "-q", "--bare", dir], { encoding: "utf8" });
   return dir;
 }
@@ -110,7 +110,7 @@ export function mkBareRemote() {
  * pull-request path stays local and deterministic. Prepend it to PATH.
  */
 export function mkFailingGhBin() {
-  const dir = mkDir("foundry-bin-");
+  const dir = mkDir("kukulu-bin-");
   const gh = path.join(dir, "gh");
   fs.writeFileSync(gh, "#!/bin/sh\nexit 1\n");
   fs.chmodSync(gh, 0o755);
@@ -124,7 +124,7 @@ export function mkFailingGhBin() {
  * `<dir>/calls.log`. Prepend the directory to PATH.
  */
 export function mkFakeGhBin() {
-  const dir = mkDir("foundry-gh-");
+  const dir = mkDir("kukulu-gh-");
   const gh = path.join(dir, "gh");
   fs.writeFileSync(
     gh,
@@ -172,7 +172,7 @@ exit 1
  * been made. Returns the program's absolute path.
  */
 export function mkFakeGpg({ failAfter } = {}) {
-  const dir = mkDir("foundry-gpg-");
+  const dir = mkDir("kukulu-gpg-");
   const gpg = path.join(dir, "gpg");
   fs.writeFileSync(
     gpg,
@@ -183,9 +183,9 @@ for a in "$@"; do
   if [ "$a" = "--verify" ]; then
     echo "[GNUPG:] NEWSIG"
     case "\${FAKE_GPG_VERIFY:-good}" in
-      bad) echo "[GNUPG:] BADSIG 0123456789ABCDEF foundry test" ;;
+      bad) echo "[GNUPG:] BADSIG 0123456789ABCDEF kukulu test" ;;
       err) echo "[GNUPG:] ERRSIG 0123456789ABCDEF 1 10 00 1700000000 9 -"; echo "[GNUPG:] NO_PUBKEY 0123456789ABCDEF" ;;
-      *) echo "[GNUPG:] GOODSIG 0123456789ABCDEF foundry test" ;;
+      *) echo "[GNUPG:] GOODSIG 0123456789ABCDEF kukulu test" ;;
     esac
     exit 0
   fi
@@ -294,16 +294,35 @@ export function plannedRepo({ tasks = DEFAULT_TASKS, config = {}, claude = "# ru
   const repo = specRepo();
   writeFile(repo, "docs/PLAN.md", planDoc(tasks));
   writeFile(repo, "docs/PROGRESS.md", progressDoc(tasks));
-  writeFile(repo, "docs/foundry.json", JSON.stringify({ verify: ["true"], maxRounds: 3, ...config }, null, 2) + "\n");
+  writeFile(repo, "docs/kukulu.json", JSON.stringify({ verify: ["true"], maxRounds: 3, ...config }, null, 2) + "\n");
   writeFile(repo, "CLAUDE.md", claude);
   gitIn(repo, ["add", "-A"]);
   gitIn(repo, ["commit", "-qm", "plan: derive build plan from SPEC"]);
   return repo;
 }
 
-/** Force `.foundry/state.json` into a given shape, bypassing the tools. */
+/**
+ * Rewrite a repo into the pre-0.6.0 layout (`.foundry/`, `docs/foundry.json`)
+ * and commit it, so a suite can prove the compatibility fallback. Whatever the
+ * repo holds of the new names is moved; nothing is invented.
+ */
+export function useLegacyLayout(repo) {
+  const move = (from, to) => {
+    const abs = path.join(repo, from);
+    if (!fs.existsSync(abs)) return;
+    fs.mkdirSync(path.dirname(path.join(repo, to)), { recursive: true });
+    fs.renameSync(abs, path.join(repo, to));
+  };
+  move("docs/kukulu.json", "docs/foundry.json");
+  move(".kukulu", ".foundry");
+  gitIn(repo, ["add", "-A"]);
+  if (gitIn(repo, ["status", "--porcelain"])) gitIn(repo, ["commit", "-qm", "chore: pre-0.6.0 layout"]);
+  return repo;
+}
+
+/** Force `.kukulu/state.json` into a given shape, bypassing the tools. */
 export function setState(repo, patch) {
-  const p = path.join(repo, ".foundry", "state.json");
+  const p = path.join(repo, ".kukulu", "state.json");
   const cur = fs.existsSync(p) ? JSON.parse(fs.readFileSync(p, "utf8")) : {};
   fs.mkdirSync(path.dirname(p), { recursive: true });
   fs.writeFileSync(p, JSON.stringify({ ...cur, ...patch }, null, 2) + "\n");
@@ -338,17 +357,21 @@ export function commitTask(repo, id, title, files = {}) {
  * notifications produce no reply.
  */
 export function startServer(repo, { env = {}, server = SERVER } = {}) {
-  // Isolate every suite from the developer's own machine: point FOUNDRY_CONFIG
-  // at a path that does not exist and force FOUNDRY_PROFILE unset, so a real
-  // ~/.config/foundry/config.json (or an inherited FOUNDRY_PROFILE) can never
-  // leak into a test. A suite that wants to test the global file passes its
-  // own FOUNDRY_CONFIG/FOUNDRY_PROFILE via `env` to override these.
+  // Isolate every suite from the developer's own machine: point KUKULU_CONFIG
+  // at a path that does not exist and force KUKULU_PROFILE unset, so a real
+  // ~/.config/kukulu/config.json (or an inherited KUKULU_PROFILE) can never
+  // leak into a test. The pre-0.6.0 FOUNDRY_* names are blanked too, so a
+  // developer's old exports cannot reach a suite. A suite that wants to test
+  // the global file passes its own KUKULU_CONFIG/KUKULU_PROFILE via `env`.
   const isolation = {
-    FOUNDRY_CONFIG: path.join(repo, ".foundry-test-no-global.json"),
+    KUKULU_CONFIG: path.join(repo, ".kukulu-test-no-global.json"),
+    KUKULU_PROFILE: "",
+    FOUNDRY_CONFIG: "",
     FOUNDRY_PROFILE: "",
+    FOUNDRY_PROJECT_DIR: "",
   };
   const proc = spawn(process.execPath, [server], {
-    env: { ...process.env, FOUNDRY_PROJECT_DIR: repo, ...isolation, ...env },
+    env: { ...process.env, KUKULU_PROJECT_DIR: repo, ...isolation, ...env },
     stdio: ["pipe", "pipe", "inherit"],
   });
   const pending = new Map();
@@ -471,9 +494,9 @@ export function splitFrontmatter(text) {
   return { frontmatter: frontmatter(text), body: m[2] };
 }
 
-/** Write a Foundry global routing-config fixture; returns its path. */
+/** Write a Kūkulu global routing-config fixture; returns its path. */
 export function writeGlobalConfig(dir, obj) {
-  return writeFile(dir, "foundry-global.json", JSON.stringify(obj, null, 2) + "\n");
+  return writeFile(dir, "global-config.json", JSON.stringify(obj, null, 2) + "\n");
 }
 
 // ---------------------------------------------------------------- guard hook
@@ -486,8 +509,8 @@ export function writeGlobalConfig(dir, obj) {
 export function runGuard(repo, input = {}, env = {}) {
   const payload = JSON.stringify({
     hook_event_name: "SubagentStop",
-    agent_type: "foundry-implementer",
-    transcript_path: path.join(repo, ".foundry-test-transcript.jsonl"),
+    agent_type: "kukulu-implementer",
+    transcript_path: path.join(repo, ".kukulu-test-transcript.jsonl"),
     cwd: repo,
     ...input,
   });

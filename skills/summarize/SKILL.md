@@ -1,11 +1,11 @@
 ---
 name: summarize
-description: "Foundry pipeline stage — compose the summary after an APPROVED review and commit it through foundry_summary_commit: what was built, what was decided, what a human still owes. Invoked by go-flight through the foundry-summarizer agent; not for ordinary work."
+description: "Kūkulu pipeline stage — compose the summary after an APPROVED review and commit it through kukulu_summary_commit: what was built, what was decided, what a human still owes. Invoked by go-flight through the kukulu-summarizer agent; not for ordinary work."
 model: inherit
 ---
 
 The build branch has been approved. Write the one document a human reads
-before merging. Call `foundry_status` for the branch, base, head, rounds and
+before merging. Call `kukulu_status` for the branch, base, head, rounds and
 counts, then read `docs/REVIEW.md`, `docs/HANDOFF.md`, `docs/PLAN.md`
 (Decisions and Spec issues sections) and `git log --oneline <base>..HEAD`.
 
@@ -26,7 +26,7 @@ it to disk yourself (see below):
    are edits the human should make to SPEC.md.
 6. **Manual checks owed**: the consolidated list, per phase, with what to
    look for.
-7. **Review history**: read `foundry_status`'s `state.rounds` — one recorded
+7. **Review history**: read `kukulu_status`'s `state.rounds` — one recorded
    entry per submission, in order, each with `round`, `fixTasks`,
    `unblocked`, `verdict` and whether it was `nonConverging`. Render it as
    one line per round: findings count, fix tasks, and whether any finding
@@ -34,12 +34,13 @@ it to disk yourself (see below):
    files). Note any notes-only approval (an `APPROVED` round whose
    `REVIEW.md` carried a `## Notes` section) so a human sees what was
    flagged but not queued as work.
-8. **Pipeline friction**: anything the Foundry pipeline itself did that cost
+8. **Pipeline friction**: anything the Kūkulu pipeline itself did that cost
    time — a tool refusal worked around, a wrong or ambiguous prompt, a
    stall, a permission prompt, anything an implementer or reviewer had to
    route around rather than the project itself being hard. Call
-   `foundry_status` for `feedbackCount`; if it is greater than zero, read
-   `.foundry/feedback.jsonl` directly (`cat` it — it is small, plain JSONL)
+   `kukulu_status` for `feedbackCount`; if it is greater than zero, read
+   `.kukulu/feedback.jsonl` directly (`.foundry/feedback.jsonl` in a project
+   that has not moved to the 0.6.0 layout) (`cat` it — it is small, plain JSONL)
    and render one line per entry, in the order logged: stage, category, and
    the message. Write "None" when `feedbackCount` is `0` — that is a real,
    useful line, not an empty section to skip. This section is what a human
@@ -60,7 +61,7 @@ Add these to the list, after the sections above:
     work, or when the flight changed a public interface, a config default, or
     behavior an existing user relies on. When unsure, it is `yes`.
 
-Pass the whole document as `content` to `foundry_summary_commit`. The tool
+Pass the whole document as `content` to `kukulu_summary_commit`. The tool
 writes `docs/SUMMARY.md` itself and commits it as `chore: build summary`, marks
 the flight complete, and returns `pr` (the branch's pull request as
 `{ url, state, draft, base }`, or `"none"`, `"skipped: policy"` or
@@ -70,11 +71,11 @@ is then not a problem you can have. A PR object with `expectedBase` targets the
 wrong branch; say so.
 
 If the result has `archive: true` (`policies.archive`), call
-`foundry_flight_archive` with no arguments. It moves the flight's artifacts
+`kukulu_flight_archive` with no arguments. It moves the flight's artifacts
 into `docs/flights/<slug>/`. If it refuses, print the refusal and go on to the
 last call anyway.
 
-Your last tool call is `foundry_pr_finalize({ breaking })`, with `breaking`
+Your last tool call is `kukulu_pr_finalize({ breaking })`, with `breaking`
 true or false from your Breaking call. It marks the draft PR ready and, unless
 the flight is breaking, turns on auto-merge; it never merges anything itself.
 Never pass `resign`: re-signing history is for a human to ask for, after

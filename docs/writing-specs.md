@@ -1,4 +1,4 @@
-# Writing a spec Foundry can build from
+# Writing a spec Kūkulu can build from
 
 The spec is the only part of this pipeline a human writes, and it is the part
 that decides whether the rest of it is worth running. The planner reads
@@ -20,7 +20,7 @@ the ones the planner looks for by name.
 | **4. Architecture** | Becomes the module map and the boundaries the reviewer enforces. |
 | **5. Data and configuration** | Config keys and defaults; every `⚠️ ASSUMPTION` becomes a tuning task. |
 | **6. Interfaces** | The contracts tasks are written against, so two tasks touching both sides agree. |
-| **7. Commands** | Copied verbatim into `docs/foundry.json` as `verify`. Get these right. |
+| **7. Commands** | Copied verbatim into `docs/kukulu.json` as `verify`. Get these right. |
 | **8. Phases** | Become the phases of the plan, in order, each ending in something a human can look at. |
 | **9. Open questions** | Each one is resolved under `## Decisions` in `PLAN.md` with a rationale, or becomes a bounded spike task. |
 | **Appendix** | Mockups and fixtures. The planner opens every file in `docs/`. |
@@ -44,18 +44,18 @@ The reviewer treats a constraint violation as the most severe category of
 finding. A principle it cannot check is a principle that does not exist.
 
 Better still: a principle phrased as a single-line pattern becomes an entry
-in `docs/foundry.json`'s `constraints`, with fixture lines proving the
+in `docs/kukulu.json`'s `constraints`, with fixture lines proving the
 pattern actually catches every shape you meant it to (a hard-coded tunable,
 for instance, can be `const x = 5;`, `'x' => 5,`, or `x: 5,` — a grep that
 only catches one shape passes silently past the other two for as many
-review rounds as it takes someone to notice by reading). `foundry_verify`
+review rounds as it takes someone to notice by reading). `kukulu_verify`
 then checks it mechanically, every task, instead of the reviewer having to
 remember to grep for it by hand each round. See
 [operations.md](./operations.md#constraints).
 
 ### 2. Commands that exit non-zero
 
-Section 7 becomes `verify` in `docs/foundry.json`, and `foundry_verify` runs it
+Section 7 becomes `verify` in `docs/kukulu.json`, and `kukulu_verify` runs it
 after every task. Each command must fail loudly:
 
 ```text
@@ -76,7 +76,7 @@ an unquoted `{filter}` placeholder where the class or path goes:
 php artisan test --filter={filter}
 ```
 
-The planner copies it into `mutation.targeted` in `docs/foundry.json`, and the
+The planner copies it into `mutation.targeted` in `docs/kukulu.json`, and the
 reviewer then mutation-tests a single file in seconds instead of running the
 whole suite.
 
@@ -141,15 +141,15 @@ mark it exclusive and keep its tasks out of the parallel part.
 Some rules cannot hold from the first commit: "no `TODO` left in `src/`" is
 false until the cleanup task has run, and a script a later task creates cannot
 be checked before it exists. Say which task makes the rule true. The planner
-then gives the rule `from: "<that task's id>"` in `docs/foundry.json`: the rule
+then gives the rule `from: "<that task's id>"` in `docs/kukulu.json`: the rule
 stays inactive until that task is in progress, and still self-tests its own
 fixtures. The old idiom, wrapping a command in `test ! -f X || bash X`, is no
 longer needed, and it was a trap: it passed forever if `X` was never written.
 
 ## Provenance logging
 
-If a spec needs Foundry's own activity logged or tagged (an audit trail, a
-provenance record), do not try to change Foundry's commit subjects or its
+If a spec needs Kūkulu's own activity logged or tagged (an audit trail, a
+provenance record), do not try to change Kūkulu's commit subjects or its
 clean-tree checks. Both are part of how the pipeline tracks itself. Ask for a
 `commit-msg` hook instead: `.githooks/commit-msg`, enabled with
 `git config core.hooksPath .githooks`, which appends a trailer derived from the
@@ -158,11 +158,11 @@ subject. Keep a live log gitignored, and have a phase-end task snapshot it.
 ```sh
 #!/bin/sh
 # Append a trailer from the commit subject: "<ID>: ..." gets Task: <ID>;
-# progress:, review:, plan: and chore: commits get Stage: foundry.
+# progress:, review:, plan: and chore: commits get Stage: kukulu.
 subject=$(head -n 1 "$1")
 case "$subject" in
   [PR][0-9]*-[0-9]*:*) printf '\nTask: %s\n' "${subject%%:*}" >> "$1" ;;
-  progress:*|review:*|plan:*|chore:*) printf '\nStage: foundry\n' >> "$1" ;;
+  progress:*|review:*|plan:*|chore:*) printf '\nStage: kukulu\n' >> "$1" ;;
 esac
 ```
 
@@ -188,7 +188,7 @@ esac
 - extra, when `src/core/` is touched: `npm run test:invariants`
 ```
 
-That is enough for the planner to write a `foundry.json` with a matching
+That is enough for the planner to write a `kukulu.json` with a matching
 `extraVerify`, a `CLAUDE.md` with four checkable constraints, and a reviewer
 that can grep for violations rather than form an impression.
 
@@ -204,7 +204,7 @@ Then:
 
 ```bash
 claude
-> /foundry:go-flight
+> /kukulu:go-flight
 ```
 
 (The README's per-project section covers the one-time permission rule an
