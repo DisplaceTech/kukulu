@@ -553,6 +553,16 @@ const scanYml = read(".github/workflows/secret-scan.yml");
 const glPin = /^\s*GITLEAKS_VERSION:\s*"?([^"\s#]+)"?/m.exec(scanYml)?.[1];
 ok(glRev && glPin === glRev, "secret-scan.yml pins GITLEAKS_VERSION to the pre-commit gitleaks rev");
 
+// RN-12: the README explains the name, carries the placeholder for the maintainer, and no longer mentions the MIT releases.
+{
+  const readme = read("README.md");
+  like(readme, /^## The name$/m, "the README has a \"The name\" section");
+  like(readme, /\\\[PLACEHOLDER — Eric:/, "...with a marked placeholder for the maintainer's own words");
+  like(readme, /not affiliated with or endorsed by any Native Hawaiian organization/, "...stating there is no affiliation or endorsement");
+  ok(!/MIT License/.test(readme), "the README no longer carries the MIT footer");
+  ok(readme.indexOf("## The name") < readme.indexOf("## Quickstart"), "...and the name section comes before the Quickstart");
+}
+
 // RN-01: the name check. Fixtures are built from escapes so this file is itself
 // clean: the display name has a macron over the first u (U+016B), identifiers
 // are ASCII, and the okina in a Hawaiian word is U+02BB.

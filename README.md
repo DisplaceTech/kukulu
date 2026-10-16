@@ -7,6 +7,16 @@ mechanical work, and a zero-dependency MCP server does everything that should
 never be left to a language model at all. You write the spec and you merge the
 branch. Kūkulu does the part in between.
 
+## The name
+
+*Kūkulu* is a word in ʻōlelo Hawaiʻi, the Hawaiian language. As a verb it means to build, construct or establish; as a noun, a pillar or post, and also a side, border, hedge or horizon (Pukui and Elbert, *Hawaiian Dictionary*, [wehewehe.org entry](https://www.wehewehe.org/gsdl2.85/cgi-bin/hdict?e=q-11000-00---off-0hdict--00-1----0-10-0---0---0direct-10-ED--4--textpukuielbert%2ctextmamaka-----0-1l--11-en-Zz-1---Zz-1-home-k%c5%abkulu--00-4-1-00-0--4----0-0-11-00-2utfZz-8-00&a=d&d=D9586)). The first *u* is long; that is what the kahakō over it marks.
+
+Kūkulu builds from a specification and nothing else: the spec is the only foundation a flight stands on. What a flight leaves behind — the plan, the per-task commits, the review record — is the evidence the build stands on.
+
+\[PLACEHOLDER — Eric: a sentence or two, in your own words, on why you chose the name.\]
+
+The name comes from ʻōlelo Hawaiʻi. This project is not affiliated with or endorsed by any Native Hawaiian organization and does not claim to speak for Hawaiian culture. We write the name with its kahakō as a matter of respect for the language, and ask contributors to do the same in prose.
+
 ## Quickstart
 
 You need Node ≥ 22, git, and Claude Code. Nothing to `npm install`.
@@ -439,4 +449,3 @@ in it maps to a task in [`docs/plans/v0.3.md`](./docs/plans/v0.3.md).
 ## License
 
 [Apache License 2.0](./LICENSE), from 0.4.0 on; see also [NOTICE](./NOTICE).
-Releases 0.3.x and earlier remain available under the MIT License.
