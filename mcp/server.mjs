@@ -3153,10 +3153,15 @@ function migrate() {
   /** Rename the matching lines where they stand; a line whose new form is already present is dropped. */
   const renameLines = (text) => {
     const lines = text.split("\n");
+    const bare = (l) => l.replace(/\r$/, "");
     const out = [];
     for (const l of lines) {
-      if (!renamedLines.has(l)) out.push(l);
-      else if (!lines.includes(renamedLines.get(l)) && !out.includes(renamedLines.get(l))) out.push(renamedLines.get(l));
+      const name = bare(l);
+      if (!renamedLines.has(name)) out.push(l);
+      else {
+        const renamed = renamedLines.get(name);
+        if (!lines.some((x) => bare(x) === renamed) && !out.some((x) => bare(x) === renamed)) out.push(renamed + l.slice(name.length));
+      }
     }
     return out.join("\n");
   };
@@ -3222,7 +3227,8 @@ function migrate() {
     const text = renamed.replace(/\s*$/, "");
     if (renamed !== current) write(excludeFile, text ? `${text}\n` : "");
   }
-  for (const line of [`${rel(next.worktrees)}/`, ".claude/agents/kukulu-*.md"]) ensureLineInFile(excludeFile, line);
+  // settings.local.json holds the operator-specific permission grant, and ensureMcpAllowRule may create it just below.
+  for (const line of [`${rel(next.worktrees)}/`, ".claude/agents/kukulu-*.md", ".claude/settings.local.json"]) ensureLineInFile(excludeFile, line);
   const permissions = ensureMcpAllowRule();
 
   return { moved: moves.map(([from, to]) => [rel(from), rel(to)]), gitignore, removedAgents, keptAgents, permissions, commit };

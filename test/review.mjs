@@ -1143,7 +1143,7 @@ const MIGRATED = [".foundry/state.json", ".foundry/feedback.jsonl", "docs/foundr
     eq(git(repo, ["status", "--porcelain", "--", ".", ":!.claude"]), "", "...leaving the tree clean");
     eq(r.removedAgents.join(","), ".claude/agents/foundry-planner.md", "a generated foundry agent file is removed");
     eq(r.keptAgents.join(","), ".claude/agents/foundry-reviewer.md", "...and one without the generated marker is kept and reported");
-    eq(readFile(repo, ".git/info/exclude"), ".claude/agents/foundry-*.md\n.kukulu/worktrees/\n.kukulu/mutation.json\n.claude/agents/kukulu-*.md\n", "...the exclude file follows, mutation line included");
+    eq(readFile(repo, ".git/info/exclude"), ".claude/agents/foundry-*.md\n.kukulu/worktrees/\n.kukulu/mutation.json\n.claude/agents/kukulu-*.md\n.claude/settings.local.json\n", "...the exclude file follows, mutation line included");
     eq(r.permissions, "added", "...and the allow rule is ensured");
     eq((await call("kukulu_status")).deprecations.length, 0, "after it, the layout notice is gone");
     isError(await call("kukulu_migrate"), /already uses \.kukulu\/ and docs\/kukulu\.json/, "a second migrate refuses");
@@ -1155,8 +1155,22 @@ const MIGRATED = [".foundry/state.json", ".foundry/feedback.jsonl", "docs/foundr
   fs.rmSync(path.join(repo, ".claude/agents/foundry-reviewer.md"));
   await withServer(repo, async ({ call }) => {
     const r = await call("kukulu_migrate");
-    eq(readFile(repo, ".git/info/exclude"), ".kukulu/worktrees/\n.kukulu/mutation.json\n.claude/agents/kukulu-*.md\n", "with no foundry agent file left, the old exclude pattern goes too");
+    eq(readFile(repo, ".git/info/exclude"), ".kukulu/worktrees/\n.kukulu/mutation.json\n.claude/agents/kukulu-*.md\n.claude/settings.local.json\n", "with no foundry agent file left, the old exclude pattern goes too");
     eq(r.keptAgents.length, 0, "...and nothing is kept");
+  });
+}
+
+{
+  // CRLF ignore files are renamed too, keeping their line endings.
+  const repo = foundryProject();
+  writeFile(repo, ".gitignore", "node_modules/\r\n.foundry/implement.lock\r\n");
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-qm", "chore: crlf ignore"]);
+  await withServer(repo, async ({ call }) => {
+    await call("kukulu_migrate");
+    eq(readFile(repo, ".gitignore"), "node_modules/\r\n.kukulu/implement.lock\r\n", "a CRLF .gitignore is renamed in place with its line endings");
+    like(readFile(repo, ".git/info/exclude"), /^\.claude\/settings\.local\.json$/m, "migrate excludes .claude/settings.local.json, which it may create");
+    eq(git(repo, ["status", "--porcelain"]), "", "...so the tree is clean afterwards");
   });
 }
 

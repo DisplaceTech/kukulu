@@ -88,7 +88,13 @@ The decision order, exactly as the server evaluates it:
    commit) → **done**, "awaiting signing", with the steps to take.
 4. `state.archived` is set, `PLAN.md` is absent and `docs/SPEC.md` is
    byte-identical to the archived copy → **done**, "flight archived". Once
-   the spec differs, decision 5 applies and the answer is **plan**.
+   the spec differs, decision 5 applies and the answer is **plan**, except
+   on the pre-0.6.0 layout (decision 4a).
+4a. The project is still on the pre-0.6.0 layout (`.foundry/`) and any of
+   `PLAN.md`, `PROGRESS.md`, `foundry.json` is missing → **halt**, "run
+   `/kukulu:go-flight migrate` first". Planning would write
+   `docs/kukulu.json` beside `.foundry/`, and every tool refuses a project
+   holding both layouts. Removed in 0.7.0 with the layout fallback.
 5. Any of `PLAN.md`, `PROGRESS.md`, `kukulu.json` missing → **plan**.
 6. Open tasks → **implement**.
 7. Lock present (a run died before its handoff) → **implement**.
