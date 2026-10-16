@@ -7,6 +7,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { finish, ok, eq, like, ROOT, frontmatter, mkDir } from "./harness.mjs";
 
 const read = (rel) => fs.readFileSync(path.join(ROOT, rel), "utf8");
@@ -43,7 +44,10 @@ like(pkg.engines.node, /^>=\d+$/, "package.json states a Node floor");
 eq(market.plugins.length, 1, "the marketplace lists exactly this plugin");
 eq(market.plugins[0].name, plugin.name, "the marketplace entry matches the plugin name");
 ok(exists(market.plugins[0].source), "the marketplace source path resolves");
-ok(market.owner?.name, "the marketplace names an owner");
+eq(market.owner?.name, "Displace Technologies LLC", "the marketplace names Displace Technologies LLC as its owner");
+eq(read("NOTICE"), "K\u016bkulu\nCopyright 2026 Displace Technologies LLC\n\nOriginally developed by Eric Mann. Copyright in this project was\nassigned to Displace Technologies LLC effective October 15, 2026.\n", "NOTICE names the copyright holder and records the assignment");
+like(read("LICENSE"), /Apache License\s+Version 2\.0, January 2004/, "LICENSE is still the unmodified Apache-2.0 text");
+eq(createHash("sha256").update(fs.readFileSync(path.join(ROOT, "LICENSE"))).digest("hex"), "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30", "...byte-identical to the 0.5.0 file");
 
 // ---------------------------------------------------------------- MCP wiring
 
