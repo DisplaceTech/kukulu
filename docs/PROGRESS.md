@@ -53,7 +53,7 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] P4-01 cleanroom.similarity configuration
 - [x] P4-02 The lexer core, Rust and the C family
 - [x] P4-03 Lexers for Go, Python, JavaScript, TypeScript, Java and PHP
-- [ ] P4-04 Metrics, positioning and the verdict
+- [x] P4-04 Metrics, positioning and the verdict
 - [ ] P4-05 Calibration fixtures
 - [ ] P4-06 Tune similarity.separationMargin
 - [ ] P4-07 kukulu_similarity
@@ -221,3 +221,6 @@ tokenize/LANGUAGES in mcp/cleanroom.mjs: one scanner driven by SPECS per languag
 
 ### P4-03 — e8177fd
 Six more SPECS (go, python, javascript, typescript, java, php) plus scanner flags: tripleQuotes, docstrings, stringPrefixes, backtickStrings (raw/template), dollarIdent, phpTags; ":=" operator. Samples for each language in test/fixtures/similarity/lexers/. Known approximations: JS regex literals and template-literal substitutions are not parsed; Python soft keywords (match) stay IDs; PHP keywords are case-sensitive here.
+
+### P4-04 — 41a0090
+scorePair, position, verdictOf, BANDS, LIMITS added; tokenize now returns identifiers too. Verdict forms: "independence supported on every separable metric", "no metric separates the controls", else "independence not supported: <pair>: <metric> is <band>; ..." (my wording of the spec's "names the failing metrics and bands"). Row keys: ngram_jaccard@n, ngram_containment@n, ident_jaccard, ident_match_rate_left, comment_jaccard.
