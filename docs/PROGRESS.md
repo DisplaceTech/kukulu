@@ -36,7 +36,7 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] P3-05 Entry fields from a hook payload
 - [x] P3-06 The signing key and checkpoint primitives
 - [x] P3-07 Genesis and sticky mode
-- [ ] P3-08 Checkpoints from the tools, and the log in their commits
+- [x] P3-08 Checkpoints from the tools, and the log in their commits
 - [ ] P3-09 Path canonicalization and the Bash splitter
 - [ ] P3-10 evaluate: the guard's rules
 - [ ] P3-11 The guard hook and its self-test
@@ -170,3 +170,6 @@ Added generateKey/loadKey/keyFingerprint/CHECKPOINT_KEYS/signCheckpoint/verifyCh
 
 ### P3-07 — 1dc9c48
 Server: cleanroomOn/cleanroomLogPath/pluginHashes/ensureKey/cleanroomModeBreak/cleanroomGenesis; next() runs mode-break halt then genesis (before st.halted); run_start generates the key and records mode general; run_resume refuses mode-break first. CleanroomError mapped to its message in handle(). Harness: addPlan, cleanroomRepo({planned, policy}), testKeyFor(repo) (stable per-repo temp key via KUKULU_CLEANROOM_KEY). Interpretation: entries the server writes use role "session"; next() does not record general mode (run_start does). Genesis is a second write in kukulu_next, docs updated.
+
+### P3-08 — 7d62139
+checkpoint(event, stage, st) + cleanroomPaths(st) helpers; wired into run_start, task_done, task_block, run_finish, review_submit (both verdicts), summary_commit, flight_archive; archive moves log (and similarity.json when present) to docs/flights/<slug>/cleanroom/. porcelainExcludingPreexisting and trackedDirtyLines ignore the log (path matched from line end, because git() trims the first porcelain line). Note for P3-12: after the archive the logger must not recreate a log before the next genesis (log only when state.cleanroom.genesis is set), else genesis would not be seq 1. Docs notes added per tool and in operations.
