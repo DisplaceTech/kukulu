@@ -82,7 +82,7 @@ for (const [event, entries] of Object.entries(hooks.hooks)) {
 // SubagentStop is scoped to the implementer at the hook-registration level
 // (F-07): the harness never even runs the guard for any other subagent.
 like(hooks.hooks.SubagentStop[0].matcher, /kukulu.implementer/, "SubagentStop's matcher names the implementer");
-like(hooks.hooks.SubagentStop[0].matcher, /foundry.implementer/, "...and still names the pre-0.6.0 implementer, until 0.7.0");
+eq(hooks.hooks.SubagentStop[0].matcher, "^(kukulu:implementer|kukulu-implementer)$", "SubagentStop's matcher names only the kukulu implementer");
 ok(!hooks.hooks.Stop[0].matcher, "Stop carries no matcher — a Stop event has no agent to match against");
 
 // ---------------------------------------------------------------- agents and skills
