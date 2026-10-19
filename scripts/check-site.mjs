@@ -1008,6 +1008,26 @@ CASES.push(
       return got === sum ? null : `textBytes.measured is ${got}, not ${sum}`;
     },
   },
+  { rule: 4, name: "rule 4: install-shell-status given text", expect: "has a status element that is not empty", inject: (t) => sub(t, "index.html", 'id="install-shell-status" role="status" aria-live="polite"></p>', 'id="install-shell-status" role="status" aria-live="polite">x</p>') },
+  { rule: 4, name: "rule 4: a .copy-label that does not read Copy", expect: "has no .copy-label reading", inject: (t) => sub(t, "index.html", '<span class="copy-label">Copy</span>', '<span class="copy-label">Grab</span>') },
+  { rule: 4, name: "rule 4: the flight-cmd code id renamed", expect: "has no <code> target", inject: (t) => sub(t, "index.html", '<code id="flight-cmd">', '<code id="flight-cmd-x">') },
+  { rule: 4, name: "rule 4: a blank line after copy.js line 1", expect: "line 2 is not the COPY_FEEDBACK_MS declaration", inject: (t) => sub(t, "copy.js", "(() => {\n", "(() => {\n\n") },
+  { rule: 5, name: "rule 5: og:image set to /og.png", expect: "og:image is", inject: (t) => sub(t, "index.html", '<meta property="og:image" content="https://kukulu.tech/og.png">', '<meta property="og:image" content="/og.png">') },
+  { rule: 5, name: "rule 5: a third-party stylesheet link", expect: "<link> href", inject: (t) => sub(t, "index.html", "</head>", '<link rel="stylesheet" href="https://example.com/x.css"></head>') },
+  { rule: 5, name: "rule 5: @import in styles.css", expect: "uses @import", inject: (t) => {
+    const p = path.join(t.site, "styles.css");
+    fs.writeFileSync(p, `@import url(/x.css);\n${fs.readFileSync(p, "utf8")}`);
+  } },
+  { rule: 8, name: "rule 8: a changed owner.name", expect: "owner.name", inject: (t) => editMarketplace(t, (m) => { m.owner.name = "someone else"; }) },
+  { rule: 9, name: "rule 9: a changed print token", expect: "@media print tokens differ", inject: (t) => subAfter(t, "styles.css", "@media print", "--muted:#4A5866", "--muted:#4A5867") },
+  { rule: 9, name: "rule 9: a contrast pair with a non-hex token", expect: "not a #rgb/#rrggbb colour", inject: (t) => editConfig(t, (c) => { c.contrastPairs.push(["--grid", "--bg"]); }) },
+  { rule: 10, name: "rule 10: an img without alt", expect: "no alt attribute", inject: (t) => sub(t, "index.html", "</main>", '<img src="/og.png"></main>') },
+  { rule: 10, name: "rule 10: a button with no name", expect: "no accessible name", inject: (t) => sub(t, "index.html", "</main>", '<button type="button"></button></main>') },
+  { rule: 10, name: "rule 10: 404.html main renamed", expect: 'has no <main id="main">', inject: (t) => sub(t, "404.html", '<main id="main"', '<main id="content"') },
+  { rule: 12, name: "rule 12: a header line over the line limit", expect: "characters, over", inject: (t) => fs.appendFileSync(path.join(t.site, "_headers"), `  X-Long: ${"x".repeat(HEADERS_MAX_LINE)}\n`) },
+  { rule: 12, name: "rule 12: more rules than the rule limit", expect: "rules, over", inject: (t) => fs.appendFileSync(path.join(t.site, "_headers"), Array.from({ length: HEADERS_MAX_RULES + 1 }, (_, k) => `/r${k}\n`).join("")) },
+  { rule: 14, name: "rule 14: a CommonJS require call", expect: "CommonJS require", inject: (t) => fs.appendFileSync(path.join(t.scripts, "check-site.mjs"), `\nconst fsx = ${"req" + "uire"}("fs");\n`) },
+  { rule: "config", name: "config: contrastMin below 1", expect: '"contrastMin" must be', inject: (t) => editConfig(t, (c) => { c.contrastMin = 0.5; }) },
   { rule: 14, name: "rule 14: a third-party import", expect: 'imports "left-pad"', inject: (t) => fs.appendFileSync(path.join(t.scripts, "check-site.mjs"), ["", "import pad " + "from" + ' "left-pad";', ""].join("\n")) },
 );
 
