@@ -225,9 +225,10 @@ export const subject = (dir) => gitIn(dir, ["log", "-1", "--format=%s"]);
 // ---------------------------------------------------------------- fixtures
 
 /** One PLAN.md task block in the exact shape the server's parser expects. */
-export function planTask(t) {
+export function planTask(t, { legacy = false } = {}) {
   return [
     `### ${t.id}: ${t.title}`,
+    ...(legacy ? [] : [""]),
     `**Goal:** ${t.goal || t.title}`,
     `**Files touched:** ${t.files || "src/x"}`,
     `**Design constraints:** ${t.constraints || "none"}`,
@@ -247,27 +248,31 @@ export const DEFAULT_TASKS = [
   { id: "P0-03", title: "Depends on the impossible one", goal: "skip me", files: "x", depends: ["P0-02"] },
 ];
 
-export function planDoc(tasks) {
+export function planDoc(tasks, { legacy = false } = {}) {
   return [
     "# Test build plan",
+    ...(legacy ? [] : [""]),
     "Derived from docs/SPEC.md v0.1.",
     "",
     "## Decisions",
+    ...(legacy ? [] : [""]),
     "- none",
     "",
     "## Phase 0 — Scaffold",
     "",
-    ...tasks.map(planTask),
+    ...tasks.map((t) => planTask(t, { legacy })),
   ].join("\n");
 }
 
-export function progressDoc(tasks) {
+export function progressDoc(tasks, { legacy = false } = {}) {
   return [
     "# Test build progress",
+    ...(legacy ? [] : [""]),
     "Branch: (set by implement)",
     "Started: (set by implement)",
     "",
     "## Tasks",
+    ...(legacy ? [] : [""]),
     // `progressStream` overrides `stream` for PROGRESS.md only (`null` drops the tag).
     ...tasks.map((t) => {
       const tag = t.progressStream !== undefined ? t.progressStream : t.stream;
@@ -275,6 +280,7 @@ export function progressDoc(tasks) {
     }),
     "",
     "## Log",
+    ...(legacy ? [] : [""]),
     "(one entry per task, appended by implement)",
     "",
   ].join("\n");
@@ -520,4 +526,22 @@ export function runGuard(repo, input = {}, env = {}) {
     encoding: "utf8",
     env: { ...process.env, CLAUDE_PROJECT_DIR: repo, ...env },
   }).trim();
+}
+
+/**
+ * Every `#` heading in a Markdown text that is not followed by a blank line,
+ * or not preceded by one (except on line 1), as `line <n>: <heading> …`
+ * (markdownlint MD022). Fenced code blocks are skipped.
+ */
+export function headingSpacingProblems(text) {
+  const lines = text.split("\n");
+  const problems = [];
+  let fenced = false;
+  lines.forEach((l, i) => {
+    if (/^```/.test(l)) fenced = !fenced;
+    if (fenced || !/^#{1,6} /.test(l)) return;
+    if (i > 0 && lines[i - 1].trim() !== "") problems.push(`line ${i + 1}: ${l} is not preceded by a blank line`);
+    if (i < lines.length - 1 && lines[i + 1].trim() !== "") problems.push(`line ${i + 1}: ${l} is not followed by a blank line`);
+  });
+  return problems;
 }

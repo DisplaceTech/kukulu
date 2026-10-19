@@ -969,9 +969,13 @@ function parseProgressText(text) {
   const logs = {};
   if (logStart >= 0) {
     let cur = null;
+    let afterHeading = false;
     for (let i = logStart + 1; i < lines.length; i++) {
       const h = lines[i].match(/^### ([PR]\d+-\d+)\s+—\s+(.*)$/);
-      if (h) { cur = h[1]; logs[cur] = (logs[cur] ? logs[cur] + "\n\n" : "") + lines[i]; continue; }
+      if (h) { cur = h[1]; logs[cur] = (logs[cur] ? logs[cur] + "\n\n" : "") + lines[i]; afterHeading = true; continue; }
+      // The blank line that follows an entry's heading is spacing, not part of the entry.
+      if (afterHeading && lines[i].trim() === "") { afterHeading = false; continue; }
+      afterHeading = false;
       if (cur) logs[cur] += "\n" + lines[i];
     }
     for (const k of Object.keys(logs)) logs[k] = logs[k].replace(/\s+$/, "");
@@ -996,7 +1000,8 @@ function setTaskState(pr, id, state) {
 function appendLog(pr, id, stamp, body) {
   if (pr.logStart < 0) { pr.lines.push("", "## Log"); pr.logStart = pr.lines.length - 1; }
   while (pr.lines.length && pr.lines[pr.lines.length - 1].trim() === "") pr.lines.pop();
-  pr.lines.push("", `### ${id} — ${stamp}`, body.replace(/\s+$/, ""));
+  // A blank line after each heading keeps the file markdownlint-clean (MD022); the parser accepts both spacings.
+  pr.lines.push("", `### ${id} — ${stamp}`, "", body.replace(/\s+$/, ""));
 }
 
 function appendTaskLines(pr, entries) {
@@ -1009,7 +1014,7 @@ function appendTaskLines(pr, entries) {
 function setHeader(pr, key, value) {
   const i = pr.lines.findIndex((l) => l.startsWith(`${key}:`));
   if (i >= 0) pr.lines[i] = `${key}: ${value}`;
-  else pr.lines.splice(1, 0, `${key}: ${value}`);
+  else pr.lines.splice(pr.lines[1] === "" ? 2 : 1, 0, `${key}: ${value}`);
 }
 
 const writeProgress = (pr) => write(P.progress, pr.lines.join("\n").replace(/\s*$/, "\n"));
@@ -2703,6 +2708,7 @@ function formatTask(id, t) {
   const list = (v) => (Array.isArray(v) ? v.join(", ") : String(v ?? ""));
   return [
     `### ${id}: ${t.title}`,
+    "",
     `**Goal:** ${t.goal || ""}`,
     `**Files touched:** ${list(t.files)}`,
     `**Design constraints:** ${t.constraints || ""}`,

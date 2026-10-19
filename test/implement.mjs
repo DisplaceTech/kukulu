@@ -11,6 +11,7 @@ import {
   finish, ok, eq, like, isError,
   mkDir, plannedRepo, withServer, readFile, writeFile, hasFile, subject, useLegacyLayout,
   commitTask, markTasks, setState, git, mkBareRemote, mkFailingGhBin, mkFakeGhBin,
+  headingSpacingProblems, planDoc, progressDoc, DEFAULT_TASKS,
 } from "./harness.mjs";
 
 const TODAY = new Date().toISOString().slice(0, 10);
@@ -261,7 +262,7 @@ for (const missing of ["docs/SPEC.md", "docs/PLAN.md", "docs/PROGRESS.md", "docs
     eq(t.skipped[1].dependsOn, "P0-02", "each skip records which dependency stopped it");
     eq(t.counts.skipped, 3, "the skipped count matches");
     eq(subject(repo), "progress: skip P0-02, P0-03, P0-04", "the skips land in one commit");
-    like(readFile(repo, "docs/PROGRESS.md"), /### P0-02 — skipped\nSKIPPED: depends on P0-01/, "each skip is logged with its cause");
+    like(readFile(repo, "docs/PROGRESS.md"), /### P0-02 — skipped\n\nSKIPPED: depends on P0-01/, "each skip is logged with its cause");
   });
 }
 
@@ -303,9 +304,31 @@ for (const missing of ["docs/SPEC.md", "docs/PLAN.md", "docs/PROGRESS.md", "docs
     eq(r.guardReset, true, "task_done reports that it reset the guard's counter");
     eq(JSON.parse(readFile(repo, ".kukulu/implement.lock")).count, 0, "...and the lock's counter is actually back to zero");
     eq(r.taskCommit, git(repo, ["rev-parse", "--short", "HEAD~1"]), "task_done records the task's commit sha");
-    like(readFile(repo, "docs/PROGRESS.md"), /^### P0-01 — [0-9a-f]{7,}\nAdded hello\.txt\.$/m, "the log entry is stamped with that sha");
+    like(readFile(repo, "docs/PROGRESS.md"), /^### P0-01 — [0-9a-f]{7,}\n\nAdded hello\.txt\.$/m, "the log entry is stamped with that sha");
+    eq(headingSpacingProblems(readFile(repo, "docs/PROGRESS.md")).join("; "), "", "PROGRESS.md is MD022-clean after task_done");
     eq(subject(repo), "progress: P0-01 done", "the bookkeeping commit is separate from the task commit");
     eq(git(repo, ["status", "--porcelain"]), "", "task_done leaves a clean tree");
+  });
+}
+
+// PLAN.md and PROGRESS.md written in the 0.6 spacing (no blank line after a heading) still parse.
+{
+  const repo = plannedRepo();
+  writeFile(repo, "docs/PLAN.md", planDoc(DEFAULT_TASKS, { legacy: true }));
+  writeFile(repo, "docs/PROGRESS.md", progressDoc(DEFAULT_TASKS, { legacy: true }));
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-qm", "chore: 0.6 spacing"]);
+  await withServer(repo, async ({ call }) => {
+    await call("kukulu_run_start");
+    const n = await call("kukulu_task_next");
+    eq(n.id, "P0-01", "a PROGRESS.md in the 0.6 spacing still parses: the first task is selected");
+    like(n.text, /\*\*Goal:\*\* write hello\.txt/, "...and its PLAN.md block is found");
+    commitTask(repo, "P0-01", "Create hello", { "hello.txt": "hi\n" });
+    const r = await call("kukulu_task_done", { id: "P0-01", log: "Added hello.txt." });
+    eq(r.counts.done, 1, "...and a task completes");
+    const next = await call("kukulu_task_next");
+    eq(next.id, "P0-02", "...then the next one is selected");
+    like(next.dependencyLogs["P0-01"], /Added hello\.txt\./, "...with its dependency's log entry");
   });
 }
 
@@ -328,7 +351,8 @@ for (const missing of ["docs/SPEC.md", "docs/PLAN.md", "docs/PROGRESS.md", "docs
     ok(!hasFile(repo, "half-done.txt"), "task_block deletes untracked debris");
     eq(readFile(repo, "docs/SPEC.md"), "# Spec\n", "task_block reverts tracked edits");
     ok(hasFile(repo, ".kukulu/implement.lock"), "task_block keeps the run's lock armed");
-    like(readFile(repo, "docs/PROGRESS.md"), /### P0-01 — blocked\nBLOCKED: tried A \/ fails B \/ fix C/, "the block reason is logged verbatim");
+    like(readFile(repo, "docs/PROGRESS.md"), /### P0-01 — blocked\n\nBLOCKED: tried A \/ fails B \/ fix C/, "the block reason is logged verbatim");
+    eq(headingSpacingProblems(readFile(repo, "docs/PROGRESS.md")).join("; "), "", "PROGRESS.md is MD022-clean after task_block");
     eq(subject(repo), "progress: P0-01 blocked", "the block is committed");
   });
 }
@@ -363,8 +387,9 @@ for (const missing of ["docs/SPEC.md", "docs/PLAN.md", "docs/PROGRESS.md", "docs
     eq(subject(repo), "progress: reopen P0-02 (+2 dependents)", "the reopen is one commit");
     eq(git(repo, ["status", "--porcelain"]), "", "...leaving a clean tree");
     const prog = readFile(repo, "docs/PROGRESS.md");
-    like(prog, /### P0-02 — reopened\nREOPENED: the operator supplied the corpus file/, "the reason is logged");
-    like(prog, /### P0-04 — reopened\nreopened: it was skipped because of P0-03, which is open again/, "a transitive dependent's log names its cause");
+    like(prog, /### P0-02 — reopened\n\nREOPENED: the operator supplied the corpus file/, "the reason is logged");
+    like(prog, /### P0-04 — reopened\n\nreopened: it was skipped because of P0-03, which is open again/, "a transitive dependent's log names its cause");
+    eq(headingSpacingProblems(prog).join("; "), "", "PROGRESS.md is MD022-clean after task_reopen");
 
     const n = await call("kukulu_next");
     eq(n.stage, "implement", "a finished round with reopened tasks goes back to implement");

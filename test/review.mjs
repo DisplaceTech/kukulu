@@ -9,6 +9,7 @@ import {
   finish, ok, eq, like, isError,
   mkDir, plannedRepo, withServer, readFile, writeFile, subject, hasFile,
   markTasks, setState, git, mkBareRemote, mkFakeGhBin, mkFakeGpg, useFakeSigner,
+  headingSpacingProblems, planDoc, progressDoc, DEFAULT_TASKS,
 } from "./harness.mjs";
 
 const TODAY = new Date().toISOString().slice(0, 10);
@@ -150,6 +151,26 @@ const FIX = {
   });
 }
 
+// A PLAN.md and PROGRESS.md in the 0.6 spacing (no blank line after a heading) still parse and take a review round.
+{
+  const repo = reviewableRepo();
+  const plan = planDoc(DEFAULT_TASKS, { legacy: true });
+  const progress = progressDoc(DEFAULT_TASKS.map((t) => ({ ...t, state: "x" })), { legacy: true });
+  writeFile(repo, "docs/PLAN.md", plan);
+  writeFile(repo, "docs/PROGRESS.md", progress);
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-qm", "chore: 0.6 spacing"]);
+  await withServer(repo, async ({ call }) => {
+    const r = await call("kukulu_review_submit", { verdict: "CHANGES REQUESTED", tasks: [FIX] });
+    eq(r.fixTasks.join(","), "R1-01", "a PLAN.md in the 0.6 spacing still parses: the review round is accepted");
+    like(readFile(repo, "docs/PLAN.md"), /### R1-01: Fix hello\n\n\*\*Goal:\*\*/, "...and the fix task is appended in the new spacing");
+    await call("kukulu_run_start");
+    const n = await call("kukulu_task_next");
+    eq(n.id, "R1-01", "...and the fix task is selected next");
+    like(n.text, /\*\*Goal:\*\*/, "...with its block found");
+  });
+}
+
 {
   const repo = reviewableRepo({ states: { "P0-01": "x", "P0-02": "!", "P0-03": "-" } });
   await withServer(repo, async ({ call }) => {
@@ -183,8 +204,9 @@ const FIX = {
 
     const prog = readFile(repo, "docs/PROGRESS.md");
     like(prog, /- \[ \] P0-02 Impossible task\n- \[ \] P0-03[^\n]*\n- \[ \] R1-01 Fix hello\n- \[ \] R1-02 Second fix\n\n## Log/, "fix tasks are appended to Tasks, above the Log");
-    like(prog, /### P0-02 — unblocked \(round 1\)\nthe API does exist; see SPEC §6/, "the unblock reason is logged");
-    like(prog, /### P0-03 — unblocked \(round 1\)\nreopened: it was skipped because of P0-02, which is open again/, "the dependent's reopening is logged with its cause");
+    like(prog, /### P0-02 — unblocked \(round 1\)\n\nthe API does exist; see SPEC §6/, "the unblock reason is logged");
+    like(prog, /### P0-03 — unblocked \(round 1\)\n\nreopened: it was skipped because of P0-02, which is open again/, "the dependent's reopening is logged with its cause");
+    eq(headingSpacingProblems(plan).concat(headingSpacingProblems(prog)).join("; "), "", "PLAN.md and PROGRESS.md are MD022-clean after a CHANGES REQUESTED submit");
 
     const s = await call("kukulu_status");
     eq(s.counts.open, 4, "the unblocked task, its dependent and both fixes are open");
@@ -214,7 +236,7 @@ const FIX = {
     const r = await call("kukulu_review_submit", { verdict: "CHANGES REQUESTED", unblock: ["P0-03"] });
     eq(r.fixTasks.length, 0, "a round can be an unblock with no new tasks");
     eq(r.unblocked.join(","), "P0-03", "a bare string id is accepted");
-    like(readFile(repo, "docs/PROGRESS.md"), /### P0-03 — unblocked \(round 1\)\nunblocked by reviewer/, "a bare id gets a default reason");
+    like(readFile(repo, "docs/PROGRESS.md"), /### P0-03 — unblocked \(round 1\)\n\nunblocked by reviewer/, "a bare id gets a default reason");
     ok(!/## Review fixes/.test(readFile(repo, "docs/PLAN.md")), "no empty review section is added to PLAN.md");
   });
 }

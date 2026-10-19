@@ -51,17 +51,22 @@ A plan may split independent tasks into **streams**; the implement stage then ru
 
 ```
 # <Project> build plan
+
 Derived from docs/SPEC.md v<version> on <date>. SPEC.md wins over this file.
 
 ## Decisions
+
 - <open question> → <decision>. <rationale>
 ...
 
 ## Conventions
+
 <commit message template, anything every task shares>
 
 ## Phase 0 — <name>
+
 ### P0-01: <title>
+
 **Goal:** ...
 **Files touched:** ...
 **Design constraints:** ...
@@ -74,28 +79,33 @@ Derived from docs/SPEC.md v<version> on <date>. SPEC.md wins over this file.
 ### P0-02: ...
 
 ## Phase 1 — <name>
+
 ...
 
 ## Spec issues
+
 <anything ambiguous or contradictory in SPEC, with your proposed resolution>
 ```
 
-The `**Stream:**` line appears only on a task in a parallel wave (see "Parallel streams" above); leave it out of every serial task. Headings must be exactly `### <ID>: <title>`; the MCP extracts task text by that heading. Review rounds later append `## Review fixes (round N)` sections in the same task format; leave room for nothing else at the end.
+The `**Stream:**` line appears only on a task in a parallel wave (see "Parallel streams" above); leave it out of every serial task. Put a blank line after every heading, in both files (markdownlint's MD022). Headings must be exactly `### <ID>: <title>`; the MCP extracts task text by that heading. Review rounds later append `## Review fixes (round N)` sections in the same task format; leave room for nothing else at the end.
 
 ## `docs/PROGRESS.md` format
 
 ```
 # <Project> build progress
+
 Branch: (set by implement)
 Started: (set by implement)
 
 ## Tasks
+
 - [ ] P0-01 <title>
 - [ ] P0-02 <title>
 - [ ] P1-01 <title> {stream: api}
 ...
 
 ## Log
+
 (one entry per task, appended by implement)
 ```
 
