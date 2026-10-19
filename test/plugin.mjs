@@ -570,6 +570,7 @@ ok(read("skills/plan-build/SKILL.md").includes("templates/constraints.example.js
     if (key === "cleanroom") {
       ok(opsDoc.includes("`cleanroom.policy`") && opsDoc.includes("`cleanroom.signingKey`"), "operations.md documents cleanroom.policy and cleanroom.signingKey");
       ok(opsDoc.includes("`KUKULU_CLEANROOM_KEY`"), "operations.md documents KUKULU_CLEANROOM_KEY");
+      ok(opsDoc.includes("`cleanroom.similarity`") && ["subject", "pairs", "languages", "ngram", "minIdentLen", "commentNgram", "identExclusions", "near", "separationMargin"].every((k) => opsDoc.includes(`\`${k}\``)), "operations.md documents cleanroom.similarity");
       continue;
     }
     if (key === "review") {

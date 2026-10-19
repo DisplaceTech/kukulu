@@ -1140,4 +1140,48 @@ const gateCheck = (reason) => (reason.match(/^clean-room gate failed: ([\w-]+):/
   });
 }
 
+// ---------------------------------------------------------------- cleanroom.similarity
+
+{
+  const PAIRS = [
+    { id: "independent", role: "negative", left: "/srv/a", right: "/srv/b" },
+    { id: "derived", role: "positive", left: "/srv/a", right: "/srv/c" },
+    { id: "vs-prior-art", role: "test", left: "subject", right: "/srv/d" },
+  ];
+  const sim = (extra = {}) => ({ subject: ["src/"], pairs: PAIRS, ...extra });
+  const statusWith = async (similarity) => {
+    const repo = plannedRepo({ config: { cleanroom: { similarity } } });
+    let out;
+    await withServer(repo, async ({ call }) => { out = await call("kukulu_status"); });
+    return out;
+  };
+  const ok1 = await statusWith(sim());
+  ok(!ok1.error, "a valid similarity block resolves");
+  for (const [bad, re, label] of [
+    [sim({ pairs: [PAIRS[0], { ...PAIRS[0], id: "again" }, PAIRS[1], PAIRS[2]] }), /exactly one pair with role "negative" \(found 2\)/, "a similarity block with two negative pairs is refused"],
+    [sim({ pairs: [PAIRS[0], PAIRS[1]] }), /at least one pair with role "test"/, "...no test pair"],
+    [sim({ pairs: [PAIRS[0], PAIRS[2]] }), /exactly one pair with role "positive" \(found 0\)/, "...no positive pair"],
+    [sim({ pairs: [PAIRS[0], PAIRS[1], { ...PAIRS[2], role: "control" }] }), /pairs\[2\]\.role must be one of negative, positive, test/, "...an unknown pair role"],
+    [sim({ pairs: [PAIRS[0], PAIRS[1], { ...PAIRS[2], id: "independent" }] }), /defines the id 'independent' more than once/, "...a duplicate pair id"],
+    [sim({ pairs: [PAIRS[0], PAIRS[1], { ...PAIRS[2], extra: 1 }] }), /pairs\[2\] has an unknown key 'extra'/, "...an unknown pair key"],
+    [sim({ pairs: [PAIRS[0], PAIRS[1], { ...PAIRS[2], right: "" }] }), /pairs\[2\]\.right must be a non-empty string/, "...an empty pair side"],
+    [{ pairs: PAIRS }, /pairs\[2\]\.left is "subject", but docs\/kukulu\.json cleanroom\.similarity\.subject is not set/, "...the word subject with no subject"],
+    [sim({ bogus: 1 }), /cleanroom\.similarity has an unknown key 'bogus'/, "...an unknown similarity key"],
+    [sim({ languages: { ".rs": "cobol" } }), /languages\[".rs"\] is "cobol"; the shipped lexers are rust, c, cpp/, "...a language that is not shipped"],
+    [sim({ languages: { rs: "rust" } }), /extension starting with "\."/, "...an extension without a dot"],
+    [sim({ ngram: [5, 0] }), /ngram must be a non-empty array of positive integers/, "...ngram with a zero"],
+    [sim({ ngram: [] }), /ngram must be a non-empty array/, "...an empty ngram"],
+    [sim({ minIdentLen: 0 }), /minIdentLen must be a positive integer/, "...minIdentLen of zero"],
+    [sim({ commentNgram: 1.5 }), /commentNgram must be a positive integer/, "...a fractional commentNgram"],
+    [sim({ near: 0.5 }), /near must be a number greater than 0 and less than 0\.5/, "...near of 0.5"],
+    [sim({ near: 0 }), /near must be a number greater than 0/, "...near of 0"],
+    [sim({ separationMargin: -0.1 }), /separationMargin must be a number of at least 0/, "...a negative separationMargin"],
+    [sim({ identExclusions: "" }), /identExclusions must be a non-empty string/, "...an empty identExclusions"],
+    [sim({ subject: [] }), /subject must be a non-empty array/, "...an empty subject"],
+  ]) {
+    const r = await statusWith(bad);
+    isError(r, re, label);
+  }
+}
+
 finish();

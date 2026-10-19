@@ -679,7 +679,86 @@ function validateMutation(mutation) {
   }
 }
 
-const CLEANROOM_KEYS = ["policy", "signingKey"];
+const CLEANROOM_KEYS = ["policy", "signingKey", "similarity"];
+const SIMILARITY_KEYS = ["subject", "pairs", "languages", "ngram", "minIdentLen", "commentNgram", "identExclusions", "near", "separationMargin"];
+const SIMILARITY_LANGUAGES = ["rust", "c", "cpp", "go", "python", "javascript", "typescript", "java", "php"];
+const PAIR_ROLES = ["negative", "positive", "test"];
+const PAIR_ID = /^[a-z0-9][a-z0-9-]{0,39}$/;
+// The extensions a similarity run reads when `languages` is not configured.
+const DEFAULT_SIMILARITY_LANGUAGES = {
+  ".rs": "rust", ".c": "c", ".h": "c", ".cc": "cpp", ".cpp": "cpp", ".cxx": "cpp", ".hpp": "cpp", ".go": "go", ".py": "python",
+  ".js": "javascript", ".mjs": "javascript", ".cjs": "javascript", ".ts": "typescript", ".java": "java", ".php": "php",
+};
+
+/** Validate `cleanroom.similarity`: the controls and test pairs a contamination score is measured against. */
+function validateSimilarity(sim) {
+  if (sim === undefined) return;
+  const where = "docs/kukulu.json cleanroom.similarity";
+  const isObj = (v) => typeof v === "object" && v !== null && !Array.isArray(v);
+  const nonEmptyString = (v) => typeof v === "string" && v.length > 0;
+  if (!isObj(sim)) throw new ToolError(`${where} must be an object`);
+  for (const k of Object.keys(sim)) {
+    if (!SIMILARITY_KEYS.includes(k)) throw new ToolError(`${where} has an unknown key '${k}'; the legal keys are ${SIMILARITY_KEYS.join(", ")}`);
+  }
+  if (sim.subject !== undefined && (!Array.isArray(sim.subject) || !sim.subject.length || !sim.subject.every(nonEmptyString))) {
+    throw new ToolError(`${where}.subject must be a non-empty array of non-empty strings (the directories being measured)`);
+  }
+  if (!Array.isArray(sim.pairs) || !sim.pairs.length) throw new ToolError(`${where}.pairs must be a non-empty array of { id, role, left, right }`);
+  const seen = new Set();
+  const roles = { negative: 0, positive: 0, test: 0 };
+  sim.pairs.forEach((p, i) => {
+    const at = `${where}.pairs[${i}]`;
+    if (!isObj(p)) throw new ToolError(`${at} must be an object { id, role, left, right }`);
+    for (const k of Object.keys(p)) if (!["id", "role", "left", "right"].includes(k)) throw new ToolError(`${at} has an unknown key '${k}'`);
+    if (typeof p.id !== "string" || !PAIR_ID.test(p.id)) throw new ToolError(`${at}.id must be a slug (lowercase letters, digits and -, at most 40 characters)`);
+    if (seen.has(p.id)) throw new ToolError(`${where}.pairs defines the id '${p.id}' more than once`);
+    seen.add(p.id);
+    if (!PAIR_ROLES.includes(p.role)) throw new ToolError(`${at}.role must be one of ${PAIR_ROLES.join(", ")} (got ${JSON.stringify(p.role)})`);
+    roles[p.role]++;
+    for (const side of ["left", "right"]) {
+      if (!nonEmptyString(p[side])) throw new ToolError(`${at}.${side} must be a non-empty string: a directory (absolute, ~, repo-relative) or "subject"`);
+      if (p[side] === "subject" && sim.subject === undefined) throw new ToolError(`${at}.${side} is "subject", but ${where}.subject is not set`);
+    }
+  });
+  if (roles.negative !== 1) throw new ToolError(`${where}.pairs needs exactly one pair with role "negative" (found ${roles.negative})`);
+  if (roles.positive !== 1) throw new ToolError(`${where}.pairs needs exactly one pair with role "positive" (found ${roles.positive})`);
+  if (roles.test < 1) throw new ToolError(`${where}.pairs needs at least one pair with role "test"`);
+  if (sim.languages !== undefined) {
+    if (!isObj(sim.languages) || !Object.keys(sim.languages).length) throw new ToolError(`${where}.languages must be an object mapping an extension such as ".rs" to a language`);
+    for (const [ext, lang] of Object.entries(sim.languages)) {
+      if (!/^\.[^./\\]+$/.test(ext)) throw new ToolError(`${where}.languages key ${JSON.stringify(ext)} must be an extension starting with "."`);
+      if (!SIMILARITY_LANGUAGES.includes(lang)) throw new ToolError(`${where}.languages[${JSON.stringify(ext)}] is ${JSON.stringify(lang)}; the shipped lexers are ${SIMILARITY_LANGUAGES.join(", ")}`);
+    }
+  }
+  if (sim.ngram !== undefined && (!Array.isArray(sim.ngram) || !sim.ngram.length || !sim.ngram.every((n) => Number.isInteger(n) && n > 0))) {
+    throw new ToolError(`${where}.ngram must be a non-empty array of positive integers`);
+  }
+  for (const k of ["minIdentLen", "commentNgram"]) {
+    if (sim[k] !== undefined && (!Number.isInteger(sim[k]) || sim[k] < 1)) throw new ToolError(`${where}.${k} must be a positive integer`);
+  }
+  if (sim.identExclusions !== undefined && !nonEmptyString(sim.identExclusions)) throw new ToolError(`${where}.identExclusions must be a non-empty string: the path of a file with one identifier per line`);
+  if (sim.near !== undefined && !(typeof sim.near === "number" && sim.near > 0 && sim.near < 0.5)) throw new ToolError(`${where}.near must be a number greater than 0 and less than 0.5`);
+  if (sim.separationMargin !== undefined && !(typeof sim.separationMargin === "number" && Number.isFinite(sim.separationMargin) && sim.separationMargin >= 0)) {
+    throw new ToolError(`${where}.separationMargin must be a number of at least 0`);
+  }
+}
+
+/** The similarity block with its defaults filled in, or null when none is configured. */
+function normalizeSimilarity(sim) {
+  if (sim === undefined) return null;
+  return {
+    subject: sim.subject ?? [],
+    pairs: sim.pairs.map((p) => ({ id: p.id, role: p.role, left: p.left, right: p.right })),
+    languages: sim.languages ?? DEFAULT_SIMILARITY_LANGUAGES,
+    // ⚠️ ASSUMPTION: the n-gram sizes, identifier and comment bounds come from cleanflate-bench; the margin is strict "pos > neg" until measured.
+    ngram: sim.ngram ?? [5, 10],
+    minIdentLen: sim.minIdentLen ?? 6,
+    commentNgram: sim.commentNgram ?? 5,
+    identExclusions: sim.identExclusions ?? null,
+    near: sim.near ?? 0.25,
+    separationMargin: sim.separationMargin ?? 0.0,
+  };
+}
 const DEFAULT_CLEANROOM_POLICY = "docs/cleanroom.json";
 const DEFAULT_SIGNING_KEY = "~/.config/kukulu/cleanroom/ed25519.pem";
 
@@ -700,6 +779,7 @@ function validateCleanroom(cleanroom) {
   if (cleanroom.signingKey !== undefined && (typeof cleanroom.signingKey !== "string" || !cleanroom.signingKey)) {
     throw new ToolError("docs/kukulu.json cleanroom.signingKey must be a non-empty string: the path of an Ed25519 private key in PEM form");
   }
+  validateSimilarity(cleanroom.similarity);
 }
 
 /** A leading `~` is the home directory; the result is always absolute. */
@@ -810,6 +890,7 @@ function cfgFrom(c, planIds) {
     cleanroom: {
       policy: c.cleanroom?.policy ?? DEFAULT_CLEANROOM_POLICY,
       signingKey: expandHome(envVar("CLEANROOM_KEY") || c.cleanroom?.signingKey || DEFAULT_SIGNING_KEY),
+      similarity: normalizeSimilarity(c.cleanroom?.similarity),
     },
     policies: {
       signing: c.policies?.signing ?? "auto",
