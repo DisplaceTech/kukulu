@@ -65,8 +65,21 @@ function contentType(file) {
   return TEXT_TYPES.has(ext) ? `${type}; charset=utf-8` : type;
 }
 
+// The port argument, then SITE_PORT, then servePort from checks.json. A SITE_PORT that is set but
+// unusable is refused rather than ignored, so a typo cannot silently bind the default port.
+function choosePort(port) {
+  if (port !== undefined && port !== null) return port;
+  const env = process.env.SITE_PORT;
+  if (env === undefined || env === "") return loadConfig(CONFIG_PATH).servePort;
+  const n = Number(env);
+  if (!/^\d+$/.test(env) || n > 65535) {
+    throw new Error(`SITE_PORT is ${JSON.stringify(env)}, not an integer from 0 to 65535; set it to a TCP port, or unset it to use servePort from docs/site/checks.json`);
+  }
+  return n;
+}
+
 export async function start({ port } = {}) {
-  const chosen = port ?? (process.env.SITE_PORT ? Number(process.env.SITE_PORT) : loadConfig(CONFIG_PATH).servePort);
+  const chosen = choosePort(port);
   const rules = parseHeaders(fs.readFileSync(path.join(SITE_DIR, "_headers"), "utf8"));
 
   const send = (req, res, status, urlPath, type, body, extra) => {
@@ -143,6 +156,35 @@ function request(base, method, urlPath) {
   });
 }
 
+// Never binds servePort: it may be in use by a running server.
+async function portChecks(check) {
+  const probe = http.createServer();
+  await new Promise((resolve) => probe.listen(0, "127.0.0.1", resolve));
+  const free = probe.address().port;
+  await new Promise((resolve) => probe.close(resolve));
+  const saved = process.env.SITE_PORT;
+  try {
+    process.env.SITE_PORT = String(free);
+    const viaEnv = await start({});
+    check("start({}) uses SITE_PORT", new URL(viaEnv.url).port === String(free));
+    await viaEnv.close();
+    const viaArg = await start({ port: 0 });
+    check("the port argument beats SITE_PORT", new URL(viaArg.url).port !== String(free) && new URL(viaArg.url).port !== "");
+    await viaArg.close();
+    process.env.SITE_PORT = "abc";
+    let message = "";
+    try {
+      await (await start({})).close();
+    } catch (e) {
+      message = e.message;
+    }
+    check("a bad SITE_PORT is refused naming SITE_PORT", message.includes("SITE_PORT"));
+  } finally {
+    if (saved === undefined) delete process.env.SITE_PORT;
+    else process.env.SITE_PORT = saved;
+  }
+}
+
 async function selfTest() {
   const server = await start({ port: 0 });
   const problems = [];
@@ -175,10 +217,12 @@ async function selfTest() {
     check("GET /_headers is 404", (await request(server.url, "GET", "/_headers")).status === 404);
     check("GET /../package.json is 403", (await request(server.url, "GET", "/../package.json")).status === 403);
     check("GET /%2e%2e/package.json is 403", (await request(server.url, "GET", "/%2e%2e/package.json")).status === 403);
+    check("GET /%00 is 403", (await request(server.url, "GET", "/%00")).status === 403);
     check("a bad escape is 403", (await request(server.url, "GET", "/%zz")).status === 403);
     check("POST / is 405", (await request(server.url, "POST", "/")).status === 405);
     const head = await request(server.url, "HEAD", "/");
     check("HEAD / is 200 with no body", head.status === 200 && head.body === "");
+    await portChecks(check);
   } finally {
     await server.close();
   }
