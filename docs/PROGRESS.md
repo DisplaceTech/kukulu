@@ -10,7 +10,7 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] P0-03 Refuse the pre-0.6.0 layout and remove kukulu_migrate
 - [x] P0-04 The guard and hooks accept only the kukulu names
 - [x] P0-05 Skills and docs drop the foundry compatibility
-- [ ] P0-06 Archives stay readable without pinned hashes
+- [x] P0-06 Archives stay readable without pinned hashes
 - [ ] P0-07 Phase 0 end: push and record the manual check
 - [ ] P1-01 plan_commit checks the branch; run_start names both fixes
 - [ ] P1-02 kukulu_run_resume
@@ -92,3 +92,6 @@ Guard: IMPLEMENTER_AGENT_TYPES kukulu only, RUN_START_TOOL kukulu_run_start only
 
 ### P0-05 — ab8fa85
 Skills summarize/pull-feedback, operations.md (single archive sentence), architecture.md (4a gone), CHANGELOG updated; plugin tests added. no-foundry-names constraint now active and passing. mcp-tools.md needed no further change.
+
+### P0-06 — 42a88a5
+State test computes SHA-256 of the nine v0-5-0 files at start; no hash literals. Review test renamed to the required name and extended with an existing alt-base case.
