@@ -4,7 +4,7 @@ Started: 2026-10-19T16:52:28.587Z
 
 ## Tasks
 - [x] P1-01 Seed site/ and start check-site.mjs with config validation and rules 1, 2 and 8
-- [ ] P1-02 styles.css foundation and index.html through How it works
+- [x] P1-02 styles.css foundation and index.html through How it works
 - [ ] P1-03 index.html from Why it holds up to the footer
 - [ ] P1-04 copy.js, 404.html and _headers
 - [ ] P1-05 check-site.mjs rules 3 to 7
@@ -22,3 +22,6 @@ Started: 2026-10-19T16:52:28.587Z
 
 ### P1-01 — 047ab27
 Seeded site/ byte-identical + robots.txt; scripts/check-site.mjs with loadConfig, checkSite (ctx.fail(rule,file,what,fix) pattern; add rules by writing ruleN(ctx) and calling it in checkSite), CASES array (13 cases), selfTest, CLI. IMPLEMENTED_RULES constant drives the "ok (rules ...)" line; extend it per task. Self-test cases match `expect` against message. --report flag not yet accepted (unknown flag exits 2).
+
+### P1-02 — 2958fe7
+styles.css has fonts, tokens (dark :root, light media, print), base, and components for header/hero/problem/How. Class vocabulary: .wrap-stack/.wrap-stack-tight/.wrap-split, .sec-head, .body-text, .inline-code, .icon/.icon-accent/.icon-dot, .arrow/.arrow-head, .stage (scoped by .pipe/.ev), .copy-status (+.install override). index.html ends with `</main></body></html>` after How it works; P1-03 inserts sections before `</main>` and the footer after it, and must add .step/.codebox (mobile rules: .step single column, .codebox column with .copy aligned end) CSS. Interpretation: .btn-outline:hover uses ink bg/bg text rather than mockup's inline colour.
