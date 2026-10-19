@@ -6,7 +6,7 @@ Started: 2026-10-19T20:19:40.028Z
 ## Tasks
 
 - [x] P0-01 Keep pre-commit from rewriting the approved-copy file
-- [ ] P0-02 Remove the FOUNDRY_* fallbacks and the deprecations field
+- [x] P0-02 Remove the FOUNDRY_* fallbacks and the deprecations field
 - [ ] P0-03 Refuse the pre-0.6.0 layout and remove kukulu_migrate
 - [ ] P0-04 The guard and hooks accept only the kukulu names
 - [ ] P0-05 Skills and docs drop the foundry compatibility
@@ -80,3 +80,6 @@ Started: 2026-10-19T20:19:40.028Z
 
 ### P0-01 — 9f634f6
 Added exclude for docs/site/copy-changes.json to end-of-file-fixer. pre-commit passes, tree clean, npm test green. Note: the first attempt via a python heredoc was denied by the auto-mode classifier; Edit tool worked.
+
+### P0-02 — 853ca09
+envVar now KUKULU_ only; deprecate()/DEPRECATIONS removed; global config path unmemoized, no foundry/ fallback; deprecations field removed from status/next, docs, go-flight, CHANGELOG. Tests as in task. Interpretation: removed deprecations assertions in test/review.mjs too (outside Files touched, would throw). resolveLayout's both-layouts refusal left for P0-03.
