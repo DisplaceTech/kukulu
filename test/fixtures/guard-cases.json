@@ -1,0 +1,929 @@
+[
+ {
+  "name": "deny.tools denies a listed tool",
+  "policy": {
+   "version": 1,
+   "deny": {
+    "tools": [
+     "Agent"
+    ]
+   }
+  },
+  "input": {
+   "tool_name": "Agent",
+   "tool_input": {
+    "subagent_type": "x",
+    "description": "y"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "tool Agent is denied by deny.tools"
+ },
+ {
+  "name": "deny.tools leaves an unlisted tool alone",
+  "policy": {
+   "version": 1,
+   "deny": {
+    "tools": [
+     "Agent"
+    ]
+   }
+  },
+  "input": {
+   "tool_name": "Read",
+   "tool_input": {
+    "file_path": "__ROOT__/a.txt"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "WebSearch is denied under deny.network",
+  "policy": {
+   "version": 1
+  },
+  "input": {
+   "tool_name": "WebSearch",
+   "tool_input": {
+    "query": "deflate"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network access is denied \\(WebSearch\\)"
+ },
+ {
+  "name": "WebSearch is also denied by the template through deny.tools",
+  "policy": "template",
+  "input": {
+   "tool_name": "WebSearch",
+   "tool_input": {
+    "query": "deflate"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "tool WebSearch is denied by deny.tools"
+ },
+ {
+  "name": "WebSearch is allowed with deny.network false",
+  "policy": {
+   "version": 1,
+   "deny": {
+    "network": false
+   }
+  },
+  "input": {
+   "tool_name": "WebSearch",
+   "tool_input": {
+    "query": "deflate"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "WebFetch of an allowed URL is allowed before lockdown",
+  "policy": "template",
+  "progress": "# p\n\n## Tasks\n\n- [x] P0-01 a\n- [~] P0-10 b\n- [ ] P0-11 c\n",
+  "input": {
+   "tool_name": "WebFetch",
+   "tool_input": {
+    "url": "https://www.rfc-editor.org/rfc/rfc1951.txt"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "WebFetch of another URL is denied",
+  "policy": "template",
+  "progress": "# p\n\n## Tasks\n\n- [x] P0-01 a\n- [~] P0-10 b\n- [ ] P0-11 c\n",
+  "input": {
+   "tool_name": "WebFetch",
+   "tool_input": {
+    "url": "https://example.invalid/x"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "is not in allow\\.urls"
+ },
+ {
+  "name": "WebFetch of an allowed URL is denied once lockdown is active",
+  "policy": "template",
+  "progress": "# p\n\n## Tasks\n\n- [x] P0-01 a\n- [x] P0-10 b\n- [ ] P0-11 c\n",
+  "input": {
+   "tool_name": "WebFetch",
+   "tool_input": {
+    "url": "https://www.rfc-editor.org/rfc/rfc1951.txt"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "lockdown is active"
+ },
+ {
+  "name": "Write to a protected path is denied",
+  "policy": "template",
+  "input": {
+   "tool_name": "Write",
+   "tool_input": {
+    "file_path": "__ROOT__/tools/build.sh",
+    "content": "x"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "Edit of a protected path is denied",
+  "policy": "template",
+  "input": {
+   "tool_name": "Edit",
+   "tool_input": {
+    "file_path": "__ROOT__/tools/build.sh",
+    "old_string": "a",
+    "new_string": "b"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "MultiEdit of a protected path is denied",
+  "policy": "template",
+  "input": {
+   "tool_name": "MultiEdit",
+   "tool_input": {
+    "file_path": "__ROOT__/tools/build.sh",
+    "edits": []
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "NotebookEdit of a protected path is denied",
+  "policy": "template",
+  "input": {
+   "tool_name": "NotebookEdit",
+   "tool_input": {
+    "notebook_path": "__ROOT__/tools/n.ipynb"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "Read of a protected path is allowed",
+  "policy": "template",
+  "input": {
+   "tool_name": "Read",
+   "tool_input": {
+    "file_path": "__ROOT__/tools/build.sh"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "Write inside the project is allowed",
+  "policy": "template",
+  "input": {
+   "tool_name": "Write",
+   "tool_input": {
+    "file_path": "__ROOT__/docs/notes.md",
+    "content": "x"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "Read under a deny.paths prefix is denied",
+  "policy": "template",
+  "input": {
+   "tool_name": "Read",
+   "tool_input": {
+    "file_path": "__HOME__/.cargo/registry/src/index/x.rs"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "\\(deny\\.paths\\)"
+ },
+ {
+  "name": "Read of a deny.paths file is denied",
+  "policy": "template",
+  "input": {
+   "tool_name": "Read",
+   "tool_input": {
+    "file_path": "/usr/include/zlib.h"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "\\(deny\\.paths\\)"
+ },
+ {
+  "name": "Read matching a pathPattern is denied",
+  "policy": "template",
+  "input": {
+   "tool_name": "Read",
+   "tool_input": {
+    "file_path": "__ROOT__/target/debug/build/x/out"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "pathPatterns build-script-output"
+ },
+ {
+  "name": "Read beside the pattern is allowed",
+  "policy": "template",
+  "input": {
+   "tool_name": "Read",
+   "tool_input": {
+    "file_path": "__ROOT__/target/debug/deps/x"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "Read of a path with a forbidden word is denied",
+  "policy": "template",
+  "input": {
+   "tool_name": "Read",
+   "tool_input": {
+    "file_path": "__ROOT__/vendor/zlib-notes.txt"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "forbidden word in path"
+ },
+ {
+  "name": "Read of the same word under allow.paths is allowed",
+  "policy": "template",
+  "input": {
+   "tool_name": "Read",
+   "tool_input": {
+    "file_path": "__ROOT__/docs/zlib-notes.md"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "Glob with a forbidden word at the root is denied",
+  "policy": "template",
+  "input": {
+   "tool_name": "Glob",
+   "tool_input": {
+    "pattern": "**/*zlib*"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "forbidden word in pattern"
+ },
+ {
+  "name": "Glob with a forbidden word under allow.paths is allowed",
+  "policy": "template",
+  "input": {
+   "tool_name": "Glob",
+   "tool_input": {
+    "path": "__ROOT__/crates/cleanflate",
+    "pattern": "**/zlib*"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "Grep for a forbidden word at the root is denied",
+  "policy": "template",
+  "input": {
+   "tool_name": "Grep",
+   "tool_input": {
+    "path": "__ROOT__",
+    "pattern": "flate2"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "forbidden word in pattern"
+ },
+ {
+  "name": "Grep for a forbidden word under allow.paths is allowed",
+  "policy": "template",
+  "input": {
+   "tool_name": "Grep",
+   "tool_input": {
+    "path": "__ROOT__/crates/oracle",
+    "pattern": "flate2"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "Grep glob with a forbidden word is denied outside allow.paths",
+  "policy": "template",
+  "input": {
+   "tool_name": "Grep",
+   "tool_input": {
+    "path": "__ROOT__/src",
+    "glob": "*zopfli*",
+    "pattern": "x"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "forbidden word in glob"
+ },
+ {
+  "name": "curl to an unlisted URL is denied",
+  "policy": "template",
+  "progress": "# p\n\n## Tasks\n\n- [x] P0-01 a\n- [~] P0-10 b\n- [ ] P0-11 c\n",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "curl -s https://example.invalid/x"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command curl is denied"
+ },
+ {
+  "name": "curl to an allowed URL is allowed before lockdown",
+  "policy": "template",
+  "progress": "# p\n\n## Tasks\n\n- [x] P0-01 a\n- [~] P0-10 b\n- [ ] P0-11 c\n",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "curl -s https://www.rfc-editor.org/rfc/rfc1951.txt -o __ROOT__/docs/rfc1951.txt"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "curl to an allowed URL is denied once lockdown is active",
+  "policy": "template",
+  "progress": "# p\n\n## Tasks\n\n- [x] P0-01 a\n- [x] P0-10 b\n- [ ] P0-11 c\n",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "curl -s https://www.rfc-editor.org/rfc/rfc1951.txt"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command curl is denied"
+ },
+ {
+  "name": "curl with one URL outside allow.urls is denied",
+  "policy": "template",
+  "progress": "# p\n\n## Tasks\n\n- [x] P0-01 a\n- [~] P0-10 b\n- [ ] P0-11 c\n",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "curl https://www.rfc-editor.org/rfc/rfc1951.txt https://example.invalid/x"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command curl"
+ },
+ {
+  "name": "wget of an allowed URL is allowed",
+  "policy": "template",
+  "progress": "# p\n\n## Tasks\n\n- [x] P0-01 a\n- [~] P0-10 b\n- [ ] P0-11 c\n",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "wget https://www.rfc-editor.org/rfc/rfc1951.txt"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "gh is never allowed",
+  "policy": "template",
+  "progress": "# p\n\n## Tasks\n\n- [x] P0-01 a\n- [~] P0-10 b\n- [ ] P0-11 c\n",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "gh pr view 3"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command gh is denied"
+ },
+ {
+  "name": "git clone is never allowed",
+  "policy": "template",
+  "progress": "# p\n\n## Tasks\n\n- [x] P0-01 a\n- [~] P0-10 b\n- [ ] P0-11 c\n",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "git clone https://www.rfc-editor.org/rfc/rfc1951.txt"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command git clone is denied"
+ },
+ {
+  "name": "git status is not a network command",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "git status --short"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "npm ci is denied",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "npm ci"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command npm ci is denied"
+ },
+ {
+  "name": "a network command behind a wrapper and an assignment is denied",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "FOO=1 sudo -E ssh host true"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command ssh is denied"
+ },
+ {
+  "name": "a network command in the second segment is denied",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "echo ok && wget https://example.invalid/a"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command wget is denied"
+ },
+ {
+  "name": "network commands are allowed with deny.network false",
+  "policy": {
+   "version": 1,
+   "deny": {
+    "network": false
+   }
+  },
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "curl https://example.invalid/x"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "a Bash token under deny.paths is denied",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat __HOME__/.cargo/registry/src/x.rs"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "\\(deny\\.paths\\)"
+ },
+ {
+  "name": "a Bash token matching a pathPattern is denied",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "ls __ROOT__/target/release/build/out"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "pathPatterns build-script-output"
+ },
+ {
+  "name": "a Bash option value under deny.paths is denied",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "tar --directory=/usr/include/zlib.h x"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "\\(deny\\.paths\\)"
+ },
+ {
+  "name": "a read-family path argument with a forbidden word is denied",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat /opt/zlib/README"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "forbidden word in path argument: /opt/zlib/README"
+ },
+ {
+  "name": "a forbidden word in a path argument under allow.paths is allowed",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat __ROOT__/docs/zlib-notes.md"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "a non-path word inside the repository is allowed",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "grep -rn zlib __ROOT__/crates/cleanflate/src"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "a non-path word with a path outside the repository is denied",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "grep zlib /etc/hosts"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "forbidden word in command outside the repository: zlib"
+ },
+ {
+  "name": "a non-path word with no path and a cwd inside the repository is allowed",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "grep zlib"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "a non-path word with no path and a cwd outside the repository is denied",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "grep zlib"
+   },
+   "cwd": "__HOME__/elsewhere"
+  },
+  "expect": "denied",
+  "reason": "forbidden word in command outside the repository"
+ },
+ {
+  "name": "a forbidden word in a non-read command is not judged",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "echo zlib is mentioned"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "cp onto a protected path is denied",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cp __ROOT__/docs/a __ROOT__/tools/b"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "a redirection onto a protected path is denied",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "echo x > __ROOT__/tools/z.sh"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "an appending redirection onto a protected path is denied",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "echo x >>__ROOT__/tools/z.sh"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "a redirection of stderr to a project file is allowed",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "make 2>__ROOT__/docs/err.log"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "2>&1 is not a redirection target",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "make 2>&1 | tail -3"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "tee onto a protected path is denied",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "echo x | tee __ROOT__/tools/q"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "git config core.hooksPath is denied",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "git config core.hooksPath /tmp/hooks"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "rm inside the project is allowed",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "rm -rf __ROOT__/docs/old"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "a commandPatterns match is denied with its id",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "perf record target/release/oracle"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "commandPatterns no-profiling-oracle"
+ },
+ {
+  "name": "a command beside the pattern is allowed",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "perf record target/release/examples/profile_decode"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "an interpreter escape is allowed (a documented gap)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "python3 -c \"print(open('/usr/include/zlib.h').read())\""
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "Agent is allowed",
+  "policy": "template",
+  "input": {
+   "tool_name": "Agent",
+   "tool_input": {
+    "subagent_type": "kukulu-implementer",
+    "description": "build"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "Skill is allowed",
+  "policy": "template",
+  "input": {
+   "tool_name": "Skill",
+   "tool_input": {
+    "skill": "kukulu:implement"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "an mcp tool is allowed",
+  "policy": "template",
+  "input": {
+   "tool_name": "mcp__plugin_kukulu_kukulu__kukulu_status",
+   "tool_input": {},
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "cleanflate false positive 1 (sed -i expression with a word, 2026-09-30T14:40:33), still denied: a regex or sed expression with a slash is a path-like token",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd __ROOT__/crates/oracle/src; \nsed -i 's/cleanflate_mib_s_min/cleanflate_mib_s_best/g; s/c_zlib_mib_s_min/c_zlib_mib_s_best/g; s/\\bmin_ns\\b/best_ns/g; s/(min)/(best)/g; s/cf_min/cf_best/g; s/cz_min/cz_best/g; s/median_and_min_odd_even/median_and_best_odd_even/' bench.rs bench_json.rs bench_compare.rs\nsed -i 's/^        schema: 1,\\n        kind: args/X/' bench.rs\npython3 - <<'EOF'\nimport re\np='bench.rs'; s=open(p).read()\ns=s.replace(\"    let json = BenchJson {\\n        schema: 1,\",\"    let json = BenchJson {\\n        schema: SCHEMA,\",1)\ns=s.replace(\"use crate::bench_json::{\",\"use crate::bench_json::{SCHEMA, \",1) if \"use crate::bench_json::{\" in s else s\ns=s.replace('''    out.push_str(\"|---|---:|---:|---:|---:|\\\\n\");\n    for a in &json.aggregates {\n        out.push_str(&format!(\n            \"| {} | {:.1} | {:.1} | {:.1} | {:.3} |\\\\n\",\n            a.key,\n            a.cleanflate_mib_s_median,\n            a.cleanflate_mib_s_best,\n            a.c_zlib_mib_s_median,\n            a.ratio\n        ));\n    }\n    out\n''','''    out.push_str(\"|---|---:|---:|---:|---:|\\\\n\");\n    for a in &json.aggregates {\n        out.push_str(&format!(\n            \"| {} | {:.1} | {:.1} | {:.1} | {:.3} |\\\\n\",\n            a.key,\n            a.cleanflate_mib_s_median,\n            a.cleanflate_mib_s_best,\n            a.c_zlib_mib_s_median,\n            a.ratio\n        ));\n    }\n    out.push('\\\\n');\n    out.push_str(TABLE_FOOTER);\n    out\n''',1)\ns=s.replace(\"/// A markdown table of the aggregates.\",'''/// Two-line definition footer printed under the stdout table.\npub const TABLE_FOOTER: &str = \"median: throughput from the median per-decode time of the samples; best: throughput of the fastest sample. Aggregates: total bytes / sum of per-file times.\\\\nratio: cleanflate median / C zlib median.\\\\n\";\n\n/// A markdown table of the aggregates.''',1)\nopen(p,'w').write(s)\n\np='bench_json.rs'; s=open(p).read()\ns=s.replace(\"schema 1;\",\"schema 2;\",1)\ns=s.replace(\"use serde::{Deserialize, Serialize};\",\"\"\"use serde::{Deserialize, Serialize};\n\n/// The schema number writers emit.\npub const SCHEMA: u32 = 2;\"\"\",1)\ns=s.replace(\"    pub best_ns: f64,\",\"    #[serde(alias = \\\"min_ns\\\")]\\n    pub best_ns: f64,\",1)\ns=s.replace(\"    /// Minimum nanoseconds per decode.\",\"    /// Best (fastest sample) nanoseconds per decode.\")\ns=s.replace(\"    pub cleanflate_mib_s_best: f64,\",\"    #[serde(alias = \\\"cleanflate_mib_s_min\\\")]\\n    pub cleanflate_mib_s_best: f64,\",1)\ns=s.replace(\"    pub c_zlib_mib_s_best: f64,\",\"    #[serde(alias = \\\"c_zlib_mib_s_min\\\")]\\n    pub c_zlib_mib_s_best: f64,\",1)\ns=s.replace(\"per-file minimums\",\"per-file best times\").replace(\"from minimums\",\"from best times\")\ns=s.replace(\"    /// Always 1.\\n    pub schema: u32,\\n    /// `full`\",\"    /// 2 for files written now; 1 (read-only) is also accepted on load.\\n    pub schema: u32,\\n    /// `full`\",1)\ns=s.replace(\"/// Format seconds since\",'''impl BenchJson {\n    /// Parse a bench JSON, accepting schema 1 (old field names) and 2.\n    pub fn parse(text: &str) -> Result<BenchJson, String> {\n        let j: BenchJson = serde_json::from_str(text).map_err(|e| e.to_string())?;\n        if j.schema != 1 && j.schema != SCHEMA {\n            return Err(format!(\n                \"unsupported bench schema {} (this build reads 1 and {SCHEMA}); regenerate the file with `make bench` or use a matching oracle build\",\n                j.schema\n            ));\n        }\n        Ok(j)\n    }\n}\n\n/// Format seconds since''',1)\ns=s.replace(\"            schema: 1,\",\"            schema: SCHEMA,\",1)\ns=s.replace('''    #[test]\n    fn utc_formatting''','''    #[test]\n    fn schema1_file_loads_with_best_fields() {\n        let path = concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/../../docs/perf/baselines/phase2.json\");\n        let text = std::fs::read_to_string(path).expect(\"phase2 baseline is committed\");\n        let j = BenchJson::parse(&text).expect(\"schema-1 loads\");\n        assert_eq!(j.schema, 1);\n        assert!(j.results.iter("
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "forbidden word in path argument"
+ },
+ {
+  "name": "cleanflate false positive 2 (perf report on target/profile, 2026-09-30T16:11:51)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd __ROOT__/target/profile; perf report -i silesia-rfc1951-l1-oneshot/perf.data --stdio --no-children -g none --sort dso 2>/dev/null | grep -E '^ +[0-9]' | head; perf report -i silesia-rfc1951-l1-streaming/perf.data --stdio --no-children -g none --sort dso 2>/dev/null | grep -E '^ +[0-9]'|head -4; grep -E \"page-faults|instructions|task-clock\" silesia-rfc1951-l1-streaming/stat.txt canterbury-rfc1952-l1-oneshot/stat.txt | cut -c1-100; cat /proc/sys/kernel/perf_event_paranoid; head -12 canterbury-rfc1952-l1-oneshot/top.txt | tail -5; ls ../../testdata/perf-inputs/canterbury"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "cleanflate false positive 3 (perf report with P=target/profile, 2026-09-30T16:11:56)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd __ROOT__; P=target/profile; perf report -i $P/silesia-rfc1951-l1-oneshot/perf.data --stdio --no-children -g none --sort dso 2>/dev/null | grep -E '^ +[0-9]' | head -5; grep -E \"page-faults|instructions|task-clock\" $P/silesia-rfc1951-l1-streaming/stat.txt | cut -c1-100; cat /proc/sys/kernel/perf_event_paranoid"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "cleanflate false positive 4 (recursive grep over src, 2026-09-30T17:00:19)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd __ROOT__/crates/cleanflate; grep -n \"CRC32_TABLES\\|CRC32_SLICES\" -r src | grep -v \"^src/checksum.rs\"; sed -n 60,200p src/tests/checksum.rs"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "cleanflate false positive 5 (grep -E alternation in profile output, 2026-09-30T17:21:39)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd __ROOT__; make profile PROFILE_KEY=canterbury/rfc1950/l1/streaming PROFILE_ITERS=300 > target/p204-a.log 2>&1; for k in silesia-rfc1950-l6-streaming silesia-rfc1952-l6-streaming canterbury-rfc1950-l1-streaming canterbury-rfc1952-l1-streaming; do echo == $k; grep -E \"ZlibDecoder|GzipDecoder|adler|Crc32|Inflater::step\" target/profile/$k/top.txt target/profile/$k/top-children.txt | sed 's#target/profile/##' | cut -c1-150; done"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "cleanflate false positive 6 (grep -v with escaped alternation, 2026-09-30T17:23:20), still denied: a regex or sed expression with a slash is a path-like token",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd __ROOT__; grep -rn \"\\.step(\" crates --include=*.rs --exclude-dir=target | grep -v \"^crates/cleanflate/src/\\(inflate\\|zlib\\|gzip\\|stream\\).rs\" | wc -l; grep -rn \"\\.step(\" crates --include=*.rs --exclude-dir=target | grep -v \"^crates/cleanflate/src/\\(inflate\\|zlib\\|gzip\\|stream\\).rs\" | cut -c1-110 | head -20; grep -rn \"copy_match\\|history_available\\|fast_loop::run\" crates --include=*.rs --exclude-dir=target | grep -v \"^crates/cleanflate/src/\\(window\\|fast_loop\\|inflate\\).rs\" | cut -c1-120 | head"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "forbidden word in path argument"
+ },
+ {
+  "name": "cleanflate false positive 7 (bench-compare table filter, 2026-09-30T18:13:45), still denied: a regex or sed expression with a slash is a path-like token",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd __ROOT__; S=__ROOT__/target/scratch; B=docs/perf/baselines; make -s bench-compare A=docs/perf/phase3/P2-07-before.json B=docs/perf/phase3/P2-07.json NOISE=$B/phase3-noise-quick.json 2>&1 | cut -c1-200 | grep -E \"^\\| (silesia|canterbury)/(raw|gzip|zlib)/l(1|6)/oneshot\" | awk -F'|' '{print $2,$5,$7,$11}'; python3 - <<'EOF'\nimport json\nfor f in ['P2-07-before','P2-07']:\n    j=json.load(open(f'__ROOT__/docs/perf/phase3/{f}.json')); print(f,j['machine']['loadavg'][:16],j['machine']['loadavg_end'][:16])\nEOF\nrun(){ $S/pd_$1 --dir testdata/perf-inputs/$2 --format $3 --iters $4 --mode $5 | sed 's/.*= //;s/ (.*//;s/ MiB.s//'; }\nfor key in \"silesia/rfc1951-l1 rfc1951 2 oneshot\" \"silesia/rfc1951-l6 rfc1951 2 oneshot\" \"silesia/rfc1952-l6 rfc1952 2 oneshot\" \"canterbury/rfc1951-l1 rfc1951 200 oneshot\" \"canterbury/rfc1952-l1 rfc1952 200 oneshot\"; do set -- $key; echo \"== $key\"; for i in 1 2 3 4 5 6; do b=$(run before $1 $2 $3 $4); a=$(run after $1 $2 $3 $4); echo \"$b $a\"; done; done"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "forbidden word in path argument"
+ },
+ {
+  "name": "cleanflate false positive 8 (bench-quick comparison, 2026-09-30T20:53:01), still denied: a regex or sed expression with a slash is a path-like token",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd __ROOT__; (make bench-quick BENCH_ID=P4-03 BENCH_OUT=docs/perf/phase3/P4-03.json > target/p403-qa.log 2>&1; echo DONE >> target/p403-qa.log) >/dev/null 2>&1 &\nuntil grep -q DONE target/p403-qa.log; do sleep 5; done; B=docs/perf/baselines; make -s bench-compare A=docs/perf/phase3/P4-03-before.json B=docs/perf/phase3/P4-03.json NOISE=$B/phase3-noise-quick.json > target/p403-cmp.txt 2>&1; cut -c1-200 target/p403-cmp.txt | grep -E \"^\\| (silesia|canterbury)/(raw|gzip|zlib)/l(1|6)/(oneshot|streaming)\" | awk -F'|' '{print $2,$5,$7,$9,$10,$11,$12}' | head -30; grep -c \"^REGRESSION\" target/p403-cmp.txt; python3 - <<'EOF'\nimport json\nfor f in ['P4-03-before','P4-03']:\n    j=json.load(open(f'__ROOT__/docs/perf/phase3/{f}.json')); print(f,j['machine']['loadavg'][:16],j['machine']['loadavg_end'][:16])\nEOF"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "forbidden word in path argument"
+ },
+ {
+  "name": "cleanflate real prior-art attempt (find for libz-sys, 2026-09-29T14:54:47)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "python3 -c \"\nimport subprocess\n\" \nfind / -path '*/libz-sys-*/src/lib.rs' 2>/dev/null | head -3"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "forbidden word in path argument"
+ }
+]

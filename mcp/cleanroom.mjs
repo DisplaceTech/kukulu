@@ -592,3 +592,192 @@ export function canonicalPaths(p, { cwd, home }) {
   const real = realPathOf(normalized);
   return real !== normalized ? [normalized, real] : [normalized];
 }
+
+// ---------------------------------------------------------------- the guard's decision
+
+// Bash commands that reach the network, fixed here so the policy cannot widen or narrow the list. A two-word
+// entry matches the command word and its first argument (`git clone`, `npm i`).
+export const NETWORK_COMMANDS = [
+  "curl", "wget", "gh", "ssh", "scp", "nc", "git clone", "git fetch", "git pull", "pip download", "cargo vendor", "cargo download",
+  "npm install", "npm i", "npm ci", "go get", "composer install",
+];
+export const READ_FAMILY = new Set(
+  "cat less more head tail grep egrep fgrep rg ag ack find fd locate ls tree sed awk bat strings xxd od hexdump file zcat zless zgrep view vi vim nano emacs".split(" "),
+);
+export const WRITE_FAMILY = new Set("cp mv rm tee sed truncate chmod chown ln install dd git".split(" "));
+const WRITE_TOOLS = new Set(["Write", "Edit", "MultiEdit", "NotebookEdit"]);
+const PATH_TOOLS = new Set(["Read", "Glob", "Grep", ...WRITE_TOOLS]);
+const NO_ISSUES = Object.freeze({ decision: "allowed", reason: null });
+const denied = (reason) => ({ decision: "denied", reason });
+
+/** Whether a task is `[x]` in the PROGRESS text. */
+const taskDone = (progressText, id) => new RegExp(`^- \\[x\\] ${id}\\b`, "m").test(progressText);
+
+/**
+ * Lockdown ends the `allow.urls` exemption: false without `lockdown.after` or
+ * without a PROGRESS text; true once that task is `[x]`, or when no task is
+ * left open.
+ */
+export function lockdownActive(policy, progressText) {
+  if (!policy.lockdown?.after || typeof progressText !== "string") return false;
+  if (taskDone(progressText, policy.lockdown.after)) return true;
+  const tasks = progressText.split("\n").filter((l) => /^- \[[ ~x!-]\] \S/.test(l));
+  return tasks.length > 0 && !tasks.some((l) => /^- \[[ ~]\]/.test(l));
+}
+
+const underPrefix = (p, prefix) => {
+  const bare = prefix.length > 1 ? prefix.replace(/\/+$/, "") : prefix;
+  return p === bare || p.startsWith(bare === "/" ? "/" : `${bare}/`);
+};
+
+/** A policy path entry made absolute: `~` is home, a relative entry is repo-relative. */
+const resolvePrefix = (entry, root, home) => canonicalPaths(entry, { cwd: root, home })[0];
+
+/**
+ * Decide one tool call against the policy (SPEC D-03). Pure: `env` carries the
+ * project `root`, the user's `home`, the PROGRESS text (for lockdown) and the
+ * `protected` prefixes. The first rule that matches denies.
+ */
+export function evaluate(policy, hookInput, env) {
+  const input = hookInput && typeof hookInput === "object" ? hookInput : {};
+  const tool = typeof input.tool_name === "string" ? input.tool_name : "";
+  const args = input.tool_input && typeof input.tool_input === "object" && !Array.isArray(input.tool_input) ? input.tool_input : {};
+  const { root, home } = env;
+  const cwd = typeof input.cwd === "string" && input.cwd ? input.cwd : root;
+  const lockdown = lockdownActive(policy, env.progressText);
+  const prefixes = (list) => list.map((e) => resolvePrefix(e, root, home));
+  const denyPaths = prefixes(policy.deny.paths);
+  const allowPaths = prefixes(policy.allow.paths);
+  const protectedPaths = env.protected ?? prefixes(policy.protected);
+  const forms = (p) => canonicalPaths(p, { cwd, home });
+  const inRepo = (p) => forms(p).some((f) => underPrefix(f, root));
+  const exempt = (p) => forms(p).some((f) => allowPaths.some((a) => underPrefix(f, a)));
+  const wordIn = (text) => {
+    const lower = String(text).toLowerCase();
+    return policy.deny.words.some((w) => lower.includes(w.toLowerCase()));
+  };
+  const regexes = (list) => list.map((p) => ({ id: p.id, re: new RegExp(p.pattern, p.flags || "") }));
+  const pathPatterns = regexes(policy.deny.pathPatterns);
+  const commandPatterns = regexes(policy.deny.commandPatterns);
+
+  /** The deny.paths / pathPatterns / protected verdict for one path, or null. */
+  const pathVerdict = (p, { write = false } = {}) => {
+    for (const f of forms(p)) {
+      if (write && protectedPaths.some((x) => underPrefix(f, x))) return denied(`protected path: ${f}`);
+    }
+    for (const f of forms(p)) {
+      if (denyPaths.some((x) => underPrefix(f, x))) return denied(`denied path: ${f} (deny.paths)`);
+      const hit = pathPatterns.find((x) => new RegExp(x.re.source, x.re.flags).test(f));
+      if (hit) return denied(`denied path: ${f} (pathPatterns ${hit.id})`);
+    }
+    return null;
+  };
+
+  // 1. tools denied outright
+  if (policy.deny.tools.includes(tool)) return denied(`tool ${tool} is denied by deny.tools`);
+  // 2. WebSearch
+  if (tool === "WebSearch" && policy.deny.network) return denied("network access is denied (WebSearch)");
+  // 3. WebFetch
+  if (tool === "WebFetch" && policy.deny.network) {
+    if (lockdown) return denied("WebFetch is denied: lockdown is active");
+    if (policy.allow.urls.includes(String(args.url ?? ""))) return NO_ISSUES;
+    return denied(`WebFetch is denied: ${args.url ?? "(no url)"} is not in allow.urls`);
+  }
+
+  if (PATH_TOOLS.has(tool)) {
+    const target = tool === "NotebookEdit" ? args.notebook_path : args.file_path;
+    const isSearch = tool === "Glob" || tool === "Grep";
+    const base = isSearch ? args.path || cwd : target;
+    // 4. protected paths, for every write tool
+    if (WRITE_TOOLS.has(tool) && typeof base === "string" && base) {
+      const v = forms(base).find((f) => protectedPaths.some((x) => underPrefix(f, x)));
+      if (v) return denied(`protected path: ${v}`);
+    }
+    // 5. deny.paths, pathPatterns and forbidden words
+    if (typeof base === "string" && base) {
+      const v = pathVerdict(base);
+      if (v) return v;
+      if (!isSearch && wordIn(base) && !exempt(base)) return denied(`forbidden word in path: ${base}`);
+    }
+    if (isSearch) {
+      const fields = tool === "Glob" ? [["pattern", args.pattern]] : [["glob", args.glob], ["pattern", args.pattern]];
+      const baseExempt = typeof base === "string" && exempt(base);
+      for (const [name, value] of fields) {
+        if (typeof value === "string" && wordIn(value) && !baseExempt) return denied(`forbidden word in ${name}: ${value}`);
+      }
+      if (typeof base === "string" && wordIn(base) && !baseExempt) return denied(`forbidden word in path: ${base}`);
+    }
+    return NO_ISSUES;
+  }
+
+  if (tool === "Bash") {
+    const command = String(args.command ?? "");
+    for (const segment of splitSegments(command)) {
+      const tokens = shellWords(segment);
+      const { word, args: rest } = commandWord(tokens);
+      if (word === null) continue;
+
+      // 6a. network commands
+      if (policy.deny.network) {
+        const first = rest.find((t) => !t.startsWith("-"));
+        const name = NETWORK_COMMANDS.includes(word) ? word : first && NETWORK_COMMANDS.includes(`${word} ${first}`) ? `${word} ${first}` : null;
+        if (name) {
+          const urls = tokens.filter((t) => /^https?:\/\//i.test(t));
+          const allowedFetch = (word === "curl" || word === "wget") && !lockdown && urls.length > 0 && urls.every((u) => policy.allow.urls.includes(u));
+          if (!allowedFetch) return denied(`network command ${name} is denied`);
+        }
+      }
+      // 6b. any token under deny.paths or matching a pathPattern
+      const pathTokens = rest.filter(isPathLike);
+      for (const t of pathTokens) {
+        const v = pathVerdict(tokenPath(t));
+        if (v) return v;
+      }
+      // 6c. read-family commands and forbidden words
+      if (READ_FAMILY.has(word)) {
+        for (const t of pathTokens) {
+          if (wordIn(t) && !exempt(tokenPath(t))) return denied(`forbidden word in path argument: ${t}`);
+        }
+        const outside = pathTokens.length ? pathTokens.some((t) => !inRepo(tokenPath(t))) : !inRepo(cwd);
+        if (outside) {
+          for (const t of rest) {
+            if (!isPathLike(t) && wordIn(t)) return denied(`forbidden word in command outside the repository: ${t}`);
+          }
+        }
+      }
+      // 6d. write-family commands and redirections on protected paths
+      const redirects = redirectTargets(tokens);
+      if (WRITE_FAMILY.has(word)) {
+        if (word === "git" && rest[0] === "config" && rest.some((t) => /core\.hookspath/i.test(t))) return denied("protected path: git config core.hooksPath");
+        for (const t of pathTokens) {
+          const f = forms(tokenPath(t)).find((x) => protectedPaths.some((p) => underPrefix(x, p)));
+          if (f) return denied(`protected path: ${f}`);
+        }
+      }
+      for (const t of redirects) {
+        const f = forms(t).find((x) => protectedPaths.some((p) => underPrefix(x, p)));
+        if (f) return denied(`protected path: ${f}`);
+      }
+      // 6e. command patterns
+      const hit = commandPatterns.find((x) => new RegExp(x.re.source, x.re.flags).test(segment));
+      if (hit) return denied(`commandPatterns ${hit.id}`);
+    }
+    return NO_ISSUES;
+  }
+
+  // 7. everything else, Agent, Task, Skill and every mcp__ tool included
+  return NO_ISSUES;
+}
+
+/** The targets of `>` and `>>` redirections in a segment's tokens, with their fd prefixes (`2>`, `&>`) removed. */
+function redirectTargets(tokens) {
+  const targets = [];
+  for (let i = 0; i < tokens.length; i++) {
+    const m = /^(?:\d+|&)?>>?(.*)$/.exec(tokens[i]);
+    if (!m) continue;
+    const inline = m[1].replace(/^&\d*$/, "");
+    if (inline) targets.push(inline);
+    else if (!/^&\d*$/.test(m[1]) && tokens[i + 1] !== undefined) targets.push(tokens[++i]);
+  }
+  return targets;
+}

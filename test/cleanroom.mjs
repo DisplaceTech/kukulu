@@ -15,6 +15,7 @@ import {
   CleanroomError, loadPolicy, policyHash,
   ENTRY_KEYS, KINDS, ZERO_HASH, TARGET_MAX, truncateTarget, canonical, entryHash, appendEntry, readEntries, verifyChain, logPathFor, targetOf, projectContext, entryFields,
   splitSegments, shellWords, commandWord, isPathLike, tokenPath, canonicalPaths,
+  evaluate, lockdownActive, NETWORK_COMMANDS, READ_FAMILY, WRITE_FAMILY,
   generateKey, loadKey, keyFingerprint, CHECKPOINT_KEYS, signCheckpoint, verifyCheckpoint,
 } from "../mcp/cleanroom.mjs";
 
@@ -638,6 +639,38 @@ async function genesisRepo(planOpts = {}) {
   fs.symlinkSync(real, link);
   eq(JSON.stringify(canonicalPaths(path.join(link, "f.txt"), { cwd, home })), JSON.stringify([path.join(link, "f.txt"), path.join(real, "f.txt")]), "...adds the real path through a symlinked repo");
   eq(JSON.stringify(canonicalPaths(path.join(link, "new", "g.txt"), { cwd, home })), JSON.stringify([path.join(link, "new", "g.txt"), path.join(real, "new", "g.txt")]), "...even for a file that does not exist yet");
+}
+
+// ---------------------------------------------------------------- the guard's decision
+
+{
+  // Every case of the fixture file, one assertion each. __ROOT__ and __HOME__ are real temp directories.
+  const cases = JSON.parse(fs.readFileSync(path.join(ROOT, "test", "fixtures", "guard-cases.json"), "utf8"));
+  const root = mkDir("kukulu-guard-root-");
+  const home = mkDir("kukulu-guard-home-");
+  const sub = (v) => JSON.parse(JSON.stringify(v).replaceAll("__ROOT__", root).replaceAll("__HOME__", home));
+  eq(new Set(cases.map((c) => c.name)).size, cases.length, "every guard case has its own name");
+  for (const c of cases) {
+    const policy = loadPolicy(c.policy === "template" ? EXAMPLE : JSON.stringify(c.policy));
+    const r = evaluate(policy, sub(c.input), { root, home, progressText: c.progress ?? null });
+    const reason = c.reason ? new RegExp(c.reason) : null;
+    ok(r.decision === c.expect && (!reason || (r.reason && reason.test(r.reason))), `guard case: ${c.name}`);
+    if (r.decision !== c.expect || (reason && !reason.test(r.reason ?? ""))) console.log(`  #   expected ${c.expect}${c.reason ? ` /${c.reason}/` : ""}, got ${r.decision}: ${r.reason}`);
+  }
+}
+
+{
+  const policy = loadPolicy('{"version":1,"lockdown":{"after":"P0-10"}}');
+  const before = "## Tasks\n- [x] P0-01 a\n- [~] P0-10 b\n- [ ] P0-11 c\n";
+  eq(lockdownActive(policy, before), false, "lockdownActive is false before the lockdown task");
+  eq(lockdownActive(policy, before.replace("[~] P0-10", "[x] P0-10")), true, "...true once it is done");
+  eq(lockdownActive(policy, "## Tasks\n- [x] P0-01 a\n- [!] P0-02 b\n- [-] P0-03 c\n"), true, "...true when no task is open");
+  eq(lockdownActive(policy, null), false, "...false without a PROGRESS.md");
+  eq(lockdownActive(loadPolicy('{"version":1}'), "## Tasks\n- [x] P0-01 a\n"), false, "...false without lockdown.after");
+  eq(lockdownActive(policy, "## Tasks\n"), false, "...false for a PROGRESS.md with no tasks at all");
+  eq(NETWORK_COMMANDS.join("|"), "curl|wget|gh|ssh|scp|nc|git clone|git fetch|git pull|pip download|cargo vendor|cargo download|npm install|npm i|npm ci|go get|composer install", "NETWORK_COMMANDS is the fixed list");
+  eq([...READ_FAMILY].join(" "), "cat less more head tail grep egrep fgrep rg ag ack find fd locate ls tree sed awk bat strings xxd od hexdump file zcat zless zgrep view vi vim nano emacs", "READ_FAMILY is the fixed list");
+  eq([...WRITE_FAMILY].join(" "), "cp mv rm tee sed truncate chmod chown ln install dd git", "WRITE_FAMILY is the fixed list");
 }
 
 finish();
