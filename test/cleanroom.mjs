@@ -14,6 +14,7 @@ import { createHash as sha, generateKeyPairSync } from "node:crypto";
 import {
   CleanroomError, loadPolicy, policyHash,
   ENTRY_KEYS, KINDS, ZERO_HASH, TARGET_MAX, truncateTarget, canonical, entryHash, appendEntry, readEntries, verifyChain, logPathFor, targetOf, projectContext, entryFields,
+  splitSegments, shellWords, commandWord, isPathLike, tokenPath, canonicalPaths,
   generateKey, loadKey, keyFingerprint, CHECKPOINT_KEYS, signCheckpoint, verifyCheckpoint,
 } from "../mcp/cleanroom.mjs";
 
@@ -589,6 +590,54 @@ async function genesisRepo(planOpts = {}) {
     ok(!hasFile(repo, ".kukulu/cleanroom"), "general mode writes no checkpoint and no log");
     ok(!touched(repo).some((f) => f.includes("cleanroom")), "...and commits nothing about one");
   });
+}
+
+// ---------------------------------------------------------------- Bash segments and paths
+
+{
+  eq(JSON.stringify(splitSegments("a; b && c || d | e & f\ng")), JSON.stringify(["a", "b", "c", "d", "e", "f", "g"]), "splitSegments splits on ; && || | & and newlines");
+  eq(JSON.stringify(splitSegments('grep -E "a|b" file | wc -l')), JSON.stringify(['grep -E "a|b" file', "wc -l"]), "...keeps a quoted |");
+  eq(JSON.stringify(splitSegments("grep 'a;b&&c' f; echo ok")), JSON.stringify(["grep 'a;b&&c' f", "echo ok"]), "...keeps quoted ; and && in single quotes");
+  eq(JSON.stringify(splitSegments('echo "a \\" ; b" ; ls')), JSON.stringify(['echo "a \\" ; b"', "ls"]), "...handles escaped quotes");
+  eq(JSON.stringify(splitSegments("echo a\\;b; ls")), JSON.stringify(["echo a\\;b", "ls"]), "...and a backslash-escaped ; outside quotes");
+  eq(JSON.stringify(splitSegments("make 2>&1 | tee out &> log")), JSON.stringify(["make 2>&1", "tee out &> log"]), "...and does not split a redirection's &");
+  eq(JSON.stringify(splitSegments("  \n ; ")), "[]", "...and drops empty segments");
+  eq(JSON.stringify(shellWords(`cp 'a b' "c \\"d\\"" e\\ f`)), JSON.stringify(["cp", "a b", 'c "d"', "e f"]), "shellWords removes quotes and unescapes");
+  eq(JSON.stringify(shellWords("a '' b")), JSON.stringify(["a", "", "b"]), "...keeping an empty quoted word");
+
+  const cw = (s) => commandWord(shellWords(s));
+  eq(cw("FOO=1 BAR=2 curl http://x").word, "curl", "commandWord skips assignments");
+  eq(cw("sudo -E env X=1 wget u").word, "wget", "...and wrappers with their flags");
+  eq(cw("nice -n 10 time cat f").word, "cat", "...nice -n with its value");
+  eq(cw("xargs -0 -n1 rm").word, "rm", "...xargs flags");
+  eq(cw("/usr/bin/curl -s u").word, "curl", "...the base name of a path");
+  eq(JSON.stringify(cw("env A=1 grep -r x .").args), JSON.stringify(["-r", "x", "."]), "...with the arguments after it");
+  eq(cw("FOO=1").word, null, "...and null when there is only an assignment");
+
+  eq(isPathLike("/etc/passwd") && isPathLike("src/a.rs") && isPathLike("~/x") && isPathLike("./a") && isPathLike("../b") && isPathLike(".hidden"), true, "isPathLike accepts / ~ and . forms");
+  eq(isPathLike("https://example.invalid/a/b") || isPathLike("git+ssh://h/p"), false, "isPathLike ignores URLs");
+  eq(isPathLike("plainword") || isPathLike("-r") || isPathLike("a.b"), false, "...and plain words");
+  eq(isPathLike("--out=/tmp/x") && !isPathLike("--mode=fast"), true, "...judging an --opt=value by its value");
+  eq(tokenPath("--out=/tmp/x") + "|" + tokenPath("/tmp/y"), "/tmp/x|/tmp/y", "tokenPath returns the value of --opt=value");
+}
+
+{
+  const dir = mkDir("kukulu-canon-");
+  const home = path.join(dir, "home");
+  fs.mkdirSync(home);
+  eq(JSON.stringify(canonicalPaths("~/a/b", { cwd: "/", home })), JSON.stringify([path.join(home, "a", "b")]), "canonicalPaths expands ~/");
+  eq(JSON.stringify(canonicalPaths("~", { cwd: "/", home })), JSON.stringify([home]), "...and a bare ~");
+  const cwd = path.join(dir, "work");
+  fs.mkdirSync(cwd);
+  eq(JSON.stringify(canonicalPaths("../work/./x/../y", { cwd, home })), JSON.stringify([path.join(cwd, "y")]), "canonicalPaths resolves relative to cwd and normalizes");
+  eq(JSON.stringify(canonicalPaths("/abs/p", { cwd, home })), JSON.stringify(["/abs/p"]), "...and leaves an absolute path alone");
+  const real = path.join(dir, "real");
+  fs.mkdirSync(real);
+  fs.writeFileSync(path.join(real, "f.txt"), "x");
+  const link = path.join(dir, "link");
+  fs.symlinkSync(real, link);
+  eq(JSON.stringify(canonicalPaths(path.join(link, "f.txt"), { cwd, home })), JSON.stringify([path.join(link, "f.txt"), path.join(real, "f.txt")]), "...adds the real path through a symlinked repo");
+  eq(JSON.stringify(canonicalPaths(path.join(link, "new", "g.txt"), { cwd, home })), JSON.stringify([path.join(link, "new", "g.txt"), path.join(real, "new", "g.txt")]), "...even for a file that does not exist yet");
 }
 
 finish();

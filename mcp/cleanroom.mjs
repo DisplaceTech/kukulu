@@ -435,3 +435,160 @@ export function verifyCheckpoint(entry, publicKey) {
     return false;
   }
 }
+
+// ---------------------------------------------------------------- Bash segments and paths
+
+/**
+ * Split a Bash command into its top-level segments on unquoted `;`, `&&`,
+ * `||`, `|`, `&` and newlines, so a `|` inside a quoted regex is never taken
+ * for a pipe. Single quotes are literal, double quotes honour backslash
+ * escapes, and a backslash outside quotes escapes the next character. An `&`
+ * that is part of a redirection (`2>&1`, `&>file`) does not end a segment.
+ */
+export function splitSegments(command) {
+  const segments = [];
+  let current = "";
+  let quote = null;
+  const cut = () => {
+    segments.push(current);
+    current = "";
+  };
+  for (let i = 0; i < command.length; i++) {
+    const c = command[i];
+    if (quote === "'") {
+      current += c;
+      if (c === "'") quote = null;
+      continue;
+    }
+    if (quote === '"') {
+      current += c;
+      if (c === "\\" && i + 1 < command.length) current += command[++i];
+      else if (c === '"') quote = null;
+      continue;
+    }
+    if (c === "'" || c === '"') {
+      quote = c;
+      current += c;
+    } else if (c === "\\" && i + 1 < command.length) {
+      current += c + command[++i];
+    } else if (c === ";" || c === "\n") {
+      cut();
+    } else if (c === "&") {
+      const redirect = /[<>]/.test(command[i - 1] ?? "") || command[i + 1] === ">";
+      if (redirect) current += c;
+      else {
+        if (command[i + 1] === "&") i++;
+        cut();
+      }
+    } else if (c === "|") {
+      if (command[i + 1] === "|") i++;
+      cut();
+    } else current += c;
+  }
+  segments.push(current);
+  return segments.map((s) => s.trim()).filter(Boolean);
+}
+
+/** The words of one segment with quoting removed, the way a shell would hand them to the command. */
+export function shellWords(segment) {
+  const words = [];
+  let current = "";
+  let started = false;
+  let quote = null;
+  for (let i = 0; i < segment.length; i++) {
+    const c = segment[i];
+    if (quote === "'") {
+      if (c === "'") quote = null;
+      else current += c;
+    } else if (quote === '"') {
+      if (c === '"') quote = null;
+      else if (c === "\\" && i + 1 < segment.length) current += segment[++i];
+      else current += c;
+    } else if (c === "'" || c === '"') {
+      quote = c;
+      started = true;
+    } else if (c === "\\" && i + 1 < segment.length) {
+      current += segment[++i];
+      started = true;
+    } else if (/\s/.test(c)) {
+      if (started) words.push(current);
+      current = "";
+      started = false;
+    } else {
+      current += c;
+      started = true;
+    }
+  }
+  if (started) words.push(current);
+  return words;
+}
+
+const WRAPPERS = new Set(["sudo", "env", "time", "command", "xargs", "nice"]);
+const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
+
+/**
+ * The command a segment runs: the first token that is neither a `NAME=value`
+ * assignment nor a wrapper (`sudo env time command xargs nice`) with its flags.
+ * `word` is the command's base name; `args` are the tokens after it.
+ */
+export function commandWord(tokens) {
+  let i = 0;
+  while (i < tokens.length) {
+    const t = tokens[i];
+    if (ASSIGNMENT.test(t)) {
+      i++;
+      continue;
+    }
+    const base = path.basename(t);
+    if (WRAPPERS.has(base)) {
+      i++;
+      while (i < tokens.length && tokens[i].startsWith("-")) {
+        const flag = tokens[i++];
+        if (base === "nice" && flag === "-n" && i < tokens.length) i++;
+      }
+      continue;
+    }
+    return { word: base, raw: t, args: tokens.slice(i + 1) };
+  }
+  return { word: null, raw: null, args: [] };
+}
+
+/** The path a token stands for: for `--opt=value`, the value; otherwise the token. */
+export const tokenPath = (token) => (/^--?[A-Za-z][\w-]*=/.test(token) ? token.slice(token.indexOf("=") + 1) : token);
+
+/** Contains a `/`, or starts with `~` or `.`, and is not a URL. */
+export function isPathLike(token) {
+  const t = tokenPath(token);
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(t)) return false;
+  return t.includes("/") || t.startsWith("~") || t.startsWith(".");
+}
+
+/** The nearest existing ancestor's real path with the rest re-attached, so a file that does not exist yet still resolves through a symlinked directory. */
+function realPathOf(p) {
+  let head = p;
+  const rest = [];
+  for (;;) {
+    try {
+      return path.join(fs.realpathSync.native(head), ...rest.reverse());
+    } catch {
+      const parent = path.dirname(head);
+      if (parent === head) return p;
+      rest.push(path.basename(head));
+      head = parent;
+    }
+  }
+}
+
+/**
+ * Every form of a path the rules must check: expanded (`~`), made absolute
+ * against `cwd`, normalized, and, when the real location differs (a symlinked
+ * repository), that too.
+ */
+export function canonicalPaths(p, { cwd, home }) {
+  let expanded = p;
+  if (p === "~") expanded = home;
+  else if (p.startsWith("~/")) expanded = path.join(home, p.slice(2));
+  const normalized = path.normalize(path.isAbsolute(expanded) ? expanded : path.resolve(cwd, expanded));
+  const real = realPathOf(normalized);
+  return real !== normalized ? [normalized, real] : [normalized];
+}
