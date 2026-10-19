@@ -40,7 +40,7 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] P3-09 Path canonicalization and the Bash splitter
 - [x] P3-10 evaluate: the guard's rules
 - [x] P3-11 The guard hook and its self-test
-- [ ] P3-12 The logger hook
+- [x] P3-12 The logger hook
 - [ ] P3-13 Tune the hook fast path and TARGET_MAX
 - [ ] P3-14 Self-protection: the always-protected set
 - [ ] P3-15 Clean-room commit trailers
@@ -182,3 +182,6 @@ evaluate(policy, hookInput, {root, home, progressText, protected?}) + lockdownAc
 
 ### P3-11 — b043e99
 Guard hook implemented: fast path, then dynamic import of ../mcp/cleanroom.mjs, evaluate, deny() = log denied entry (if possible) + stderr line + exit 2; every exception becomes "guard internal error: <message>". --self-test <policy> sets KUKULU_CLEANROOM_LOG to a temp file, runs the 70 shipped cases (template resolves to the plugin's template) plus each pattern fixture of the given policy via a one-pattern policy; template run prints "guard self-test: ok (74 cases)". extraVerify self-test commands (from P3-11) are active from this task. The P3-03 stub tests were rewritten around a denied Read probe.
+
+### P3-12 — 13b10e2
+Logger implemented (PostToolUse only; UserPromptSubmit exits 0 until P3-18). Interpretation: loggingActive(ctx, logPath) in cleanroom.mjs gates BOTH hooks: they append only when state.cleanroom.genesis is set or the log already exists, so genesis stays entry 1 and the archive's own PostToolUse does not recreate a log (P3-08 note). A pre-genesis guard denial still blocks, unlogged. Guard tests now seed state with a genesis. Hooks fall back to one stderr line when even the logger-error entry cannot be written.
