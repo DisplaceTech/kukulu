@@ -8,7 +8,7 @@ Started: 2026-10-19T16:52:28.587Z
 - [x] P1-03 index.html from Why it holds up to the footer
 - [x] P1-04 copy.js, 404.html and _headers
 - [x] P1-05 check-site.mjs rules 3 to 7
-- [ ] P1-06 check-site.mjs rules 9 to 14, check:site and the lint line
+- [x] P1-06 check-site.mjs rules 9 to 14, check:site and the lint line
 - [ ] P1-07 Measure the budgets and contrast against their assumptions
 - [ ] P1-08 serve-site.mjs and site:serve
 - [ ] P1-09 Phase 1 end: push and record the manual check
@@ -34,3 +34,6 @@ copy.js (1009 bytes, line 2 is the COPY_FEEDBACK_MS const), 404.html (no styles.
 
 ### P1-05 — 323b4ae
 Rules 3-7 + parseHtml/textContent/visibleText/findAll exported; 32 self-test cases. Helpers for later rules: need(ctx,rule,rel) reads a site file or reports it missing; byTag/byId/hasClass/collapse; sub(t,file,from,to) for cases (throws if the target text is absent); CASES.push block placed before makeTemp (add more there). Real page passed all rules unchanged. Interpretation: rule 4 also asserts copy.js line 2 literally.
+
+### P1-06 — b4ac94a
+Rules 9-14 + rule 1 missing half; 51 self-test cases; ok line lists 1..14. package.json gains check:site; lint.sh runs check-site.mjs after check-names. Exports added: contrastReport(opts) -> {contrastMin, dark:[{fg,bg,fgValue,bgValue,ratio}], light:[...]} (throws on unusable styles.css), contrastRatio. Real site passed all rules unchanged. Interpretation: rule 9 needs exactly one @media print block with one :root rule, compares custom properties only. Codebase notes: the constraint site-scripts-node-builtins scans the checker's own source, so test strings that contain `from "x"` or require( must be assembled from pieces; check-names rejects a literal combining U+0304 in source (use the escape).
