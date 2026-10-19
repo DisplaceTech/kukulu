@@ -15,7 +15,7 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] P1-01 plan_commit checks the branch; run_start names both fixes
 - [x] P1-02 kukulu_run_resume
 - [x] P1-03 Halts name kukulu_run_resume; go-flight maps resume
-- [ ] P1-04 The link check reads git ls-files
+- [x] P1-04 The link check reads git ls-files
 - [ ] P1-05 MD022-clean writes to PROGRESS.md and PLAN.md
 - [ ] P1-06 The dependency field is matched at line start
 - [ ] P1-07 kukulu_mutate runs the constraint scan
@@ -107,3 +107,6 @@ Added kukulu_run_resume (after run_halt), 22 tools; state.haltStream recorded by
 
 ### P1-03 — 94401d6
 RESUME_HINT appended by next() to stored halts without haltCap (not duplicated if the reason already names kukulu_run_resume); run_halt result gains next; stream-merge reason ends with kukulu_run_resume call. go-flight maps resume/continue; operations.md, README, mcp-tools.md updated. Interpretation: operations.md test checks only the Halts section for $EDITOR plus whole file for "halted": null, because another section legitimately documents flight_options clearing halted. Updated state.mjs assertion for the new halt reason.
+
+### P1-04 — 24e9f1d
+brokenLinks(root) in test/plugin.mjs uses git ls-files; orphan-doc check also tracked-only. Note for later tasks: a new doc/file must be git-added before kukulu_verify, or the link/orphan checks cannot see it (index counts as tracked).
