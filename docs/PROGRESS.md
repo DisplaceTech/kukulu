@@ -20,7 +20,7 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] P1-06 The dependency field is matched at line start
 - [x] P1-07 kukulu_mutate runs the constraint scan
 - [x] P1-08 kukulu_status reports prChecks; the review reads CI
-- [ ] P1-09 Review tasks carry a source; mutation-only rounds are capped
+- [x] P1-09 Review tasks carry a source; mutation-only rounds are capped
 - [ ] P1-10 Tune review.mutationFixRounds from the archived trails
 - [ ] P1-11 The flight slug rule and the -spec note
 - [ ] P1-12 Auto-merge unavailable names policies.finalize
@@ -122,3 +122,6 @@ mutate now scans constraints on the mutated tree (checkConstraints with preexist
 
 ### P1-08 — 8b0ae0e
 prChecks() computed only in the kukulu_status TOOLS fn wrapper (status() unchanged, so next() never calls gh). Interpretation: gh pr view errors other than "no pull request" give "unknown: <why>". Harness mkFakeGhBin answers pr checks from checks.json/checks-exit. Test for "no gh" uses a PATH holding only a git symlink. Docs row, skill, CHANGELOG.
+
+### P1-09 — c5dd958
+Config key review.mutationFixRounds (default 2, ASSUMPTION, only in cfgFrom's review line; validateReview with unknown-key and positive-integer refusals). review_submit: source required (review|mutation|blocked), cap refusal before any write using the SPEC text, state.rounds[].sources. Skills (review-build new paragraph kept free of a standalone 2 near the key, summarize) and docs (operations row, mcp-tools, CHANGELOG) updated. Also updated test/protocol.mjs and test/drive.mjs for the required source.
