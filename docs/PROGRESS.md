@@ -54,7 +54,7 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] P4-02 The lexer core, Rust and the C family
 - [x] P4-03 Lexers for Go, Python, JavaScript, TypeScript, Java and PHP
 - [x] P4-04 Metrics, positioning and the verdict
-- [ ] P4-05 Calibration fixtures
+- [x] P4-05 Calibration fixtures
 - [ ] P4-06 Tune similarity.separationMargin
 - [ ] P4-07 kukulu_similarity
 - [ ] P4-08 The summarize skill carries the contamination score
@@ -224,3 +224,6 @@ Six more SPECS (go, python, javascript, typescript, java, php) plus scanner flag
 
 ### P4-04 — 41a0090
 scorePair, position, verdictOf, BANDS, LIMITS added; tokenize now returns identifiers too. Verdict forms: "independence supported on every separable metric", "no metric separates the controls", else "independence not supported: <pair>: <metric> is <band>; ..." (my wording of the spec's "names the failing metrics and bands"). Row keys: ngram_jaccard@n, ngram_containment@n, ident_jaccard, ident_match_rate_left, comment_jaccard.
+
+### P4-05 — e37d3d5
+Fixtures a/ b/ b-derived/ c/ under test/fixtures/similarity (original RLE + additive checksum, ~120 lines per Rust side, C pair, NOTES.txt). Measured (default ngram 5,10): ngram_jaccard@5 neg 0.292 pos 0.972 derived-vs-a 0.285; ident_jaccard neg 0.133 pos 0.769 test 0.133; comment_jaccard neg 0.011 pos 0.597 test 0.011; the c-vs-b pair ngram@5 0.006. Test helper side(dir) in the test file reads and counts skipped files (P4-07 does the server-side reading).
