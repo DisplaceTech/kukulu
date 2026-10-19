@@ -23,7 +23,7 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] P1-09 Review tasks carry a source; mutation-only rounds are capped
 - [x] P1-10 Tune review.mutationFixRounds from the archived trails
 - [x] P1-11 The flight slug rule and the -spec note
-- [ ] P1-12 Auto-merge unavailable names policies.finalize
+- [x] P1-12 Auto-merge unavailable names policies.finalize
 - [ ] P1-13 pull-feedback never commits; Flight feedback moves to CONTRIBUTING
 - [ ] P1-14 Phase 1 end: push and record the manual check
 - [ ] P2-01 Private-project labels in pull-feedback and CONTRIBUTING
@@ -130,4 +130,7 @@ Config key review.mutationFixRounds (default 2, ASSUMPTION, only in cfgFrom's re
 Measurement: review.mutationFixRounds before 2, after 2 (unchanged, not tuned). Evidence in docs/spikes/P1-10.md: v0-5-0 round-3 task was a CI-found real defect (source review, not capped); kukulu-tech's rounds 3-4 were all mutation survivors in self-tests (cap would have approved at round 3 instead of 5). mcp/server.mjs unchanged.
 
 ### P1-11 — 11e283f
-Slug rule in plan-build (both examples verbatim); plan_commit returns notes[] (empty array normally). Note: check-names forbids the macron letter outside the standalone display name, so the skill says "a u with a macron" and the test regex uses ū.
+Slug rule in plan-build (both examples verbatim); plan_commit returns notes[] (empty array normally). Note: check-names forbids the macron letter outside the standalone display name, so the skill says "a u with a macron" and the test regex uses a unicode escape.
+
+### P1-12 — 4c150ea
+STOP_ASKING suffix appended to both unavailable: strings in pr_finalize. Docs and review test updated. Process note: never put a unicode escape for the macron letter in a log param (the JSON decodes it and check-names then fails on PROGRESS.md); I fixed the one P1-11 log line by hand, noted in feedback.
