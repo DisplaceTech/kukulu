@@ -13,7 +13,7 @@ Started: 2026-10-19T16:52:28.587Z
 - [x] P1-08 serve-site.mjs and site:serve
 - [x] P1-09 Phase 1 end: push and record the manual check
 - [x] P2-01 check-site-browser.mjs, check:site:browser and .site-shots/
-- [ ] P2-02 The site CI workflow
+- [x] P2-02 The site CI workflow
 - [ ] P2-03 README, CONTRIBUTING and CHANGELOG for the site
 - [ ] P2-04 Phase 2 end: push and record the manual check
 
@@ -50,3 +50,6 @@ Manual check: NOT VERIFIED (human): run `npm run site:serve`, open it on desktop
 
 ### P2-01 — cab9422
 scripts/check-site-browser.mjs works with /usr/bin/google-chrome (Node 24): 6 runs ok in ~4 s; --shots writes .site-shots/ (gitignored). Negative overflow check done by hand and reverted; CHROME_PATH=/nonexistent exits 1. Screenshot of 1440 dark viewed: structure matches mockup. No site/ changes needed.
+
+### P2-02 — fd9e313
+.github/workflows/site.yml added (checkout@v7, setup-node@v7 node 24, check:site, browser step with CHROME_PATH from command -v google-chrome). Manual check: NOT VERIFIED (human): the PR's `site` check is green on GitHub Actions (not run locally).
