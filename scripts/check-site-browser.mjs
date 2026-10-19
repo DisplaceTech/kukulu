@@ -214,7 +214,7 @@ async function withBrowser(fn) {
       }
       return failures;
     };
-    return await fn({ visit, profile });
+    return await fn({ visit, profile, pid: child.pid });
   } finally {
     // Ask Chrome to quit, then insist: a profile removed under a live browser is recreated.
     if (conn) {
@@ -265,6 +265,16 @@ function replaceIn(dir, file, from, to) {
   fs.writeFileSync(p, text.replace(from, () => to));
 }
 
+function replaceAllIn(dir, file, from, to) {
+  const p = path.join(dir, file);
+  const text = fs.readFileSync(p, "utf8");
+  if (!text.includes(from)) throw new Error(`check-site-browser: self-test case cannot find ${JSON.stringify(from)} in ${file}`);
+  fs.writeFileSync(p, text.split(from).join(to));
+}
+
+// How long after Chrome's exit the profile must stay gone; a late-writing browser would recreate it.
+const PROFILE_SETTLE_MS = 1000;
+
 const CASES = [
   {
     name: "overflow is caught",
@@ -290,6 +300,21 @@ const CASES = [
     expect: "latin-ext subset did not load",
     inject: (dir) => replaceIn(dir, "styles.css", "/fonts/hanken-grotesk-latin-ext-wght-normal.woff2", "/fonts/missing.woff2"),
   },
+  {
+    name: "a console.error is caught",
+    expect: "console.error:",
+    inject: (dir) => fs.appendFileSync(path.join(dir, "copy.js"), '\nconsole.error("self-test");\n'),
+  },
+  {
+    name: "an uncaught exception is caught",
+    expect: "uncaught exception:",
+    inject: (dir) => fs.appendFileSync(path.join(dir, "copy.js"), '\nthrow new Error("self-test");\n'),
+  },
+  {
+    name: "a page with no copy buttons is caught",
+    expect: "no [data-copy-for] buttons",
+    inject: (dir) => replaceAllIn(dir, "index.html", "data-copy-for", "data-self-test-for"),
+  },
 ];
 
 async function selfTest() {
@@ -310,10 +335,12 @@ async function selfTest() {
     return dir;
   };
   let profile = null;
+  let pid = null;
   try {
     // One browser serves every case, each against its own server and site copy.
     await withBrowser(async (session) => {
       profile = session.profile;
+      pid = session.pid;
       const probe = async (dir) => {
         const server = await start({ port: 0, siteDir: dir });
         try {
@@ -331,7 +358,14 @@ async function selfTest() {
         report(c.name, found.some((f) => f.includes(c.expect)), `expected a failure containing ${JSON.stringify(c.expect)}, got ${found.length ? found.join("; ") : "none"}`);
       }
     });
-    report("the Chrome profile is removed", profile !== null && !fs.existsSync(profile), `${profile} still exists`);
+    let alive = true;
+    try {
+      process.kill(pid, 0);
+    } catch (e) {
+      alive = e.code !== "ESRCH";
+    }
+    await new Promise((r) => setTimeout(r, PROFILE_SETTLE_MS));
+    report("the Chrome profile is removed", profile !== null && !alive && !fs.existsSync(profile), alive ? `Chrome process ${pid} is still running` : `${profile} still exists`);
   } finally {
     for (const dir of temps) fs.rmSync(dir, { recursive: true, force: true });
   }
