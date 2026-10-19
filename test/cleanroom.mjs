@@ -162,20 +162,19 @@ const LOGGER = path.join(ROOT, "scripts", "cleanroom-log.mjs");
 }
 
 {
-  // With a policy present and no implementation yet, the guard fails closed; the logger never blocks.
+  // Where the policy is looked for: docs/kukulu.json names it, else the default path.
   const repo = plannedRepo();
   writeFile(repo, "docs/cleanroom.json", EXAMPLE);
   const env = { CLAUDE_PROJECT_DIR: repo };
-  const g = runHook(GUARD, { hook_event_name: "PreToolUse", tool_name: "Read", tool_input: {}, cwd: repo }, env);
-  eq(g.status, 2, "with a policy present the guard denies until it is implemented");
-  like(g.stderr, /^kukulu clean-room guard: guard internal error: the guard is not implemented yet/, "...saying why");
+  const probe = { hook_event_name: "PreToolUse", tool_name: "Read", tool_input: { file_path: "/usr/include/zlib.h" }, cwd: repo };
   eq(runHook(LOGGER, { hook_event_name: "PostToolUse", cwd: repo }, env).status, 0, "the logger exits 0 with a policy present");
+  eq(runHook(GUARD, probe, env).status, 2, "with a policy present the guard checks the call");
   writeFile(repo, "docs/kukulu.json", JSON.stringify({ cleanroom: { policy: "policy/cr.json" } }));
-  eq(runHook(GUARD, { cwd: repo }, env).status, 0, "a policy named in docs/kukulu.json is the one looked for (the default file no longer counts)");
+  eq(runHook(GUARD, probe, env).status, 0, "a policy named in docs/kukulu.json is the one looked for (the default file no longer counts)");
   writeFile(repo, "policy/cr.json", EXAMPLE);
-  eq(runHook(GUARD, { cwd: repo }, env).status, 2, "...and its presence turns the mode on");
+  eq(runHook(GUARD, probe, env).status, 2, "...and its presence turns the mode on");
   writeFile(repo, "docs/kukulu.json", "{ not json");
-  eq(runHook(GUARD, { cwd: repo }, env).status, 2, "an unparseable docs/kukulu.json means the default policy path");
+  eq(runHook(GUARD, probe, env).status, 2, "an unparseable docs/kukulu.json means the default policy path");
 }
 
 // ---------------------------------------------------------------- the hash chain
@@ -671,6 +670,90 @@ async function genesisRepo(planOpts = {}) {
   eq(NETWORK_COMMANDS.join("|"), "curl|wget|gh|ssh|scp|nc|git clone|git fetch|git pull|pip download|cargo vendor|cargo download|npm install|npm i|npm ci|go get|composer install", "NETWORK_COMMANDS is the fixed list");
   eq([...READ_FAMILY].join(" "), "cat less more head tail grep egrep fgrep rg ag ack find fd locate ls tree sed awk bat strings xxd od hexdump file zcat zless zgrep view vi vim nano emacs", "READ_FAMILY is the fixed list");
   eq([...WRITE_FAMILY].join(" "), "cp mv rm tee sed truncate chmod chown ln install dd git", "WRITE_FAMILY is the fixed list");
+}
+
+// ---------------------------------------------------------------- the guard hook
+
+{
+  const repo = plannedRepo();
+  writeFile(repo, "docs/cleanroom.json", EXAMPLE);
+  const env = { CLAUDE_PROJECT_DIR: repo };
+  const log = LOG(repo);
+  const read = (file_path, extra = {}) => ({ hook_event_name: "PreToolUse", tool_name: "Read", tool_input: { file_path }, cwd: repo, session_id: "s-9", model: "m-1", ...extra });
+
+  const denial = runHook(GUARD, read("/usr/include/zlib.h"), env);
+  eq(denial.status, 2, "a denied Read exits 2 with the reason on stderr");
+  eq(denial.stderr, "kukulu clean-room guard: denied path: /usr/include/zlib.h (deny.paths)\n", "...the exact line");
+  eq(denial.stdout, "", "...and nothing on stdout");
+  const entries = readEntries(log);
+  const e = entries[0];
+  eq(entries.length + "|" + e.kind + "|" + e.decision + "|" + e.tool + "|" + e.target + "|" + e.role + "|" + e.session + "|" + e.model, "1|denied|denied|Read|/usr/include/zlib.h|session|s-9|m-1", "...and appends a denied entry with the payload's fields");
+  like(e.reason, /denied path: \/usr\/include\/zlib\.h \(deny\.paths\)/, "...carrying the reason");
+  eq(verifyChain(linesOf(log)).ok, true, "...in a chain that verifies");
+
+  const fine = runHook(GUARD, read(path.join(repo, "docs", "notes.md")), env);
+  eq(fine.status + "|" + fine.stdout + "|" + fine.stderr, "0||", "an allowed call exits 0 silently");
+  eq(readEntries(log).length, 1, "...and logs nothing (the logger does that)");
+
+  eq(runHook(GUARD, "", env).status, 2, "an empty hook input is a denial when a policy exists");
+  like(runHook(GUARD, "[1,2]", env).stderr, /guard internal error: the hook input is empty or not a JSON object/, "...as is one that is not an object");
+  like(readEntries(log).at(-1).reason, /guard internal error/, "...and the internal error is logged too");
+
+  // A malformed policy is a denial naming the problem, not a pass.
+  writeFile(repo, "docs/cleanroom.json", '{"version":2}');
+  const bad = runHook(GUARD, read(path.join(repo, "a.txt")), env);
+  eq(bad.status, 2, "a malformed policy is a denial");
+  like(bad.stderr, /^kukulu clean-room guard: guard internal error: policy version must be 1/, "...with guard internal error and the loader's message");
+  writeFile(repo, "docs/cleanroom.json", EXAMPLE);
+}
+
+{
+  // An exception in evaluate is a denial, never exit 0: a temp plugin copy whose evaluate throws.
+  const plugin = mkDir("kukulu-plugin-");
+  fs.mkdirSync(path.join(plugin, "scripts"));
+  fs.mkdirSync(path.join(plugin, "mcp"));
+  fs.copyFileSync(GUARD, path.join(plugin, "scripts", "cleanroom-guard.mjs"));
+  const source = fs.readFileSync(path.join(ROOT, "mcp", "cleanroom.mjs"), "utf8");
+  const hook = "export function evaluate(policy, hookInput, env) {";
+  ok(source.includes(hook), "the evaluate signature this test patches is present");
+  fs.writeFileSync(path.join(plugin, "mcp", "cleanroom.mjs"), source.replace(hook, `${hook}\n  throw new Error("evaluate exploded");`));
+  const repo = plannedRepo();
+  writeFile(repo, "docs/cleanroom.json", EXAMPLE);
+  const r = runHook(path.join(plugin, "scripts", "cleanroom-guard.mjs"), { tool_name: "Read", tool_input: { file_path: "/x" }, cwd: repo }, { CLAUDE_PROJECT_DIR: repo });
+  eq(r.status, 2, "an exception in evaluate is a denial, never exit 0");
+  like(r.stderr, /guard internal error: evaluate exploded/, "...saying what threw");
+  like(readEntries(LOG(repo)).at(-1).reason, /evaluate exploded/, "...and logged");
+  const noModule = mkDir("kukulu-plugin-");
+  fs.mkdirSync(path.join(noModule, "scripts"));
+  fs.copyFileSync(GUARD, path.join(noModule, "scripts", "cleanroom-guard.mjs"));
+  const gone = runHook(path.join(noModule, "scripts", "cleanroom-guard.mjs"), { tool_name: "Read", cwd: repo }, { CLAUDE_PROJECT_DIR: repo });
+  eq(gone.status, 2, "a guard that cannot load mcp/cleanroom.mjs still denies");
+  like(gone.stderr, /^kukulu clean-room guard: guard internal error: /, "...with guard internal error");
+}
+
+{
+  const run = (policyPath, cwd) => spawnSync(process.execPath, [GUARD, "--self-test", policyPath], { cwd, encoding: "utf8", env: { PATH: process.env.PATH, HOME: process.env.HOME } });
+  const repo = plannedRepo();
+  const template = run(path.join(ROOT, "templates", "cleanroom.example.json"), repo);
+  eq(template.status, 0, "--self-test on the template exits 0");
+  like(template.stdout, /^guard self-test: ok \(\d+ cases\)\n$/, "...printing guard self-test: ok with the case count");
+  ok(!fs.existsSync(path.join(repo, ".kukulu")), "--self-test never writes .kukulu/cleanroom/log.jsonl");
+  const disagree = JSON.parse(EXAMPLE);
+  disagree.deny.pathPatterns[0].shouldMatch = ["/home/u/p/target/debug/deps/x"];
+  writeFile(repo, "bad-policy.json", JSON.stringify(disagree));
+  const bad = run(path.join(repo, "bad-policy.json"), repo);
+  ok(bad.status !== 0 && /shouldMatch "\/home\/u\/p\/target\/debug\/deps\/x" did not match/.test(bad.stderr), "--self-test fails on a policy whose own fixture disagrees");
+  eq(run(path.join(repo, "absent.json"), repo).status !== 0, true, "...and on a policy that does not exist");
+  const noArg = spawnSync(process.execPath, [GUARD, "--self-test"], { cwd: repo, encoding: "utf8" });
+  ok(noArg.status !== 0 && /pass the policy to test/.test(noArg.stderr), "...and with no policy argument");
+  // The given policy's own patterns are exercised: a pattern that does not deny its shouldMatch line in the real evaluator fails.
+  const broken = JSON.parse(EXAMPLE);
+  broken.deny.commandPatterns[0].pattern = "^never$";
+  broken.deny.commandPatterns[0].shouldMatch = ["never"];
+  broken.deny.commandPatterns[0].shouldNotMatch = ["perf record target/release/examples/profile_decode"];
+  writeFile(repo, "ok-policy.json", JSON.stringify(broken));
+  const okRun = run(path.join(repo, "ok-policy.json"), repo);
+  eq(okRun.status, 0, "a policy whose patterns agree with their fixtures passes the self-test");
 }
 
 finish();
