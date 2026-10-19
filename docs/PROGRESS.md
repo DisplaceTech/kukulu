@@ -10,7 +10,7 @@ Started: 2026-10-19T16:52:28.587Z
 - [x] P1-05 check-site.mjs rules 3 to 7
 - [x] P1-06 check-site.mjs rules 9 to 14, check:site and the lint line
 - [x] P1-07 Measure the budgets and contrast against their assumptions
-- [ ] P1-08 serve-site.mjs and site:serve
+- [x] P1-08 serve-site.mjs and site:serve
 - [ ] P1-09 Phase 1 end: push and record the manual check
 - [ ] P2-01 check-site-browser.mjs, check:site:browser and .site-shots/
 - [ ] P2-02 The site CI workflow
@@ -40,3 +40,6 @@ Rules 9-14 + rule 1 missing half; 51 self-test cases; ok line lists 1..14. packa
 
 ### P1-07 — d6a55a8
 --report added (exported report(opts)); 52 self-test cases incl. a `report` case with a verify callback. Measurement (before = assumption -> after = measured): textBytes 65536 -> 49503 (24% headroom); fontBytes 184320 -> 165872 (10%); scriptBytes 2048 -> 1009 (51%); contrast min 4.5 -> lowest dark 5.51, light 4.91 (both --code-muted on --code-bg); copyFeedbackMs 2400 and servePort 8788 not machine-measurable. No config value changed.
+
+### P1-08 — 223d23e
+scripts/serve-site.mjs: exports async start({port}) -> {url, close}; port arg, SITE_PORT, then config servePort. Self-test 21 checks. close() calls closeAllConnections so it resolves promptly. CLI: --port N, --self-test; bad args exit 2. package.json gains site:serve. Interpretation: bad %-escape -> 403; missing file -> 404.html with headers for its own path.
