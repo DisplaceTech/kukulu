@@ -37,6 +37,8 @@ You need Node ≥ 22, git, and Claude Code. Nothing to `npm install`.
    claude plugin install kukulu@displacetech
    ```
 
+   To install from the website's hosted marketplace instead, run `claude plugin marketplace add https://kukulu.tech/marketplace.json` in place of the first command.
+
 2. **Write a spec** in the project you want built, and commit it.
 
    ```bash
@@ -244,6 +246,7 @@ Everything is on disk and committed, so `/kukulu:go-flight` can be re-run from a
 │   ├── implement-guard.mjs      the guard hook
 │   ├── lint.sh                  dependency-free syntax + manifest lint
 │   └── check-diagrams.mjs       parses every Mermaid block (CI only)
+├── site/                        the kukulu.tech landing page, deployed to Cloudflare Pages
 ├── agents/                      planner · implementer · reviewer · summarizer
 ├── skills/                      go-flight · plan-build · implement · review-build · summarize
 ├── templates/
@@ -263,6 +266,7 @@ Everything is on disk and committed, so `/kukulu:go-flight` can be re-run from a
 - [**docs/operations.md**](./docs/operations.md): running, resuming, halting, and what to do when a stage misbehaves
 - [**docs/plans/**](./docs/plans/): the task-by-task plan behind each release
 - [**docs/feedback/**](./docs/feedback/): problems real flights hit, which feed the next release plan
+- [**Website**](docs/site/DEPLOY.md): deploying kukulu.tech to Cloudflare Pages, and the launch checklist
 - [**CONTRIBUTING.md**](./CONTRIBUTING.md): layout, tests, and the rules about where behavior is allowed to live
 - [**CHANGELOG.md**](./CHANGELOG.md): what shipped, and when
 

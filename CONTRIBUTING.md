@@ -20,6 +20,10 @@ Every behaviour change to the server therefore needs a test, because the thing u
 | `scripts/lint.sh` | Dependency-free syntax and manifest lint |
 | `scripts/check-names.mjs` | Fails on a misplaced kahakō or an ASCII spelling of the display name in prose; run by `scripts/lint.sh` |
 | `scripts/check-diagrams.mjs` | Parses every Mermaid block; CI-only, needs mermaid + jsdom |
+| `scripts/check-site.mjs` | Static checks for the site's SPEC rules 1–14, with `--self-test` and `--report`; run by `scripts/lint.sh` and `npm run check:site` |
+| `scripts/check-site-browser.mjs` | Layout, console and font checks in headless Chrome; needs Chrome or Chromium; `npm run check:site:browser` |
+| `scripts/serve-site.mjs` | Local server for `site/` that applies `site/_headers`; `npm run site:serve` |
+| `site/` | The kukulu.tech landing page, deployed as-is by Cloudflare Pages; `docs/site/` holds its inputs |
 | `agents/*.md` | Stage agents: default model, effort, and the skill each preloads |
 | `skills/*/SKILL.md` | The prose each stage follows |
 | `templates/SPEC.md` | The spec skeleton users copy |
