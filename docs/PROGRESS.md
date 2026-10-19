@@ -3,7 +3,7 @@ Branch: build/landing
 Started: 2026-10-19T16:52:28.587Z
 
 ## Tasks
-- [ ] P1-01 Seed site/ and start check-site.mjs with config validation and rules 1, 2 and 8
+- [x] P1-01 Seed site/ and start check-site.mjs with config validation and rules 1, 2 and 8
 - [ ] P1-02 styles.css foundation and index.html through How it works
 - [ ] P1-03 index.html from Why it holds up to the footer
 - [ ] P1-04 copy.js, 404.html and _headers
@@ -19,3 +19,6 @@ Started: 2026-10-19T16:52:28.587Z
 
 ## Log
 (one entry per task, appended by implement)
+
+### P1-01 — 047ab27
+Seeded site/ byte-identical + robots.txt; scripts/check-site.mjs with loadConfig, checkSite (ctx.fail(rule,file,what,fix) pattern; add rules by writing ruleN(ctx) and calling it in checkSite), CASES array (13 cases), selfTest, CLI. IMPLEMENTED_RULES constant drives the "ok (rules ...)" line; extend it per task. Self-test cases match `expect` against message. --report flag not yet accepted (unknown flag exits 2).
