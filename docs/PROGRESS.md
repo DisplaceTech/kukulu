@@ -32,7 +32,7 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] P3-01 mcp/cleanroom.mjs: the policy loader, the template and the cleanroom suite
 - [x] P3-02 validateCleanroom in docs/kukulu.json
 - [x] P3-03 Hook registration and the no-policy fast path
-- [ ] P3-04 The hash chain
+- [x] P3-04 The hash chain
 - [ ] P3-05 Entry fields from a hook payload
 - [ ] P3-06 The signing key and checkpoint primitives
 - [ ] P3-07 Genesis and sticky mode
@@ -158,3 +158,6 @@ validateCleanroom + cfgFrom.cleanroom { policy, signingKey } (signingKey absolut
 
 ### P3-03 — 1c3d794
 hooks.json registers PreToolUse (guard) and PostToolUse/UserPromptSubmit (logger), no matchers. Scripts are standalone fast paths using only node: imports; the policy-present branch is a stub (guard exits 2 with the not-implemented reason, logger exits 0) for P3-11/P3-12 to replace. Harness gains runHook(script, payload, env). lint.sh exec-bit loop extended. Fast path measured ok (<50 ms).
+
+### P3-04 — ffad041
+Chain primitives in mcp/cleanroom.mjs: ENTRY_KEYS, KINDS, ZERO_HASH, TARGET_MAX (exact line under the ASSUMPTION comment), truncateTarget, canonical, entryHash, logPathFor, appendEntry (dir lock, 10 ms retry, 2 s bound, validation before writing), readEntries, verifyChain({ok,entries,tip,firstBad{line,seq,reason}}). KUKULU_CLEANROOM_LOG row in operations.md. Later tasks: appendEntry takes the caller's fields (kind, stage, ..., data); data goes before hash.
