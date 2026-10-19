@@ -33,7 +33,7 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] P3-02 validateCleanroom in docs/kukulu.json
 - [x] P3-03 Hook registration and the no-policy fast path
 - [x] P3-04 The hash chain
-- [ ] P3-05 Entry fields from a hook payload
+- [x] P3-05 Entry fields from a hook payload
 - [ ] P3-06 The signing key and checkpoint primitives
 - [ ] P3-07 Genesis and sticky mode
 - [ ] P3-08 Checkpoints from the tools, and the log in their commits
@@ -161,3 +161,6 @@ hooks.json registers PreToolUse (guard) and PostToolUse/UserPromptSubmit (logger
 
 ### P3-04 — ffad041
 Chain primitives in mcp/cleanroom.mjs: ENTRY_KEYS, KINDS, ZERO_HASH, TARGET_MAX (exact line under the ASSUMPTION comment), truncateTarget, canonical, entryHash, logPathFor, appendEntry (dir lock, 10 ms retry, 2 s bound, validation before writing), readEntries, verifyChain({ok,entries,tip,firstBad{line,seq,reason}}). KUKULU_CLEANROOM_LOG row in operations.md. Later tasks: appendEntry takes the caller's fields (kind, stage, ..., data); data goes before hash.
+
+### P3-05 — c8f7b3a
+targetOf, projectContext, entryFields added to mcp/cleanroom.mjs; stage round comes from lock.round else state.round; agent_type matched by suffix planner/implementer/reviewer/summarizer after '-' or ':'. Missing Grep/Glob parts are omitted (SPEC), unlike cleanflate which prints empty ones.
