@@ -49,7 +49,7 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] P3-18 Human entries and kukulu_cleanroom_record
 - [x] P3-19 Clean-room status, prompts, skills and docs/cleanroom.md
 - [x] P3-20 An end-to-end clean-room flight in the drive suite
-- [ ] P3-21 Phase 3 end: push and record the manual check
+- [x] P3-21 Phase 3 end: push and record the manual check
 - [ ] P4-01 cleanroom.similarity configuration
 - [ ] P4-02 The lexer core, Rust and the C family
 - [ ] P4-03 Lexers for Go, Python, JavaScript, TypeScript, Java and PHP
@@ -209,3 +209,6 @@ cleanroomStatus(st) in status(); CLEANROOM_SENTENCE appended to the run-policies
 
 ### P3-20 — 825dd49
 Clean-room drive flight: genesis, plan added after genesis, run_start, two tasks with simulated Write/Bash calls and one guard-denied Read under deny.paths, run_finish, APPROVED review, summary, final next; hooks invoked through runHook with CLAUDE_PROJECT_DIR and CLAUDE_PLUGIN_ROOT. 6 checkpoints verify, 8 server commits carry trailers. No harness change needed.
+
+### P3-21 — b4969b2
+Push: pushed build/2026-10-19. Also committed 387b6bd (outside a task): plan-build writes docs/kukulu.json before PLAN.md in clean-room mode, because the guard protects it once PLAN.md exists. Manual check: NOT VERIFIED (human): copy templates/cleanroom.example.json into a throwaway Rust project as docs/cleanroom.json, start a new Claude Code session with the working-tree plugin, ask it to read ~/.cargo/registry, confirm the denial appears in the session and in .kukulu/cleanroom/log.jsonl, type one instruction and confirm a human entry, then run /kukulu:go-flight and confirm 'gate: ok (7 checks)' before the plan stage
