@@ -17,7 +17,7 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] P1-03 Halts name kukulu_run_resume; go-flight maps resume
 - [x] P1-04 The link check reads git ls-files
 - [x] P1-05 MD022-clean writes to PROGRESS.md and PLAN.md
-- [ ] P1-06 The dependency field is matched at line start
+- [x] P1-06 The dependency field is matched at line start
 - [ ] P1-07 kukulu_mutate runs the constraint scan
 - [ ] P1-08 kukulu_status reports prChecks; the review reads CI
 - [ ] P1-09 Review tasks carry a source; mutation-only rounds are capped
@@ -113,3 +113,6 @@ brokenLinks(root) in test/plugin.mjs uses git ls-files; orphan-doc check also tr
 
 ### P1-05 — 46fae86
 appendLog/formatTask/setHeader write MD022-clean spacing; parseProgressText skips the blank after a log heading so dependencyLogs are unchanged. Harness: headingSpacingProblems(text), planTask/planDoc/progressDoc take { legacy } for the 0.6 spacing (new spacing default). plan-build skill formats updated. Existing tests' log regexes updated to expect heading+blank.
+
+### P1-06 — f49b2a4
+Regex now /^\*\*Depends on:\*\*\s*(.*)$/im. Test confirmed failing before the fix, passing after.
