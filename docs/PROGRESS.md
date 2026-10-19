@@ -37,7 +37,7 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] P3-06 The signing key and checkpoint primitives
 - [x] P3-07 Genesis and sticky mode
 - [x] P3-08 Checkpoints from the tools, and the log in their commits
-- [ ] P3-09 Path canonicalization and the Bash splitter
+- [x] P3-09 Path canonicalization and the Bash splitter
 - [ ] P3-10 evaluate: the guard's rules
 - [ ] P3-11 The guard hook and its self-test
 - [ ] P3-12 The logger hook
@@ -173,3 +173,6 @@ Server: cleanroomOn/cleanroomLogPath/pluginHashes/ensureKey/cleanroomModeBreak/c
 
 ### P3-08 — 7d62139
 checkpoint(event, stage, st) + cleanroomPaths(st) helpers; wired into run_start, task_done, task_block, run_finish, review_submit (both verdicts), summary_commit, flight_archive; archive moves log (and similarity.json when present) to docs/flights/<slug>/cleanroom/. porcelainExcludingPreexisting and trackedDirtyLines ignore the log (path matched from line end, because git() trims the first porcelain line). Note for P3-12: after the archive the logger must not recreate a log before the next genesis (log only when state.cleanroom.genesis is set), else genesis would not be seq 1. Docs notes added per tool and in operations.
+
+### P3-09 — aa68450
+Added splitSegments, shellWords, commandWord ({word (basename), raw, args}), tokenPath, isPathLike, canonicalPaths to mcp/cleanroom.mjs. Interpretation: redirection & (2>&1, &>) does not split; canonicalPaths adds the real path via the nearest existing ancestor; nice -n takes its value. Backslash escapes in test strings: write them with String.fromCharCode(92) when scripting edits.
