@@ -4,7 +4,7 @@
   "reviewed": false,
   "verdict": null,
   "summarized": false,
-  "halted": null,
+  "halted": "kukulu_run_start refuses: working tree is dirty on main. docs/SPEC.md has uncommitted changes (160 insertions, 661 deletions) and docs/site/ is untracked. The plan was derived from this SPEC, so I did not stash or revert it, and I did not commit it because that is the owner's file. Fix: commit (or deliberately discard) docs/SPEC.md, then restart the implement stage.",
   "preexistingUntracked": [],
   "policies": {
     "signing": "auto",
