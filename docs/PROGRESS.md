@@ -44,7 +44,7 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] P3-13 Tune the hook fast path and TARGET_MAX
 - [x] P3-14 Self-protection: the always-protected set
 - [x] P3-15 Clean-room commit trailers
-- [ ] P3-16 The gate: checks 1 to 6
+- [x] P3-16 The gate: checks 1 to 6
 - [ ] P3-17 Gate liveness
 - [ ] P3-18 Human entries and kukulu_cleanroom_record
 - [ ] P3-19 Clean-room status, prompts, skills and docs/cleanroom.md
@@ -194,3 +194,6 @@ protectedPaths(policy, env) exported; evaluate uses env.protected ?? protectedPa
 
 ### P3-15 — 52cbbc7
 withTrailers() inside commitStaged (and the stream merge commit); gitCommitIfChanged now passes its options through ({ stage, task, cleanroom }); every call site passes a stage (implement/fix by round, review, summarize, controller, plan). A site that forgets would fall back to controller (all current sites covered by the all-commits test). Archive passes cleanroom: Boolean(old.cleanroom?.genesis) because its state is reset before committing. implement skill and docs/mcp-tools.md updated.
+
+### P3-16 — f82dd58
+runGate/requireGate in the server: 6 checks (mode, policy, guard incl. hooks.json registrations, self-test through runShell 60 s, lockdown probe via evaluate, chain incl. genesis equality and newest-checkpoint signature); failure appends a gate entry then halts (kukulu_next) or throws (run_start, task_next, review_submit, summary_commit; stage-scoped task_next included). kukulu_next result gains gate: {ok, checked} (null in general mode); go-flight prints it. Harness tempPlugin(). The gate adds a gate entry on every kukulu_next, so the log is dirty after any next call (checkpoint commits it). P3-17 adds the 7th check.
