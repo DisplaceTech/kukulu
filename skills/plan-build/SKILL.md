@@ -15,6 +15,8 @@ You are the first of four chained roles. Your output is executed **unattended** 
 3. `docs/kukulu.json` (verification commands and run settings).
 4. `CLAUDE.md` for the repo.
 
+**Clean-room mode.** When the project has a clean-room policy (`docs/cleanroom.json`, or the path `cleanroom.policy` names), the guard protects `docs/kukulu.json` as soon as `docs/PLAN.md` exists. Write the deliverables in the order 3, 1, 2, 4: `docs/kukulu.json` first, then `docs/PLAN.md`, `docs/PROGRESS.md` and `CLAUDE.md`. Never write the policy file or anything under `.kukulu/`.
+
 Do not write implementation code. Do not create the branch, package manifest, or any source files; the first task of the first phase does that.
 
 ## Rules for the plan

@@ -437,6 +437,8 @@ like(read("skills/implement/SKILL.md"), /A denial is not an obstacle to route ar
 like(read("skills/review-build/SKILL.md"), /A denial that was worked around[^.]*is a category 1 finding/, "review-build treats a worked-around denial as category 1");
 ok(read("README.md").includes("(./docs/cleanroom.md)") && exists("docs/cleanroom.md"), "docs/cleanroom.md is linked from the README");
 
+like(read("skills/plan-build/SKILL.md"), /Write the deliverables in the order 3, 1, 2, 4: `docs\/kukulu\.json` first/, "plan-build writes docs/kukulu.json first in clean-room mode");
+
 let unknownTool = null;
 let retiredMention = null;
 let unknownSkill = null;
