@@ -638,13 +638,15 @@ for (const [label, patch] of [
 {
   // The 0.5.0 flight archive is recorded evidence. Its bytes are pinned here, so
   // a rename that touches them fails the suite instead of passing silently.
+  // PLAN.md and SPEC.md were re-pinned once, after private project names
+  // were redacted to project-a … project-d.
   const FLIGHT = "docs/flights/v0-5-0";
   const PINNED = {
     "HANDOFF.md": "9863d227bda6e2ed78e06b636d126bb51d6d601cbdd155106aeccc7cee1316dd",
-    "PLAN.md": "d19b22535ee8c15991ade980fc21c59e94e299b25aee2a2a7fd9a317cda508a4",
+    "PLAN.md": "d47abc9978a1bb1a90a92add57fe98ef27d3d8ee704cea82cb122f8cc5af1199",
     "PROGRESS.md": "052741b07c57deb3d8f42128efbd68ffe496b045e15be0469946790f84091f93",
     "REVIEW.md": "ebe811b9a0a8f33089d11908ddd09e15e8e9c741108322db3a941225c93fcc3a",
-    "SPEC.md": "5573578c6720ac37d8ad3ebf9dad7bed98ae578bcb87537833982dc659da8f7f",
+    "SPEC.md": "8c3d8df19d716eebb817f8f98be212ac7a7a279afd2a7d49a518436070af894a",
     "SUMMARY.md": "5daee8277cf18e5ead6fd1fa0cd42ecb5fbbce7b8aaa6120b10ad06ce27e5b33",
     "feedback.jsonl": "cf70939964c3ad6882a755fbd04b63c40c21ca682fa4ec1e65c0952eb7a9b9e0",
     "foundry.json": "fe937f3a9f406e774639d17b0573eec8f8192cbfa7f34c521816b0682f09e756",

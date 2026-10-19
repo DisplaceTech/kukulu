@@ -17,9 +17,9 @@ plan → implement → review → fix → summarize pipeline unattended, with
 mechanics in a dependency-free MCP server (`mcp/server.mjs`) and judgment
 in skills (`skills/*/SKILL.md`). Release 0.5.0 closes every item in two
 feedback files:
-[`docs/feedback/2026-10-07-project-c.md`](feedback/2026-10-07-project-c.md)
+`docs/feedback/2026-10-07-project-c.md`
 (F-01–F-23, ten flights on 0.3.2 and 0.4.0) and
-[`docs/feedback/2026-10-07-project-d.md`](feedback/2026-10-07-project-d.md)
+`docs/feedback/2026-10-07-project-d.md`
 (F-01–F-06, two flights on 0.4.0). It also makes Opus the default model for
 every judgment role. Done means four things: every F-item in the appendix
 map is closed by the requirement it names, `npm run check` and

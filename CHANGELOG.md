@@ -109,9 +109,9 @@ from the first flights on 0.4.0. **Breaking changes** are listed last.
 
 The 0.4.0 flights were two project-c batches and two project-d
 flights. Their friction is in
-[`docs/feedback/2026-10-07-project-c.md`](./docs/feedback/2026-10-07-project-c.md)
+`docs/feedback/2026-10-07-project-c.md`
 and
-[`docs/feedback/2026-10-07-project-d.md`](./docs/feedback/2026-10-07-project-d.md),
+`docs/feedback/2026-10-07-project-d.md`,
 and every item is mapped to what closed it in Appendix A of
 [`docs/SPEC.md`](./docs/SPEC.md).
 
@@ -216,7 +216,7 @@ new license.
 
 The 0.3.2 flights were three cleanflate flights: a build, then two
 performance phases. Their thirty friction items are in
-[`docs/feedback/2026-09-30-cleanflate.md`](./docs/feedback/2026-09-30-cleanflate.md)
+`docs/feedback/2026-09-30-cleanflate.md`
 and triaged in [`docs/plans/v0.4.md`](./docs/plans/v0.4.md#addendum-the-cleanflate-flights-032-feedback).
 They are listed under "From the cleanflate flights" below. **Breaking
 changes** are listed last, after the license.
@@ -226,7 +226,7 @@ minor version and not a patch: `go-flight` now spawns more than one stage
 agent at once, `PLAN.md` gains a field, and `foundry_next` gains a shape.
 The motivating flight ran 26 tasks on one implementer for about 68 minutes
 though many had disjoint file sets (F-05 of
-[`docs/feedback/2026-09-23-project-b.md`](./docs/feedback/2026-09-23-project-b.md)).
+`docs/feedback/2026-09-23-project-b.md`).
 A plan with no streams behaves exactly as it did in 0.3.2: every existing
 suite passes unchanged.
 
@@ -410,7 +410,7 @@ behavior. The skills shipped with this release are already updated.
 ## [0.3.2] — 2026-09-23
 
 Fixes from the first real flight on 0.3.1
-([`docs/feedback/2026-09-23-project-b.md`](./docs/feedback/2026-09-23-project-b.md)),
+(`docs/feedback/2026-09-23-project-b.md`),
 whose friction the new feedback channel captured by itself. No pipeline
 behavior change: no stage gained judgment, no `foundry_next` transition
 moved, and nothing about rounds, verdicts or policies changed.
