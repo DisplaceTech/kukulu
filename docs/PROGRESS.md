@@ -18,7 +18,7 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] P1-04 The link check reads git ls-files
 - [x] P1-05 MD022-clean writes to PROGRESS.md and PLAN.md
 - [x] P1-06 The dependency field is matched at line start
-- [ ] P1-07 kukulu_mutate runs the constraint scan
+- [x] P1-07 kukulu_mutate runs the constraint scan
 - [ ] P1-08 kukulu_status reports prChecks; the review reads CI
 - [ ] P1-09 Review tasks carry a source; mutation-only rounds are capped
 - [ ] P1-10 Tune review.mutationFixRounds from the archived trails
@@ -116,3 +116,6 @@ appendLog/formatTask/setHeader write MD022-clean spacing; parseProgressText skip
 
 ### P1-06 — f49b2a4
 Regex now /^\*\*Depends on:\*\*\s*(.*)$/im. Test confirmed failing before the fix, passing after.
+
+### P1-07 — 2e79762
+mutate now scans constraints on the mutated tree (checkConstraints with preexistingUntracked), returns constraints {ok,results}; hits = kill, verdict "killed: constraint <id> caught the mutation" when no command failed. Interpretation: confirmKill re-runs only when a command failed (previously an empty confirm array could appear); a constraint kill is not downgraded to inconclusive by a failing re-run. Docs/CHANGELOG updated.
