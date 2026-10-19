@@ -139,7 +139,7 @@ function cleanroomGenesis(cc, st) {
     });
     st.cleanroom = { genesis: entry.hash, policyHash: policyHash(policyBytes), ...hashes };
     saveState(st);
-    gitCommitIfChanged(paths, "chore: clean-room genesis");
+    gitCommitIfChanged(paths, "chore: clean-room genesis", { stage: "controller" });
   });
 }
 
@@ -231,7 +231,21 @@ const SIGNING_FAILURE = /gpg failed to sign|failed to sign|signing failed|cannot
  * signing off for the run and retries once, with the record of that decision
  * in the same commit; under "required" it throws (S-02).
  */
-function commitStaged(rels, message, { stage } = {}) {
+/**
+ * In clean-room mode every commit the server makes ends with two trailers,
+ * added here and not by a git hook, so `--no-verify` cannot skip them. `task`
+ * defaults to the first in-progress task, else `-`.
+ */
+function withTrailers(message, { stage, task, cleanroom } = {}) {
+  if (!(cleanroom ?? Boolean(loadState().cleanroom?.genesis))) return message;
+  let taskId = task;
+  if (taskId === undefined && exists(P.progress)) taskId = /^- \[~\] (\S+)/m.exec(read(P.progress))?.[1];
+  return `${message}\n\nKukulu-Stage: ${stage || "controller"}\nKukulu-Task: ${taskId || "-"}`;
+}
+
+function commitStaged(rels, message, opts = {}) {
+  const { stage } = opts;
+  message = withTrailers(message, opts);
   const run = (args) =>
     spawnSync("git", args, {
       cwd: ROOT,
@@ -315,7 +329,7 @@ function withRollback(paths, fn) {
   }
 }
 
-function gitCommitIfChanged(paths, message, { stage } = {}) {
+function gitCommitIfChanged(paths, message, opts = {}) {
   // A path that neither exists on disk nor is tracked yet (e.g. a feedback
   // log nothing has written to this run) is not "nothing changed" to `git
   // add` — it is a pathspec error. Drop those before asking git about them.
@@ -324,7 +338,7 @@ function gitCommitIfChanged(paths, message, { stage } = {}) {
   git(["add", "-A", "--", ...rels]);
   const staged = git(["diff", "--cached", "--name-only", "--", ...rels]).out;
   if (!staged) return null;
-  commitStaged(rels, message, { stage });
+  commitStaged(rels, message, opts);
   return git(["rev-parse", "--short", "HEAD"]).out;
 }
 
@@ -1437,7 +1451,7 @@ function recordSerialWave(wave, cc, st) {
   if (cc.policies.feedback && !(wave.category === "stream-exclusive" && already)) {
     appendFeedback("plan", `Wave ${wave.index} runs serially: ${wave.reason}`, wave.category, "auto");
   }
-  gitCommitIfChanged([P.state, P.feedback], `chore: wave ${wave.index} runs serially`);
+  gitCommitIfChanged([P.state, P.feedback], `chore: wave ${wave.index} runs serially`, { stage: "controller" });
   return cur;
 }
 
@@ -1572,7 +1586,7 @@ function countFeedback() {
 function feedbackLog({ stage, message, category }) {
   if (!cfg().policies.feedback) return { logged: false, reason: "disabled by policy" };
   appendFeedback(stage, message, category, "agent");
-  const commit = gitCommitIfChanged([P.feedback], `chore: pipeline friction (${stage})`, { stage });
+  const commit = gitCommitIfChanged([P.feedback], `chore: pipeline friction (${stage})`, { stage: stage === "implement" ? implementStage(loadState()) : stage });
   return { logged: true, count: countFeedback(), commit };
 }
 
@@ -1964,7 +1978,7 @@ function startRun() {
     appendFeedback("implement", `Signing disabled for this run: ${st.signing}`, "signing", "auto");
   }
   checkpoint("run-start", implementStage(st), st);
-  return gitCommitIfChanged([P.gitignore, P.progress, P.state, P.feedback, ...crPaths], st.round === 0 ? "chore: start implementation run" : `chore: start review-fix round ${st.round}`);
+  return gitCommitIfChanged([P.gitignore, P.progress, P.state, P.feedback, ...crPaths], st.round === 0 ? "chore: start implementation run" : `chore: start review-fix round ${st.round}`, { stage: implementStage(st) });
   });
   return { alreadyStarted: false, branch, commit: sha, counts: counts(pr.tasks), round: st.round, policies: st.policies, signing: st.signing, basePush };
 }
@@ -2012,7 +2026,7 @@ function runStart({ stream } = {}) {
     st.serialWaves = [...serialWavesOf(st), { wave: wave.index, category: "stream-setup", reason }];
     saveState(st);
     if (cc.policies.feedback) appendFeedback("implement", `Wave ${wave.index} runs serially: ${reason}`, "stream-setup", "auto");
-    gitCommitIfChanged([P.state, P.feedback], `chore: wave ${wave.index} runs serially`);
+    gitCommitIfChanged([P.state, P.feedback], `chore: wave ${wave.index} runs serially`, { stage: "controller" });
     throw new ToolError(`${reason}. Wave ${wave.index} now runs serially; stop here and the controller's next kukulu_next will hand it out that way.`);
   }
 
@@ -2023,7 +2037,7 @@ function runStart({ stream } = {}) {
     const st = loadState();
     st.streams = { ...(st.streams || {}), [stream]: { branch: created.streamBranch, preexistingUntracked: untrackedPaths(created.cwd) } };
     saveState(st);
-    gitCommitIfChanged([P.state], `chore: stream ${stream} started (wave ${wave.index})`);
+    gitCommitIfChanged([P.state], `chore: stream ${stream} started (wave ${wave.index})`, { stage: implementStage(st) });
     // Runs that began before this plan's streams (or before 0.4.0) may lack
     // the .gitignore line; exclude per clone rather than dirty the tree.
     const ignored = exists(P.gitignore) && read(P.gitignore).split("\n").includes(`${rel(P.worktrees)}/`);
@@ -2062,12 +2076,12 @@ function streamFinish({ stream } = {}) {
   }
   // Every stream call leaves PROGRESS.md/state.json changes for the next
   // commit; land them first so the merge starts from a clean tracked tree.
-  gitCommitIfChanged([P.progress, P.state, P.feedback], `progress: sync before merging stream ${stream}`);
+  gitCommitIfChanged([P.progress, P.state, P.feedback], `progress: sync before merging stream ${stream}`, { stage: implementStage(loadState()) });
   const stray = trackedDirtyLines().join("\n");
   if (stray) throw new ToolError(`the main checkout has uncommitted tracked changes; commit or discard them before merging stream '${stream}':\n${stray}`);
 
   const before = git(["rev-parse", "HEAD"]).out;
-  const merge = git(["merge", "--no-ff", "--no-edit", "-m", `merge stream ${stream} (wave ${wave.index})`, streamBranch], { allowFail: true });
+  const merge = git(["merge", "--no-ff", "--no-edit", "-m", withTrailers(`merge stream ${stream} (wave ${wave.index})`, { stage: implementStage(loadState()), task: "-" }), streamBranch], { allowFail: true });
   if (!merge.ok) {
     const conflicts = git(["diff", "--name-only", "--diff-filter=U"], { allowFail: true }).out.split("\n").filter(Boolean);
     git(["merge", "--abort"], { allowFail: true });
@@ -2083,7 +2097,7 @@ function streamFinish({ stream } = {}) {
     cur.haltStream = stream; // so kukulu_run_resume can tell a merge halt from any other
     saveState(cur);
     if (cc.policies.feedback) appendFeedback("implement", halted, "stream-merge", "auto");
-    gitCommitIfChanged([P.state, P.feedback], `chore: run halted (stream ${stream} merge conflict)`);
+    gitCommitIfChanged([P.state, P.feedback], `chore: run halted (stream ${stream} merge conflict)`, { stage: implementStage(cur) });
     return { stream, merged: false, halted, conflicts };
   }
 
@@ -2126,7 +2140,7 @@ function taskNext({ stream } = {}) {
     const wave = pick ? parallelWaveOf(pick) : null;
     if (wave) {
       writeProgress(pr);
-      if (skipped.length) gitCommitIfChanged([P.progress], `progress: skip ${skipped.map((x) => x.id).join(", ")}`);
+      if (skipped.length) gitCommitIfChanged([P.progress], `progress: skip ${skipped.map((x) => x.id).join(", ")}`, { stage: implementStage(loadState()) });
       setLockPaused(wave.index);
       return {
         done: true,
@@ -2140,7 +2154,7 @@ function taskNext({ stream } = {}) {
     }
     if (!pick) {
       writeProgress(pr);
-      if (skipped.length) gitCommitIfChanged([P.progress], `progress: skip ${skipped.map((s) => s.id).join(", ")}`);
+      if (skipped.length) gitCommitIfChanged([P.progress], `progress: skip ${skipped.map((s) => s.id).join(", ")}`, { stage: implementStage(loadState()) });
       return { done: true, counts: counts(pr.tasks), skipped, ...(stream !== undefined ? { stream } : {}) };
     }
     const task = planTask(pick.id);
@@ -2217,7 +2231,7 @@ function taskDone({ stream, id, log }) {
     appendLog(pr, id, sha, log);
     writeProgress(pr);
     checkpoint("kukulu_task_done", implementStage(stDone), stDone);
-    return gitCommitIfChanged([P.progress, ...crPaths], `progress: ${id} done`);
+    return gitCommitIfChanged([P.progress, ...crPaths], `progress: ${id} done`, { stage: implementStage(stDone), task: id });
   });
   resetLockCounter();
   return { id, taskCommit: sha, progressCommit: psha, counts: counts(pr.tasks), guardReset: true, ...(stream !== undefined ? { stream } : {}) };
@@ -2251,7 +2265,7 @@ function taskBlock({ stream, id, reason }) {
     appendLog(pr, id, "blocked", `BLOCKED: ${reason}`);
     writeProgress(pr);
     checkpoint("kukulu_task_block", implementStage(stBlock), stBlock);
-    return gitCommitIfChanged([P.progress, ...crPaths], `progress: ${id} blocked`);
+    return gitCommitIfChanged([P.progress, ...crPaths], `progress: ${id} blocked`, { stage: implementStage(stBlock), task: id });
   });
   resetLockCounter();
   return { id, progressCommit: psha, counts: counts(pr.tasks), ...(stream !== undefined ? { stream } : {}) };
@@ -2316,7 +2330,7 @@ function taskReopen({ id, reason } = {}) {
   const commit = withRollback([P.progress], () => {
     dependents = reopenWithDependents(pr, [id], "reopened", `REOPENED: ${reason}`);
     writeProgress(pr);
-    return gitCommitIfChanged([P.progress], `progress: reopen ${id}${dependents.length ? ` (+${dependents.length} dependent${dependents.length === 1 ? "" : "s"})` : ""}`);
+    return gitCommitIfChanged([P.progress], `progress: reopen ${id}${dependents.length ? ` (+${dependents.length} dependent${dependents.length === 1 ? "" : "s"})` : ""}`, { stage: implementStage(st), task: id });
   });
   resetLockCounter();
   return { id, reopenedDependents: dependents, commit, counts: counts(pr.tasks) };
@@ -2540,7 +2554,7 @@ function recoverMutation() {
   // make the implementer's next kukulu_task_done refuse on a dirty tree.
   if (feedbackEnabled()) {
     appendFeedback("review", `Restored ${relPath}, left mutated by a kukulu_mutate call that never finished.`, "mutation-recovered", "auto");
-    gitCommitIfChanged([P.feedback], "chore: pipeline friction (review)");
+    gitCommitIfChanged([P.feedback], "chore: pipeline friction (review)", { stage: "review" });
   }
   return relPath;
 }
@@ -2729,7 +2743,7 @@ function runFinish() {
   const st = loadState();
   const c = cfg();
   const g = gitFacts();
-  const handoffCommit = withRollback([P.handoff], () => gitCommitIfChanged([P.handoff], "chore: handoff for review"));
+  const handoffCommit = withRollback([P.handoff], () => gitCommitIfChanged([P.handoff], "chore: handoff for review", { stage: implementStage(st) }));
   const dirtyLines = porcelainExcludingPreexisting(st.preexistingUntracked);
   if (dirtyLines.length) {
     throw new ToolError(`working tree is not clean:\n${dirtyLines.join("\n")}\nCommit them as part of the handoff or \`git checkout --\`/\`git clean\` them.`);
@@ -2740,7 +2754,7 @@ function runFinish() {
   const stateCommit = withRollback([P.state, ...crPaths], () => {
     saveState(st);
     checkpoint("kukulu_run_finish", implementStage(st), st);
-    return gitCommitIfChanged([P.state, ...crPaths], `chore: round ${st.round} implemented`);
+    return gitCommitIfChanged([P.state, ...crPaths], `chore: round ${st.round} implemented`, { stage: implementStage(st) });
   });
 
   const push = pushBranch(g.branch, st.policies.push);
@@ -2820,7 +2834,7 @@ function flightOptions(args = {}) {
     }
     const after = Object.fromEntries(FLIGHT_OPTION_KEYS.map((k) => [k, cfg()[k]]));
     const label = `${given.map((k) => `${k}=${args[k]}`).join(", ")}${resume ? ", resume" : ""}`;
-    const commit = gitCommitIfChanged(paths, `chore: flight options (${label})`);
+    const commit = gitCommitIfChanged(paths, `chore: flight options (${label})`, { stage: "controller" });
     return { before, after, commit, ...(resume ? { resumed: true } : {}) };
   });
 }
@@ -2842,7 +2856,7 @@ function runHalt({ reason }) {
     saveState(st);
     if (exists(P.lock)) fs.unlinkSync(P.lock);
     if (cfg().policies.feedback) appendFeedback("controller", `Run halted: ${reason}`, "halt", "auto");
-    return gitCommitIfChanged([P.state, P.progress, P.feedback], "chore: run halted");
+    return gitCommitIfChanged([P.state, P.progress, P.feedback], "chore: run halted", { stage: "controller" });
   });
   const g = gitFacts();
   const dirty = git(["status", "--porcelain"], { allowFail: true }).out !== "";
@@ -2887,7 +2901,7 @@ function runResume({ reason } = {}) {
   const commit = withRollback([P.state, P.feedback], () => {
     saveState(st);
     if (c.policies.feedback) appendFeedback("controller", `Run resumed: ${reason.trim()}`, "resume", "human");
-    return gitCommitIfChanged([P.state, P.feedback], "chore: run resumed");
+    return gitCommitIfChanged([P.state, P.feedback], "chore: run resumed", { stage: "controller" });
   });
   return { resumed: true, previousHalt, commit };
 }
@@ -3364,7 +3378,7 @@ function flightArchive({ slug } = {}) {
       // only what exists now is added.
       git(["add", "-A", "--", ...rels.filter((r) => exists(path.join(ROOT, r)))]);
       const known = rels.filter((r) => exists(path.join(ROOT, r)) || git(["cat-file", "-e", `HEAD:${r}`], { allowFail: true }).ok);
-      commitStaged(known, `chore: archive flight ${slug}`, { stage: "summarize" });
+      commitStaged(known, `chore: archive flight ${slug}`, { stage: "summarize", cleanroom: Boolean(old.cleanroom?.genesis) });
       return git(["rev-parse", "--short", "HEAD"]).out;
     });
   } catch (e) {

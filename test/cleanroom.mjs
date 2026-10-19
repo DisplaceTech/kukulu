@@ -555,6 +555,23 @@ async function genesisRepo(planOpts = {}) {
     eq(all[0].data.git.length, 40, "...each recording the full HEAD sha");
     eq(all[0].data.keyFingerprint, loadKey(testKeyFor(repo)).fingerprint, "...and the key's fingerprint");
     eq(git(repo, ["status", "--porcelain"]), "", "the archive leaves a clean tree");
+
+    // Trailers on every commit the server made.
+    const trailer = (sha, key) => git(repo, ["log", "-1", `--format=%(trailers:key=${key},valueonly)`, sha]).trim();
+    const commits = git(repo, ["log", "--reverse", "--format=%H%x09%s"]).split("\n").map((l) => l.split("\t"));
+    const serverCommits = commits.filter(([, subj]) => /^(chore|progress|review):/.test(subj) && !/^chore: (clean-room policy)$/.test(subj));
+    ok(serverCommits.length >= 8, `the flight made ${serverCommits.length} server commits`);
+    const missing = serverCommits.filter(([sha]) => !trailer(sha, "Kukulu-Stage") || !trailer(sha, "Kukulu-Task"));
+    eq(missing.map(([, subj]) => subj).join(" | "), "", "every server commit in clean-room mode carries the stage and task trailers");
+    const by = (subj) => commits.find(([, x]) => x === subj)?.[0];
+    eq(trailer(by("chore: clean-room genesis"), "Kukulu-Stage"), "controller", "the genesis commit is filed under controller");
+    eq(trailer(by("chore: start implementation run"), "Kukulu-Stage"), "implement", "run_start's commit is filed under implement");
+    eq(trailer(by("progress: P0-01 done"), "Kukulu-Task"), "P0-01", "task_done's progress commit names its task");
+    eq(trailer(by("progress: P0-02 blocked"), "Kukulu-Task"), "P0-02", "task_block's names its task");
+    eq(trailer(by("review: round 1 approved"), "Kukulu-Stage"), "review", "review_submit's commit is filed under review");
+    eq(trailer(by("chore: build summary"), "Kukulu-Stage"), "summarize", "summary_commit's is filed under summarize");
+    eq(trailer(by("chore: archive flight w1"), "Kukulu-Stage"), "summarize", "the archive commit, made after its state reset, still carries the trailers");
+    eq(git(repo, ["log", "-1", "--format=%B", by("progress: P0-01 done")]).trim().split("\n").slice(-3).join("|"), "|Kukulu-Stage: implement|Kukulu-Task: P0-01", "the trailers sit after a blank line at the end of the message");
   });
 }
 
@@ -580,6 +597,21 @@ async function genesisRepo(planOpts = {}) {
 }
 
 {
+  // The trailers survive the unsigned retry (the failing-signer protocol).
+  const repo = cleanroomRepo();
+  git(repo, ["config", "--local", "commit.gpgsign", "true"]);
+  git(repo, ["config", "--local", "gpg.format", "openpgp"]);
+  git(repo, ["config", "--local", "gpg.program", "/nonexistent-signing-agent"]);
+  await withServer(repo, async ({ call }) => {
+    const n = await call("kukulu_next");
+    ok(!n.error, "kukulu_next survives a failing signer under policies.signing auto");
+    eq(subject(repo), "chore: clean-room genesis", "...the genesis commit was made, unsigned");
+    const body = git(repo, ["log", "-1", "--format=%B"]).trim().split("\n");
+    eq(body.slice(-2).join("|"), "Kukulu-Stage: controller|Kukulu-Task: -", "the trailers survive the unsigned retry");
+  });
+}
+
+{
   // General mode: no checkpoint, no log.
   const repo = plannedRepo();
   await withServer(repo, async ({ call }) => {
@@ -588,6 +620,7 @@ async function genesisRepo(planOpts = {}) {
     commitTask(repo, "P0-01", "Create hello", { "hello.txt": "hi\n" });
     await call("kukulu_task_done", { id: "P0-01", log: "done" });
     ok(!hasFile(repo, ".kukulu/cleanroom"), "general mode writes no checkpoint and no log");
+    eq(git(repo, ["log", "--format=%B"]).includes("Kukulu-Stage"), false, "general mode adds no trailers");
     ok(!touched(repo).some((f) => f.includes("cleanroom")), "...and commits nothing about one");
   });
 }
