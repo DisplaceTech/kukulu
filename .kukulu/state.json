@@ -10,9 +10,12 @@
     "signing": "auto",
     "push": true,
     "pr": "draft",
-    "feedback": true
+    "feedback": true,
+    "archive": false,
+    "finalize": "auto",
+    "mergeMethod": "merge"
   },
-  "signing": null,
+  "signing": "on",
   "rounds": [],
   "archived": {
     "slug": "kukulu-tech",
