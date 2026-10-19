@@ -693,6 +693,22 @@ ok(glRev && glPin === glRev, "secret-scan.yml pins GITLEAKS_VERSION to the pre-c
   const apostrophe = run({ "README.md": "Hawai'i and '\u014dlelo.\n" });
   eq(apostrophe.status, 1, "check-names refuses an apostrophe where the okina belongs");
   like(apostrophe.stderr, /\u02bbokina/, "...and names the okina");
+  // The private-name denylist: always a temp root, never the maintainer's own file.
+  {
+    const names = "# private names\nproject-e Orbit\nproject-f Quasar Works\n";
+    const withNames = (files) => run({ "docs/feedback/.private-names": names, ...files });
+    const named = withNames({ "docs/notes.md": "Intro line.\nSee the quasar works dashboard.\n" });
+    eq(named.status, 1, "a tracked file naming private project #2 fails check-names");
+    like(named.stderr, /check-names: docs\/notes\.md:2: contains private project name #2 \(see docs\/feedback\/\.private-names\); replace it with its label/, "...with file, line and #2");
+    ok(!/quasar/i.test(named.stdout + named.stderr), "...and no output contains the name");
+    eq(withNames({ "docs/feedback/2026-01-01-project-f.md": "Quasar Works did this.\n", "test/fixtures/x.jsonl": "Orbit\n" }).status, 0, "the same name under docs/feedback/ passes");
+    const none = run({ "README.md": "Orbit.\n" });
+    eq(none.status, 0, "without a denylist check-names still passes");
+    like(none.stdout, /private-name check skipped \(no docs\/feedback\/\.private-names\)/, "...and prints the skipped line");
+    eq(withNames({ "docs/notes.md": "The orbital and orbiting words, Quasar Worksheets.\n" }).status, 0, "a private name is matched only as a whole word");
+    ok(spawnSync("git", ["check-ignore", "-q", "docs/feedback/.private-names"], { cwd: ROOT }).status === 0, "docs/feedback/.private-names is gitignored");
+  }
+
   const okina = run({ "README.md": "Hawai\u02bbi and \u02bb\u014dlelo.\n" });
   eq(okina.status, 0, "check-names accepts the okina");
 }

@@ -50,6 +50,8 @@ The display name is **Kūkulu**, with the macron (kahakō) over the first u, U+0
 
 `node scripts/check-names.mjs` enforces this and runs inside `npm run lint`, pre-commit and CI. It fails on a macron outside the standalone word, a decomposed u + U+0304, a non-ASCII path, the ASCII spelling of the display name in Markdown prose (code spans, fenced blocks and URLs are exempt), and an apostrophe where the ʻokina belongs. Archived flights, `docs/plans/`, `docs/feedback/`, `docs/SPEC.md` and the changelog below its newest entry are history and are not checked for prose.
 
+When `docs/feedback/.private-names` exists on your machine (gitignored; see [Flight feedback](#flight-feedback)), the same script also fails on any real project name listed there that appears in a file outside `docs/feedback/` and `test/fixtures/`. It cites the entry's number, never the name, and without the file it prints that it skipped the check.
+
 ## Tests
 
 ```bash

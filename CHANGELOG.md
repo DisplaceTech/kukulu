@@ -14,6 +14,7 @@ All notable changes to this plugin. Format follows
 - `kukulu_mutate` runs the active constraints over the mutated tree, reports them as `constraints`, and counts a rule with hits as a kill (`killed: constraint <id> caught the mutation`).
 - `kukulu_status` reports the pull request's CI checks as `prChecks`, and the review-build skill reads them from round 2 on.
 - `kukulu_review_submit` requires every fix task to name its `source` (`review`, `mutation` or `blocked`) and refuses a `mutation` task once the round is past the new `review.mutationFixRounds` key, so a mutation-only review loop converges. `state.rounds` records the counts.
+- `scripts/check-names.mjs` reads the gitignored `docs/feedback/.private-names` and fails on any listed project name in a file outside `docs/feedback/` and `test/fixtures/`, citing the entry's number and never the name.
 - A `site` CI workflow that runs the static and browser checks.
 
 ### Fixed
