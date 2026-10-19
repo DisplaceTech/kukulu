@@ -8,9 +8,11 @@ import path from "node:path";
 import { createHash } from "node:crypto";
 import { finish, ok, eq, like, isError, ROOT, plannedRepo, withServer, runHook, mkDir, writeFile } from "./harness.mjs";
 import { spawn, spawnSync } from "node:child_process";
+import { createHash as sha, generateKeyPairSync } from "node:crypto";
 import {
   CleanroomError, loadPolicy, policyHash,
   ENTRY_KEYS, KINDS, ZERO_HASH, TARGET_MAX, truncateTarget, canonical, entryHash, appendEntry, readEntries, verifyChain, logPathFor, targetOf, projectContext, entryFields,
+  generateKey, loadKey, keyFingerprint, CHECKPOINT_KEYS, signCheckpoint, verifyCheckpoint,
 } from "../mcp/cleanroom.mjs";
 
 const EXAMPLE = fs.readFileSync(path.join(ROOT, "templates", "cleanroom.example.json"), "utf8");
@@ -327,6 +329,47 @@ eq(targetOf("Read", null), "", "...and a missing input is empty");
   writeFile(repo, ".kukulu/state.json", "{ not json");
   const c = projectContext(repo);
   eq(c.lock.round + "|" + c.state + "|" + /P0-09/.test(c.progress), "1|null|true", "...and reads PROGRESS.md and the lock, with an unreadable state as null");
+}
+
+// ---------------------------------------------------------------- the key and checkpoints
+
+{
+  const dir = mkDir("kukulu-key-");
+  const keyPath = path.join(dir, "keys", "ed25519.pem");
+  const key = generateKey(keyPath);
+  eq((fs.statSync(keyPath).mode & 0o777).toString(8), "600", "generateKey writes a 0600 private key");
+  ok(fs.existsSync(keyPath + ".pub") && /BEGIN PUBLIC KEY/.test(fs.readFileSync(keyPath + ".pub", "utf8")), "...and a .pub in SPKI PEM");
+  eq((fs.statSync(path.dirname(keyPath)).mode & 0o777).toString(8), "700", "...in a 0700 directory");
+  let refused = null;
+  try { generateKey(keyPath); } catch (e) { refused = e; }
+  like(refused?.message, /already exists/, "generateKey refuses an existing key");
+  eq(key.fingerprint, "sha256:" + sha("sha256").update(key.publicKey.export({ type: "spki", format: "der" })).digest("hex"), "keyFingerprint is sha256: over the public DER");
+  const loaded = loadKey(keyPath);
+  eq(loaded.fingerprint, key.fingerprint, "loadKey returns the same fingerprint");
+  eq(keyFingerprint(loaded.publicKey), key.fingerprint, "...and the public key matches");
+
+  const rsa = path.join(dir, "rsa.pem");
+  fs.writeFileSync(rsa, generateKeyPairSync("rsa", { modulusLength: 2048 }).privateKey.export({ type: "pkcs8", format: "pem" }));
+  try { loadKey(rsa); refused = null; } catch (e) { refused = e; }
+  ok(refused?.message.includes(rsa) && /rsa key/.test(refused.message), "loadKey refuses a non-Ed25519 key, naming the path");
+  try { loadKey(path.join(dir, "absent.pem")); refused = null; } catch (e) { refused = e; }
+  like(refused?.message, /cannot read an Ed25519 signing key at/, "...and an unreadable one");
+
+  const data = { chainTip: ZERO_HASH, git: "abc1234", policyHash: "p".repeat(64), guardHash: "g".repeat(64), loggerHash: "l".repeat(64), hooksHash: "h".repeat(64), keyFingerprint: key.fingerprint, event: "run-start" };
+  const signed = signCheckpoint(data, key.privateKey);
+  ok(typeof signed.signature === "string" && Buffer.from(signed.signature, "base64").length === 64, "signCheckpoint adds a base64 Ed25519 signature");
+  eq(CHECKPOINT_KEYS.join(","), "chainTip,git,policyHash,guardHash,loggerHash,hooksHash,keyFingerprint,event", "the checkpoint fields are fixed and ordered");
+  eq(verifyCheckpoint({ kind: "checkpoint", data: signed }, key.publicKey), true, "a signed checkpoint verifies");
+  eq(verifyCheckpoint({ kind: "checkpoint", data: { signature: signed.signature, ...Object.fromEntries([...CHECKPOINT_KEYS].reverse().map((k) => [k, data[k]])) } }, key.publicKey), true, "...whatever order the data's keys are stored in");
+  const other = generateKey(path.join(dir, "other.pem"));
+  eq(verifyCheckpoint({ kind: "checkpoint", data: signed }, other.publicKey), false, "...fails with another key");
+  eq(verifyCheckpoint({ kind: "checkpoint", data: { ...signed, git: "def5678" } }, key.publicKey), false, "...fails after a field changes");
+  eq(verifyCheckpoint({ kind: "checkpoint", data: { ...signed, extra: 1 } }, key.publicKey), false, "...fails with an added field");
+  eq(verifyCheckpoint({ kind: "allowed", data: signed }, key.publicKey), false, "...fails when the entry is not a checkpoint");
+  eq(verifyCheckpoint({ kind: "checkpoint", data }, key.publicKey), false, "...and when it carries no signature");
+  let unsigned = null;
+  try { signCheckpoint({ ...data, extra: 1 }, key.privateKey); } catch (e) { unsigned = e; }
+  like(unsigned?.message, /exactly the fields/, "signCheckpoint refuses data with a field it would not sign");
 }
 
 finish();

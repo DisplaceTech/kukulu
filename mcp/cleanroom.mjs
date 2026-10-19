@@ -3,7 +3,7 @@
 // awaits: the callers own I/O and exit codes, which is what lets the same code
 // run inside a hook and inside the test suite (SPEC section 4).
 
-import { createHash } from "node:crypto";
+import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, sign, verify } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -372,4 +372,66 @@ export function entryFields(hookInput, context = {}) {
     tool: typeof input.tool_name === "string" && input.tool_name ? input.tool_name : null,
     target: targetOf(input.tool_name, input.tool_input),
   };
+}
+
+// ---------------------------------------------------------------- the signing key and checkpoints
+
+/** `sha256:` + hex of SHA-256 over the public key's SPKI DER: the key's identity in the log and the manifest. */
+export function keyFingerprint(publicKey) {
+  const der = publicKey.export({ type: "spki", format: "der" });
+  return `sha256:${createHash("sha256").update(der).digest("hex")}`;
+}
+
+/** Create an Ed25519 key pair at `keyPath` (PKCS#8 PEM, mode 0600) and `<keyPath>.pub` (SPKI PEM). Never overwrites a key. */
+export function generateKey(keyPath) {
+  if (fs.existsSync(keyPath)) throw new CleanroomError(`a signing key already exists at ${keyPath}; refusing to overwrite it, since every earlier checkpoint was signed with it`);
+  fs.mkdirSync(path.dirname(keyPath), { recursive: true, mode: 0o700 });
+  const { privateKey, publicKey } = generateKeyPairSync("ed25519");
+  fs.writeFileSync(keyPath, privateKey.export({ type: "pkcs8", format: "pem" }), { mode: 0o600 });
+  fs.chmodSync(keyPath, 0o600);
+  fs.writeFileSync(`${keyPath}.pub`, publicKey.export({ type: "spki", format: "pem" }));
+  return { privateKey, publicKey, fingerprint: keyFingerprint(publicKey) };
+}
+
+/** Read a PEM Ed25519 private key; a key of any other kind, or an unreadable file, is a refusal naming the path. */
+export function loadKey(keyPath) {
+  let privateKey;
+  try {
+    privateKey = createPrivateKey(fs.readFileSync(keyPath, "utf8"));
+  } catch (e) {
+    throw new CleanroomError(`cannot read an Ed25519 signing key at ${keyPath}: ${e.message}`);
+  }
+  if (privateKey.asymmetricKeyType !== "ed25519") {
+    throw new CleanroomError(`the signing key at ${keyPath} is a ${privateKey.asymmetricKeyType} key; clean-room checkpoints are signed with Ed25519 only`);
+  }
+  const publicKey = createPublicKey(privateKey);
+  return { privateKey, publicKey, fingerprint: keyFingerprint(publicKey) };
+}
+
+export const CHECKPOINT_KEYS = ["chainTip", "git", "policyHash", "guardHash", "loggerHash", "hooksHash", "keyFingerprint", "event"];
+
+/** The bytes a checkpoint signature covers: the data rebuilt in CHECKPOINT_KEYS order, nothing else. */
+function checkpointBytes(data) {
+  const rest = Object.keys(data).filter((k) => k !== "signature");
+  if ([...rest].sort().join(",") !== [...CHECKPOINT_KEYS].sort().join(",")) {
+    throw new CleanroomError(`checkpoint data must have exactly the fields ${CHECKPOINT_KEYS.join(", ")} (plus signature)`);
+  }
+  const ordered = {};
+  for (const key of CHECKPOINT_KEYS) ordered[key] = data[key];
+  return Buffer.from(JSON.stringify(ordered), "utf8");
+}
+
+/** `data` with a base64 Ed25519 `signature` over its canonical bytes. */
+export function signCheckpoint(data, privateKey) {
+  return { ...data, signature: sign(null, checkpointBytes(data), privateKey).toString("base64") };
+}
+
+/** True when `entry` is a checkpoint whose signature verifies, over exactly the fields it carries, with `publicKey`. */
+export function verifyCheckpoint(entry, publicKey) {
+  try {
+    if (!entry || entry.kind !== "checkpoint" || !entry.data || typeof entry.data.signature !== "string") return false;
+    return verify(null, checkpointBytes(entry.data), publicKey, Buffer.from(entry.data.signature, "base64"));
+  } catch {
+    return false;
+  }
 }
