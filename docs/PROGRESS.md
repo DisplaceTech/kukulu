@@ -45,7 +45,7 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] P3-14 Self-protection: the always-protected set
 - [x] P3-15 Clean-room commit trailers
 - [x] P3-16 The gate: checks 1 to 6
-- [ ] P3-17 Gate liveness
+- [x] P3-17 Gate liveness
 - [ ] P3-18 Human entries and kukulu_cleanroom_record
 - [ ] P3-19 Clean-room status, prompts, skills and docs/cleanroom.md
 - [ ] P3-20 An end-to-end clean-room flight in the drive suite
@@ -197,3 +197,6 @@ withTrailers() inside commitStaged (and the stream merge commit); gitCommitIfCha
 
 ### P3-16 — f82dd58
 runGate/requireGate in the server: 6 checks (mode, policy, guard incl. hooks.json registrations, self-test through runShell 60 s, lockdown probe via evaluate, chain incl. genesis equality and newest-checkpoint signature); failure appends a gate entry then halts (kukulu_next) or throws (run_start, task_next, review_submit, summary_commit; stage-scoped task_next included). kukulu_next result gains gate: {ok, checked} (null in general mode); go-flight prints it. Harness tempPlugin(). The gate adds a gate entry on every kukulu_next, so the log is dirty after any next call (checkpoint commits it). P3-17 adds the 7th check.
+
+### P3-17 — c49125d
+Check 7 liveness added (checks:7). Harness logCall(repo). In test/cleanroom.mjs the post-genesis flows use live(repo, fn), a withServer wrapper that logs a call before each tool call (a few places that compare log bytes use raw withServer plus logCall). Lesson: a gate refusal also counts as an isError, so a commit-failure test must prove the failure is the commit's, not the gate's (the failed-progress-commit test did not at first).
