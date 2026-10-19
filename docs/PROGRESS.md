@@ -41,7 +41,7 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] P3-10 evaluate: the guard's rules
 - [x] P3-11 The guard hook and its self-test
 - [x] P3-12 The logger hook
-- [ ] P3-13 Tune the hook fast path and TARGET_MAX
+- [x] P3-13 Tune the hook fast path and TARGET_MAX
 - [ ] P3-14 Self-protection: the always-protected set
 - [ ] P3-15 Clean-room commit trailers
 - [ ] P3-16 The gate: checks 1 to 6
@@ -185,3 +185,6 @@ Guard hook implemented: fast path, then dynamic import of ../mcp/cleanroom.mjs, 
 
 ### P3-12 — 13b10e2
 Logger implemented (PostToolUse only; UserPromptSubmit exits 0 until P3-18). Interpretation: loggingActive(ctx, logPath) in cleanroom.mjs gates BOTH hooks: they append only when state.cleanroom.genesis is set or the log already exists, so genesis stays entry 1 and the archive's own PostToolUse does not recreate a log (P3-08 note). A pre-genesis guard denial still blocks, unlogged. Guard tests now seed state with a genesis. Hooks fall back to one stderr line when even the logger-error entry cannot be written.
+
+### P3-13 — c44901f
+Measurement: hook fast path before 50 ms, after 50 ms (unchanged): overhead over bare node guard median 6.0 / p90 23.9 / max 34.2 ms, logger 2.3 / 13.1 / 15.0 ms (30 runs each). TARGET_MAX before 4000, after 4000 (unchanged): cleanflate snapshot 3,314 entries, median 93, p95 2,058, p99 = max = 4,000, 85 entries (2.6%) exactly at the cap since cleanflate's own logger truncated; true maximum unobservable. Human may want to decide about raising it. Evidence: docs/spikes/P3-13.md.
