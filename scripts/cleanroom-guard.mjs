@@ -128,7 +128,10 @@ let fields = {};
 /** Log the denial where the log can be written, tell the model why on stderr, and stop the call. Never returns. */
 function deny(reason) {
   try {
-    if (cr) cr.appendEntry(cr.logPathFor(root, process.env), { kind: "denied", ...fields, decision: "denied", reason });
+    if (cr) {
+      const logPath = cr.logPathFor(root, process.env);
+      if (cr.loggingActive(cr.projectContext(root), logPath)) cr.appendEntry(logPath, { kind: "denied", ...fields, decision: "denied", reason });
+    }
   } catch {
     // an unwritable log must not turn a denial into an allowance
   }

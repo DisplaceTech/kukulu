@@ -2,6 +2,7 @@
 // Kūkulu clean-room logger: the PostToolUse and UserPromptSubmit hook (SPEC
 // D-02, D-04, D-09). Like the guard it exits 0 at once, silently, in a project
 // with no clean-room policy, before importing anything but node: built-ins.
+// It never blocks a call: every path ends in exit 0.
 
 import fs from "node:fs";
 import path from "node:path";
@@ -39,5 +40,24 @@ const input = parseInput(readStdin());
 const root = process.env.CLAUDE_PROJECT_DIR || input?.cwd || process.cwd();
 if (!fs.existsSync(policyFile(root))) process.exit(0);
 
-// A policy exists. P3-12 replaces this with the real logging; the logger never blocks a call.
+let cr = null;
+try {
+  cr = await import("../mcp/cleanroom.mjs");
+  if (!input) throw new Error("the hook input is empty or not a JSON object");
+  const logPath = cr.logPathFor(root, process.env);
+  const ctx = cr.projectContext(root);
+  if (cr.loggingActive(ctx, logPath) && input.hook_event_name === "PostToolUse") {
+    cr.appendEntry(logPath, { kind: "allowed", decision: "allowed", reason: null, ...cr.entryFields(input, ctx) });
+  }
+  // UserPromptSubmit is logged by a later task; any other event is not ours.
+} catch (e) {
+  const message = e instanceof Error ? e.message : String(e);
+  try {
+    if (!cr) throw new Error(message);
+    const logPath = cr.logPathFor(root, process.env);
+    if (cr.loggingActive(cr.projectContext(root), logPath)) cr.appendEntry(logPath, { kind: "allowed", tool: "unknown", decision: null, reason: `logger-error: ${message}` });
+  } catch (inner) {
+    process.stderr.write(`kukulu clean-room logger: could not log (${message}); ${inner instanceof Error ? inner.message : String(inner)}\n`);
+  }
+}
 process.exit(0);

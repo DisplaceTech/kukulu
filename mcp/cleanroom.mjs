@@ -349,6 +349,13 @@ export function projectContext(root) {
 
 const STAGE_OF_AGENT = { planner: "plan", implementer: "implement", reviewer: "review", summarizer: "summarize" };
 
+/**
+ * Whether the hooks should write to the log: once the flight has its genesis (or
+ * a log already exists). Before genesis there is no chain to extend, and after an
+ * archive moved the log away a stray entry would make the next genesis entry 2.
+ */
+export const loggingActive = (context, logPath) => Boolean(context?.state?.cleanroom?.genesis) || fs.existsSync(logPath);
+
 /** The descriptive fields of an entry for a hook payload and the project's context. */
 export function entryFields(hookInput, context = {}) {
   const input = hookInput && typeof hookInput === "object" ? hookInput : {};

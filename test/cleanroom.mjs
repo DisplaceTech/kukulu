@@ -7,7 +7,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import {
-  finish, ok, eq, like, isError, ROOT, plannedRepo, cleanroomRepo, withServer, runHook, mkDir, writeFile, readFile, hasFile, git, subject, testKeyFor, addPlan, commitTask,
+  finish, ok, eq, like, isError, ROOT, plannedRepo, cleanroomRepo, withServer, runHook, mkDir, writeFile, readFile, hasFile, git, subject, testKeyFor, addPlan, commitTask, setState,
 } from "./harness.mjs";
 import { spawn, spawnSync } from "node:child_process";
 import { createHash as sha, generateKeyPairSync } from "node:crypto";
@@ -677,6 +677,7 @@ async function genesisRepo(planOpts = {}) {
 {
   const repo = plannedRepo();
   writeFile(repo, "docs/cleanroom.json", EXAMPLE);
+  setState(repo, { cleanroom: { genesis: "g" } }); // the hooks log once the flight has its genesis
   const env = { CLAUDE_PROJECT_DIR: repo };
   const log = LOG(repo);
   const read = (file_path, extra = {}) => ({ hook_event_name: "PreToolUse", tool_name: "Read", tool_input: { file_path }, cwd: repo, session_id: "s-9", model: "m-1", ...extra });
@@ -719,6 +720,7 @@ async function genesisRepo(planOpts = {}) {
   fs.writeFileSync(path.join(plugin, "mcp", "cleanroom.mjs"), source.replace(hook, `${hook}\n  throw new Error("evaluate exploded");`));
   const repo = plannedRepo();
   writeFile(repo, "docs/cleanroom.json", EXAMPLE);
+  setState(repo, { cleanroom: { genesis: "g" } });
   const r = runHook(path.join(plugin, "scripts", "cleanroom-guard.mjs"), { tool_name: "Read", tool_input: { file_path: "/x" }, cwd: repo }, { CLAUDE_PROJECT_DIR: repo });
   eq(r.status, 2, "an exception in evaluate is a denial, never exit 0");
   like(r.stderr, /guard internal error: evaluate exploded/, "...saying what threw");
@@ -754,6 +756,62 @@ async function genesisRepo(planOpts = {}) {
   writeFile(repo, "ok-policy.json", JSON.stringify(broken));
   const okRun = run(path.join(repo, "ok-policy.json"), repo);
   eq(okRun.status, 0, "a policy whose patterns agree with their fixtures passes the self-test");
+}
+
+// ---------------------------------------------------------------- the logger hook
+
+{
+  const repo = plannedRepo();
+  writeFile(repo, "docs/cleanroom.json", EXAMPLE);
+  writeFile(repo, "PROGRESS-NOTE", "x");
+  writeFile(repo, "docs/PROGRESS.md", "# p\n\n## Tasks\n\n- [~] P0-04 working\n");
+  const env = { CLAUDE_PROJECT_DIR: repo };
+  const post = (tool_name, tool_input, extra = {}) => ({ hook_event_name: "PostToolUse", tool_name, tool_input, cwd: repo, session_id: "s-3", model: "m-2", ...extra });
+
+  const before = runHook(LOGGER, post("Read", { file_path: "/x/a" }), env);
+  eq(before.status + "|" + before.stdout + "|" + before.stderr, "0||", "before genesis the logger exits 0 silently");
+  ok(!fs.existsSync(LOG(repo)), "...and writes no log, so the genesis entry can be entry 1");
+
+  setState(repo, { round: 0, cleanroom: { genesis: "g" } });
+  eq(runHook(LOGGER, post("Read", { file_path: "/x/a" }), env).status, 0, "the logger exits 0");
+  runHook(LOGGER, post("Bash", { command: "ls -la" }, { agent_type: "kukulu-implementer" }), env);
+  runHook(LOGGER, post("Grep", { pattern: "x", glob: "*.rs" }), env);
+  const entries = readEntries(LOG(repo));
+  eq(entries.length, 3, "PostToolUse appends one allowed entry per call");
+  const [a, b] = entries;
+  eq(a.kind + "|" + a.decision + "|" + a.reason + "|" + a.tool + "|" + a.target, "allowed|allowed|null|Read|/x/a", "...an allowed entry for the call");
+  eq(a.stage + "|" + a.task + "|" + a.role + "|" + a.model + "|" + a.session, "null|P0-04|session|m-2|s-3", "...with stage, task, role, model and session");
+  eq(b.stage + "|" + b.role + "|" + b.target, "implement|kukulu-implementer|ls -la", "...an implementer's call is filed under implement");
+  eq(entries[2].target, "glob=*.rs pattern=x", "...a Grep's target is its parts");
+  // The guard denies in between: one chain.
+  runHook(GUARD, { hook_event_name: "PreToolUse", tool_name: "Read", tool_input: { file_path: "/usr/include/zlib.h" }, cwd: repo }, env);
+  runHook(LOGGER, post("Read", { file_path: "/x/b" }), env);
+  const v = verifyChain(linesOf(LOG(repo)));
+  eq(v.ok + "|" + v.entries.length + "|" + v.entries.map((e) => e.kind).join(","), "true|5|allowed,allowed,allowed,denied,allowed", "the chain stays valid across guard and logger appends");
+  eq(runHook(LOGGER, { hook_event_name: "UserPromptSubmit", prompt: "hello", cwd: repo }, env).status, 0, "UserPromptSubmit exits 0 for now");
+  eq(readEntries(LOG(repo)).length, 5, "...without logging");
+
+  // Its own failure: an unparseable payload is logged as a logger-error and the call goes on.
+  const garbled = runHook(LOGGER, "{nope", env);
+  eq(garbled.status, 0, "a logger failure exits 0");
+  const last = readEntries(LOG(repo)).at(-1);
+  eq(last.kind + "|" + last.tool + "|" + last.decision, "allowed|unknown|null", "...after appending an entry with tool unknown");
+  like(last.reason, /^logger-error: /, "...whose reason says logger-error");
+
+  // When the log cannot be written either: one stderr line, still exit 0.
+  const blocked = runHook(LOGGER, post("Read", { file_path: "/x/c" }), { ...env, KUKULU_CLEANROOM_LOG: "/dev/null/cannot/log.jsonl" });
+  eq(blocked.status, 0, "an unwritable log still exits 0");
+  eq(blocked.stderr.split("\n").filter(Boolean).length, 1, "...with exactly one stderr line");
+  like(blocked.stderr, /^kukulu clean-room logger: could not log/, "...naming the logger");
+}
+
+{
+  // Before genesis a denial still blocks, but there is no chain to put it in.
+  const repo = plannedRepo();
+  writeFile(repo, "docs/cleanroom.json", EXAMPLE);
+  const r = runHook(GUARD, { hook_event_name: "PreToolUse", tool_name: "Read", tool_input: { file_path: "/usr/include/zlib.h" }, cwd: repo }, { CLAUDE_PROJECT_DIR: repo });
+  eq(r.status, 2, "before genesis the guard still denies");
+  ok(!fs.existsSync(LOG(repo)), "...but writes no log");
 }
 
 finish();
