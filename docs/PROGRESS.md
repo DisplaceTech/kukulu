@@ -19,7 +19,7 @@ Started: 2026-10-19T16:52:28.587Z
 - [x] R1-01 check-site.mjs self-test cases for the uncovered rule branches
 - [x] R1-02 serve-site.mjs: test port precedence, validate SITE_PORT, test the NUL refusal
 - [x] R1-03 check-site-browser.mjs --self-test and no leaked Chrome profile
-- [ ] R2-01 check-site-browser.mjs self-test: console.error, uncaught exception, no buttons, and Chrome really exited
+- [x] R2-01 check-site-browser.mjs self-test: console.error, uncaught exception, no buttons, and Chrome really exited
 - [ ] R2-02 serve-site.mjs self-test: SITE_PORT above 65535, empty SITE_PORT, and the siteDir 404 page
 
 ## Log
@@ -74,3 +74,6 @@ Added choosePort() (arg, SITE_PORT, servePort; bad SITE_PORT rejects naming it; 
 ### R1-03 — 9a6b958
 Refactored check-site-browser.mjs into withBrowser (Browser.close, bounded wait, SIGKILL fallback, await exit, then rm profile) + visit(); added --self-test with 6 cases (baseline, overflow, CSP, hidden buttons, missing latin-ext font, profile removed). The font injection did work with document.fonts.check, so no check was weakened. serve-site start() gained siteDir (self-test now 26 checks). kukulu.json extraVerify for site/, check-site-browser.mjs, serve-site.mjs runs the self-test (non-exclusive, port 0); site.yml runs it before the browser check. Leaked profile dirs: /tmp count stayed at 14 (older leaks) across runs.
 Interpretation: overflow case injects width via appended CSS since CSP blocks inline style. Codebase note: the page CSP blocks inline style attributes, which surfaces as a console error.
+
+### R2-01 — e9eee9d
+Added 3 CASES (console.error, uncaught exception, no copy buttons via replaceAllIn helper) and a Chrome-exit assertion (process.kill(pid,0) ESRCH, then PROFILE_SETTLE_MS=1000 delay, profile absent). withBrowser callback now receives pid. Self-test: 9 cases ok. verify green. Mutation not re-run by me.
