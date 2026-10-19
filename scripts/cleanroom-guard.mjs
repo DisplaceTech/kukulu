@@ -49,6 +49,20 @@ function policyFile(root) {
   return path.resolve(root, rel);
 }
 
+/** The signing key path the way the server resolves it: KUKULU_CLEANROOM_KEY, else the configured key, else the default under home. */
+function keyPathFor(root, home) {
+  let configured = null;
+  try {
+    const named = JSON.parse(fs.readFileSync(path.join(root, "docs", "kukulu.json"), "utf8"))?.cleanroom?.signingKey;
+    if (typeof named === "string" && named) configured = named;
+  } catch {
+    // no config, or not JSON: the default applies
+  }
+  const chosen = process.env.KUKULU_CLEANROOM_KEY || configured || "~/.config/kukulu/cleanroom/ed25519.pem";
+  const expanded = chosen === "~" || chosen.startsWith("~/") ? path.join(home, chosen.slice(1)) : chosen;
+  return path.resolve(expanded);
+}
+
 // ---------------------------------------------------------------- the self-test
 
 /** Run the shipped fixture cases plus one case per fixture line of the given policy's patterns. Returns the failure lines and the case count. */
@@ -63,6 +77,15 @@ async function selfTest(policyArg) {
   const cr = await import("../mcp/cleanroom.mjs");
   const failures = [];
   let count = 0;
+  const fixtureEnv = (rootDir, homeDir, c) => ({
+    root: rootDir,
+    home: homeDir,
+    progressText: c.progress ?? null,
+    policyPath: path.join(rootDir, "docs", "cleanroom.json"),
+    pluginRoot: path.join(homeDir, "plugin-root"),
+    keyPath: path.join(homeDir, ".config", "kukulu", "cleanroom", "ed25519.pem"),
+    planExists: Boolean(c.planExists),
+  });
   try {
     const policyText = fs.readFileSync(path.resolve(policyArg), "utf8");
     const given = cr.loadPolicy(policyText);
@@ -72,7 +95,7 @@ async function selfTest(policyArg) {
     for (const c of cases) {
       count++;
       const policy = cr.loadPolicy(c.policy === "template" ? template : JSON.stringify(c.policy));
-      const r = cr.evaluate(policy, sub(c.input), { root, home, progressText: c.progress ?? null });
+      const r = cr.evaluate(policy, sub(c.input), fixtureEnv(root, home, c));
       const reasonOk = !c.reason || (r.reason && new RegExp(c.reason).test(r.reason));
       if (r.decision !== c.expect || !reasonOk) failures.push(`guard self-test: ${c.name}: expected ${c.expect}${c.reason ? ` (${c.reason})` : ""}, got ${r.decision}${r.reason ? `: ${r.reason}` : ""}`);
     }
@@ -145,7 +168,16 @@ try {
   const ctx = cr.projectContext(root);
   fields = cr.entryFields(input, ctx);
   const policy = cr.loadPolicy(fs.readFileSync(policyFile(root), "utf8"));
-  const verdict = cr.evaluate(policy, input, { root, home: process.env.HOME || os.homedir(), progressText: ctx.progress });
+  const home = process.env.HOME || os.homedir();
+  const verdict = cr.evaluate(policy, input, {
+    root,
+    home,
+    progressText: ctx.progress,
+    policyPath: policyFile(root),
+    pluginRoot: process.env.CLAUDE_PLUGIN_ROOT || PLUGIN_ROOT,
+    keyPath: keyPathFor(root, home),
+    planExists: fs.existsSync(path.join(root, "docs", "PLAN.md")),
+  });
   if (verdict.decision === "allowed") process.exit(0);
   deny(verdict.reason);
 } catch (e) {

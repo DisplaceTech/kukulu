@@ -560,8 +560,8 @@ export function commandWord(tokens) {
   return { word: null, raw: null, args: [] };
 }
 
-/** The path a token stands for: for `--opt=value`, the value; otherwise the token. */
-export const tokenPath = (token) => (/^--?[A-Za-z][\w-]*=/.test(token) ? token.slice(token.indexOf("=") + 1) : token);
+/** The path a token stands for: for `--opt=value` and `of=value` (dd), the value; otherwise the token. */
+export const tokenPath = (token) => (/^(?:--?[A-Za-z][\w-]*|[A-Za-z_]\w*)=/.test(token) ? token.slice(token.indexOf("=") + 1) : token);
 
 /** Contains a `/`, or starts with `~` or `.`, and is not a URL. */
 export function isPathLike(token) {
@@ -641,6 +641,31 @@ const underPrefix = (p, prefix) => {
 const resolvePrefix = (entry, root, home) => canonicalPaths(entry, { cwd: root, home })[0];
 
 /**
+ * The paths no write tool or write-family command may touch (SPEC D-10): the
+ * rules, the evidence, the configuration that selects them, the hooks that
+ * enforce them, the plugin that holds the hooks, and the signing key. `env`
+ * carries what the caller knows: `{ root, home, policyPath, pluginRoot, keyPath,
+ * planExists }`; a missing piece is skipped. `docs/kukulu.json` is protected
+ * from the moment the plan exists, because the planner writes it before that.
+ */
+export function protectedPaths(policy, env) {
+  const { root, home, policyPath, pluginRoot, keyPath, planExists } = env;
+  const list = [];
+  if (policyPath) list.push(policyPath);
+  if (root) {
+    list.push(path.join(root, ".kukulu", "cleanroom"), path.join(root, ".kukulu", "state.json"));
+    if (planExists) list.push(path.join(root, "docs", "kukulu.json"));
+    list.push(path.join(root, ".claude", "settings.json"), path.join(root, ".claude", "settings.local.json"), path.join(root, ".claude", "hooks"), path.join(root, ".mcp.json"));
+  }
+  if (pluginRoot) list.push(pluginRoot);
+  if (home) list.push(path.join(home, ".claude", "plugins"), path.join(home, ".claude", "settings.json"));
+  if (keyPath) list.push(keyPath, `${keyPath}.pub`);
+  if (root) list.push(path.join(root, ".git", "hooks"), path.join(root, ".git", "config"), path.join(root, ".git", "info"));
+  list.push(...policy.protected.map((e) => resolvePrefix(e, root, home)));
+  return list.map((p) => path.normalize(p));
+}
+
+/**
  * Decide one tool call against the policy (SPEC D-03). Pure: `env` carries the
  * project `root`, the user's `home`, the PROGRESS text (for lockdown) and the
  * `protected` prefixes. The first rule that matches denies.
@@ -653,9 +678,10 @@ export function evaluate(policy, hookInput, env) {
   const cwd = typeof input.cwd === "string" && input.cwd ? input.cwd : root;
   const lockdown = lockdownActive(policy, env.progressText);
   const prefixes = (list) => list.map((e) => resolvePrefix(e, root, home));
-  const denyPaths = prefixes(policy.deny.paths);
+  // The signing key is read-denied like a deny.paths entry; its public half and every other protected file stay readable.
+  const denyPaths = [...prefixes(policy.deny.paths), ...(env.keyPath ? [env.keyPath] : [])];
   const allowPaths = prefixes(policy.allow.paths);
-  const protectedPaths = env.protected ?? prefixes(policy.protected);
+  const protectedList = env.protected ?? protectedPaths(policy, env);
   const forms = (p) => canonicalPaths(p, { cwd, home });
   const inRepo = (p) => forms(p).some((f) => underPrefix(f, root));
   const exempt = (p) => forms(p).some((f) => allowPaths.some((a) => underPrefix(f, a)));
@@ -670,7 +696,7 @@ export function evaluate(policy, hookInput, env) {
   /** The deny.paths / pathPatterns / protected verdict for one path, or null. */
   const pathVerdict = (p, { write = false } = {}) => {
     for (const f of forms(p)) {
-      if (write && protectedPaths.some((x) => underPrefix(f, x))) return denied(`protected path: ${f}`);
+      if (write && protectedList.some((x) => underPrefix(f, x))) return denied(`protected path: ${f}`);
     }
     for (const f of forms(p)) {
       if (denyPaths.some((x) => underPrefix(f, x))) return denied(`denied path: ${f} (deny.paths)`);
@@ -697,7 +723,7 @@ export function evaluate(policy, hookInput, env) {
     const base = isSearch ? args.path || cwd : target;
     // 4. protected paths, for every write tool
     if (WRITE_TOOLS.has(tool) && typeof base === "string" && base) {
-      const v = forms(base).find((f) => protectedPaths.some((x) => underPrefix(f, x)));
+      const v = forms(base).find((f) => protectedList.some((x) => underPrefix(f, x)));
       if (v) return denied(`protected path: ${v}`);
     }
     // 5. deny.paths, pathPatterns and forbidden words
@@ -757,12 +783,12 @@ export function evaluate(policy, hookInput, env) {
       if (WRITE_FAMILY.has(word)) {
         if (word === "git" && rest[0] === "config" && rest.some((t) => /core\.hookspath/i.test(t))) return denied("protected path: git config core.hooksPath");
         for (const t of pathTokens) {
-          const f = forms(tokenPath(t)).find((x) => protectedPaths.some((p) => underPrefix(x, p)));
+          const f = forms(tokenPath(t)).find((x) => protectedList.some((p) => underPrefix(x, p)));
           if (f) return denied(`protected path: ${f}`);
         }
       }
       for (const t of redirects) {
-        const f = forms(t).find((x) => protectedPaths.some((p) => underPrefix(x, p)));
+        const f = forms(t).find((x) => protectedList.some((p) => underPrefix(x, p)));
         if (f) return denied(`protected path: ${f}`);
       }
       // 6e. command patterns

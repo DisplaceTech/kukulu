@@ -15,7 +15,7 @@ import {
   CleanroomError, loadPolicy, policyHash,
   ENTRY_KEYS, KINDS, ZERO_HASH, TARGET_MAX, truncateTarget, canonical, entryHash, appendEntry, readEntries, verifyChain, logPathFor, targetOf, projectContext, entryFields,
   splitSegments, shellWords, commandWord, isPathLike, tokenPath, canonicalPaths,
-  evaluate, lockdownActive, NETWORK_COMMANDS, READ_FAMILY, WRITE_FAMILY,
+  evaluate, lockdownActive, NETWORK_COMMANDS, READ_FAMILY, WRITE_FAMILY, protectedPaths,
   generateKey, loadKey, keyFingerprint, CHECKPOINT_KEYS, signCheckpoint, verifyCheckpoint,
 } from "../mcp/cleanroom.mjs";
 
@@ -648,10 +648,19 @@ async function genesisRepo(planOpts = {}) {
   const root = mkDir("kukulu-guard-root-");
   const home = mkDir("kukulu-guard-home-");
   const sub = (v) => JSON.parse(JSON.stringify(v).replaceAll("__ROOT__", root).replaceAll("__HOME__", home));
+  const fixtureEnv = (rootDir, homeDir, c) => ({
+    root: rootDir,
+    home: homeDir,
+    progressText: c.progress ?? null,
+    policyPath: path.join(rootDir, "docs", "cleanroom.json"),
+    pluginRoot: path.join(homeDir, "plugin-root"),
+    keyPath: path.join(homeDir, ".config", "kukulu", "cleanroom", "ed25519.pem"),
+    planExists: Boolean(c.planExists),
+  });
   eq(new Set(cases.map((c) => c.name)).size, cases.length, "every guard case has its own name");
   for (const c of cases) {
     const policy = loadPolicy(c.policy === "template" ? EXAMPLE : JSON.stringify(c.policy));
-    const r = evaluate(policy, sub(c.input), { root, home, progressText: c.progress ?? null });
+    const r = evaluate(policy, sub(c.input), fixtureEnv(root, home, c));
     const reason = c.reason ? new RegExp(c.reason) : null;
     ok(r.decision === c.expect && (!reason || (r.reason && reason.test(r.reason))), `guard case: ${c.name}`);
     if (r.decision !== c.expect || (reason && !reason.test(r.reason ?? ""))) console.log(`  #   expected ${c.expect}${c.reason ? ` /${c.reason}/` : ""}, got ${r.decision}: ${r.reason}`);
@@ -812,6 +821,24 @@ async function genesisRepo(planOpts = {}) {
   const r = runHook(GUARD, { hook_event_name: "PreToolUse", tool_name: "Read", tool_input: { file_path: "/usr/include/zlib.h" }, cwd: repo }, { CLAUDE_PROJECT_DIR: repo });
   eq(r.status, 2, "before genesis the guard still denies");
   ok(!fs.existsSync(LOG(repo)), "...but writes no log");
+}
+
+// ---------------------------------------------------------------- self-protection
+
+{
+  const policy = loadPolicy('{"version":1,"protected":["tools/","/opt/extra"]}');
+  const env = { root: "/p", home: "/h", policyPath: "/p/docs/cleanroom.json", pluginRoot: "/h/.claude/plugins/cache/kukulu", keyPath: "/h/.config/kukulu/cleanroom/ed25519.pem", planExists: true };
+  const list = protectedPaths(policy, env);
+  const want = [
+    "/p/docs/cleanroom.json", "/p/.kukulu/cleanroom", "/p/.kukulu/state.json", "/p/docs/kukulu.json",
+    "/p/.claude/settings.json", "/p/.claude/settings.local.json", "/p/.claude/hooks", "/p/.mcp.json",
+    "/h/.claude/plugins/cache/kukulu", "/h/.claude/plugins", "/h/.claude/settings.json",
+    "/h/.config/kukulu/cleanroom/ed25519.pem", "/h/.config/kukulu/cleanroom/ed25519.pem.pub",
+    "/p/.git/hooks", "/p/.git/config", "/p/.git/info", "/p/tools", "/opt/extra",
+  ];
+  eq(list.map((p) => p.replace(/\/$/, "")).join("\n"), want.join("\n"), "protectedPaths lists the always-protected set, then the policy's own");
+  ok(!protectedPaths(policy, { ...env, planExists: false }).includes("/p/docs/kukulu.json"), "docs/kukulu.json is not protected before docs/PLAN.md exists");
+  eq(protectedPaths(policy, { root: "/p", home: "/h" }).length > 0, true, "a missing piece of the environment is skipped, not a crash");
 }
 
 finish();
