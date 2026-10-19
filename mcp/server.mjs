@@ -226,6 +226,13 @@ function runGate(stage, st = loadState()) {
     if (!verifyCheckpoint(newest, publicKey)) return failed("chain", `the newest checkpoint (entry ${newest.seq}) does not verify with the signing key`);
   }
 
+  // 7. liveness: the hooks are recording. A session whose hooks are not loaded produces gates with nothing between them.
+  checked.push("liveness");
+  const lastGate = chain.entries.map((e) => e.kind).lastIndexOf("gate");
+  if (lastGate >= 0 && !chain.entries.slice(lastGate + 1).some((e) => e.kind === "allowed")) {
+    return failed("liveness", "no tool call has been logged since the last gate; the clean-room hooks are not running in this session. Start a new session.");
+  }
+
   appendEntry(logPath, { kind: "gate", stage, role: "session", data: { checks: checked.length, ok: true } });
   return { ok: true, checked };
 }

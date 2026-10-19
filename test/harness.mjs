@@ -365,6 +365,14 @@ export function runHook(script, payload, env = {}) {
 }
 
 /**
+ * Log one tool call the way a live session's PostToolUse hook does, by running the logger hook once.
+ * The gate's liveness check wants an `allowed` entry between two gates, and a test has no session.
+ */
+export function logCall(repo, payload = {}) {
+  return runHook(path.join(ROOT, "scripts", "cleanroom-log.mjs"), { hook_event_name: "PostToolUse", tool_name: "Read", tool_input: { file_path: path.join(repo, "docs", "SPEC.md") }, cwd: repo, ...payload }, { CLAUDE_PROJECT_DIR: repo });
+}
+
+/**
  * A throwaway copy of the plugin (server, scripts, hooks, templates, agents, skills and the guard
  * fixtures), so a test can edit "the installed plugin" without touching this checkout. Start a
  * server from it with `startServer(repo, { server: <dir>/mcp/server.mjs })`.

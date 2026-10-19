@@ -7,7 +7,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import {
-  finish, ok, eq, like, isError, ROOT, plannedRepo, cleanroomRepo, withServer, runHook, mkDir, writeFile, readFile, hasFile, git, subject, testKeyFor, addPlan, commitTask, setState, tempPlugin, markTasks, startServer,
+  finish, ok, eq, like, isError, ROOT, plannedRepo, cleanroomRepo, withServer, runHook, mkDir, writeFile, readFile, hasFile, git, subject, testKeyFor, addPlan, commitTask, setState, tempPlugin, markTasks, startServer, logCall,
 } from "./harness.mjs";
 import { spawn, spawnSync } from "node:child_process";
 import { createHash as sha, generateKeyPairSync } from "node:crypto";
@@ -468,6 +468,7 @@ const stateOf = (repo) => (hasFile(repo, ".kukulu/state.json") ? JSON.parse(read
     isError(await call("kukulu_run_resume", { reason: "restored it" }), /archive this flight with kukulu_flight_archive/, "kukulu_run_resume refuses it too");
     git(repo, ["checkout", "HEAD~1", "--", "docs/cleanroom.json"]);
     git(repo, ["commit", "-qm", "restore the policy"]);
+    logCall(repo);
     ok((await call("kukulu_next")).stage !== "halt", "...and restoring the policy clears it, because the halt is computed each call");
   });
 }
@@ -482,6 +483,9 @@ const stateOf = (repo) => (hasFile(repo, ".kukulu/state.json") ? JSON.parse(read
 
 // ---------------------------------------------------------------- checkpoints from the tools
 
+/** withServer whose calls first log a tool call, as a live session's PostToolUse hook would. */
+const live = (repo, fn, opts) => withServer(repo, async (server) => fn({ ...server, call: async (name, args) => { logCall(repo); return server.call(name, args); } }), opts);
+
 const LOG = (repo) => path.join(repo, ".kukulu", "cleanroom", "log.jsonl");
 const checkpoints = (repo, log = LOG(repo)) => readEntries(log).filter((e) => e.kind === "checkpoint");
 const touched = (repo, ref = "HEAD") => git(repo, ["show", "--name-only", "--format=", ref]).split("\n").filter(Boolean);
@@ -489,7 +493,7 @@ const touched = (repo, ref = "HEAD") => git(repo, ["show", "--name-only", "--for
 /** A clean-room project taken past genesis, with its plan committed. */
 async function genesisRepo(planOpts = {}) {
   const repo = cleanroomRepo();
-  await withServer(repo, async ({ call }) => { await call("kukulu_next"); });
+  await live(repo, async ({ call }) => { await call("kukulu_next"); });
   addPlan(repo, planOpts);
   return repo;
 }
@@ -497,7 +501,7 @@ async function genesisRepo(planOpts = {}) {
 {
   const repo = await genesisRepo({ config: { flight: "w1" } });
   const publicKey = loadKey(testKeyFor(repo)).publicKey;
-  await withServer(repo, async ({ call }) => {
+  await live(repo, async ({ call }) => {
     // The hooks append to the log after every tool call, so the log is routinely dirty between commits.
     appendEntry(LOG(repo), sample(0));
     await call("kukulu_run_start");
@@ -521,7 +525,7 @@ async function genesisRepo(planOpts = {}) {
     await call("kukulu_task_block", { id: "P0-02", reason: "cannot" });
     cps = checkpoints(repo);
     eq(cps[cps.length - 1].data.event, "kukulu_task_block", "kukulu_task_block appends a kukulu_task_block checkpoint");
-    ok(!hasFile(repo, "debris.txt") && readEntries(LOG(repo)).length === lines + 1, "...and its hard reset does not throw the hooks' log entries away");
+    ok(!hasFile(repo, "debris.txt") && readEntries(LOG(repo)).length > lines && readEntries(LOG(repo)).some((e) => e.target === "/x/2"), "...and its hard reset does not throw the hooks' log entries away");
 
     await call("kukulu_task_next");
     writeFile(repo, "docs/HANDOFF.md", "# Handoff\n");
@@ -579,7 +583,9 @@ async function genesisRepo(planOpts = {}) {
   // A failed progress commit restores the log byte for byte (the commit-failure protocol).
   const repo = await genesisRepo();
   await withServer(repo, async ({ call }) => {
+    logCall(repo);
     await call("kukulu_run_start");
+    logCall(repo);
     await call("kukulu_task_next");
     commitTask(repo, "P0-01", "Create hello", { "hello.txt": "hi\n" });
     const hook = path.join(repo, ".git", "hooks", "commit-msg");
@@ -602,7 +608,7 @@ async function genesisRepo(planOpts = {}) {
   git(repo, ["config", "--local", "commit.gpgsign", "true"]);
   git(repo, ["config", "--local", "gpg.format", "openpgp"]);
   git(repo, ["config", "--local", "gpg.program", "/nonexistent-signing-agent"]);
-  await withServer(repo, async ({ call }) => {
+  await live(repo, async ({ call }) => {
     const n = await call("kukulu_next");
     ok(!n.error, "kukulu_next survives a failing signer under policies.signing auto");
     eq(subject(repo), "chore: clean-room genesis", "...the genesis commit was made, unsigned");
@@ -614,7 +620,7 @@ async function genesisRepo(planOpts = {}) {
 {
   // General mode: no checkpoint, no log.
   const repo = plannedRepo();
-  await withServer(repo, async ({ call }) => {
+  await live(repo, async ({ call }) => {
     await call("kukulu_run_start");
     await call("kukulu_task_next");
     commitTask(repo, "P0-01", "Create hello", { "hello.txt": "hi\n" });
@@ -882,11 +888,11 @@ const gateCheck = (reason) => (reason.match(/^clean-room gate failed: ([\w-]+):/
 
 {
   const repo = cleanroomRepo();
-  await withServer(repo, async ({ call }) => {
+  await live(repo, async ({ call }) => {
     const n = await call("kukulu_next");
-    eq(JSON.stringify(n.gate), JSON.stringify({ ok: true, checked: ["mode", "policy", "guard", "self-test", "lockdown", "chain"] }), "the gate passes on an intact clean-room project and kukulu_next reports it");
+    eq(JSON.stringify(n.gate), JSON.stringify({ ok: true, checked: ["mode", "policy", "guard", "self-test", "lockdown", "chain", "liveness"] }), "the gate passes on an intact clean-room project and kukulu_next reports it");
     const g = gateEntries(repo);
-    eq(g.length + "|" + JSON.stringify(g[0].data), '1|{"checks":6,"ok":true}', "a passing gate appends a gate entry");
+    eq(g.length + "|" + JSON.stringify(g[0].data), '1|{"checks":7,"ok":true}', "a passing gate appends a gate entry recording seven checks");
     eq(verifyChain(linesOf(LOG(repo))).ok, true, "...in a chain that verifies");
   });
   const general = plannedRepo();
@@ -898,7 +904,7 @@ const gateCheck = (reason) => (reason.match(/^clean-room gate failed: ([\w-]+):/
 {
   // An edited policy halts kukulu_next, and the failure is in the chain.
   const repo = cleanroomRepo();
-  await withServer(repo, async ({ call }) => {
+  await live(repo, async ({ call }) => {
     await call("kukulu_next");
     writeFile(repo, "docs/cleanroom.json", EXAMPLE.replace('"WebSearch"', '"WebSearch", "Agent"'));
     git(repo, ["add", "-A"]);
@@ -916,9 +922,9 @@ const gateCheck = (reason) => (reason.match(/^clean-room gate failed: ([\w-]+):/
 
 {
   const repo = cleanroomRepo();
-  await withServer(repo, async ({ call }) => { await call("kukulu_next"); });
+  await live(repo, async ({ call }) => { await call("kukulu_next"); });
   addPlan(repo);
-  await withServer(repo, async ({ call }) => {
+  await live(repo, async ({ call }) => {
     writeFile(repo, "docs/cleanroom.json", EXAMPLE.replace('"WebSearch"', '"WebSearch", "Agent"'));
     git(repo, ["add", "-A"]);
     git(repo, ["commit", "-qm", "edit the policy"]);
@@ -934,7 +940,7 @@ const gateCheck = (reason) => (reason.match(/^clean-room gate failed: ([\w-]+):/
     const plugin = tempPlugin();
     if (before) mutate(plugin);
     const repo = cleanroomRepo();
-    await withServer(repo, async ({ call }) => {
+    await live(repo, async ({ call }) => {
       const first = await call("kukulu_next");
       if (!before) {
         eq(first.gate?.ok, true, `${label}: the gate passes before the edit`);
@@ -972,7 +978,7 @@ const gateCheck = (reason) => (reason.match(/^clean-room gate failed: ([\w-]+):/
   fs.writeFileSync(gfile, fs.readFileSync(gfile, "utf8").replace('if (process.argv[2] === "--self-test") {', 'if (process.argv[2] === "--self-test") {\n  process.stdout.write("guard self-test: ok (0 cases)\\n");\n  process.exit(0);'));
   const policy = JSON.stringify({ version: 1, allow: { urls: ["https://example.invalid/a"] }, lockdown: { after: "P0-01" } });
   const repo = cleanroomRepo({ policy });
-  await withServer(repo, async ({ call }) => {
+  await live(repo, async ({ call }) => {
     ok((await call("kukulu_next")).gate.ok, "(the doctored plugin passes its first gate)");
     addPlan(repo);
     markTasks(repo, { "P0-01": "x" });
@@ -984,7 +990,7 @@ const gateCheck = (reason) => (reason.match(/^clean-room gate failed: ([\w-]+):/
 {
   // The chain: a tampered line, and a checkpoint signed by another key.
   const repo = await genesisRepo();
-  await withServer(repo, async ({ call }) => {
+  await live(repo, async ({ call }) => {
     await call("kukulu_run_start");
     appendEntry(LOG(repo), sample(1));
     appendEntry(LOG(repo), sample(2));
@@ -1002,6 +1008,26 @@ const gateCheck = (reason) => (reason.match(/^clean-room gate failed: ([\w-]+):/
     const m = await call("kukulu_next");
     eq(m.stage + "|" + gateCheck(m.reason), "halt|chain", "a checkpoint signed by another key halts naming chain");
     like(m.reason, /does not verify with the signing key/, "...saying so");
+  });
+}
+
+// ---------------------------------------------------------------- gate liveness
+
+{
+  const repo = cleanroomRepo();
+  await withServer(repo, async ({ call }) => {
+    const first = await call("kukulu_next");
+    eq(first.gate.ok + "|" + first.gate.checked.length, "true|7", "the first gate needs no allowed entry, and a passing gate records seven checks");
+    const second = await call("kukulu_next");
+    eq(second.stage + "|" + gateCheck(second.reason), "halt|liveness", "two gates with no allowed entry between them halt with the liveness message");
+    eq(second.reason, "clean-room gate failed: liveness: no tool call has been logged since the last gate; the clean-room hooks are not running in this session. Start a new session.", "...in exactly these words");
+    const last = gateEntries(repo).at(-1);
+    eq(last.data.failed, "liveness", "...and the failed gate is in the chain");
+    logCall(repo);
+    const third = await call("kukulu_next");
+    eq(third.gate.ok, true, "an allowed entry between gates passes");
+    eq(gateEntries(repo).at(-1).data.checks, 7, "...and is recorded as seven checks");
+    isError(await call("kukulu_review_submit", { verdict: "APPROVED" }), /clean-room gate failed: liveness: no tool call has been logged/, "a tool's gate has the same liveness rule");
   });
 }
 
