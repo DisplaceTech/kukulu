@@ -1230,6 +1230,36 @@ eq(LANGUAGES.join(","), "rust,c,cpp,go,python,javascript,typescript,java,php", "
   eq(tokenize("class A { public: };", "cpp").tokens.join(" "), "TYPEDEF ID { public : } ;", "...and class as TYPEDEF with public as itself");
 }
 
+// ---------------------------------------------------------------- lexers: the other six
+
+{
+  const samples = { go: "sample.go", python: "sample.py", javascript: "sample.js", typescript: "sample.ts", java: "sample.java", php: "sample.php" };
+  const classes = {
+    go: ["FN", "TYPEDEF", "TYPE", "LOOP", "SWITCH", "if", "return", "break", "continue", "NUM", "STR", "CHAR", "ID"],
+    python: ["FN", "TYPEDEF", "TYPE", "LOOP", "if", "else", "return", "break", "continue", "NUM", "STR", "ID"],
+    javascript: ["FN", "TYPEDEF", "LOOP", "SWITCH", "if", "else", "return", "break", "continue", "NUM", "STR", "ID"],
+    typescript: ["FN", "TYPEDEF", "TYPE", "LOOP", "SWITCH", "if", "return", "break", "continue", "NUM", "STR", "ID"],
+    java: ["TYPEDEF", "TYPE", "LOOP", "SWITCH", "if", "else", "return", "break", "continue", "NUM", "STR", "CHAR", "ID"],
+    php: ["FN", "TYPEDEF", "TYPE", "LOOP", "SWITCH", "if", "return", "break", "continue", "NUM", "STR", "ID"],
+  };
+  for (const [language, file] of Object.entries(samples)) {
+    const lexed = tokenize(LEXER_SAMPLE(file), language);
+    ok(lexed.tokens.length > 120 && lexed.comments.length >= 2, `the ${language} lexer tokenizes its sample without throwing`);
+    const seen = new Set(lexed.tokens);
+    eq(classes[language].filter((k) => !seen.has(k)).join(","), "", `...classifies its keywords (${language})`);
+  }
+  eq(tokenize("x := `raw \"str\" \\n` + 'r'", "go").tokens.join(" "), "ID := STR + CHAR", "go: a backtick string is raw and a rune is a CHAR");
+  eq(tokenize('"""doc"""\nx = """not a doc"""\n# note\ny = r"a\\b" + b\'c\' + f"{x}"', "python").tokens.join(" "), "ID = STR ID = STR + STR + STR", "python: a prefix belongs to its string, a mid-line triple quote is a STR");
+  eq(tokenize('"""doc"""\n# note', "python").comments.join("|"), "doc| note", "...a docstring that starts its line is a comment, like #");
+  eq(tokenize("def f(): pass\nclass C: pass\nasync_x = 1", "python").tokens.join(" "), "FN ID ( ) : pass TYPEDEF ID : pass ID = NUM", "...def is FN, class is TYPEDEF, and a longer word is not a keyword");
+  eq(tokenize("const s = `a ${b} c`; let t = 'x' + \"y\";", "javascript").tokens.join(" "), "const ID = STR ; let ID = STR + STR ;", "javascript: template literals and both quote styles are STR");
+  eq(tokenize("function f() {} class A {}", "javascript").tokens.join(" "), "FN ID ( ) { } TYPEDEF ID { }", "...function is FN and class is TYPEDEF");
+  eq(tokenize("interface I {} type T = number; enum E {}", "typescript").tokens.join(" "), "TYPEDEF ID { } TYPEDEF ID = TYPE ; TYPEDEF ID { }", "typescript: interface, type and enum are TYPEDEF, number is TYPE");
+  eq(tokenize("char c = 'x'; String s = \"y\"; long n = 10L; var v = 1;", "java").tokens.join(" "), "TYPE ID = CHAR ; ID ID = STR ; TYPE ID = NUM ; var ID = NUM ;", "java: primitives are TYPE, a char is CHAR, var stays itself");
+  eq(tokenize('<?php $a = 1; # c\n// d\n/* e */ echo "x" . $a; ?>', "php").tokens.join(" "), "<?php ID = NUM ; echo STR . ID ; ?>", "php: $variables are identifiers, tags are tokens of their own");
+  eq(tokenize('<?php # c\n// d\n/* e */', "php").comments.map((c) => c.trim()).join("|"), "c|d|e", "...and # // /* */ are comments");
+}
+
 {
   let refused = null;
   try { tokenize("x", "cobol"); } catch (e) { refused = e; }

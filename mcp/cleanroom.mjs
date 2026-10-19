@@ -855,9 +855,46 @@ const SPECS = {
   },
 };
 
+const PYTHON_KEYWORDS = "def class if elif else for while try except finally with as import from return break continue pass lambda yield raise assert global nonlocal in is not and or None True False del";
+const JS_KEYWORDS = `function class if else for while do switch return break continue var let const new delete this typeof instanceof in of yield ${ASYNC_AWAIT} try catch finally throw import export default case null undefined true false void with extends super static get set`;
+SPECS.go = {
+  lineComments: ["//"], blockComments: [["/*", "*/"]], nestedBlocks: false,
+  stringQuotes: ['"'], charQuotes: ["'"], backtickStrings: "raw",
+  types: words("int int8 int16 int32 int64 uint uint8 uint16 uint32 uint64 uintptr float32 float64 complex64 complex128 string bool byte rune error any"),
+  keywords: words("func type struct interface for if else return break continue switch select case default map chan go defer range var const package import fallthrough goto"),
+};
+SPECS.python = {
+  lineComments: ["#"], blockComments: [], nestedBlocks: false,
+  stringQuotes: ['"', "'"], charQuotes: [], tripleQuotes: ['"""', "'''"], stringPrefixes: true, docstrings: true,
+  types: words("int float str bool bytes list dict set tuple complex object"),
+  keywords: words(`${PYTHON_KEYWORDS} ${ASYNC_AWAIT}`),
+};
+SPECS.javascript = {
+  lineComments: ["//"], blockComments: [["/*", "*/"]], nestedBlocks: false,
+  stringQuotes: ['"', "'"], charQuotes: [], backtickStrings: "template", dollarIdent: true,
+  types: words(""), keywords: words(JS_KEYWORDS),
+};
+SPECS.typescript = {
+  ...SPECS.javascript,
+  types: words("number string boolean any never unknown object symbol bigint"),
+  keywords: words(`${JS_KEYWORDS} interface type enum implements namespace declare readonly abstract keyof public private protected`),
+};
+SPECS.java = {
+  lineComments: ["//"], blockComments: [["/*", "*/"]], nestedBlocks: false,
+  stringQuotes: ['"'], charQuotes: ["'"], tripleQuotes: ['"""'],
+  types: words("int long short byte char float double boolean void"),
+  keywords: words("class interface enum if else for while do switch return break continue public private protected static final abstract new this super extends implements import package try catch finally throw throws case default instanceof synchronized volatile transient native assert null true false var"),
+};
+SPECS.php = {
+  lineComments: ["//", "#"], blockComments: [["/*", "*/"]], nestedBlocks: false,
+  stringQuotes: ['"', "'"], charQuotes: [], dollarIdent: true, phpTags: true,
+  types: words("int float string bool array callable iterable object mixed void never"),
+  keywords: words("function class interface trait enum if elseif else for foreach while do switch match return break continue echo print public private protected static final abstract new extends implements namespace use try catch finally throw const global isset empty case default"),
+};
+
 const OPERATORS = [
   "<<=", ">>=", "...", "..=", "->*",
-  "::", "->", "=>", "==", "!=", "<=", ">=", "&&", "||", "<<", ">>", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "++", "--", "..", ".*", "?.", "??", "**", "===", "!==",
+  "::", ":=", "->", "=>", "==", "!=", "<=", ">=", "&&", "||", "<<", ">>", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "++", "--", "..", ".*", "?.", "??", "**", "===", "!==",
 ];
 const IDENT_START = /[A-Za-z_]/;
 const IDENT_PART = /[A-Za-z0-9_]/;
@@ -878,6 +915,8 @@ export function tokenize(text, language) {
   const n = text.length;
   const at = (i) => (i < n ? text[i] : "");
   const startsWith = (i, s) => text.startsWith(s, i);
+  const identStart = spec.dollarIdent ? /[A-Za-z_$]/ : IDENT_START;
+  const identPart = spec.dollarIdent ? /[A-Za-z0-9_$]/ : IDENT_PART;
   let i = 0;
   let lineStart = true; // only whitespace so far on this line, for preprocessor detection
 
@@ -907,9 +946,27 @@ export function tokenize(text, language) {
       }
       continue;
     }
+    const atLineStart = lineStart;
     lineStart = false;
+    // PHP open and close tags are tokens of their own, not operators
+    if (spec.phpTags && (startsWith(i, "<?php") || startsWith(i, "<?=") || startsWith(i, "?>"))) {
+      const tag = startsWith(i, "<?php") ? "<?php" : startsWith(i, "<?=") ? "<?=" : "?>";
+      tokens.push(tag);
+      i += tag.length;
+      continue;
+    }
+    // Python: a triple-quoted string that starts its line is a docstring, which counts as a comment
+    const triple = spec.tripleQuotes?.find((q) => startsWith(i, q));
+    if (triple) {
+      const end = text.indexOf(triple, i + 3);
+      const stop = end < 0 ? n : end;
+      if (spec.docstrings && atLineStart) comments.push(text.slice(i + 3, stop));
+      else tokens.push("STR");
+      i = end < 0 ? n : end + 3;
+      continue;
+    }
     // comments
-    const line = spec.lineComments.find((m) => startsWith(i, m));
+    const line = spec.lineComments.find((m) => startsWith(i, m) && !(m === "#" && at(i + 1) === "["));
     if (line) {
       const end = text.indexOf("\n", i);
       const stop = end < 0 ? n : end;
@@ -968,10 +1025,19 @@ export function tokenize(text, language) {
       }
     }
     // identifiers, keywords, types (and C/C++ wide-literal prefixes such as L"x")
-    if (IDENT_START.test(c)) {
+    if (identStart.test(c)) {
       let j = i + 1;
-      while (j < n && IDENT_PART.test(text[j])) j++;
+      while (j < n && identPart.test(text[j])) j++;
       const word = text.slice(i, j);
+      if (spec.stringPrefixes && /^[rRbBuUfF]{1,2}$/.test(word) && (at(j) === '"' || at(j) === "'")) {
+        i = j; // a Python string prefix belongs to the string that follows
+        continue;
+      }
+      if (spec.dollarIdent && word.startsWith("$") && word.length > 1) {
+        tokens.push("ID");
+        i = j;
+        continue;
+      }
       if (spec.wideLiterals && ["L", "u", "U", "u8"].includes(word) && (at(j) === '"' || at(j) === "'")) {
         tokens.push(at(j) === '"' ? "STR" : "CHAR");
         i = skipQuoted(j, at(j));
@@ -996,6 +1062,15 @@ export function tokenize(text, language) {
       }
       tokens.push("NUM");
       i = j;
+      continue;
+    }
+    // Go raw strings and JavaScript template literals
+    if (spec.backtickStrings && c === "`") {
+      if (spec.backtickStrings === "raw") {
+        const end = text.indexOf("`", i + 1);
+        i = end < 0 ? n : end + 1;
+      } else i = skipQuoted(i, "`");
+      tokens.push("STR");
       continue;
     }
     // strings and chars
