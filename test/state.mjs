@@ -534,6 +534,36 @@ for (const [config, re, label] of [
 }
 
 {
+  // the branch the plan is committed on must be one run_start accepts
+  const copyPlan = (repo) => {
+    const plan = plannedRepo();
+    writeFile(repo, "docs/PLAN.md", readFile(plan, "docs/PLAN.md"));
+    writeFile(repo, "docs/PROGRESS.md", readFile(plan, "docs/PROGRESS.md"));
+    writeFile(repo, "docs/kukulu.json", readFile(plan, "docs/kukulu.json"));
+    writeFile(repo, "CLAUDE.md", "# rules\n");
+  };
+  const repo = specRepo();
+  copyPlan(repo);
+  git(repo, ["checkout", "-q", "-b", "feature/x"]);
+  await withServer(repo, async ({ rpc }) => {
+    const e = (await rpc("tools/call", { name: "kukulu_plan_commit", arguments: {} })).result;
+    ok(e.isError, "plan_commit refuses a plan on a branch that is neither baseBranch nor a branchPrefix branch");
+    like(e.content[0].text, /\[branch\] on 'feature\/x', but docs\/kukulu\.json baseBranch is 'main'; set baseBranch to 'feature\/x'/, "...with the message naming both fixes");
+    eq(e.structuredContent.problems.map((p) => p.check).join(","), "branch", "...as check 'branch' alone");
+  });
+  git(repo, ["checkout", "-q", "main"]);
+  await withServer(repo, async ({ call }) => {
+    ok((await call("kukulu_plan_commit")).tasks === 3, "plan_commit accepts baseBranch");
+  });
+  const repo2 = specRepo();
+  copyPlan(repo2);
+  git(repo2, ["checkout", "-q", "-b", "build/2026-01-01"]);
+  await withServer(repo2, async ({ call }) => {
+    ok((await call("kukulu_plan_commit")).tasks === 3, "plan_commit accepts a branchPrefix branch");
+  });
+}
+
+{
   // every problem at once (project-c F-07)
   const repo = specRepo();
   const planText = [

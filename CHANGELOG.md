@@ -12,6 +12,10 @@ All notable changes to this plugin. Format follows
 - `scripts/check-site.mjs`, `scripts/check-site-browser.mjs` and `scripts/serve-site.mjs`, with the `check:site`, `check:site:browser` and `site:serve` npm scripts.
 - A `site` CI workflow that runs the static and browser checks.
 
+### Fixed
+
+- `kukulu_plan_commit` refuses a plan committed on a branch that is neither `baseBranch` nor a `branchPrefix` branch, and `kukulu_run_start`'s foreign-branch refusal names both ways out.
+
 ### Breaking changes
 
 - The `FOUNDRY_*` environment variables and the `foundry/` global config directory are no longer read; use `KUKULU_*` and `kukulu/config.json`.

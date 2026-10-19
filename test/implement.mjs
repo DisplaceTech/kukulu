@@ -79,6 +79,7 @@ for (const missing of ["docs/SPEC.md", "docs/PLAN.md", "docs/PROGRESS.md", "docs
   git(repo, ["checkout", "-q", "-b", "feature/side-quest"]);
   await withServer(repo, async ({ call }) => {
     isError(await call("kukulu_run_start"), /runs start from 'main' or an existing 'build\/\*' branch/, "run_start refuses to hijack an unrelated branch");
+    isError(await call("kukulu_run_start"), /set baseBranch to 'feature\/side-quest'.*git switch -c build\//s, "run_start's foreign-branch refusal names both fixes");
   });
 }
 

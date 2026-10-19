@@ -101,6 +101,7 @@ The checks, by the name each problem carries in `check`:
 | `streams` | A malformed `**Stream:**` value, or any parallel wave judged invalid (`wave <n>: <reason>`) |
 | `config` | `docs/kukulu.json` is not valid JSON or fails the same validation `cfg()` applies |
 | `from` | A `from` (on a constraint, `verify` or `extraVerify` entry) names an id with no heading |
+| `branch` | The current branch is neither the config's `baseBranch` nor a `branchPrefix*` branch: `on '<branch>', but docs/kukulu.json baseBranch is '<base>'; set baseBranch to '<branch>' (the branch the plan is committed on) or switch to it`. Skipped outside a git repository; a detached HEAD counts as `HEAD` |
 | `claude` | `CLAUDE.md` does not exist at the repository root |
 
 **Returns:** `{ commit, tasks, phases: [{ phase, tasks }], waves: [{ index, streams, valid }], renumbered }`. `commit` is `null` when everything is already committed; `renumbered` is the `{ old: new }` map of ids `renumber: true` changed, `{}` otherwise.
@@ -128,7 +129,7 @@ Begin or resume an implementation run. Idempotent: calling it on a run already i
 
 **Returns:** `{ alreadyStarted, branch, commit, counts, round, policies, signing, basePush }`. `signing` is `"on"`, `"off"`, `"none"` (not configured), or `"off (probe failed: <reason>)"`. `basePush` is present only when a new build branch was created: `"pushed"`, `"skipped: policy"`, `"skipped: no origin remote"`, or `"failed: <git's first line>"`.
 
-**Refuses when:** any of `SPEC.md`, `PLAN.md`, `PROGRESS.md` or `kukulu.json` is missing; the directory is not a git repository; `policies` is malformed; `policies.signing` is `"required"` and signing is not configured or the probe fails; a *tracked* file has uncommitted changes on the base branch (an untracked one never blocks a start; see above); or the current branch is neither the base branch nor a `branchPrefix*` branch.
+**Refuses when:** any of `SPEC.md`, `PLAN.md`, `PROGRESS.md` or `kukulu.json` is missing; the directory is not a git repository; `policies` is malformed; `policies.signing` is `"required"` and signing is not configured or the probe fails; a *tracked* file has uncommitted changes on the base branch (an untracked one never blocks a start; see above); or the current branch is neither the base branch nor a `branchPrefix*` branch. That refusal names both ways out: set `baseBranch` to the current branch in `docs/kukulu.json` and re-run `kukulu_plan_commit`, or `git switch -c <branchPrefix><date>` from it.
 
 ### Stream mode
 

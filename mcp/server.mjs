@@ -1759,7 +1759,9 @@ function startRun() {
     git(["checkout", "-q", "-b", name]);
     branch = name;
   } else if (!branch || !branch.startsWith(c.branchPrefix)) {
-    throw new ToolError(`on branch '${branch}'; runs start from '${c.baseBranch}' or an existing '${c.branchPrefix}*' branch`);
+    throw new ToolError(
+      `on branch '${branch}'; runs start from '${c.baseBranch}' or an existing '${c.branchPrefix}*' branch. Either set baseBranch to '${branch}' in docs/kukulu.json and re-run \`kukulu_plan_commit\`, or \`git switch -c ${c.branchPrefix}${today()}\` from '${branch}'.`,
+    );
   }
 
   // Snapshot what is untracked *before* this call's own writes (starting
@@ -3076,7 +3078,7 @@ function flightArchive({ slug } = {}) {
  * it on text it has not written yet. `allowSuffix` admits a headings such as
  * `P1-02a`, which only a renumbering pass may hold.
  */
-function validatePlanTexts({ planText, progressText, configRaw, configError, claudeExists, allowSuffix = false }) {
+function validatePlanTexts({ planText, progressText, configRaw, configError, claudeExists, branch = null, allowSuffix = false }) {
   const problems = [];
   const add = (check, message, id) => {
     if (!problems.some((p) => p.message === message)) problems.push({ check, ...(id ? { id } : {}), message });
@@ -3215,6 +3217,13 @@ function validatePlanTexts({ planText, progressText, configRaw, configError, cla
     }
   }
 
+  // A plan committed on a branch that run_start would then refuse strands the operator after the planner is done.
+  if (cc && branch) {
+    if (branch !== cc.baseBranch && !branch.startsWith(cc.branchPrefix)) {
+      add("branch", `on '${branch}', but docs/kukulu.json baseBranch is '${cc.baseBranch}'; set baseBranch to '${branch}' (the branch the plan is committed on) or switch to it`);
+    }
+  }
+
   if (pr && planLines && cc) {
     for (const w of computeWaves(pr, cc, planLines)) if (!w.valid) add("streams", `wave ${w.index}: ${w.reason}`);
   }
@@ -3266,7 +3275,9 @@ function planCommit({ renumber } = {}) {
     }
   }
   const claudePath = path.join(ROOT, "CLAUDE.md");
-  const problems = validatePlanTexts({ planText, progressText, configRaw, configError, claudeExists: exists(claudePath) });
+  const inRepo = git(["rev-parse", "--is-inside-work-tree"], { allowFail: true }).ok;
+  const branch = inRepo ? git(["rev-parse", "--abbrev-ref", "HEAD"], { allowFail: true }).out || null : null;
+  const problems = validatePlanTexts({ planText, progressText, configRaw, configError, claudeExists: exists(claudePath), branch });
   if (problems.length) {
     const head = `${problems.length} problem${problems.length === 1 ? "" : "s"} in the plan; fix every one, then call kukulu_plan_commit again. Nothing was committed.`;
     throw new ToolError(`${head}\n${problems.map((p, i) => `${i + 1}. [${p.check}] ${p.message}`).join("\n")}`, { problems });
