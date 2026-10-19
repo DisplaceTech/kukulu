@@ -669,7 +669,6 @@ for (const [label, patch] of [
   await withServer(repo, async ({ call }) => {
     const st = await call("kukulu_status");
     eq(st.state.archived.slug, "v0-5-0", "status reads the archive record of a flight archived before 0.6.0");
-    like(st.deprecations.join("\n"), /Foundry layout \(\.foundry\/, docs\/foundry\.json\); run kukulu_migrate\. Support ends in 0\.7\.0/, "...and says the project is on the old layout");
     const n = await call("kukulu_next");
     eq(n.stage, "done", "kukulu_next recognizes the archived flight");
     like(n.reason, /flight v0-5-0 is archived in docs\/flights\/v0-5-0/, "...and names it");
@@ -684,7 +683,8 @@ for (const [label, patch] of [
   await withServer(repo, async ({ call }) => {
     const st = await call("kukulu_status");
     eq(st.configPresent, true, "a project with docs/foundry.json and .foundry/ is read in place");
-    eq(st.deprecations.length, 1, "...with exactly one layout notice");
+    ok(!("deprecations" in st), "kukulu_status has no deprecations field");
+    ok(!("deprecations" in (await call("kukulu_next"))), "kukulu_next has no deprecations field");
   });
 }
 

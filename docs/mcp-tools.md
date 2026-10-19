@@ -25,7 +25,6 @@ Everything the pipeline knows from disk. It is read-only and safe to call at any
 | Field | Meaning |
 |---|---|
 | `root` | Absolute project root the server is operating on |
-| `deprecations` | Notices for a pre-0.6.0 name still in use: the `.foundry/` / `docs/foundry.json` project layout, a `FOUNDRY_*` environment variable, or the global routing config in `foundry/`. Each says what to rename; support ends in 0.7.0. Empty when nothing is deprecated |
 | `specPresent` … `configPresent` | Which pipeline documents exist |
 | `lockPresent` | Whether an implementation run is armed |
 | `lockCounter` | The implement guard's re-block counter, read from the lock (either format); `null` when there is no lock |
@@ -59,10 +58,9 @@ The stage machine. Its answer is a pure function of disk state; it never sees a 
 
 **Arguments:** none.
 
-**Returns:** `{ stage, agent, agentFallback, fallbackAgent, restartRequired, model, agentModel, agentModelExact, round, deprecations, reviewRound, reason, prompt, streams? }`.
+**Returns:** `{ stage, agent, agentFallback, fallbackAgent, restartRequired, model, agentModel, agentModelExact, round, reviewRound, reason, prompt, streams? }`.
 
 - `stage`: `plan` · `implement` · `review` · `summarize` · `done` · `halt`
-- `deprecations`: the same array `kukulu_status` returns, so the flight controller can print it
 - `agent`: the subagent to spawn. This is the generated `kukulu-<role>` name when it can be trusted to spawn (`agentFallback` is false), else the plugin's own `kukulu:planner` / `kukulu:implementer` / `kukulu:reviewer` / `kukulu:summarizer`; `null` for `done`, `halt`, and whenever `restartRequired` is true. On a project's first flight, when this session created the agents directory, that means the plugin agent from the start, not a generated name that fails with "not found" and is retried
 - `agentFallback`: true when the generated agent file cannot yet be trusted to spawn in this session: it is absent, or this server process created the `.claude/agents` directory itself (see [routing.md](./routing.md) for why that one case needs a restart and a routing *change* to an existing directory does not)
 - `fallbackAgent`: the plugin's own `kukulu:<role>` name, always present for a stage that has a role, so a controller can retry with it if spawning a generated `agent` still fails with "not found"

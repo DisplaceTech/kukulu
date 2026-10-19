@@ -16,25 +16,12 @@ import path from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-// Notices for a project still using a pre-0.6.0 name, reported in the
-// `deprecations` field of kukulu_status and kukulu_next. Every compatibility
-// fallback below adds one and is removed in 0.7.0.
-const DEPRECATIONS = [];
-function deprecate(message) {
-  if (!DEPRECATIONS.includes(message)) DEPRECATIONS.push(message);
-}
-
 /**
- * An environment variable by its Kūkulu name, falling back to the Foundry name
- * until 0.7.0. A non-empty KUKULU_<name> always wins; an empty one counts as
- * unset, because .mcp.json passes unset variables through as empty strings.
+ * An environment variable by its Kūkulu name. An empty value counts as unset,
+ * because .mcp.json passes unset variables through as empty strings.
  */
 function envVar(name) {
-  if (process.env[`KUKULU_${name}`]) return process.env[`KUKULU_${name}`];
-  const old = process.env[`FOUNDRY_${name}`];
-  if (!old) return undefined;
-  deprecate(`FOUNDRY_${name} is deprecated; set KUKULU_${name} instead. Support ends in 0.7.0.`);
-  return old;
+  return process.env[`KUKULU_${name}`] || undefined;
 }
 
 const ROOT = path.resolve(envVar("PROJECT_DIR") || process.cwd());
@@ -63,7 +50,6 @@ function layoutFor(stateName, configName) {
 }
 
 const LAYOUT = { current: [".kukulu", "kukulu.json"], legacy: [".foundry", "foundry.json"] };
-const LEGACY_LAYOUT_NOTICE = "this project uses the pre-0.6.0 Foundry layout (.foundry/, docs/foundry.json); run kukulu_migrate. Support ends in 0.7.0.";
 
 let P = layoutFor(...LAYOUT.current);
 let legacyLayout = false;
@@ -82,9 +68,6 @@ function resolveLayout() {
   const hasLegacy = layoutPresent(LAYOUT.legacy);
   legacyLayout = hasLegacy && !hasCurrent;
   P = layoutFor(...(legacyLayout ? LAYOUT.legacy : LAYOUT.current));
-  const at = DEPRECATIONS.indexOf(LEGACY_LAYOUT_NOTICE);
-  if (legacyLayout && at === -1) DEPRECATIONS.push(LEGACY_LAYOUT_NOTICE);
-  if (!legacyLayout && at !== -1) DEPRECATIONS.splice(at, 1);
   if (hasCurrent && hasLegacy) {
     throw new ToolError(
       "both the pre-0.6.0 layout (.foundry/ or docs/foundry.json) and the current one (.kukulu/ or docs/kukulu.json) exist, so Kūkulu cannot tell which holds the live state. Keep the one you use and remove the other with git (kukulu_migrate only runs on a project with none of the .kukulu files), then call again.",
@@ -602,13 +585,7 @@ function globalConfigPath() {
   const fromEnv = envVar("CONFIG");
   if (fromEnv) return path.resolve(fromEnv);
   const base = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config");
-  const current = path.join(base, "kukulu", "config.json");
-  const legacy = path.join(base, "foundry", "config.json");
-  if (!exists(current) && exists(legacy)) {
-    deprecate(`the global routing config ${legacy} is read from its pre-0.6.0 location; move it to ${current}. Support ends in 0.7.0.`);
-    return legacy;
-  }
-  return current;
+  return path.join(base, "kukulu", "config.json");
 }
 
 function loadGlobalConfig() {
@@ -688,7 +665,7 @@ function resolveRouting() {
     profileSource = "global";
   }
   if (profile !== null && !(profile in (global.data.profiles || {}))) {
-    const src = profileSource === "env" ? `${process.env.KUKULU_PROFILE ? "KUKULU_PROFILE" : "FOUNDRY_PROFILE"}=${profile}` : `"profile": "${profile}" in ${global.path}`;
+    const src = profileSource === "env" ? `KUKULU_PROFILE=${profile}` : `"profile": "${profile}" in ${global.path}`;
     const globalDesc = global.present ? global.path : `${global.path} (does not exist)`;
     throw new ToolError(`${src} selects a profile, but ${globalDesc} has no profiles.${profile} entry`);
   }
@@ -1480,7 +1457,6 @@ function status() {
   const g = gitFacts();
   const out = {
     root: ROOT,
-    deprecations: DEPRECATIONS.slice(),
     specPresent: exists(P.spec),
     planPresent: exists(P.plan),
     progressPresent: exists(P.progress),
@@ -1626,7 +1602,6 @@ function next() {
       agentModel: info.agentModel,
       agentModelExact: info.agentModelExact,
       round: st.round,
-      deprecations: DEPRECATIONS.slice(),
       reviewRound: st.round + 1,
       reason,
       prompt: PROMPTS[name] ? PROMPTS[name](st.round, s, policySentence, st.round + 1) : null,

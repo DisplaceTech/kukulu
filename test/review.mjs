@@ -1145,7 +1145,6 @@ const MIGRATED = [".foundry/state.json", ".foundry/feedback.jsonl", "docs/foundr
     eq(r.keptAgents.join(","), ".claude/agents/foundry-reviewer.md", "...and one without the generated marker is kept and reported");
     eq(readFile(repo, ".git/info/exclude"), ".claude/agents/foundry-*.md\n.kukulu/worktrees/\n.kukulu/mutation.json\n.claude/agents/kukulu-*.md\n.claude/settings.local.json\n", "...the exclude file follows, mutation line included");
     eq(r.permissions, "added", "...and the allow rule is ensured");
-    eq((await call("kukulu_status")).deprecations.length, 0, "after it, the layout notice is gone");
     isError(await call("kukulu_migrate"), /already uses \.kukulu\/ and docs\/kukulu\.json/, "a second migrate refuses");
   });
 }
@@ -1224,7 +1223,6 @@ for (const [label, setup, re] of [
     eq(git(repo, ["diff", "--cached", "--name-only"]), "", "...nothing is staged");
     eq(git(repo, ["rev-parse", "HEAD"]), head, "...HEAD did not move");
     ok(hasFile(repo, ".claude/agents/foundry-planner.md"), "...and the generated agent was not touched");
-    eq((await call("kukulu_status")).deprecations.length, 1, "...and the project is still read as the old layout");
   });
 }
 

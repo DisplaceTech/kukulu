@@ -12,6 +12,11 @@ All notable changes to this plugin. Format follows
 - `scripts/check-site.mjs`, `scripts/check-site-browser.mjs` and `scripts/serve-site.mjs`, with the `check:site`, `check:site:browser` and `site:serve` npm scripts.
 - A `site` CI workflow that runs the static and browser checks.
 
+### Breaking changes
+
+- The `FOUNDRY_*` environment variables and the `foundry/` global config directory are no longer read; use `KUKULU_*` and `kukulu/config.json`.
+- The `deprecations` field is gone from `kukulu_status` and `kukulu_next`.
+
 ## [0.6.1] — 2026-10-16
 
 Documentation only. No code or behavior change.
