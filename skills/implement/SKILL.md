@@ -72,6 +72,10 @@ Your prompt may instead name one **stream** of a parallel wave ("Run the Kūkulu
 - **Finishing.** When `kukulu_task_next` returns `{ done: true }` for your stream, call `kukulu_stream_finish` with `stream: "<s>"`. It merges your branch into the build branch and removes your worktree. If it reports a merge conflict, the flight is halted for a human: print what it returned and stop. Then print one line starting `STREAM DONE` with the stream name and the counts of done and blocked tasks.
 - Blocking works the same way, in your worktree only: `kukulu_task_block` with your `stream`.
 
+## Clean-room mode
+
+When your prompt says the flight is in clean-room mode, every tool call is checked against `docs/cleanroom.json` and logged. A denial is not an obstacle to route around: do not reach the same target through another tool, a different command or a copy. Name the denial in the task's log entry and continue another way, or block the task if there is no other way. Never stage, edit or delete anything under `.kukulu/cleanroom/`; the server commits the log with its own bookkeeping.
+
 ## Constraints you may not relax
 
 Everything under `## Constraints` in `CLAUDE.md`, on every task. SPEC.md wins over PLAN.md wins over code comments.

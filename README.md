@@ -225,6 +225,10 @@ The server exposes twenty-three tools.
 
 Full arguments, return shapes and failure modes: [docs/mcp-tools.md](./docs/mcp-tools.md).
 
+## Clean-room mode
+
+A project with a `docs/cleanroom.json` policy runs in clean-room mode: a guard checks every tool call against the policy before it runs, a logger writes every allowed call and every prompt to a hash-chained log with signed checkpoints, and a gate refuses to start a stage if any of that machinery has changed since the flight began. Without the policy file nothing changes and nothing is paid for. The method is patent pending (U.S. Provisional Application No. 64/178,095, Displace Technologies LLC). [docs/cleanroom.md](./docs/cleanroom.md) has the policy reference, the log format, the gate and the known gaps.
+
 ## The guard hook
 
 `scripts/implement-guard.mjs` runs on `Stop` and `SubagentStop`, but only considers a stop that belongs to the implementer: a `SubagentStop` naming it (the matcher in `hooks/hooks.json` already scopes the hook to it) or a `Stop` whose own transcript called `kukulu_run_start`. A controller session merely waiting on a background implementer is never blocked. For a stop it does consider: while `.kukulu/implement.lock` exists and `## Tasks` still has `[ ]` or `[~]` lines, it returns `{"decision":"block"}` naming the next task. `kukulu_task_done`, `kukulu_task_block` and `kukulu_run_start` all reset the lock's counter to zero, so the cap bounds re-blocks since the last time work actually moved, not the whole run. It gives up at the effective cap (`docs/kukulu.json`'s `guardCap`, else `KUKULU_GUARD_CAP`, else 60), naming the stalled task, so a stuck run ends instead of looping.
@@ -264,6 +268,7 @@ Everything is on disk and committed, so `/kukulu:go-flight` can be re-run from a
 - [**docs/mcp-tools.md**](./docs/mcp-tools.md): every tool, argument, return field and refusal
 - [**docs/routing.md**](./docs/routing.md): per-role model routing, covering the global config file, profiles, and running stages through a router like claude-code-router
 - [**docs/writing-specs.md**](./docs/writing-specs.md): how to write a `SPEC.md` the planner can turn into a usable plan
+- [**docs/cleanroom.md**](./docs/cleanroom.md): clean-room mode, covering the policy, the guard, the log and checkpoints, the gate, and recording what you did
 - [**docs/operations.md**](./docs/operations.md): running, resuming, halting, and what to do when a stage misbehaves
 - [**docs/plans/**](./docs/plans/): the task-by-task plan behind each release
 - [**Website**](docs/site/DEPLOY.md): deploying kukulu.tech to Cloudflare Pages, and the launch checklist

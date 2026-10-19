@@ -1095,4 +1095,49 @@ const gateCheck = (reason) => (reason.match(/^clean-room gate failed: ([\w-]+):/
   });
 }
 
+// ---------------------------------------------------------------- status and prompts
+
+{
+  const general = plannedRepo();
+  await withServer(general, async ({ call }) => {
+    eq((await call("kukulu_status")).cleanroom, null, "kukulu_status.cleanroom is null without a policy");
+    const n = await call("kukulu_next");
+    ok(!n.prompt.includes("clean-room mode"), "no prompt carries the clean-room sentence in general mode");
+  });
+
+  const repo = await genesisRepo();
+  const SENTENCE = "This flight is in clean-room mode: every tool call is checked against docs/cleanroom.json and logged; a denied call is never worked around — note it in the task's log and continue another way.";
+  await withServer(repo, async ({ call }) => {
+    const first = (await call("kukulu_status")).cleanroom;
+    eq([first.policy, first.mode, first.genesis === stateOf(repo).cleanroom.genesis, first.pinnedPolicyHash === first.policyHash, first.keyFingerprint === loadKey(testKeyFor(repo)).fingerprint, first.lockdown].join("|"), "docs/cleanroom.json|clean-room|true|true|true|false", "kukulu_status.cleanroom reports the policy, mode, genesis, pinned hash, key fingerprint and lockdown");
+    eq(first.chain.entries + "|" + first.chain.lastCheckpoint + "|" + first.denied, "2|null|0", "...and the chain (genesis and the first gate), no checkpoint, no denial");
+    eq(first.chain.tip, readEntries(LOG(repo)).at(-1).hash, "...with the newest hash as its tip");
+    eq(first.hooksLive, false, "hooksLive is false with no allowed entry since the last gate");
+    logCall(repo);
+    appendEntry(LOG(repo), { kind: "denied", tool: "Read", target: "/x", decision: "denied", reason: "r" });
+    const second = (await call("kukulu_status")).cleanroom;
+    eq(second.hooksLive + "|" + second.denied, "true|1", "...true after an allowed entry, and the denial is counted");
+    const n = await call("kukulu_next");
+    eq(n.stage, "implement", "(the flight is at the implement stage)");
+    ok(n.prompt.endsWith(SENTENCE), "the implement prompt carries the clean-room sentence in clean-room mode, last");
+    ok(n.prompt.includes("Run policies:"), "...after the run policies");
+  });
+  // Review and summarize prompts: put the flight at those stages.
+  setState(repo, { implemented: true, reviewed: false, verdict: null });
+  markTasks(repo, { "P0-01": "x", "P0-02": "x", "P0-03": "x" });
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-qm", "all done"]);
+  await live(repo, async ({ call }) => {
+    const r = await call("kukulu_next");
+    eq(r.stage, "review", "(the flight is at the review stage)");
+    ok(r.prompt.endsWith(SENTENCE), "the review prompt carries the clean-room sentence");
+    setState(repo, { implemented: true, reviewed: true, verdict: "APPROVED" });
+    git(repo, ["add", "-A"]);
+    git(repo, ["commit", "-qm", "approved"]);
+    const s2 = await call("kukulu_next");
+    eq(s2.stage, "summarize", "(the flight is at the summarize stage)");
+    ok(s2.prompt.endsWith(SENTENCE), "the summarize prompt carries it too");
+  });
+}
+
 finish();

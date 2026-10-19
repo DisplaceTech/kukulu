@@ -16,7 +16,7 @@ import path from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import {
-  CleanroomError, loadPolicy, policyHash, appendEntry, readEntries, logPathFor, generateKey, loadKey, signCheckpoint, verifyCheckpoint, verifyChain, evaluate, ZERO_HASH,
+  CleanroomError, loadPolicy, policyHash, appendEntry, readEntries, logPathFor, generateKey, loadKey, signCheckpoint, verifyCheckpoint, verifyChain, evaluate, lockdownActive, ZERO_HASH,
 } from "./cleanroom.mjs";
 
 /**
@@ -273,6 +273,50 @@ function checkpoint(event, stage, st) {
     key.privateKey,
   );
   appendEntry(logPath, { kind: "checkpoint", stage, role: "session", data });
+}
+
+const CLEANROOM_SENTENCE =
+  "This flight is in clean-room mode: every tool call is checked against docs/cleanroom.json and logged; a denied call is never worked around — note it in the task's log and continue another way.";
+
+/** `kukulu_status.cleanroom`: null without a policy file, else the whole state of the mode (SPEC D-01). Never throws on a damaged log or policy; it reports what it can read. */
+function cleanroomStatus(st) {
+  const cc = cfg();
+  const policyPath = cleanroomPolicyPath(cc);
+  if (!exists(policyPath)) return null;
+  const logPath = cleanroomLogPath();
+  let entries = [];
+  try {
+    entries = readEntries(logPath);
+  } catch {
+    // a damaged log is the gate's finding; status still answers
+  }
+  const lastGate = entries.map((e) => e.kind).lastIndexOf("gate");
+  const lastCheckpoint = entries.map((e) => e.kind).lastIndexOf("checkpoint");
+  const afterMarker = lastGate >= 0 ? lastGate : entries.findIndex((e) => e.kind === "genesis");
+  let keyFingerprint = null;
+  try {
+    if (exists(cc.cleanroom.signingKey)) keyFingerprint = loadKey(cc.cleanroom.signingKey).fingerprint;
+  } catch {
+    // an unreadable key is reported as absent
+  }
+  let lockdown = false;
+  try {
+    lockdown = lockdownActive(loadPolicy(read(policyPath)), exists(P.progress) ? read(P.progress) : null);
+  } catch {
+    // an invalid policy is the gate's finding
+  }
+  return {
+    policy: cc.cleanroom.policy,
+    policyHash: policyHash(fs.readFileSync(policyPath)),
+    mode: st.cleanroom?.mode === "general" ? "general" : "clean-room",
+    genesis: st.cleanroom?.genesis ?? null,
+    pinnedPolicyHash: st.cleanroom?.policyHash ?? null,
+    chain: { entries: entries.length, tip: entries.length ? entries[entries.length - 1].hash : null, lastCheckpoint: lastCheckpoint >= 0 ? entries[lastCheckpoint].seq : null },
+    denied: entries.filter((e) => e.kind === "denied").length,
+    hooksLive: afterMarker >= 0 && entries.slice(afterMarker + 1).some((e) => e.kind === "allowed"),
+    keyFingerprint,
+    lockdown,
+  };
 }
 
 /** The `human` entry an operator-initiated tool leaves in the chain, in clean-room mode. */
@@ -1787,6 +1831,7 @@ function status() {
   out.artifacts = artifactStates(g.inRepo);
   out.strayArtifacts = out.artifacts["PLAN.md"] === "absent" ? Object.keys(out.artifacts).filter((k) => out.artifacts[k] === "untracked") : [];
   out.lastReviewCommit = lastReviewCommit(g.inRepo);
+  out.cleanroom = cleanroomStatus(st);
   return out;
 }
 
@@ -1864,7 +1909,7 @@ function next() {
   // accurate even before this round's kukulu_run_start has recorded
   // state.policies (round 0, before the implementer's first call).
   let gateResult = null;
-  const policySentence = `Run policies: signing=${c.policies.signing}, push=${c.policies.push ? "on" : "off"}, pr=${c.policies.pr}.`;
+  const policySentence = `Run policies: signing=${c.policies.signing}, push=${c.policies.push ? "on" : "off"}, pr=${c.policies.pr}.${cleanroomOn(c) ? ` ${CLEANROOM_SENTENCE}` : ""}`;
   const stage = (name, reason, extra = {}) => {
     const info = agentInfo(name);
     return {

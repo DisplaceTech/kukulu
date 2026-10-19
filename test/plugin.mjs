@@ -433,6 +433,10 @@ like(read("skills/review-build/SKILL.md"), /Round 2 and later\*\*: read `prCheck
 like(goFlight, /"record: <text>".*kukulu_cleanroom_record\(\{ text, kind \}\)/, "go-flight maps record: to kukulu_cleanroom_record");
 like(goFlight, /print `gate: ok \(<n> checks\)`/, "go-flight prints the gate line");
 
+like(read("skills/implement/SKILL.md"), /A denial is not an obstacle to route around/, "the implement skill says a denial is never worked around");
+like(read("skills/review-build/SKILL.md"), /A denial that was worked around[^.]*is a category 1 finding/, "review-build treats a worked-around denial as category 1");
+ok(read("README.md").includes("(./docs/cleanroom.md)") && exists("docs/cleanroom.md"), "docs/cleanroom.md is linked from the README");
+
 let unknownTool = null;
 let retiredMention = null;
 let unknownSkill = null;
