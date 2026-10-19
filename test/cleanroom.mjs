@@ -14,7 +14,7 @@ import { createHash as sha, generateKeyPairSync } from "node:crypto";
 import {
   CleanroomError, loadPolicy, policyHash,
   ENTRY_KEYS, KINDS, ZERO_HASH, TARGET_MAX, truncateTarget, canonical, entryHash, appendEntry, readEntries, verifyChain, logPathFor, targetOf, projectContext, entryFields,
-  tokenize, LANGUAGES,
+  tokenize, LANGUAGES, scorePair, position, verdictOf, LIMITS, BANDS,
   splitSegments, shellWords, commandWord, isPathLike, tokenPath, canonicalPaths,
   evaluate, lockdownActive, NETWORK_COMMANDS, READ_FAMILY, WRITE_FAMILY, protectedPaths,
   generateKey, loadKey, keyFingerprint, CHECKPOINT_KEYS, signCheckpoint, verifyCheckpoint,
@@ -1266,6 +1266,45 @@ eq(LANGUAGES.join(","), "rust,c,cpp,go,python,javascript,typescript,java,php", "
   ok(refused instanceof CleanroomError && /unknown language "cobol"; the shipped lexers are rust, c, cpp/.test(refused.message), "tokenize refuses an unknown language");
   eq(tokenize("", "rust").tokens.length + tokenize("/* never closed", "c").comments.length, 1, "an empty text has no tokens and an unterminated comment runs to the end");
   eq(tokenize('"never closed', "c").tokens.join(" "), "STR", "an unterminated string runs to the end");
+}
+
+// ---------------------------------------------------------------- metrics, positioning and the verdict
+
+{
+  const file = (text, language = "c") => ({ path: "f", text, language });
+  const score = (l, r, opts = {}) => scorePair(l.map((t) => file(t)), r.map((t) => file(t)), { ngram: [2], minIdentLen: 6, commentNgram: 3, ...opts });
+  const two = score(["a = 1; b = 2;"], ["x = 1;"]);
+  eq(two["ngram_jaccard@2"], 0.75, "ngram_jaccard on two token streams");
+  eq(two["ngram_containment@2"], 1, "containment uses the smaller set");
+  eq(Object.keys(two).join(","), "ngram_jaccard@2,ngram_containment@2,ident_jaccard,ident_match_rate_left,comment_jaccard", "...and the rows are one per metric, in order");
+  const spanning = score(["a = 1;", "b = 2;"], ["a = 1; b = 2;"], { ngram: [3] });
+  eq(spanning["ngram_jaccard@3"] + "|" + spanning["ngram_containment@3"], "0.5|1", "no shingle spans a file");
+  eq(score(["a = 1;", "b = 2;"], ["a = 1;", "b = 2;"], { ngram: [5] })["ngram_jaccard@5"], 0, "...a file shorter than n has none, and an empty union scores 0");
+  const ids = score(["int alpha_long, beta_long, tiny;"], ["int alpha_long, gamma_long, tiny;"]);
+  eq(ids.ident_jaccard + "|" + ids.ident_match_rate_left, "0.3333333333333333|0.5", "identifier sets drop short identifiers");
+  const excluded = score(["int alpha_long, beta_long;"], ["int alpha_long, gamma_long;"], { exclusions: new Set(["alpha_long"]) });
+  eq(excluded.ident_jaccard + "|" + excluded.ident_match_rate_left, "0|0", "...and exclusions");
+  eq(score(["/* The Quick brown fox jumps */"], ["// the quick   BROWN fox leaps"]).comment_jaccard, 0.5, "comment_jaccard compares lower-cased word n-grams");
+  eq(score(["x = 1;"], [""]).ident_match_rate_left, 0, "an empty side scores 0 rather than NaN");
+
+  const opts = { near: 0.25, separationMargin: 0 };
+  const band = (c) => position(c, 0, 1, opts).band;
+  eq([-0.1, 0, 0.25, 0.5, 0.75, 1, 1.1].map(band).join("|"), "below negative|at or near negative|at or near negative|between|at or near positive|at or near positive|above positive", "position bands at -0.1, 0, 0.25, 0.5, 0.75, 1 and 1.1");
+  eq(position(0.5, 0.2, 0.6, opts).c.toFixed(4), "0.7500", "...c is (test - neg) / (pos - neg)");
+  eq(position(0.5, 0.4, 0.4, opts).band + "|" + position(0.5, 0.4, 0.4, opts).c, "not separated|null", "not separated when pos minus neg is at most separationMargin");
+  eq(position(0.5, 0.4, 0.45, { near: 0.25, separationMargin: 0.05 }).band, "not separated", "...including exactly at the margin");
+  eq(position(0.5, 0.4, 0.46, { near: 0.25, separationMargin: 0.05 }).band, "above positive", "...and separated just beyond it");
+  eq(BANDS.length, 5, "there are five bands");
+
+  const row = (pair, metric, band) => ({ pair, metric, score: 0, c: 0, band });
+  eq(verdictOf([row("t", "m1", "below negative"), row("t", "m2", "at or near negative"), row("t", "m3", "not separated")]), "independence supported on every separable metric", "the verdict supports independence on every separable metric");
+  eq(verdictOf([row("t", "m1", "below negative"), row("t", "ident_jaccard", "between"), row("u", "comment_jaccard", "above positive")]), "independence not supported: t: ident_jaccard is between; u: comment_jaccard is above positive", "...names the failing metrics and bands");
+  eq(verdictOf([row("t", "m1", "not separated"), row("t", "m2", "not separated")]), "no metric separates the controls", "...says no metric separates the controls");
+  eq(verdictOf([]), "no metric separates the controls", "...also with no rows at all");
+
+  eq(LIMITS.length, 5, "LIMITS lists the five limits");
+  like(LIMITS.join(" "), /lexical approximation[\s\S]*no clone detector[\s\S]*Cross-language[\s\S]*same-language positive control[\s\S]*n = 1/i, "...in the spec's order");
+  eq(tokenize("int alpha_long;", "c").identifiers.join(","), "alpha_long", "tokenize also returns the raw identifiers");
 }
 
 finish();

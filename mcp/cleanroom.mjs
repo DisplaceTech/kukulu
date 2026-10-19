@@ -912,6 +912,7 @@ export function tokenize(text, language) {
   if (!spec) throw new CleanroomError(`the ${language} lexer is not available in this build`);
   const tokens = [];
   const comments = [];
+  const identifiers = []; // the raw text of every identifier, for the identifier metrics
   const n = text.length;
   const at = (i) => (i < n ? text[i] : "");
   const startsWith = (i, s) => text.startsWith(s, i);
@@ -1045,7 +1046,10 @@ export function tokenize(text, language) {
       }
       if (spec.keywords.has(word)) tokens.push(KEYWORD_CLASS[word] ?? word);
       else if (spec.types.has(word)) tokens.push("TYPE");
-      else tokens.push("ID");
+      else {
+        tokens.push("ID");
+        identifiers.push(word);
+      }
       i = j;
       continue;
     }
@@ -1102,5 +1106,103 @@ export function tokenize(text, language) {
     tokens.push(c);
     i++;
   }
-  return { tokens, comments };
+  return { tokens, comments, identifiers };
 }
+
+// ---------------------------------------------------------------- the lexical scorer: metrics
+
+const jaccard = (a, b) => {
+  let inter = 0;
+  for (const x of a) if (b.has(x)) inter++;
+  const union = a.size + b.size - inter;
+  return union === 0 ? 0 : inter / union;
+};
+const containment = (a, b) => {
+  let inter = 0;
+  for (const x of a) if (b.has(x)) inter++;
+  const smaller = Math.min(a.size, b.size);
+  return smaller === 0 ? 0 : inter / smaller;
+};
+
+/** Every n-gram of `items` as a joined string; fewer than n items give none. */
+function addShingles(set, items, n) {
+  for (let k = 0; k + n <= items.length; k++) set.add(items.slice(k, k + n).join(" "));
+}
+
+/** What one side of a pair contributes: shingle sets per n (never spanning a file), identifier set, comment shingles. */
+function sideProfile(files, { ngram, minIdentLen, commentNgram, exclusions }) {
+  const shingles = new Map(ngram.map((n) => [n, new Set()]));
+  const identifiers = new Set();
+  const commentShingles = new Set();
+  for (const file of files) {
+    const { tokens, comments, identifiers: ids } = tokenize(file.text, file.language);
+    for (const [n, set] of shingles) addShingles(set, tokens, n);
+    for (const id of ids) if (id.length >= minIdentLen && !exclusions.has(id)) identifiers.add(id);
+    addShingles(commentShingles, comments.join(" ").toLowerCase().split(/\s+/).filter(Boolean), commentNgram);
+  }
+  return { shingles, identifiers, commentShingles };
+}
+
+/**
+ * Score two sets of files against each other (SPEC E-02). `left` and `right`
+ * are arrays of `{ path, text, language }`; the result has one number per metric:
+ * `ngram_jaccard@n` and `ngram_containment@n` for each n, `ident_jaccard`,
+ * `ident_match_rate_left` and `comment_jaccard`.
+ */
+export function scorePair(left, right, opts) {
+  const o = { ngram: [5, 10], minIdentLen: 6, commentNgram: 5, exclusions: new Set(), ...opts };
+  const a = sideProfile(left, o);
+  const b = sideProfile(right, o);
+  const rows = {};
+  for (const n of o.ngram) {
+    rows[`ngram_jaccard@${n}`] = jaccard(a.shingles.get(n), b.shingles.get(n));
+    rows[`ngram_containment@${n}`] = containment(a.shingles.get(n), b.shingles.get(n));
+  }
+  rows.ident_jaccard = jaccard(a.identifiers, b.identifiers);
+  let shared = 0;
+  for (const id of a.identifiers) if (b.identifiers.has(id)) shared++;
+  rows.ident_match_rate_left = a.identifiers.size === 0 ? 0 : shared / a.identifiers.size;
+  rows.comment_jaccard = jaccard(a.commentShingles, b.commentShingles);
+  return rows;
+}
+
+export const BANDS = ["below negative", "at or near negative", "between", "at or near positive", "above positive"];
+
+/**
+ * Where a test pair's score falls between the controls: `c = (test - neg) / (pos - neg)`,
+ * in bands fixed before anything is measured. Controls that do not differ by more than
+ * `separationMargin` cannot position anything: `not separated`.
+ */
+export function position(sTest, sNeg, sPos, { near, separationMargin }) {
+  if (sPos - sNeg <= separationMargin) return { c: null, band: "not separated" };
+  const c = (sTest - sNeg) / (sPos - sNeg);
+  let band;
+  if (c < 0) band = BANDS[0];
+  else if (c <= near) band = BANDS[1];
+  else if (c < 1 - near) band = BANDS[2];
+  else if (c <= 1) band = BANDS[3];
+  else band = BANDS[4];
+  return { c, band };
+}
+
+/**
+ * The verdict line over the test pairs' rows `{ pair, metric, score, c, band }`:
+ * independence is supported only when every test pair sits at or below the negative
+ * control on every metric that separates the controls.
+ */
+export function verdictOf(rows) {
+  const separable = rows.filter((r) => r.band !== "not separated");
+  if (!separable.length) return "no metric separates the controls";
+  const failing = separable.filter((r) => r.band !== BANDS[0] && r.band !== BANDS[1]);
+  if (!failing.length) return "independence supported on every separable metric";
+  return `independence not supported: ${failing.map((r) => `${r.pair}: ${r.metric} is ${r.band}`).join("; ")}`;
+}
+
+/** What this scorer cannot show, printed with every result (SPEC E-02). */
+export const LIMITS = [
+  "This is a lexical approximation of cleanflate-bench's tree-sitter token method: the same normalization but no parse tree, so a C macro body and a Rust impl-for block are handled by rule rather than by grammar.",
+  "There is no clone detector: copied logic that was renamed and reordered below the n-gram window is not found.",
+  "Cross-language pairs score lower on token metrics by construction, as the bench found: its n-gram metrics did not separate its controls, and its identifier and comment metrics did.",
+  "A structural metric needs a same-language positive control.",
+  "One target library is n = 1: a score is evidence about this subject and this prior art, not a general property.",
+];
