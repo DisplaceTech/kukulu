@@ -658,12 +658,12 @@ for (const [label, patch] of [
   }
   eq(fs.readdirSync(path.join(ROOT, FLIGHT)).sort().join(","), Object.keys(PINNED).sort().join(","), `${FLIGHT} holds exactly the recorded files`);
 
-  // A project on the old layout that archived that flight is still understood.
+  // A project that archived that flight under the old config name is still understood.
   const repo = specRepo();
   fs.mkdirSync(path.join(repo, FLIGHT), { recursive: true });
   for (const name of Object.keys(PINNED)) fs.copyFileSync(path.join(ROOT, FLIGHT, name), path.join(repo, FLIGHT, name));
   fs.copyFileSync(path.join(ROOT, FLIGHT, "SPEC.md"), path.join(repo, "docs", "SPEC.md"));
-  writeFile(repo, ".foundry/state.json", JSON.stringify({ ...JSON.parse(readFile(repo, `${FLIGHT}/state.json`)), summarized: false, archived: { slug: "v0-5-0", dir: FLIGHT, at: "2026-10-07T20:54:01.917Z" } }));
+  writeFile(repo, ".kukulu/state.json", JSON.stringify({ ...JSON.parse(readFile(repo, `${FLIGHT}/state.json`)), summarized: false, archived: { slug: "v0-5-0", dir: FLIGHT, at: "2026-10-07T20:54:01.917Z" } }));
   git(repo, ["add", "-A"]);
   git(repo, ["commit", "-qm", "chore: archive flight v0-5-0"]);
   await withServer(repo, async ({ call }) => {
@@ -678,45 +678,40 @@ for (const [label, patch] of [
   }
 }
 
-{
-  const repo = useLegacyLayout(plannedRepo());
-  await withServer(repo, async ({ call }) => {
-    const st = await call("kukulu_status");
-    eq(st.configPresent, true, "a project with docs/foundry.json and .foundry/ is read in place");
-    ok(!("deprecations" in st), "kukulu_status has no deprecations field");
-    ok(!("deprecations" in (await call("kukulu_next"))), "kukulu_next has no deprecations field");
-  });
-}
+/** A project on the pre-0.6.0 layout, built from a planned repo. */
+const OLD_LAYOUT = /pre-0\.6\.0 Foundry layout, which 0\.7\.0 no longer reads/;
 
 {
-  // A 0.5.0 project after its flight was archived: only .foundry/state.json is left. Planning
-  // would write docs/kukulu.json beside it, and every tool refuses a project holding both
-  // layouts, so the controller is told to migrate first.
-  const repo = plannedRepo({ config: { flight: "w1" } });
-  setState(repo, { summarized: true, verdict: "APPROVED", reviewed: true, implemented: true });
-  git(repo, ["checkout", "-q", "-b", "build/2020-01-01"]);
-  git(repo, ["add", "-A"]);
-  git(repo, ["commit", "-qm", "chore: build summary"]);
-  await withServer(repo, async ({ call }) => {
-    await call("kukulu_flight_archive");
-  });
-  useLegacyLayout(repo);
-  writeFile(repo, "docs/SPEC.md", "# Next spec\n");
-  await withServer(repo, async ({ call }) => {
-    const n = await call("kukulu_next");
-    eq(n.stage, "halt", "on the old layout, an archived project with an edited spec halts instead of planning");
-    like(n.reason, /run \/kukulu:go-flight migrate, then run/, "...telling the controller to migrate");
-  });
-}
-
-{
-  // Error messages name the files the project actually has.
   const repo = plannedRepo();
   setState(repo, { round: 0 });
   useLegacyLayout(repo);
   fs.rmSync(path.join(repo, "docs/foundry.json"));
+  git(repo, ["commit", "-qam", "chore: only the state directory"]);
   await withServer(repo, async ({ call }) => {
-    isError(await call("kukulu_verify"), /docs\/foundry\.json is missing/, "on the old layout a refusal names docs/foundry.json, not docs/kukulu.json");
+    const e = await call("kukulu_status");
+    isError(e, OLD_LAYOUT, "a project with only .foundry/ is refused with the 0.7.0 layout message");
+    isError(await call("kukulu_status"), /docs\/kukulu\.json/, "...which names docs/kukulu.json");
+  });
+}
+
+{
+  const repo = plannedRepo();
+  setState(repo, { round: 0 });
+  useLegacyLayout(repo);
+  fs.rmSync(path.join(repo, ".foundry"), { recursive: true });
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-qm", "chore: only the config"]);
+  await withServer(repo, async ({ call }) => {
+    isError(await call("kukulu_status"), OLD_LAYOUT, "a project with only docs/foundry.json is refused the same way");
+  });
+}
+
+{
+  const repo = useLegacyLayout(plannedRepo());
+  await withServer(repo, async ({ call }) => {
+    isError(await call("kukulu_status"), OLD_LAYOUT, "every tool refuses the old layout: kukulu_status");
+    isError(await call("kukulu_next"), OLD_LAYOUT, "...kukulu_next");
+    isError(await call("kukulu_verify"), OLD_LAYOUT, "...kukulu_verify");
   });
 }
 
@@ -726,7 +721,7 @@ for (const [label, patch] of [
   setState(repo, { round: 0 });
   writeFile(repo, ".foundry/state.json", "{}");
   await withServer(repo, async ({ call }) => {
-    isError(await call("kukulu_status"), /both the pre-0\.6\.0 layout .* and the current one .* exist/, "a project holding both layouts is refused, since either would hide the other");
+    isError(await call("kukulu_status"), /both the pre-0\.6\.0 layout .* and the current one .* exist/, "a project with both layouts is refused, since either would hide the other");
     isError(await call("kukulu_next"), /Keep the one you use and remove the other/, "...for every tool, with what to do");
   });
 }

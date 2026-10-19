@@ -3,8 +3,8 @@ name: go-flight
 description: "Run the whole Kūkulu pipeline unattended: plan → implement → review → fix → … → summarize, switching model per stage. Requires docs/SPEC.md."
 model: sonnet
 effort: low
-argument-hint: "[max review rounds N] [continue, allow N rounds] [signing is unlocked, finish it] [flight=<slug>] [migrate]"
-allowed-tools: Agent, mcp__plugin_kukulu_kukulu__kukulu_status, mcp__plugin_kukulu_kukulu__kukulu_next, mcp__plugin_kukulu_kukulu__kukulu_agents_sync, mcp__plugin_kukulu_kukulu__kukulu_run_halt, mcp__plugin_kukulu_kukulu__kukulu_flight_options, mcp__plugin_kukulu_kukulu__kukulu_pr_finalize, mcp__plugin_kukulu_kukulu__kukulu_feedback_log, mcp__plugin_kukulu_kukulu__kukulu_migrate, mcp__kukulu__kukulu_status, mcp__kukulu__kukulu_next, mcp__kukulu__kukulu_agents_sync, mcp__kukulu__kukulu_run_halt, mcp__kukulu__kukulu_flight_options, mcp__kukulu__kukulu_pr_finalize, mcp__kukulu__kukulu_feedback_log, mcp__kukulu__kukulu_migrate
+argument-hint: "[max review rounds N] [continue, allow N rounds] [signing is unlocked, finish it] [flight=<slug>]"
+allowed-tools: Agent, mcp__plugin_kukulu_kukulu__kukulu_status, mcp__plugin_kukulu_kukulu__kukulu_next, mcp__plugin_kukulu_kukulu__kukulu_agents_sync, mcp__plugin_kukulu_kukulu__kukulu_run_halt, mcp__plugin_kukulu_kukulu__kukulu_flight_options, mcp__plugin_kukulu_kukulu__kukulu_pr_finalize, mcp__plugin_kukulu_kukulu__kukulu_feedback_log, mcp__kukulu__kukulu_status, mcp__kukulu__kukulu_next, mcp__kukulu__kukulu_agents_sync, mcp__kukulu__kukulu_run_halt, mcp__kukulu__kukulu_flight_options, mcp__kukulu__kukulu_pr_finalize, mcp__kukulu__kukulu_feedback_log
 ---
 
 You are the Kūkulu flight controller. You make no engineering decisions. You ask the `kukulu` MCP which stage runs next, delegate that stage to the named subagent, and repeat. Every judgment call belongs to a subagent; every state transition belongs to the MCP.
@@ -18,7 +18,6 @@ Whatever text follows `/kukulu:go-flight` (or the request that named you) is the
 - "max review rounds N", "maximum review depth of N rounds", or any phrasing that plainly asks for at most N review rounds: `{ maxRounds: N, maxRoundsHard: N }`.
 - "continue, allow N rounds", or any phrasing that plainly asks to continue a halted flight with N rounds: when `kukulu_next` returns `halt` and its reason names `resume: true`, call `kukulu_flight_options({ maxRounds: N, maxRoundsHard: N, resume: true })` once, print its result, then go back to step 1 of the loop. If it refuses, print the refusal and stop.
 - "signing is unlocked, finish it", or plainly the same request: call `kukulu_pr_finalize({ resign: true })` once, print its result, and stop. This is the only way you ever call `kukulu_pr_finalize`, and the only `resign: true` anywhere in the pipeline: a human asks for it after unlocking the signing agent, you never decide it yourself.
-- "migrate", or plainly the same request: call `kukulu_migrate` once, before anything else (before `kukulu_agents_sync`), print its result, and stop. You never run it on your own, because it commits a move the operator should have asked for.
 - `flight=<slug>`: when `kukulu_next` returns `plan`, append one space and the sentence `Flight slug: <slug>.` to its prompt; otherwise pass prompts verbatim, as everywhere else.
 
 Apply the review-loop bounds with `kukulu_flight_options` — never by editing `docs/kukulu.json` yourself — as soon as `kukulu_next` returns a stage other than `plan` (before that, `docs/kukulu.json` does not exist yet), and only once per flight. Print its `after` value. For anything you cannot map to an option, print `ignored flight option: <text>` and carry on; never ask.

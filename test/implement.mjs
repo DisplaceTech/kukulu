@@ -1012,21 +1012,15 @@ function rejectCommitsStarting(repo, prefix) {
   });
 }
 
-// ---------------------------------------------------------------- pre-0.6.0 layout (RN-06)
+// ---------------------------------------------------------------- pre-0.6.0 layout (refused since 0.7.0)
 
 {
-  // A project that has not migrated keeps its lock, ignore line and state in
-  // .foundry/, and no .kukulu/ appears beside them.
   const repo = plannedRepo();
   setState(repo, { round: 0 });
   useLegacyLayout(repo);
   await withServer(repo, async ({ call }) => {
-    const r = await call("kukulu_run_start");
-    eq(r.alreadyStarted, false, "run_start works on the pre-0.6.0 layout");
-    ok(hasFile(repo, ".foundry/implement.lock"), "...arming the lock under .foundry/");
-    ok(!hasFile(repo, ".kukulu"), "...without creating .kukulu/");
-    like(readFile(repo, ".gitignore"), /^\.foundry\/implement\.lock$/m, "...and ignoring the lock under its .foundry/ name");
-    eq(git(repo, ["status", "--porcelain"]), "", "...leaving the tree clean");
+    isError(await call("kukulu_run_start"), /pre-0\.6\.0 Foundry layout, which 0\.7\.0 no longer reads/, "run_start refuses the pre-0.6.0 layout");
+    ok(!hasFile(repo, ".foundry/implement.lock") && !hasFile(repo, ".kukulu"), "...arming nothing and creating no .kukulu/");
   });
 }
 

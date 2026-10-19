@@ -15,6 +15,7 @@ All notable changes to this plugin. Format follows
 ### Breaking changes
 
 - The `FOUNDRY_*` environment variables and the `foundry/` global config directory are no longer read; use `KUKULU_*` and `kukulu/config.json`.
+- `kukulu_migrate` is removed, and a project on the pre-0.6.0 Foundry layout is refused. Migrate by hand: move `.foundry/state.json` and `.foundry/feedback.jsonl` to `.kukulu/`, `docs/foundry.json` to `docs/kukulu.json`, and the `.foundry/` lines of `.gitignore` to `.kukulu/`, then commit.
 - The `deprecations` field is gone from `kukulu_status` and `kukulu_next`.
 
 ## [0.6.1] — 2026-10-16

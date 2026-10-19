@@ -224,7 +224,7 @@ const goFlight = read("skills/go-flight/SKILL.md");
 const fmGo = frontmatter(goFlight);
 const allowed = String(fmGo["allowed-tools"]).split(",").map((s) => s.trim());
 const toolNames = Array.from(serverSrc.matchAll(/name: "(kukulu_[a-z_]+)"/g), (m) => m[1]);
-eq(toolNames.length, 22, "the server defines twenty-two tools");
+eq(toolNames.length, 21, "the server defines twenty-one tools");
 
 const COUNT_WORDS = { 18: "Eighteen", 19: "Nineteen", 20: "Twenty", 21: "Twenty-one", 22: "Twenty-two", 23: "Twenty-three", 24: "Twenty-four", 25: "Twenty-five" };
 like(read("docs/mcp-tools.md").split("\n")[2], new RegExp(`^${COUNT_WORDS[toolNames.length]} tools,`), "docs/mcp-tools.md states the tool count in words");
@@ -353,19 +353,27 @@ const PROSE = [...MD, ...skillNames.map((n) => `skills/${n}/SKILL.md`), ...agent
 // built yet, so the tool/skill-name check cannot hold for them.
 const FLIGHT_ARTIFACTS = ["docs/SPEC.md", "docs/PLAN.md", "docs/PROGRESS.md", "docs/HANDOFF.md", "docs/REVIEW.md", "docs/SUMMARY.md"];
 
+// Retired tools stay in the history of CHANGELOG.md and README.md and nowhere else.
+const RETIRED_TOOLS = ["kukulu_migrate"];
+const RETIRED_ALLOWED = ["CHANGELOG.md", "README.md"];
 let unknownTool = null;
+let retiredMention = null;
 let unknownSkill = null;
 for (const file of PROSE) {
   if (FLIGHT_ARTIFACTS.includes(file)) continue;
   const body = read(file);
   for (const m of body.matchAll(/\bkukulu_[a-z_]+/g)) {
-    if (!toolNames.includes(m[0]) && !unknownTool) unknownTool = `${file}: ${m[0]}`;
+    if (RETIRED_TOOLS.includes(m[0])) {
+      if (!RETIRED_ALLOWED.includes(file) && !retiredMention) retiredMention = `${file}: ${m[0]}`;
+    } else if (!toolNames.includes(m[0]) && !unknownTool) unknownTool = `${file}: ${m[0]}`;
   }
   for (const m of body.matchAll(/\bkukulu:([a-z-]+)/g)) {
     if (!skillNames.includes(m[1]) && !agentNames.includes(m[1]) && !unknownSkill) unknownSkill = `${file}: ${m[0]}`;
   }
 }
 eq(unknownTool, null, "every kukulu_* tool named in prose exists on the server");
+eq(retiredMention, null, "kukulu_migrate appears only in CHANGELOG.md and README.md");
+ok(!/migrate/.test(goFlight) && !allowed.some((t) => t.endsWith("kukulu_migrate")), "go-flight no longer offers migrate");
 eq(unknownSkill, null, "every kukulu:* skill or agent named in prose exists");
 
 // Documentation links have to land somewhere.

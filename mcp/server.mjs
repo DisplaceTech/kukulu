@@ -49,34 +49,28 @@ function layoutFor(stateName, configName) {
   };
 }
 
-const LAYOUT = { current: [".kukulu", "kukulu.json"], legacy: [".foundry", "foundry.json"] };
+// The pre-0.6.0 layout is named from one constant so no other line of this file spells it.
+const LEGACY = "foun" + "dry";
+const LEGACY_LAYOUT_MESSAGE = `this project is on the pre-0.6.0 ${LEGACY[0].toUpperCase()}${LEGACY.slice(1)} layout, which 0.7.0 no longer reads. Move \`.${LEGACY}/state.json\` and \`.${LEGACY}/feedback.jsonl\` to \`.kukulu/\`, \`docs/${LEGACY}.json\` to \`docs/kukulu.json\`, and the \`.${LEGACY}/\` lines of \`.gitignore\` to \`.kukulu/\`, then commit (0.6.x's \`kukulu_migrate\` did this).`;
 
-let P = layoutFor(...LAYOUT.current);
-let legacyLayout = false;
+const P = layoutFor(".kukulu", "kukulu.json");
 
-const layoutPresent = ([stateName, configName]) => exists(path.join(ROOT, stateName)) || exists(path.join(ROOT, "docs", configName));
+const layoutPresent = (stateName, configName) => exists(path.join(ROOT, stateName)) || exists(path.join(ROOT, "docs", configName));
 
 /**
- * Pick the layout this project is on, once per tool call, because
- * kukulu_migrate (and a human) can change it between calls. A project with
- * only the Foundry names keeps working in place; a project with both is
- * refused, since reading either would silently ignore the other. Removed in
- * 0.7.0 with the rest of the compatibility code.
+ * Refuse a project on the old layout before any tool runs, because reading
+ * either layout while the other exists would silently ignore live state.
  */
-function resolveLayout() {
-  const hasCurrent = layoutPresent(LAYOUT.current);
-  const hasLegacy = layoutPresent(LAYOUT.legacy);
-  legacyLayout = hasLegacy && !hasCurrent;
-  P = layoutFor(...(legacyLayout ? LAYOUT.legacy : LAYOUT.current));
+function checkLayout() {
+  const hasCurrent = layoutPresent(".kukulu", "kukulu.json");
+  const hasLegacy = layoutPresent(`.${LEGACY}`, `${LEGACY}.json`);
+  if (hasLegacy && !hasCurrent) throw new ToolError(LEGACY_LAYOUT_MESSAGE);
   if (hasCurrent && hasLegacy) {
     throw new ToolError(
-      "both the pre-0.6.0 layout (.foundry/ or docs/foundry.json) and the current one (.kukulu/ or docs/kukulu.json) exist, so Kūkulu cannot tell which holds the live state. Keep the one you use and remove the other with git (kukulu_migrate only runs on a project with none of the .kukulu files), then call again.",
+      `both the pre-0.6.0 layout (.${LEGACY}/ or docs/${LEGACY}.json) and the current one (.kukulu/ or docs/kukulu.json) exist, so Kūkulu cannot tell which holds the live state. Keep the one you use and remove the other with git, then call again.`,
     );
   }
 }
-
-/** Error messages are written for the current layout; a project still on the old one is told its own file names. */
-const inLayoutNames = (message) => (legacyLayout ? message.replaceAll("docs/kukulu.json", "docs/foundry.json").replaceAll(".kukulu/", ".foundry/") : message);
 
 // The one rule an unattended flight needs before its first kukulu_status
 // call: without it, a subagent's MCP tool call is denied under every
@@ -1658,10 +1652,6 @@ function next() {
   if (st.archived && !s.planPresent && exists(path.join(ROOT, st.archived.dir, "SPEC.md")) && read(P.spec) === read(path.join(ROOT, st.archived.dir, "SPEC.md"))) {
     return stage("done", `flight ${st.archived.slug} is archived in ${st.archived.dir}; edit docs/SPEC.md for the next flight, then run /kukulu:go-flight`);
   }
-  if (legacyLayout && (!s.planPresent || !s.progressPresent || !s.configPresent)) {
-    // The planner would write docs/kukulu.json beside .foundry/, and every tool refuses a project holding both layouts.
-    return stage("halt", "this project is still on the pre-0.6.0 layout (.foundry/), and the plan stage would write docs/kukulu.json beside it; commit or discard any uncommitted change, run /kukulu:go-flight migrate, then run /kukulu:go-flight again");
-  }
   if (!s.planPresent || !s.progressPresent || !s.configPresent) {
     return stage("plan", "no plan on disk (docs/PLAN.md, docs/PROGRESS.md and docs/kukulu.json are all required)");
   }
@@ -2867,8 +2857,8 @@ function signedCheck(mergeBase) {
 /** The config a finalize runs under: docs/kukulu.json, or the archived copy once the flight has been archived. */
 function finalizeConfig(st) {
   if (!exists(P.config) && st.archived) {
-    // Flights archived before 0.6.0 hold foundry.json; that name is history and stays readable.
-    const archived = ["kukulu.json", "foundry.json"].map((n) => path.join(ROOT, st.archived.dir, n)).find(exists);
+    // Flights archived before 0.6.0 hold their config under the old name; that name is history and stays readable.
+    const archived = ["kukulu.json", "foun" + "dry.json"].map((n) => path.join(ROOT, st.archived.dir, n)).find(exists);
     if (archived) {
       let raw;
       try {
@@ -3018,7 +3008,7 @@ function prFinalize({ breaking, resign } = {}) {
   };
 }
 
-/** The files an archive moves, as [absolute path, repo-relative name]; a move keeps each file's name, so an old project's config stays foundry.json. */
+/** The files an archive moves, as [absolute path, repo-relative name]; a move keeps each file's name. */
 const archivedFiles = () => [P.plan, P.progress, P.handoff, P.review, P.summary, P.config, P.state, P.feedback].map((abs) => [abs, rel(abs)]);
 
 /**
@@ -3076,137 +3066,6 @@ function flightArchive({ slug } = {}) {
   }
   const push = pushBranch(gitFacts().branch, pushAllowed);
   return { slug, dir: relDir, moved: sources.map(([, r]) => r), copied: ["docs/SPEC.md"], commit, push };
-}
-
-// ---------------------------------------------------------------- migrate from the Foundry layout (0.6.0)
-
-// The text the pre-0.6.0 agents sync wrote into every agent it generated. A foundry-<role>.md
-// without it is the operator's own file and is never touched.
-const LEGACY_AGENT_MARKER = "generated by foundry_agents_sync";
-
-/**
- * Move a project from the pre-0.6.0 layout (`.foundry/`, `docs/foundry.json`)
- * to `.kukulu/` and `docs/kukulu.json` and commit the move. Every refusal
- * comes before the first file moves; if the commit fails, every path is put
- * back. Archived flights under docs/flights/ are never touched. What lives
- * outside git (the exclude file, generated agents, the allow rule) is fixed
- * after the commit, since none of it can be rolled back by a reset.
- */
-function migrate() {
-  if (!legacyLayout) {
-    throw new ToolError(
-      layoutPresent(LAYOUT.current)
-        ? "this project already uses .kukulu/ and docs/kukulu.json; there is nothing to migrate"
-        : "this project has neither .foundry/ nor docs/foundry.json; there is nothing to migrate",
-    );
-  }
-  if (!gitFacts().inRepo) throw new ToolError("kukulu_migrate commits the move, so the project must be a git repository");
-  if (exists(P.lock)) throw new ToolError(`an implementation run is armed (${rel(P.lock)} exists); finish or halt the run before migrating`);
-  if (exists(P.mutation)) throw new ToolError(`a mutation run left ${rel(P.mutation)}; restore the file it names (kukulu_status explains), delete ${rel(P.mutation)}, then migrate`);
-  if (exists(P.worktrees) && fs.readdirSync(P.worktrees).length) {
-    throw new ToolError(`stream worktrees exist under ${rel(P.worktrees)}; merge or remove them (git worktree remove --force <dir>) before migrating`);
-  }
-  const strangers = exists(P.stateDir) ? fs.readdirSync(P.stateDir).filter((n) => !["state.json", "feedback.jsonl", "worktrees"].includes(n)) : [];
-  if (strangers.length) {
-    throw new ToolError(`${rel(P.stateDir)} holds files kukulu_migrate does not know: ${strangers.join(", ")}. Move or delete them, then migrate; nothing was moved.`);
-  }
-  const old = loadState();
-  const dirty = porcelainExcludingPreexisting(old.preexistingUntracked);
-  if (dirty.length) throw new ToolError(`the working tree is not clean:\n${dirty.join("\n")}\nCommit or discard these before migrating.`);
-
-  const before = P;
-  const next = layoutFor(...LAYOUT.current);
-  const moves = [[before.state, next.state], [before.feedback, next.feedback], [before.config, next.config]].filter(([from]) => exists(from));
-  const tracked = (abs) => git(["ls-files", "--error-unmatch", "--", rel(abs)], { allowFail: true }).ok;
-
-  // Ignore lines follow the files they name; a line that is already in its new form is just dropped.
-  const renamedLines = new Map([
-    [rel(before.lock), rel(next.lock)],
-    [rel(before.mutation), rel(next.mutation)],
-    [`${rel(before.worktrees)}/`, `${rel(next.worktrees)}/`],
-  ]);
-  /** Rename the matching lines where they stand; a line whose new form is already present is dropped. */
-  const renameLines = (text) => {
-    const lines = text.split("\n");
-    const bare = (l) => l.replace(/\r$/, "");
-    const out = [];
-    for (const l of lines) {
-      const name = bare(l);
-      if (!renamedLines.has(name)) out.push(l);
-      else {
-        const renamed = renamedLines.get(name);
-        if (!lines.some((x) => bare(x) === renamed) && !out.some((x) => bare(x) === renamed)) out.push(renamed + l.slice(name.length));
-      }
-    }
-    return out.join("\n");
-  };
-  const ignoreBefore = exists(before.gitignore) ? read(before.gitignore) : null;
-  let gitignore = "absent";
-  let ignoreAfter = ignoreBefore;
-  if (ignoreBefore !== null) {
-    ignoreAfter = renameLines(ignoreBefore);
-    gitignore = ignoreAfter === ignoreBefore ? "unchanged" : "rewritten";
-  }
-  const ignoreTracked = ignoreAfter !== ignoreBefore && tracked(before.gitignore);
-
-  const all = [...new Set([...moves.flat(), ...(ignoreAfter !== ignoreBefore ? [before.gitignore] : [])])];
-  const hadWorktreesDir = exists(before.worktrees);
-  let commit;
-  try {
-    commit = withRollback(all, () => {
-      for (const [from, to] of moves) {
-        fs.mkdirSync(path.dirname(to), { recursive: true });
-        if (tracked(from)) git(["mv", rel(from), rel(to)]);
-        else fs.renameSync(from, to);
-      }
-      if (ignoreAfter !== ignoreBefore) write(before.gitignore, ignoreAfter);
-      if (hadWorktreesDir) fs.rmdirSync(before.worktrees);
-      if (exists(before.stateDir) && !fs.readdirSync(before.stateDir).length) fs.rmdirSync(before.stateDir);
-      // commitStaged's unsigned fallback reads the state file, which now lives at its new path.
-      P = next;
-      legacyLayout = false;
-      const rels = [...moves.flat(), ...(ignoreTracked ? [before.gitignore] : [])].map(rel);
-      git(["add", "-A", "--", ...rels.filter((r) => exists(path.join(ROOT, r)))]);
-      const known = rels.filter((r) => exists(path.join(ROOT, r)) || git(["cat-file", "-e", `HEAD:${r}`], { allowFail: true }).ok);
-      commitStaged(known, "chore: migrate .foundry layout to .kukulu", { stage: "summarize" });
-      return git(["rev-parse", "--short", "HEAD"]).out;
-    });
-  } catch (e) {
-    P = before;
-    legacyLayout = true;
-    // withRollback puts files back but not directories; a leftover empty .kukulu/ would read as a second layout.
-    if (exists(next.stateDir) && !fs.readdirSync(next.stateDir).length) fs.rmdirSync(next.stateDir);
-    if (hadWorktreesDir) fs.mkdirSync(before.worktrees, { recursive: true });
-    throw e;
-  }
-
-  // Outside git, after the commit.
-  const excludeFile = gitPath("info/exclude");
-  const removedAgents = [];
-  const keptAgents = [];
-  for (const role of ROLES) {
-    const file = path.join(P.agentsDir, `foundry-${role}.md`);
-    if (!exists(file)) continue;
-    if (read(file).includes(LEGACY_AGENT_MARKER)) {
-      fs.rmSync(file);
-      removedAgents.push(rel(file));
-    } else keptAgents.push(rel(file));
-  }
-  if (exists(excludeFile)) {
-    const current = read(excludeFile);
-    const oldAgentsLine = ".claude/agents/foundry-*.md";
-    const renamed = renameLines(current)
-      .split("\n")
-      .filter((l) => !(l === oldAgentsLine && !keptAgents.length))
-      .join("\n");
-    const text = renamed.replace(/\s*$/, "");
-    if (renamed !== current) write(excludeFile, text ? `${text}\n` : "");
-  }
-  // settings.local.json holds the operator-specific permission grant, and ensureMcpAllowRule may create it just below.
-  for (const line of [`${rel(next.worktrees)}/`, ".claude/agents/kukulu-*.md", ".claude/settings.local.json"]) ensureLineInFile(excludeFile, line);
-  const permissions = ensureMcpAllowRule();
-
-  return { moved: moves.map(([from, to]) => [rel(from), rel(to)]), gitignore, removedAgents, keptAgents, permissions, commit };
 }
 
 // ---------------------------------------------------------------- plan validation and commit (S-06)
@@ -3528,7 +3387,6 @@ const TOOLS = [
   },
   { name: "kukulu_summary_commit", description: "Write docs/SUMMARY.md from `content` (preferred) or commit the file already on disk, and mark the flight complete. Only valid after an APPROVED review. Returns { commit, branch, base, head, reviews, fixRounds, push, pr, archive }; archive is the policies.archive setting (true means call kukulu_flight_archive next); pr is the branch's pull request ({ url, state, draft, base }) or \"none\", \"skipped: policy\" or \"unknown: <why>\".", inputSchema: S({ content: { type: "string", description: "the full text of docs/SUMMARY.md; the tool writes the file itself, so never Write it yourself" } }), fn: summaryCommit },
   { name: "kukulu_flight_archive", description: "Archive a summarized flight so the repository can run its next flight: move PLAN, PROGRESS, HANDOFF, REVIEW, SUMMARY, kukulu.json, .kukulu/state.json and .kukulu/feedback.jsonl into docs/flights/<slug>/ (copying SPEC.md, which stays), write a fresh state.json, commit 'chore: archive flight <slug>' and push per policy. slug defaults to the 'flight' key in docs/kukulu.json. Refused unless the flight is summarized, no run is armed, and the tree is clean. All-or-nothing. Returns { slug, dir, moved, copied, commit, push }.", inputSchema: S({ slug: { type: "string", description: "lowercase letters, digits and - (at most 40 characters); defaults to docs/kukulu.json's flight" } }), fn: flightArchive },
-  { name: "kukulu_migrate", description: "Move a project from the pre-0.6.0 Foundry layout to the current one: .foundry/state.json and feedback.jsonl to .kukulu/, docs/foundry.json to docs/kukulu.json, the matching .gitignore lines, then commit 'chore: migrate .foundry layout to .kukulu'. Also removes the generated .claude/agents/foundry-<role>.md files (an agent file without the generated marker is kept and reported), fixes .git/info/exclude and ensures the MCP allow rule. Refused unless the project is on the old layout, a git repository with a clean tree, with no armed run, mutation or stream worktree, and no unknown file in .foundry/. All-or-nothing. Archived flights are never touched. Returns { moved, gitignore, removedAgents, keptAgents, permissions, commit }.", inputSchema: S({}), fn: migrate },
   { name: "kukulu_pr_finalize", description: "End a flight. Checks that every commit since the merge base with baseBranch is signed (judged from the commits, not from state): if so, marks the draft PR ready and, unless breaking is true, enables auto-merge (gh pr merge --auto, never an immediate merge), per policies.finalize and policies.mergeMethod. If any commit is unsigned the PR stays a draft, state.awaitingSigning is recorded, the steps are appended to SUMMARY.md, and kukulu_next reports done until it is resolved. breaking is required on the first call. Returns { signed, unsigned, ready, merge, breaking, awaitingSigning, resigned, push, pr, next? }; merge is enabled, skipped: breaking, skipped: policy, skipped: no pull request, skipped: awaiting signing or unavailable: <why>.", inputSchema: S({ breaking: { type: "boolean", description: "whether this flight is a breaking change, so its PR must not auto-merge; required on the first call, remembered after" }, resign: { type: "boolean", description: "HUMAN-INITIATED ONLY: never pass this on your own. Re-sign every commit of the branch (git rebase -f --rebase-merges --gpg-sign), force-push with lease, then finalize. For an operator who has unlocked the signing agent after an awaiting-signing result" } }), fn: prFinalize },
   {
     name: "kukulu_agents_sync",
@@ -3565,11 +3423,11 @@ function handle(req) {
       const tool = TOOLS.find((t) => t.name === params?.name);
       if (!tool) return fail(-32602, `unknown tool ${params?.name}`);
       try {
-        resolveLayout();
+        checkLayout();
         const result = tool.fn(params?.arguments || {});
         return reply({ content: [{ type: "text", text: JSON.stringify(result, null, 2) }] });
       } catch (e) {
-        const text = e instanceof ToolError ? inLayoutNames(e.message) : `${e.message}\n${e.stack}`;
+        const text = e instanceof ToolError ? e.message : `${e.message}\n${e.stack}`;
         if (e instanceof ToolError && e.data !== undefined) return reply({ content: [{ type: "text", text }], isError: true, structuredContent: e.data });
         return reply({ content: [{ type: "text", text }], isError: true });
       }

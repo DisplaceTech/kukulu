@@ -1,6 +1,6 @@
 # MCP tool reference
 
-Twenty-two tools, served over stdio by `mcp/server.mjs` with no dependencies. The server is launched by Claude Code from [`.mcp.json`](../.mcp.json) with `KUKULU_PROJECT_DIR` set to the project root; every path below is relative to that root.
+Twenty-one tools, served over stdio by `mcp/server.mjs` with no dependencies. The server is launched by Claude Code from [`.mcp.json`](../.mcp.json) with `KUKULU_PROJECT_DIR` set to the project root; every path below is relative to that root.
 
 Three of them are read-only: `kukulu_status`, `kukulu_next` and `kukulu_config_show`. The flight controller may call those three and four more. `kukulu_agents_sync` writes only the generated agent files, the MCP allow rule and a `.git/info/exclude` line, never a task or a verdict. It may call `kukulu_run_halt` itself when it cannot even spawn a stage, so the next flight sees a clean halt instead of retrying blindly. `kukulu_flight_options` applies the operator's own go-flight options to the review-loop bounds (and, with `resume`, lifts a round-cap halt). `kukulu_pr_finalize` is allowed for the human-initiated re-sign only (`resign: true`, when the operator says signing is unlocked). Everything else changes project state and belongs to a stage agent. (`kukulu_mutate` changes a source file only for the length of one call and always restores it, and a stream's tools work in that stream's own worktree.)
 
@@ -69,7 +69,7 @@ The stage machine. Its answer is a pure function of disk state; it never sees a 
 - `agentModel`: what to pass as the `Agent` tool's `model` when `agentFallback` is true: a family alias (`opus`, `sonnet`, `haiku`, `fable`), or `null` to pass none (`inherit`, and `done`/`halt`). A full `claude-<family>-…` id maps to its family alias
 - `agentModelExact`: false when `agentModel` was mapped down from a full id, since an alias means the latest of that family, which may not be the version pinned in routing. Always true otherwise
 - `reviewRound`: always `round + 1`. The review stage's prompt states it, and `kukulu_review_submit` refuses a `Round:` line that disagrees with it; see [architecture.md](./architecture.md#review-rounds)
-- `reason`: one sentence, written for a human reading the transcript. A `done` reason counts reviews and fix rounds separately: "flight complete after 2 reviews (1 fix round); …". After [`kukulu_flight_archive`](#kukulu_flight_archive) it is `done` with the reason "flight <slug> is archived in <dir>; edit docs/SPEC.md for the next flight, then run /kukulu:go-flight", until `docs/SPEC.md` differs from the archived copy; then the stage is `plan` again, except on the pre-0.6.0 layout, where it is `halt` with "commit or discard any uncommitted change, run /kukulu:go-flight migrate, then run /kukulu:go-flight again". While `kukulu_pr_finalize` has recorded `state.awaitingSigning` the stage is `done` with the reason "awaiting signing: <n> unsigned commit(s), oldest <sha>." followed by the steps to take
+- `reason`: one sentence, written for a human reading the transcript. A `done` reason counts reviews and fix rounds separately: "flight complete after 2 reviews (1 fix round); …". After [`kukulu_flight_archive`](#kukulu_flight_archive) it is `done` with the reason "flight <slug> is archived in <dir>; edit docs/SPEC.md for the next flight, then run /kukulu:go-flight", until `docs/SPEC.md` differs from the archived copy; then the stage is `plan` again. While `kukulu_pr_finalize` has recorded `state.awaitingSigning` the stage is `done` with the reason "awaiting signing: <n> unsigned commit(s), oldest <sha>." followed by the steps to take
 - `prompt`: the text to hand the subagent verbatim. The implement, review and summarize prompts each end with a sentence stating this run's policies (see `kukulu_run_start`)
 - `streams`: present only on an `implement` result that is a parallel wave: `[{ stream, agent, agentFallback, fallbackAgent, agentModel, agentModelExact, prompt }]`, one entry per stream to run concurrently. The controller spawns one implementer per entry, all at once, passes each entry's `prompt` verbatim, and waits for all of them before calling `kukulu_next` again. The list holds, in order: streams already in flight (a worktree exists; an unfinished one is handed out again, and a finished one is offered so it gets merged), then streams with open tasks in plan order, capped at `parallel.maxStreams`; the rest go out on a later call. It is absent when the flight is serial here: no streams, `maxStreams` of `1`, or a wave that runs serially. When `streams` is present, ignore the top-level `prompt`, which is the ordinary serial one.
 
@@ -415,20 +415,6 @@ After it, `kukulu_next` reports `done` until `docs/SPEC.md` is edited, then `pla
 **Returns:** `{ slug, dir, moved, copied, commit, push }`.
 
 **Refuses when** (in this order, before anything moves): there is no slug; the slug is malformed; the flight is not summarized; the implement lock is armed; the working tree is dirty (apart from files that were untracked before the run started); or `docs/flights/<slug>/` already exists.
-
----
-
-## `kukulu_migrate`
-
-Move a project from the pre-0.6.0 Foundry layout to the current one. Until 0.7.0 a project that has not migrated keeps working in place; this tool ends the deprecation notice.
-
-**Arguments:** none.
-
-**Does:** moves `.foundry/state.json`, `.foundry/feedback.jsonl` and `docs/foundry.json` (each one that exists) to `.kukulu/state.json`, `.kukulu/feedback.jsonl` and `docs/kukulu.json` (`git mv` for a tracked file, a plain rename for an untracked one), rewrites the `.foundry/implement.lock` and `.foundry/worktrees/` lines of `.gitignore`, removes the empty `.foundry/`, and commits `chore: migrate .foundry layout to .kukulu`. If the commit fails, every path is put back. Nothing under `docs/flights/` is touched: archived flights keep the names they were written with. After the commit it deletes the generated `.claude/agents/foundry-<role>.md` files (a file without the generated marker is kept and listed), replaces the matching lines of `.git/info/exclude`, and ensures the `mcp__plugin_kukulu_kukulu` allow rule in `.claude/settings.local.json`. The old `mcp__plugin_foundry_foundry` rule is left where it is; remove it by hand.
-
-**Returns:** `{ moved, gitignore, removedAgents, keptAgents, permissions, commit }`: `moved` is `[from, to]` pairs, `gitignore` is `rewritten`, `unchanged` or `absent`.
-
-**Refuses when** (before anything moves): the project holds both layouts (every tool refuses that); it is already on `.kukulu/` or has neither layout; it is not a git repository; the implement lock is armed; `mutation.json` exists; a stream worktree exists; `.foundry/` holds a file this tool does not know; or the working tree is dirty (apart from files that were untracked before the run started).
 
 ---
 
