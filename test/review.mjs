@@ -1033,7 +1033,7 @@ for (const [label, args, policies, expect, mergeFails] of [
   ["breaking", { breaking: true }, {}, { calls: ["pr ready"], merge: "skipped: breaking", ready: true }],
   ["finalize ready", { breaking: false }, { finalize: "ready" }, { calls: ["pr ready"], merge: "skipped: policy", ready: true }],
   ["finalize draft", { breaking: false }, { finalize: "draft" }, { calls: [], merge: "skipped: policy", ready: false }],
-  ["merge unavailable", { breaking: false }, {}, { calls: ["pr ready", "pr merge --auto --merge"], merge: "unavailable: auto-merge is not allowed", ready: true }, "auto-merge is not allowed\nsecond line\n"],
+  ["merge unavailable", { breaking: false }, {}, { calls: ["pr ready", "pr merge --auto --merge"], merge: 'unavailable: auto-merge is not allowed; set policies.finalize to "ready" to stop asking', ready: true }, "auto-merge is not allowed\nsecond line\n"],
 ]) {
   const { repo, ghDir, opts } = finalizeRepo({ signed: true, policies });
   if (mergeFails) writeFile(ghDir, "merge-fails", mergeFails);
@@ -1041,6 +1041,7 @@ for (const [label, args, policies, expect, mergeFails] of [
     const r = await call("kukulu_pr_finalize", args);
     eq(r.unsigned, 0, `all signed, ${label}: no unsigned commits`);
     eq(r.merge, expect.merge, `...merge is ${expect.merge}`);
+    if (mergeFails) like(r.merge, /^unavailable: .*; set policies\.finalize to "ready" to stop asking$/, "an unavailable auto-merge says to set policies.finalize to ready");
     eq(r.ready, expect.ready, `...ready is ${expect.ready}`);
     const calls = ghCalls(ghDir).filter((c) => c.startsWith("pr ready") || c.startsWith("pr merge"));
     eq(calls.join("|"), expect.calls.join("|"), "...and the gh calls are exactly those");

@@ -2897,6 +2897,9 @@ function prState(policies, baseBranch) {
   }
 }
 
+// An unavailable auto-merge keeps being asked for until the policy says otherwise.
+const STOP_ASKING = '; set policies.finalize to "ready" to stop asking';
+
 const CHECKS_FAIL = ["FAILURE", "ERROR", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED", "STARTUP_FAILURE"];
 const CHECKS_PENDING = ["PENDING", "QUEUED", "IN_PROGRESS", "WAITING", "REQUESTED", "EXPECTED"];
 const CHECKS_TIMEOUT_MS = 30000;
@@ -3119,12 +3122,12 @@ function prFinalize({ breaking, resign } = {}) {
     merge = "skipped: policy";
   } else {
     const readied = pr.draft ? gh(["pr", "ready"]) : { status: 0 };
-    if (readied.status !== 0) merge = `unavailable: gh pr ready failed: ${firstLine(readied)}`;
+    if (readied.status !== 0) merge = `unavailable: gh pr ready failed: ${firstLine(readied)}${STOP_ASKING}`;
     else if (cc.policies.finalize === "ready") merge = "skipped: policy";
     else if (brk) merge = "skipped: breaking";
     else {
       const m = spawnSync("gh", ["pr", "merge", "--auto", `--${cc.policies.mergeMethod}`], { cwd: ROOT, encoding: "utf8" });
-      merge = m.status === 0 ? "enabled" : `unavailable: ${firstLine(m)}`;
+      merge = m.status === 0 ? "enabled" : `unavailable: ${firstLine(m)}${STOP_ASKING}`;
     }
     pr = prState(cc.policies, cc.baseBranch);
   }
