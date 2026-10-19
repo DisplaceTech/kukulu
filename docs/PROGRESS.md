@@ -11,7 +11,7 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] P0-04 The guard and hooks accept only the kukulu names
 - [x] P0-05 Skills and docs drop the foundry compatibility
 - [x] P0-06 Archives stay readable without pinned hashes
-- [ ] P0-07 Phase 0 end: push and record the manual check
+- [x] P0-07 Phase 0 end: push and record the manual check
 - [ ] P1-01 plan_commit checks the branch; run_start names both fixes
 - [ ] P1-02 kukulu_run_resume
 - [ ] P1-03 Halts name kukulu_run_resume; go-flight maps resume
@@ -95,3 +95,6 @@ Skills summarize/pull-feedback, operations.md (single archive sentence), archite
 
 ### P0-06 — 42a88a5
 State test computes SHA-256 of the nine v0-5-0 files at start; no hash literals. Review test renamed to the required name and extended with an existing alt-base case.
+
+### P0-07 — 665c2eb
+Push: pushed build/2026-10-19 to origin. Manual check: NOT VERIFIED (human): run the installed 0.6.1 plugin's kukulu_migrate on a throwaway .foundry/ project, then run one task of a flight on it with the working-tree plugin (claude --plugin-dir .)
