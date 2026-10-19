@@ -19,7 +19,7 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] P1-05 MD022-clean writes to PROGRESS.md and PLAN.md
 - [x] P1-06 The dependency field is matched at line start
 - [x] P1-07 kukulu_mutate runs the constraint scan
-- [ ] P1-08 kukulu_status reports prChecks; the review reads CI
+- [x] P1-08 kukulu_status reports prChecks; the review reads CI
 - [ ] P1-09 Review tasks carry a source; mutation-only rounds are capped
 - [ ] P1-10 Tune review.mutationFixRounds from the archived trails
 - [ ] P1-11 The flight slug rule and the -spec note
@@ -119,3 +119,6 @@ Regex now /^\*\*Depends on:\*\*\s*(.*)$/im. Test confirmed failing before the fi
 
 ### P1-07 — 2e79762
 mutate now scans constraints on the mutated tree (checkConstraints with preexistingUntracked), returns constraints {ok,results}; hits = kill, verdict "killed: constraint <id> caught the mutation" when no command failed. Interpretation: confirmKill re-runs only when a command failed (previously an empty confirm array could appear); a constraint kill is not downgraded to inconclusive by a failing re-run. Docs/CHANGELOG updated.
+
+### P1-08 — 8b0ae0e
+prChecks() computed only in the kukulu_status TOOLS fn wrapper (status() unchanged, so next() never calls gh). Interpretation: gh pr view errors other than "no pull request" give "unknown: <why>". Harness mkFakeGhBin answers pr checks from checks.json/checks-exit. Test for "no gh" uses a PATH holding only a git symlink. Docs row, skill, CHANGELOG.
