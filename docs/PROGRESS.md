@@ -14,7 +14,7 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] P0-07 Phase 0 end: push and record the manual check
 - [x] P1-01 plan_commit checks the branch; run_start names both fixes
 - [x] P1-02 kukulu_run_resume
-- [ ] P1-03 Halts name kukulu_run_resume; go-flight maps resume
+- [x] P1-03 Halts name kukulu_run_resume; go-flight maps resume
 - [ ] P1-04 The link check reads git ls-files
 - [ ] P1-05 MD022-clean writes to PROGRESS.md and PLAN.md
 - [ ] P1-06 The dependency field is matched at line start
@@ -104,3 +104,6 @@ validatePlanTexts takes a branch param (null skips); planCommit reads it via git
 
 ### P1-02 — 33015d1
 Added kukulu_run_resume (after run_halt), 22 tools; state.haltStream recorded by stream_finish conflict path, deleted by run_halt/run_resume. Interpretation: resume feedback skipped when policies.feedback false (as run_halt); stream-merge unmerged check runs after the worktree check, so a normal conflict halt hits the worktree refusal first. Docs, README, go-flight allowed-tools, CHANGELOG updated.
+
+### P1-03 — 94401d6
+RESUME_HINT appended by next() to stored halts without haltCap (not duplicated if the reason already names kukulu_run_resume); run_halt result gains next; stream-merge reason ends with kukulu_run_resume call. go-flight maps resume/continue; operations.md, README, mcp-tools.md updated. Interpretation: operations.md test checks only the Halts section for $EDITOR plus whole file for "halted": null, because another section legitimately documents flight_options clearing halted. Updated state.mjs assertion for the new halt reason.
