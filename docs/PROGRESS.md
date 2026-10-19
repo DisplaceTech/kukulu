@@ -21,6 +21,7 @@ Started: 2026-10-19T16:52:28.587Z
 - [x] R1-03 check-site-browser.mjs --self-test and no leaked Chrome profile
 - [x] R2-01 check-site-browser.mjs self-test: console.error, uncaught exception, no buttons, and Chrome really exited
 - [x] R2-02 serve-site.mjs self-test: SITE_PORT above 65535, empty SITE_PORT, and the siteDir 404 page
+- [ ] R3-01 check-site-browser.mjs self-test: zero-size copy buttons, a late console error, and a clean page after failing cases
 
 ## Log
 (one entry per task, appended by implement)
