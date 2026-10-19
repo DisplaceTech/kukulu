@@ -5,7 +5,7 @@ Started: 2026-10-19T16:52:28.587Z
 ## Tasks
 - [x] P1-01 Seed site/ and start check-site.mjs with config validation and rules 1, 2 and 8
 - [x] P1-02 styles.css foundation and index.html through How it works
-- [ ] P1-03 index.html from Why it holds up to the footer
+- [x] P1-03 index.html from Why it holds up to the footer
 - [ ] P1-04 copy.js, 404.html and _headers
 - [ ] P1-05 check-site.mjs rules 3 to 7
 - [ ] P1-06 check-site.mjs rules 9 to 14, check:site and the lint line
@@ -25,3 +25,6 @@ Seeded site/ byte-identical + robots.txt; scripts/check-site.mjs with loadConfig
 
 ### P1-02 — 2958fe7
 styles.css has fonts, tokens (dark :root, light media, print), base, and components for header/hero/problem/How. Class vocabulary: .wrap-stack/.wrap-stack-tight/.wrap-split, .sec-head, .body-text, .inline-code, .icon/.icon-accent/.icon-dot, .arrow/.arrow-head, .stage (scoped by .pipe/.ev), .copy-status (+.install override). index.html ends with `</main></body></html>` after How it works; P1-03 inserts sections before `</main>` and the footer after it, and must add .step/.codebox (mobile rules: .step single column, .codebox column with .copy aligned end) CSS. Interpretation: .btn-outline:hover uses ink bg/bg text rather than mockup's inline colour.
+
+### P1-03 — c1ce17d
+index.html complete (all sections + footer); styles.css gained rules for them incl. .step/.codebox mobile rules. 4 copy buttons (hidden) with 4 empty copy-status elements. Table th/td text copied verbatim from the mockup. Chart marks are classes (.mark-*, .label-*, .tick-*, .scale-*). Interpretation: none.
