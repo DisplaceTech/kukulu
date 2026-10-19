@@ -278,7 +278,7 @@ const goFlight = read("skills/go-flight/SKILL.md");
 const fmGo = frontmatter(goFlight);
 const allowed = String(fmGo["allowed-tools"]).split(",").map((s) => s.trim());
 const toolNames = Array.from(serverSrc.matchAll(/name: "(kukulu_[a-z_]+)"/g), (m) => m[1]);
-eq(toolNames.length, 22, "the server defines twenty-two tools");
+eq(toolNames.length, 23, "the server defines twenty-three tools");
 
 const COUNT_WORDS = { 18: "Eighteen", 19: "Nineteen", 20: "Twenty", 21: "Twenty-one", 22: "Twenty-two", 23: "Twenty-three", 24: "Twenty-four", 25: "Twenty-five" };
 like(read("docs/mcp-tools.md").split("\n")[2], new RegExp(`^${COUNT_WORDS[toolNames.length]} tools,`), "docs/mcp-tools.md states the tool count in words");
@@ -430,6 +430,7 @@ like(read("skills/review-build/SKILL.md"), /Round 2 and later\*\*: read `prCheck
   ok(/kukulu\.tech — Specification" gives `kukulu-tech`/.test(planSkill) && /K\u016bkulu 0\.7\.0 — Specification" gives `kukulu-0-7-0`/.test(planSkill), "plan-build states the slug rule with both examples");
 }
 
+like(goFlight, /"record: <text>".*kukulu_cleanroom_record\(\{ text, kind \}\)/, "go-flight maps record: to kukulu_cleanroom_record");
 like(goFlight, /print `gate: ok \(<n> checks\)`/, "go-flight prints the gate line");
 
 let unknownTool = null;

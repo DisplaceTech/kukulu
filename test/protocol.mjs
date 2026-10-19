@@ -19,6 +19,7 @@ const EXPECTED_TOOLS = [
   "kukulu_run_halt",
   "kukulu_run_resume",
   "kukulu_flight_options",
+  "kukulu_cleanroom_record",
   "kukulu_feedback_log",
   "kukulu_mutate",
   "kukulu_review_submit",

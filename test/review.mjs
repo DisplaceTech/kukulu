@@ -1106,6 +1106,21 @@ function resignRepo({ extraState = {} } = {}) {
 }
 
 {
+  // In clean-room mode a re-sign leaves the operator's instruction in the chain, in a commit the rebase then signs.
+  const { repo, opts } = resignRepo({ extraState: { cleanroom: { genesis: "g" } } });
+  const gpg = mkFakeGpg();
+  const globalCfg = fakeSignerGlobal(gpg);
+  await withServer(repo, async ({ call }) => {
+    const r = await call("kukulu_pr_finalize", { breaking: false, resign: true });
+    eq(r.resigned, true, "(the clean-room re-sign succeeds)");
+    const entries = readFile(repo, ".kukulu/cleanroom/log.jsonl").trim().split("\n").map((l) => JSON.parse(l));
+    const human = entries.find((e) => e.kind === "human");
+    eq(human.data.via + "|" + human.role + "|" + human.target, 'kukulu_pr_finalize|operator|{"breaking":false,"resign":true}', "kukulu_pr_finalize({ resign: true }) appends a human entry");
+    eq(git(repo, ["log", "--format=%s", "-n", "20"]).split("\n").includes("chore: clean-room record"), true, "...in its own commit");
+  }, { env: { ...opts.env, GIT_CONFIG_GLOBAL: globalCfg } });
+}
+
+{
   // resign re-signs the branch and finalizes
   const { repo, ghDir, opts } = resignRepo();
   const gpg = mkFakeGpg();

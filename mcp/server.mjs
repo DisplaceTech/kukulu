@@ -275,6 +275,12 @@ function checkpoint(event, stage, st) {
   appendEntry(logPath, { kind: "checkpoint", stage, role: "session", data });
 }
 
+/** The `human` entry an operator-initiated tool leaves in the chain, in clean-room mode. */
+function humanEntry(st, via, args) {
+  if (!st.cleanroom?.genesis) return;
+  appendEntry(cleanroomLogPath(), { kind: "human", stage: "controller", role: "operator", target: JSON.stringify(args ?? {}), data: { kind: "instruction", via } });
+}
+
 /** The stage a bookkeeping tool's entries are filed under. */
 const implementStage = (st) => (st.round >= 1 ? "fix" : "implement");
 
@@ -2905,6 +2911,39 @@ const FLIGHT_OPTION_KEYS = ["maxRounds", "maxRoundsHard"];
  * else is the planner's to decide from SPEC. Refused before the plan stage
  * has written docs/kukulu.json.
  */
+const RECORD_KINDS = ["instruction", "intervention", "verdict"];
+const VERDICT_TEXT = /^#(\d+): (prior-art attempt|false positive|offline test) — .+/;
+
+/**
+ * Put something the operator did or decided into the chain (SPEC D-09): an
+ * instruction, a thing done outside the pipeline, or a verdict on a denial.
+ * Replaces the hand-kept intervention and denial-verdict files of earlier
+ * clean-room runs.
+ */
+function cleanroomRecord({ text, kind = "instruction" } = {}) {
+  const st = loadState();
+  if (!st.cleanroom?.genesis) {
+    throw new ToolError("kukulu_cleanroom_record only works in clean-room mode, after genesis: this project has no clean-room flight in progress (a policy file at cleanroom.policy and a first kukulu_next start one)");
+  }
+  if (typeof text !== "string" || !text.trim()) throw new ToolError("text must be a non-empty string: what the operator said, did or decided");
+  if (!RECORD_KINDS.includes(kind)) throw new ToolError(`kind must be one of ${RECORD_KINDS.join(", ")} (got ${JSON.stringify(kind)})`);
+  const logPath = cleanroomLogPath();
+  if (kind === "verdict") {
+    const m = VERDICT_TEXT.exec(text);
+    if (!m) throw new ToolError('a verdict reads "#<seq>: prior-art attempt|false positive|offline test — <note>", for example "#12: false positive — grep on a sed expression"');
+    const target = readEntries(logPath).find((e) => e.seq === Number(m[1]));
+    if (!target || target.kind !== "denied") {
+      throw new ToolError(`entry #${m[1]} is ${target ? `a ${target.kind} entry` : "not in the log"}, not a denial; a verdict classifies a denied entry's seq`);
+    }
+  }
+  const paths = cleanroomPaths(st);
+  return withRollback(paths, () => {
+    const entry = appendEntry(logPath, { kind: "human", stage: "controller", role: "operator", target: text, data: { kind } });
+    const commit = gitCommitIfChanged(paths, "chore: clean-room record", { stage: "controller" });
+    return { recorded: true, seq: entry.seq, kind, commit };
+  });
+}
+
 function flightOptions(args = {}) {
   if (args.resume !== undefined && typeof args.resume !== "boolean") throw new ToolError("resume must be a boolean");
   const given = FLIGHT_OPTION_KEYS.filter((k) => args[k] !== undefined);
@@ -2930,9 +2969,10 @@ function flightOptions(args = {}) {
   const was = cfg();
   const before = Object.fromEntries(FLIGHT_OPTION_KEYS.map((k) => [k, was[k]]));
   for (const k of given) raw[k] = args[k];
-  const paths = resume ? [P.config, P.state] : [P.config];
+  const paths = [...(resume ? [P.config, P.state] : [P.config]), ...cleanroomPaths(st)];
   return withRollback(paths, () => {
     write(P.config, `${JSON.stringify(raw, null, 2)}\n`);
+    humanEntry(st, "kukulu_flight_options", args);
     if (resume) {
       st.halted = null;
       delete st.haltCap;
@@ -3004,10 +3044,12 @@ function runResume({ reason } = {}) {
   const previousHalt = st.halted;
   st.halted = null;
   delete st.haltStream;
-  const commit = withRollback([P.state, P.feedback], () => {
+  const crPaths = cleanroomPaths(st);
+  const commit = withRollback([P.state, P.feedback, ...crPaths], () => {
     saveState(st);
     if (c.policies.feedback) appendFeedback("controller", `Run resumed: ${reason.trim()}`, "resume", "human");
-    return gitCommitIfChanged([P.state, P.feedback], "chore: run resumed", { stage: "controller" });
+    humanEntry(st, "kukulu_run_resume", { reason });
+    return gitCommitIfChanged([P.state, P.feedback, ...crPaths], "chore: run resumed", { stage: "controller" });
   });
   return { resumed: true, previousHalt, commit };
 }
@@ -3349,6 +3391,14 @@ function prFinalize({ breaking, resign } = {}) {
     } catch (e) {
       putOverrideBack();
       throw e;
+    }
+    // The operator's instruction goes into the chain, and into a commit the rebase will re-sign, before the rebase needs a clean tree.
+    const crPaths = cleanroomPaths(st);
+    if (crPaths.length) {
+      withRollback(crPaths, () => {
+        humanEntry(st, "kukulu_pr_finalize", { breaking, resign: true });
+        gitCommitIfChanged(crPaths, "chore: clean-room record", { stage: "controller" });
+      });
     }
     const rb = spawnSync("git", ["rebase", "-f", "--rebase-merges", "--gpg-sign", mb], {
       cwd: ROOT,
@@ -3789,6 +3839,15 @@ const TOOLS = [
       resume: { type: "boolean", description: "clear a round-cap halt (the call the halt message names); the bound passed must lift the cap that fired. Any other halt is refused" },
     }),
     fn: flightOptions,
+  },
+  {
+    name: "kukulu_cleanroom_record",
+    description: "Record what the operator said, did or decided in the clean-room chain, and commit it as 'chore: clean-room record': an instruction (the default), an intervention (something done outside the pipeline: a file supplied, a fix made by hand, a tool installed) or a verdict on a denial ('#<seq>: prior-art attempt|false positive|offline test — <note>'). Clean-room mode only; for the flight controller, on the operator's word.",
+    inputSchema: S({
+      text: { type: "string", description: "what the operator said, did or decided; a verdict starts with the denial's seq" },
+      kind: { type: "string", enum: RECORD_KINDS, description: "instruction (default), intervention or verdict" },
+    }, ["text"]),
+    fn: cleanroomRecord,
   },
   {
     name: "kukulu_feedback_log",

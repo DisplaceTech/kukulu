@@ -49,7 +49,20 @@ try {
   if (cr.loggingActive(ctx, logPath) && input.hook_event_name === "PostToolUse") {
     cr.appendEntry(logPath, { kind: "allowed", decision: "allowed", reason: null, ...cr.entryFields(input, ctx) });
   }
-  // UserPromptSubmit is logged by a later task; any other event is not ours.
+  if (cr.loggingActive(ctx, logPath) && input.hook_event_name === "UserPromptSubmit") {
+    const fields = cr.entryFields(input, ctx);
+    cr.appendEntry(logPath, {
+      kind: "human",
+      role: "operator",
+      task: fields.task,
+      model: fields.model,
+      session: fields.session,
+      tool: null,
+      decision: null,
+      target: cr.truncateTarget(String(input.prompt ?? "")),
+    });
+  }
+  // Any other event is not ours.
 } catch (e) {
   const message = e instanceof Error ? e.message : String(e);
   try {

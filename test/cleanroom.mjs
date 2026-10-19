@@ -836,8 +836,15 @@ async function genesisRepo(planOpts = {}) {
   runHook(LOGGER, post("Read", { file_path: "/x/b" }), env);
   const v = verifyChain(linesOf(LOG(repo)));
   eq(v.ok + "|" + v.entries.length + "|" + v.entries.map((e) => e.kind).join(","), "true|5|allowed,allowed,allowed,denied,allowed", "the chain stays valid across guard and logger appends");
-  eq(runHook(LOGGER, { hook_event_name: "UserPromptSubmit", prompt: "hello", cwd: repo }, env).status, 0, "UserPromptSubmit exits 0 for now");
-  eq(readEntries(LOG(repo)).length, 5, "...without logging");
+  const SEQ_DENIED = v.entries.find((e) => e.kind === "denied").seq;
+  eq(SEQ_DENIED, 4, "(the denial is entry 4)");
+  const prompt = runHook(LOGGER, { hook_event_name: "UserPromptSubmit", prompt: "please go on", session_id: "s-7", model: "m-9", cwd: repo }, env);
+  eq(prompt.status + "|" + prompt.stderr, "0|", "UserPromptSubmit exits 0");
+  const human = readEntries(LOG(repo)).at(-1);
+  eq([human.kind, human.role, human.target, human.tool, human.decision, human.session, human.model].join("|"), "human|operator|please go on|||s-7|m-9", "UserPromptSubmit appends a human entry with role operator and the prompt");
+  eq(readEntries(LOG(repo)).length, 6, "...one entry");
+  runHook(LOGGER, { hook_event_name: "UserPromptSubmit", prompt: "z".repeat(TARGET_MAX + 50), cwd: repo }, env);
+  eq(readEntries(LOG(repo)).at(-1).target.length, TARGET_MAX, "...a long prompt is truncated to TARGET_MAX");
 
   // Its own failure: an unparseable payload is logged as a logger-error and the call goes on.
   const garbled = runHook(LOGGER, "{nope", env);
@@ -1028,6 +1035,63 @@ const gateCheck = (reason) => (reason.match(/^clean-room gate failed: ([\w-]+):/
     eq(third.gate.ok, true, "an allowed entry between gates passes");
     eq(gateEntries(repo).at(-1).data.checks, 7, "...and is recorded as seven checks");
     isError(await call("kukulu_review_submit", { verdict: "APPROVED" }), /clean-room gate failed: liveness: no tool call has been logged/, "a tool's gate has the same liveness rule");
+  });
+}
+
+// ---------------------------------------------------------------- human entries and kukulu_cleanroom_record
+
+{
+  const repo = await genesisRepo({ config: { flight: "w1" } });
+  await live(repo, async ({ call }) => {
+    const a = await call("kukulu_cleanroom_record", { text: "the operator supplied crates/oracle/corpus.bin" });
+    ok(a.recorded === true && a.kind === "instruction" && a.seq > 1, "kukulu_cleanroom_record records an instruction by default");
+    const e = readEntries(LOG(repo)).at(-1);
+    eq([e.kind, e.stage, e.role, e.target, e.data.kind].join("|"), "human|controller|operator|the operator supplied crates/oracle/corpus.bin|instruction", "...as a human entry from the operator");
+    eq(subject(repo), "chore: clean-room record", "...committing chore: clean-room record");
+    ok(touched(repo).includes(".kukulu/cleanroom/log.jsonl"), "...with the log");
+    eq(a.commit, git(repo, ["rev-parse", "--short", "HEAD"]), "...and returning the commit");
+
+    const i = await call("kukulu_cleanroom_record", { text: "installed rustfmt by hand", kind: "intervention" });
+    eq(i.kind, "intervention", "kukulu_cleanroom_record records an intervention");
+    eq(readEntries(LOG(repo)).at(-1).data.kind, "intervention", "...with kind in data");
+
+    appendEntry(LOG(repo), { kind: "denied", tool: "Read", target: "/x", decision: "denied", reason: "denied path" });
+    const denied = readEntries(LOG(repo)).at(-1).seq;
+    const v = await call("kukulu_cleanroom_record", { text: `#${denied}: false positive — a sed expression`, kind: "verdict" });
+    eq(v.kind + "|" + v.recorded, "verdict|true", "kukulu_cleanroom_record records a verdict naming a denied seq");
+    isError(await call("kukulu_cleanroom_record", { text: "this was bad", kind: "verdict" }), /a verdict reads "#<seq>: prior-art attempt\|false positive\|offline test — <note>"/, "...refuses a malformed verdict");
+    isError(await call("kukulu_cleanroom_record", { text: `#${denied}: maybe — hmm`, kind: "verdict" }), /a verdict reads/, "...and an unknown classification");
+    isError(await call("kukulu_cleanroom_record", { text: "#1: false positive — genesis", kind: "verdict" }), /entry #1 is a genesis entry, not a denial/, "...refuses a verdict whose seq is not a denial");
+    isError(await call("kukulu_cleanroom_record", { text: "#9999: false positive — x", kind: "verdict" }), /entry #9999 is not in the log/, "...and one that is not in the log");
+    isError(await call("kukulu_cleanroom_record", { text: "  " }), /text must be a non-empty string/, "...refuses empty text");
+    isError(await call("kukulu_cleanroom_record", { text: "x", kind: "note" }), /kind must be one of instruction, intervention, verdict/, "...and an unknown kind");
+    eq(verifyChain(linesOf(LOG(repo))).ok, true, "the chain verifies after the records");
+
+    const before = readEntries(LOG(repo)).length;
+    await call("kukulu_flight_options", { maxRounds: 4 });
+    const fo = readEntries(LOG(repo)).at(-1);
+    eq(fo.kind + "|" + fo.data.via + "|" + fo.target, 'human|kukulu_flight_options|{"maxRounds":4}', "kukulu_flight_options appends a human entry");
+    ok(readEntries(LOG(repo)).length > before && touched(repo).includes(".kukulu/cleanroom/log.jsonl") && touched(repo).includes("docs/kukulu.json"), "...in the commit it makes");
+
+    await call("kukulu_run_halt", { reason: "the signing agent died" });
+    await call("kukulu_run_resume", { reason: "restarted it" });
+    const rr = readEntries(LOG(repo)).at(-1);
+    eq(rr.kind + "|" + rr.data.via + "|" + rr.target, 'human|kukulu_run_resume|{"reason":"restarted it"}', "kukulu_run_resume appends a human entry");
+    ok(touched(repo).includes(".kukulu/cleanroom/log.jsonl"), "...in the commit it makes");
+  });
+}
+
+{
+  const pre = cleanroomRepo();
+  await withServer(pre, async ({ call }) => {
+    isError(await call("kukulu_cleanroom_record", { text: "x" }), /only works in clean-room mode, after genesis/, "kukulu_cleanroom_record refuses before genesis");
+  });
+  const general = plannedRepo();
+  await withServer(general, async ({ call }) => {
+    isError(await call("kukulu_cleanroom_record", { text: "x" }), /only works in clean-room mode/, "...and outside clean-room mode");
+    ok(!hasFile(general, ".kukulu/cleanroom"), "...writing nothing");
+    await call("kukulu_flight_options", { maxRounds: 4 });
+    ok(!hasFile(general, ".kukulu/cleanroom"), "general mode flight options write no human entry");
   });
 }
 

@@ -1,6 +1,6 @@
 # MCP tool reference
 
-Twenty-two tools, served over stdio by `mcp/server.mjs` with no dependencies. The server is launched by Claude Code from [`.mcp.json`](../.mcp.json) with `KUKULU_PROJECT_DIR` set to the project root; every path below is relative to that root.
+Twenty-three tools, served over stdio by `mcp/server.mjs` with no dependencies. The server is launched by Claude Code from [`.mcp.json`](../.mcp.json) with `KUKULU_PROJECT_DIR` set to the project root; every path below is relative to that root.
 
 Three of them are read-only: `kukulu_status`, `kukulu_next` and `kukulu_config_show`. The flight controller may call those three and four more. `kukulu_agents_sync` writes only the generated agent files, the MCP allow rule and a `.git/info/exclude` line, never a task or a verdict. It may call `kukulu_run_halt` itself when it cannot even spawn a stage, so the next flight sees a clean halt instead of retrying blindly. `kukulu_flight_options` applies the operator's own go-flight options to the review-loop bounds (and, with `resume`, lifts a round-cap halt). `kukulu_pr_finalize` is allowed for the human-initiated re-sign only (`resign: true`, when the operator says signing is unlocked). Everything else changes project state and belongs to a stage agent. (`kukulu_mutate` changes a source file only for the length of one call and always restores it, and a stream's tools work in that stream's own worktree.)
 
@@ -361,6 +361,22 @@ Apply the operator's flight options to `docs/kukulu.json`. go-flight calls it wh
 **Returns:** `{ before, after, commit }`, plus `resumed: true` after a resume. `before` and `after` are the effective bounds, defaults included.
 
 **Refuses when:** neither key is given; a value is not a positive integer; `docs/kukulu.json` does not exist yet (before the plan stage); or, with `resume`, the flight is not halted, the halt is not a round-cap halt (a stream-merge or operator halt is never cleared this way), or the bound passed would not lift the cap that fired.
+
+---
+
+## `kukulu_cleanroom_record`
+
+Put what the operator said, did or decided into the clean-room chain. It replaces the hand-kept intervention and denial-verdict files of earlier clean-room runs. For the flight controller only, on the operator's word: `/kukulu:go-flight` maps "record: <text>", "record intervention: <text>" and "record verdict: <text>" to it.
+
+**Arguments:** `{ text, kind? }`. `kind` is `instruction` (the default), `intervention` (something done outside the pipeline: a file supplied, a fix made by hand, a tool installed) or `verdict` (a human classification of a denial). A verdict's text reads `#<seq>: prior-art attempt|false positive|offline test — <note>`, and `<seq>` must be a `denied` entry in the log.
+
+**Does:** appends `{ kind: "human", stage: "controller", role: "operator", target: <text>, data: { kind } }` and commits the log as `chore: clean-room record`; a failed commit restores the log.
+
+**Returns:** `{ recorded: true, seq, kind, commit }`.
+
+**Refuses when:** the project has no clean-room flight past genesis; `text` is empty; `kind` is not one of the three; a verdict is malformed; or a verdict's seq is not a `denied` entry. It is not behind the gate, so an operator can record a verdict about the denial that halted the flight.
+
+**Other human entries.** In clean-room mode `kukulu_flight_options`, `kukulu_run_resume` and `kukulu_pr_finalize({ resign: true })` each append a `human` entry (`data: { kind: "instruction", via: "<tool>" }`, `target` the call's arguments as JSON) in the commit they make, and the `UserPromptSubmit` hook appends one for every prompt typed into a session in the project.
 
 ---
 

@@ -17,6 +17,7 @@ All notable changes to this plugin. Format follows
 - `scripts/check-names.mjs` reads the gitignored `docs/feedback/.private-names` and fails on any listed project name in a file outside `docs/feedback/` and `test/fixtures/`, citing the entry's number and never the name.
 - A `cleanroom` object in `docs/kukulu.json` (`policy`, `signingKey`), validated with an unknown-key refusal, and the `KUKULU_CLEANROOM_KEY` environment variable.
 - Clean-room mode, first pieces: `mcp/cleanroom.mjs` (policy loader, hash chain, signing key, checkpoint primitives), the guard and logger hook scripts registered in `hooks/hooks.json` (inert without a policy), and the genesis entry and sticky mode in `kukulu_next`.
+- `kukulu_cleanroom_record` and `human` chain entries: every prompt typed in a clean-room project, every operator record, and `kukulu_flight_options`, `kukulu_run_resume` and a re-signing `kukulu_pr_finalize`.
 - A `site` CI workflow that runs the static and browser checks.
 
 ### Fixed
