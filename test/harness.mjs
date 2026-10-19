@@ -300,9 +300,8 @@ export function specRepo(spec = "# Spec\n") {
   return repo;
 }
 
-/** A repo with the planner's four deliverables committed on `main`. */
-export function plannedRepo({ tasks = DEFAULT_TASKS, config = {}, claude = "# rules\n" } = {}) {
-  const repo = specRepo();
+/** Write and commit the planner's four deliverables into an existing repo. */
+export function addPlan(repo, { tasks = DEFAULT_TASKS, config = {}, claude = "# rules\n" } = {}) {
   writeFile(repo, "docs/PLAN.md", planDoc(tasks));
   writeFile(repo, "docs/PROGRESS.md", progressDoc(tasks));
   writeFile(repo, "docs/kukulu.json", JSON.stringify({ verify: ["true"], maxRounds: 3, ...config }, null, 2) + "\n");
@@ -310,6 +309,24 @@ export function plannedRepo({ tasks = DEFAULT_TASKS, config = {}, claude = "# ru
   gitIn(repo, ["add", "-A"]);
   gitIn(repo, ["commit", "-qm", "plan: derive build plan from SPEC"]);
   return repo;
+}
+
+/** A repo with the planner's four deliverables committed on `main`. */
+export function plannedRepo(opts = {}) {
+  return addPlan(specRepo(), opts);
+}
+
+/**
+ * A repo in clean-room mode: `docs/cleanroom.json` is the shipped example,
+ * committed on `main`. By default only the spec exists (the state a flight is
+ * in at its first kukulu_next); `planned: true` adds the plan as well.
+ */
+export function cleanroomRepo({ planned = false, policy = null, ...planOpts } = {}) {
+  const repo = specRepo();
+  writeFile(repo, "docs/cleanroom.json", policy ?? fs.readFileSync(path.join(ROOT, "templates", "cleanroom.example.json"), "utf8"));
+  gitIn(repo, ["add", "-A"]);
+  gitIn(repo, ["commit", "-qm", "clean-room policy"]);
+  return planned ? addPlan(repo, planOpts) : repo;
 }
 
 /**
@@ -383,6 +400,13 @@ export function commitTask(repo, id, title, files = {}) {
  * `messages` records every frame the server emits, so suites can assert that
  * notifications produce no reply.
  */
+const testKeys = new Map();
+/** The signing-key path a server for `repo` uses in tests: stable per repo, in a temp directory that is removed on exit. */
+export function testKeyFor(repo) {
+  if (!testKeys.has(repo)) testKeys.set(repo, path.join(mkDir("kukulu-key-"), "ed25519.pem"));
+  return testKeys.get(repo);
+}
+
 export function startServer(repo, { env = {}, server = SERVER } = {}) {
   // Isolate every suite from the developer's own machine: point KUKULU_CONFIG
   // at a path that does not exist and force KUKULU_PROFILE unset, so a real
@@ -392,6 +416,8 @@ export function startServer(repo, { env = {}, server = SERVER } = {}) {
   // the global file passes its own KUKULU_CONFIG/KUKULU_PROFILE via `env`.
   const isolation = {
     KUKULU_CONFIG: path.join(repo, ".kukulu-test-no-global.json"),
+    // One throwaway signing key per repo, outside it, so a test never touches the developer's own key.
+    KUKULU_CLEANROOM_KEY: testKeyFor(repo),
     KUKULU_PROFILE: "",
     FOUNDRY_CONFIG: "",
     FOUNDRY_PROFILE: "",

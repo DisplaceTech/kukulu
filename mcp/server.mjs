@@ -15,6 +15,7 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { CleanroomError, loadPolicy, policyHash, appendEntry, logPathFor, generateKey, loadKey } from "./cleanroom.mjs";
 
 /**
  * An environment variable by its Kūkulu name. An empty value counts as unset,
@@ -86,6 +87,61 @@ const PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "
 
 // Keep in sync with .claude-plugin/plugin.json and package.json; test/plugin.mjs checks it.
 const VERSION = "0.6.1";
+
+// ---------------------------------------------------------------- clean-room mode (SPEC D-06)
+
+/** Clean-room mode is on when the file at cleanroom.policy exists; there is no flag. */
+const cleanroomPolicyPath = (cc) => path.join(ROOT, cc.cleanroom.policy);
+const cleanroomOn = (cc) => exists(cleanroomPolicyPath(cc));
+const cleanroomLogPath = () => logPathFor(ROOT, process.env);
+
+/** SHA-256 of the files the gate pins: the two hook scripts and hooks.json, as installed under PLUGIN_ROOT. */
+function pluginHashes() {
+  const of = (rel2) => policyHash(fs.readFileSync(path.join(PLUGIN_ROOT, rel2)));
+  return { guardHash: of("scripts/cleanroom-guard.mjs"), loggerHash: of("scripts/cleanroom-log.mjs"), hooksHash: of("hooks/hooks.json") };
+}
+
+/** The signing key, generated first when the file is absent. */
+function ensureKey(cc) {
+  if (!exists(cc.cleanroom.signingKey)) generateKey(cc.cleanroom.signingKey);
+  return loadKey(cc.cleanroom.signingKey);
+}
+
+/** Why the flight's mode no longer matches its genesis, or null. Computed on every call, never stored. */
+function cleanroomModeBreak(st, policyPresent, planPresent) {
+  const cr = st.cleanroom;
+  if (policyPresent && cr?.mode === "general") return "a clean-room policy appeared after the flight started in general mode";
+  if (policyPresent && !cr && planPresent) return "a clean-room policy was first seen after the plan was written";
+  if (!policyPresent && cr?.genesis) return "the clean-room policy file was removed after genesis";
+  return null;
+}
+const modeBreakText = (why) => `clean-room coverage is broken: the mode changed after genesis (${why}); archive this flight with kukulu_flight_archive and start another`;
+
+/**
+ * Append the genesis entry and record the hashes the gate will compare against,
+ * in one commit with the log. A policy that does not load is a refusal.
+ */
+function cleanroomGenesis(cc, st) {
+  const policyBytes = fs.readFileSync(cleanroomPolicyPath(cc));
+  loadPolicy(policyBytes.toString("utf8"));
+  const key = ensureKey(cc);
+  const hashes = pluginHashes();
+  const logPath = cleanroomLogPath();
+  const logInRepo = path.relative(ROOT, logPath).startsWith("..") === false;
+  const head = git(["rev-parse", "HEAD"], { allowFail: true }).out || null;
+  const paths = [P.state, ...(logInRepo ? [logPath] : [])];
+  withRollback(paths, () => {
+    const entry = appendEntry(logPath, {
+      kind: "genesis",
+      stage: "controller",
+      role: "session",
+      data: { mode: "clean-room", policyHash: policyHash(policyBytes), ...hashes, pluginVersion: VERSION, keyFingerprint: key.fingerprint, baseBranch: cc.baseBranch, head },
+    });
+    st.cleanroom = { genesis: entry.hash, policyHash: policyHash(policyBytes), ...hashes };
+    saveState(st);
+    gitCommitIfChanged(paths, "chore: clean-room genesis");
+  });
+}
 
 const TASK_ID = /\b[PR]\d+-\d+\b/g;
 const TASK_LINE = /^- \[( |~|x|!|-)\] ([PR]\d+-\d+)(?: (.*))?$/;
@@ -1700,6 +1756,10 @@ function next() {
   };
 
   if (!s.specPresent) return stage("halt", "docs/SPEC.md is missing; nothing to build from");
+  const policyPresent = cleanroomOn(c);
+  const broken = cleanroomModeBreak(st, policyPresent, s.planPresent);
+  if (broken) return stage("halt", modeBreakText(broken));
+  if (policyPresent && !st.cleanroom) cleanroomGenesis(c, st);
   if (st.halted) return stage("halt", st.haltCap || st.halted.includes("kukulu_run_resume") ? st.halted : `${st.halted} — ${RESUME_HINT}`);
   if (st.awaitingSigning) {
     const mb = git(["merge-base", c.baseBranch, "HEAD"], { allowFail: true }).out || "<merge-base>";
@@ -1824,6 +1884,8 @@ function startRun() {
   // with .gitignore below) can create anything new — otherwise a freshly
   // created .gitignore would be misfiled as if it predated the run.
   const preexistingUntracked = untrackedPaths();
+  // In clean-room mode the signing key must exist before the first checkpoint; without a policy the flight is general, for good.
+  if (cleanroomOn(c)) ensureKey(c);
 
   // .gitignore the lock, arm it, stamp PROGRESS, commit.
   const sha = withRollback([P.gitignore, P.progress, P.state, P.feedback], () => {
@@ -1840,6 +1902,7 @@ function startRun() {
   // a deliverable to commit, not debris to clean up, not a signal to act on
   // (F-09, F-17).
   st.preexistingUntracked = preexistingUntracked;
+  if (!cleanroomOn(c) && !st.cleanroom) st.cleanroom = { mode: "general" };
   st.policies = c.policies;
   st.signing = probeSigning(c.policies.signing);
   if (st.signing.startsWith("off (probe failed")) st.signingOverride = true;
@@ -2734,6 +2797,8 @@ const RESUME_HINT = 'once the cause is fixed, call kukulu_run_resume({ reason: "
 function runResume({ reason } = {}) {
   if (typeof reason !== "string" || !reason.trim()) throw new ToolError("reason must be a non-empty string: say what you fixed so the flight can continue");
   const st = loadState();
+  const broken = cleanroomModeBreak(st, cleanroomOn(cfg()), exists(P.plan));
+  if (broken) throw new ToolError(modeBreakText(broken));
   if (!st.halted) throw new ToolError("the flight is not halted; there is nothing to resume");
   if (st.haltCap) throw new ToolError("a round-cap halt is lifted by `kukulu_flight_options({ …, resume: true })`, not by kukulu_run_resume");
   const dirty = porcelainExcludingPreexisting(st.preexistingUntracked);
@@ -3611,7 +3676,7 @@ function handle(req) {
         const result = tool.fn(params?.arguments || {});
         return reply({ content: [{ type: "text", text: JSON.stringify(result, null, 2) }] });
       } catch (e) {
-        const text = e instanceof ToolError ? e.message : `${e.message}\n${e.stack}`;
+        const text = e instanceof ToolError || e instanceof CleanroomError ? e.message : `${e.message}\n${e.stack}`;
         if (e instanceof ToolError && e.data !== undefined) return reply({ content: [{ type: "text", text }], isError: true, structuredContent: e.data });
         return reply({ content: [{ type: "text", text }], isError: true });
       }

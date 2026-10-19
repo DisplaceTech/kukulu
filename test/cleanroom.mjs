@@ -6,7 +6,9 @@
 import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
-import { finish, ok, eq, like, isError, ROOT, plannedRepo, withServer, runHook, mkDir, writeFile } from "./harness.mjs";
+import {
+  finish, ok, eq, like, isError, ROOT, plannedRepo, cleanroomRepo, withServer, runHook, mkDir, writeFile, readFile, hasFile, git, subject, testKeyFor,
+} from "./harness.mjs";
 import { spawn, spawnSync } from "node:child_process";
 import { createHash as sha, generateKeyPairSync } from "node:crypto";
 import {
@@ -370,6 +372,111 @@ eq(targetOf("Read", null), "", "...and a missing input is empty");
   let unsigned = null;
   try { signCheckpoint({ ...data, extra: 1 }, key.privateKey); } catch (e) { unsigned = e; }
   like(unsigned?.message, /exactly the fields/, "signCheckpoint refuses data with a field it would not sign");
+}
+
+// ---------------------------------------------------------------- genesis and sticky mode
+
+const logOf = (repo) => readEntries(path.join(repo, ".kukulu", "cleanroom", "log.jsonl"));
+const stateOf = (repo) => (hasFile(repo, ".kukulu/state.json") ? JSON.parse(readFile(repo, ".kukulu/state.json")) : {});
+
+{
+  const repo = cleanroomRepo();
+  await withServer(repo, async ({ call }) => {
+    const n = await call("kukulu_next");
+    eq(n.stage, "plan", "the first kukulu_next in a clean-room project goes on to the plan stage");
+    const log = logOf(repo);
+    eq(log.length + "|" + log[0].kind + "|" + log[0].stage, "1|genesis|controller", "the first kukulu_next with a policy appends a genesis entry");
+    const d = log[0].data;
+    eq(Object.keys(d).join(","), "mode,policyHash,guardHash,loggerHash,hooksHash,pluginVersion,keyFingerprint,baseBranch,head", "...whose data names mode, the four hashes, pluginVersion, keyFingerprint, baseBranch and head");
+    eq(d.mode + "|" + d.baseBranch, "clean-room|main", "...in clean-room mode on main");
+    like(d.head, /^[0-9a-f]{40}$/, "...at the commit it was written on");
+    eq(d.policyHash, policyHash(fs.readFileSync(path.join(repo, "docs", "cleanroom.json"))), "...the policy hash is the SHA-256 of the file");
+    eq(d.guardHash, policyHash(fs.readFileSync(path.join(ROOT, "scripts", "cleanroom-guard.mjs"))), "...and the guard hash of the installed script");
+    const st = stateOf(repo);
+    eq(JSON.stringify(st.cleanroom), JSON.stringify({ genesis: log[0].hash, policyHash: d.policyHash, guardHash: d.guardHash, loggerHash: d.loggerHash, hooksHash: d.hooksHash }), "...and records state.cleanroom");
+    eq(subject(repo), "chore: clean-room genesis", "...commits chore: clean-room genesis");
+    eq(git(repo, ["show", "--name-only", "--format=", "HEAD"]).split("\n").sort().join(","), ".kukulu/cleanroom/log.jsonl,.kukulu/state.json", "...with the log and state");
+    ok(fs.existsSync(testKeyFor(repo)), "...generating the key at KUKULU_CLEANROOM_KEY");
+    eq(d.keyFingerprint, loadKey(testKeyFor(repo)).fingerprint, "...and the genesis names its fingerprint");
+    await call("kukulu_next");
+    eq(logOf(repo).length, 1, "a second kukulu_next appends no second genesis");
+    eq(git(repo, ["status", "--porcelain"]), "", "...and the tree is clean");
+  });
+}
+
+{
+  const repo = cleanroomRepo();
+  const viaConfig = path.join(mkDir("kukulu-key-a-"), "k.pem");
+  const viaEnv = path.join(mkDir("kukulu-key-b-"), "k.pem");
+  writeFile(repo, "docs/kukulu.json", JSON.stringify({ cleanroom: { signingKey: viaConfig } }));
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-qm", "config"]);
+  await withServer(repo, async ({ call }) => {
+    await call("kukulu_next");
+  }, { env: { KUKULU_CLEANROOM_KEY: viaEnv } });
+  ok(fs.existsSync(viaEnv) && !fs.existsSync(viaConfig), "KUKULU_CLEANROOM_KEY wins over cleanroom.signingKey");
+  const repo2 = cleanroomRepo();
+  writeFile(repo2, "docs/kukulu.json", JSON.stringify({ cleanroom: { signingKey: viaConfig } }));
+  git(repo2, ["add", "-A"]);
+  git(repo2, ["commit", "-qm", "config"]);
+  await withServer(repo2, async ({ call }) => {
+    await call("kukulu_next");
+  }, { env: { KUKULU_CLEANROOM_KEY: "" } });
+  ok(fs.existsSync(viaConfig), "...and an empty KUKULU_CLEANROOM_KEY falls back to cleanroom.signingKey");
+}
+
+{
+  const repo = plannedRepo();
+  await withServer(repo, async ({ call }) => {
+    await call("kukulu_next");
+    ok(!hasFile(repo, ".kukulu/cleanroom"), "a project without a policy writes no log at kukulu_next");
+    eq(stateOf(repo).cleanroom, undefined, "...and records nothing in state");
+    await call("kukulu_run_start");
+    eq(JSON.stringify(stateOf(repo).cleanroom), JSON.stringify({ mode: "general" }), "kukulu_run_start records mode general without a policy");
+    ok(!hasFile(repo, ".kukulu/cleanroom"), "...still without a log");
+    writeFile(repo, "docs/cleanroom.json", EXAMPLE);
+    const n = await call("kukulu_next");
+    eq(n.stage, "halt", "a policy that appears after run_start halts");
+    like(n.reason, /^clean-room coverage is broken: the mode changed after genesis \(a clean-room policy appeared after the flight started in general mode\); archive this flight with kukulu_flight_archive and start another$/, "...with the mode-change reason");
+    isError(await call("kukulu_run_resume", { reason: "ignore it" }), /clean-room coverage is broken.*archive this flight/, "kukulu_run_resume refuses a mode-change halt and says to archive");
+  });
+}
+
+{
+  const repo = plannedRepo();
+  writeFile(repo, "docs/cleanroom.json", EXAMPLE);
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-qm", "policy after the plan"]);
+  await withServer(repo, async ({ call }) => {
+    const n = await call("kukulu_next");
+    eq(n.stage, "halt", "a policy first seen after the plan exists halts");
+    like(n.reason, /first seen after the plan was written/, "...saying so");
+    ok(!hasFile(repo, ".kukulu/cleanroom"), "...and writes no genesis");
+  });
+}
+
+{
+  const repo = cleanroomRepo();
+  await withServer(repo, async ({ call }) => {
+    await call("kukulu_next");
+    git(repo, ["rm", "-q", "docs/cleanroom.json"]);
+    git(repo, ["commit", "-qm", "drop the policy"]);
+    const n = await call("kukulu_next");
+    eq(n.stage, "halt", "a policy removed after genesis halts");
+    like(n.reason, /the clean-room policy file was removed after genesis/, "...saying so");
+    isError(await call("kukulu_run_resume", { reason: "restored it" }), /archive this flight with kukulu_flight_archive/, "kukulu_run_resume refuses it too");
+    git(repo, ["checkout", "HEAD~1", "--", "docs/cleanroom.json"]);
+    git(repo, ["commit", "-qm", "restore the policy"]);
+    ok((await call("kukulu_next")).stage !== "halt", "...and restoring the policy clears it, because the halt is computed each call");
+  });
+}
+
+{
+  const repo = cleanroomRepo({ policy: '{"version":2}' });
+  await withServer(repo, async ({ call }) => {
+    isError(await call("kukulu_next"), /policy version must be 1/, "an invalid policy file is a refusal at genesis");
+    ok(!hasFile(repo, ".kukulu/cleanroom/log.jsonl") && !hasFile(repo, ".kukulu/state.json"), "...and nothing is written");
+  });
 }
 
 finish();

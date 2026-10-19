@@ -55,13 +55,14 @@ Everything the pipeline knows from disk. It is read-only and safe to call at any
 
 ## `kukulu_next`
 
-The stage machine. Its answer is a pure function of disk state; it never sees a subagent's report. Its one write records, once, that a parallel wave must run serially (see `streams` below).
+The stage machine. Its answer is a pure function of disk state; it never sees a subagent's report. It writes in two cases only: it records, once, that a parallel wave must run serially (see `streams` below), and in a project with a clean-room policy file it writes the flight's genesis (see below).
 
 **Arguments:** none.
 
 **Returns:** `{ stage, agent, agentFallback, fallbackAgent, restartRequired, model, agentModel, agentModelExact, round, reviewRound, reason, prompt, streams? }`.
 
 - `stage`: `plan` · `implement` · `review` · `summarize` · `done` · `halt`
+- **Clean-room genesis and sticky mode.** When the file at `cleanroom.policy` exists, the first call, before the plan exists, validates the policy, generates the signing key if it is absent, appends a `genesis` entry to `.kukulu/cleanroom/log.jsonl` (its `data` names `mode`, `policyHash`, `guardHash`, `loggerHash`, `hooksHash`, `pluginVersion`, `keyFingerprint`, `baseBranch` and `head`), records `state.cleanroom = { genesis, policyHash, guardHash, loggerHash, hooksHash }`, and commits state and log as `chore: clean-room genesis`. A project without a policy writes no log. The mode is sticky: a policy that appears after the flight started in general mode (recorded by `kukulu_run_start`), a policy first seen after the plan exists, or a policy removed after genesis makes the stage `halt` with "clean-room coverage is broken: the mode changed after genesis (…); archive this flight with kukulu_flight_archive and start another". That halt is computed on every call, never stored, and `kukulu_run_resume` refuses it.
 - `agent`: the subagent to spawn. This is the generated `kukulu-<role>` name when it can be trusted to spawn (`agentFallback` is false), else the plugin's own `kukulu:planner` / `kukulu:implementer` / `kukulu:reviewer` / `kukulu:summarizer`; `null` for `done`, `halt`, and whenever `restartRequired` is true. On a project's first flight, when this session created the agents directory, that means the plugin agent from the start, not a generated name that fails with "not found" and is retried
 - `agentFallback`: true when the generated agent file cannot yet be trusted to spawn in this session: it is absent, or this server process created the `.claude/agents` directory itself (see [routing.md](./routing.md) for why that one case needs a restart and a routing *change* to an existing directory does not)
 - `fallbackAgent`: the plugin's own `kukulu:<role>` name, always present for a stage that has a role, so a controller can retry with it if spawning a generated `agent` still fails with "not found"
@@ -122,11 +123,12 @@ Begin or resume an implementation run. Idempotent: calling it on a run already i
 1. Records every currently untracked path as `preexistingUntracked` in `.kukulu/state.json`, so the run never treats a file that was already there as its own. Skipped on an idempotent resume, so the list is fixed at the start of each round, not re-scanned mid-run.
 2. Resolves `kukulu.json`'s `policies` (`signing`, `push`, `pr`) and records them in state. Unless this is an idempotent resume, it then probes signing: `off` disables `commit.gpgsign` locally; `auto`/`required` with signing configured actually attempt a signed object (`git commit-tree -S`, not a dry run) and record `"on"` on success; `auto` falls back to disabling signing locally on failure, recording why; `required` refuses instead of falling back. See [operations.md](./operations.md#configuration).
 3. When creating a new build branch (not resuming one), first pushes `baseBranch` to `origin` through the shared push helper, which honours `policies.push`. The planner's commits then reach the remote before the build branch diverges, and a later PR's diff is the build, not the plan. A failed or skipped base push is reported, never fatal.
-4. Creates `build/<date>` from `baseBranch` (or `build/<date>-2`, `-3`, … if that name is taken), or reuses the current `branchPrefix*` branch.
-5. Adds `.kukulu/implement.lock` to `.gitignore` if it is not already there.
-6. Arms the guard hook by writing the lock as JSON: `{ count: 0, armedAt, round, cap }`, with `cap` from `kukulu.json`'s `guardCap`.
-7. Fills in `Branch:` and `Started:` in `PROGRESS.md` if they are placeholders.
-8. Commits as `chore: start implementation run`, or `chore: start review-fix round N`.
+4. In clean-room mode generates the signing key (`cleanroom.signingKey`, or `KUKULU_CLEANROOM_KEY`) if it is absent, as a PEM Ed25519 private key with mode 0600 and a `.pub` beside it; without a policy it records `state.cleanroom = { mode: "general" }` in the state it commits, which the sticky-mode check reads.
+5. Creates `build/<date>` from `baseBranch` (or `build/<date>-2`, `-3`, … if that name is taken), or reuses the current `branchPrefix*` branch.
+6. Adds `.kukulu/implement.lock` to `.gitignore` if it is not already there.
+7. Arms the guard hook by writing the lock as JSON: `{ count: 0, armedAt, round, cap }`, with `cap` from `kukulu.json`'s `guardCap`.
+8. Fills in `Branch:` and `Started:` in `PROGRESS.md` if they are placeholders.
+9. Commits as `chore: start implementation run`, or `chore: start review-fix round N`.
 
 **Returns:** `{ alreadyStarted, branch, commit, counts, round, policies, signing, basePush }`. `signing` is `"on"`, `"off"`, `"none"` (not configured), or `"off (probe failed: <reason>)"`. `basePush` is present only when a new build branch was created: `"pushed"`, `"skipped: policy"`, `"skipped: no origin remote"`, or `"failed: <git's first line>"`.
 
