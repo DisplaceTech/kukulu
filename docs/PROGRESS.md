@@ -43,7 +43,7 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] P3-12 The logger hook
 - [x] P3-13 Tune the hook fast path and TARGET_MAX
 - [x] P3-14 Self-protection: the always-protected set
-- [ ] P3-15 Clean-room commit trailers
+- [x] P3-15 Clean-room commit trailers
 - [ ] P3-16 The gate: checks 1 to 6
 - [ ] P3-17 Gate liveness
 - [ ] P3-18 Human entries and kukulu_cleanroom_record
@@ -191,3 +191,6 @@ Measurement: hook fast path before 50 ms, after 50 ms (unchanged): overhead over
 
 ### P3-14 — 075fa2e
 protectedPaths(policy, env) exported; evaluate uses env.protected ?? protectedPaths(policy, env) and read-denies env.keyPath (as deny.paths). Guard script builds policyPath, pluginRoot (CLAUDE_PLUGIN_ROOT else its own ..), keyPath (KUKULU_CLEANROOM_KEY, else cleanroom.signingKey, else default) and planExists. Fixtures: 160 cases (16 categories x 4 write tools + Bash forms); each case may carry planExists. Self-test now 164 cases. tokenPath also unwraps name=value (dd of=). NOTE for P3-19: because docs/kukulu.json is protected as soon as docs/PLAN.md exists, the plan-build skill must write docs/kukulu.json BEFORE PLAN.md in clean-room mode (and the plan stage must write nothing else protected).
+
+### P3-15 — 52cbbc7
+withTrailers() inside commitStaged (and the stream merge commit); gitCommitIfChanged now passes its options through ({ stage, task, cleanroom }); every call site passes a stage (implement/fix by round, review, summarize, controller, plan). A site that forgets would fall back to controller (all current sites covered by the all-commits test). Archive passes cleanroom: Boolean(old.cleanroom?.genesis) because its state is reset before committing. implement skill and docs/mcp-tools.md updated.
