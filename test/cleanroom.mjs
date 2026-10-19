@@ -14,6 +14,7 @@ import { createHash as sha, generateKeyPairSync } from "node:crypto";
 import {
   CleanroomError, loadPolicy, policyHash,
   ENTRY_KEYS, KINDS, ZERO_HASH, TARGET_MAX, truncateTarget, canonical, entryHash, appendEntry, readEntries, verifyChain, logPathFor, targetOf, projectContext, entryFields,
+  tokenize, LANGUAGES,
   splitSegments, shellWords, commandWord, isPathLike, tokenPath, canonicalPaths,
   evaluate, lockdownActive, NETWORK_COMMANDS, READ_FAMILY, WRITE_FAMILY, protectedPaths,
   generateKey, loadKey, keyFingerprint, CHECKPOINT_KEYS, signCheckpoint, verifyCheckpoint,
@@ -1182,6 +1183,59 @@ const gateCheck = (reason) => (reason.match(/^clean-room gate failed: ([\w-]+):/
     const r = await statusWith(bad);
     isError(r, re, label);
   }
+}
+
+// ---------------------------------------------------------------- lexers: Rust and the C family
+
+const LEXER_SAMPLE = (name) => fs.readFileSync(path.join(ROOT, "test", "fixtures", "similarity", "lexers", name), "utf8");
+const NORMALIZED = new Set(["ID", "NUM", "STR", "CHAR", "TYPE", "LOOP", "SWITCH", "FN", "TYPEDEF"]);
+
+eq(LANGUAGES.join(","), "rust,c,cpp,go,python,javascript,typescript,java,php", "the nine shipped lexers are listed");
+
+{
+  const rust = tokenize(LEXER_SAMPLE("sample.rs"), "rust");
+  ok(rust.tokens.length > 250 && rust.comments.length === 3, "the rust lexer tokenizes its sample");
+  const classes = new Set(rust.tokens);
+  eq(["FN", "SWITCH", "LOOP", "TYPEDEF"].every((k) => classes.has(k)), true, "...classifies fn, match, loop and struct");
+  eq(JSON.stringify(tokenize("fn f(x: u32) { match x { _ => 0 } loop {} struct S; }", "rust").tokens.filter((t) => NORMALIZED.has(t))), JSON.stringify(["FN", "ID", "ID", "TYPE", "SWITCH", "ID", "ID", "NUM", "LOOP", "TYPEDEF", "ID"]), "...in order");
+  const norm = tokenize('let name = 0x1f; let s = "text"; let c = \'q\'; let n: u32 = 1_000u32;', "rust").tokens;
+  eq(norm.join(" "), "let ID = NUM ; let ID = STR ; let ID = CHAR ; let ID : TYPE = NUM ;", "...normalizes identifiers, numbers, strings, chars and u32");
+  eq(tokenize("&'a str, 'static, 'x'", "rust").tokens.join(" "), "& ID TYPE , ID , CHAR", "...keeps a lifetime out of CHAR");
+  eq(tokenize('r#"a "q" b"# br"x" b"y" b\'z\'', "rust").tokens.join(" "), "STR STR STR CHAR", "...reads raw and byte strings and byte chars");
+  const nested = tokenize("a /* one /* two */ still */ b // end", "rust");
+  eq(nested.tokens.join(" ") + "|" + nested.comments.join("|"), "ID ID| one /* two */ still | end", "...nests block comments");
+  eq(tokenize("0..10 1.5e-3 1_0.0f64", "rust").tokens.join(" "), "NUM .. NUM NUM NUM", "...reads ranges and floats");
+  eq(tokenize("a ::b -> c => d ..= e", "rust").tokens.join(" "), "ID :: ID -> ID => ID ..= ID", "...keeps multi-character operators whole");
+}
+
+{
+  const c = tokenize(LEXER_SAMPLE("sample.c"), "c");
+  ok(!c.tokens.includes("include") && !c.tokens.includes("define") && !c.tokens.includes("#"), "the c lexer skips preprocessor lines");
+  ok(!c.tokens.includes("CAPACITY") && c.tokens.filter((t) => t === "ID").length > 20, "...continuation lines included");
+  eq(c.comments.length + "|" + c.comments[0].trim() + "|" + c.comments[1].trim(), "2|A tiny ring buffer, written for the lexer tests.|Push one byte; returns 0 when the buffer is full.", "...captures line and block comments");
+  eq(tokenize("#define X(a) \\\n  ((a) + 1)\nint y;", "c").tokens.join(" "), "TYPE ID ;", "...a backslash continuation belongs to the preprocessor line");
+  eq(tokenize("x = 1; #not_a_directive", "c").tokens.includes("#"), true, "...a # in the middle of a line is an ordinary character");
+  const k = tokenize("typedef struct { int a; } t; union u { char c; }; enum e { X }; if (a) { } else { } do { } while (0); switch (a) { case 1: break; default: continue; } return;", "c").tokens;
+  eq(["TYPEDEF", "TYPE", "LOOP", "SWITCH", "if", "else", "break", "continue", "return", "case", "default"].every((t) => k.includes(t)), true, "...classifies its keywords");
+  eq(tokenize("type func def", "c").tokens.join(" "), "ID ID ID", "...a word that is a keyword only elsewhere stays an identifier");
+  eq(tokenize("x = L\"wide\" + u8\"s\" + 'c' + '\\\\';", "c").tokens.join(" "), "ID = STR + STR + CHAR + CHAR ;", "...reads wide literals and escaped chars");
+  eq(tokenize("uint32_t size_t unsigned long void", "c").tokens.join(" "), "TYPE TYPE TYPE TYPE TYPE", "...and classifies the primitive type names");
+}
+
+{
+  const cpp = tokenize(LEXER_SAMPLE("sample.cpp"), "cpp");
+  ok(cpp.tokens.length > 200 && cpp.comments.length === 3, "the cpp lexer tokenizes its sample");
+  eq(["TYPEDEF", "TYPE", "LOOP", "SWITCH", "::", "template", "namespace", "nullptr"].every((t) => cpp.tokens.includes(t)), true, "...classifying class, template, namespace and ::");
+  eq(tokenize('const char *s = R"x(a)" b)x"; int y;', "cpp").tokens.join(" "), "const TYPE * ID = STR ; TYPE ID ;", "...reads raw string literals");
+  eq(tokenize("class A { public: };", "cpp").tokens.join(" "), "TYPEDEF ID { public : } ;", "...and class as TYPEDEF with public as itself");
+}
+
+{
+  let refused = null;
+  try { tokenize("x", "cobol"); } catch (e) { refused = e; }
+  ok(refused instanceof CleanroomError && /unknown language "cobol"; the shipped lexers are rust, c, cpp/.test(refused.message), "tokenize refuses an unknown language");
+  eq(tokenize("", "rust").tokens.length + tokenize("/* never closed", "c").comments.length, 1, "an empty text has no tokens and an unterminated comment runs to the end");
+  eq(tokenize('"never closed', "c").tokens.join(" "), "STR", "an unterminated string runs to the end");
 }
 
 finish();

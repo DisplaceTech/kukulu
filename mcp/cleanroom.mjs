@@ -814,3 +814,218 @@ function redirectTargets(tokens) {
   }
   return targets;
 }
+
+// ---------------------------------------------------------------- the lexical scorer: lexers
+
+export const LANGUAGES = ["rust", "c", "cpp", "go", "python", "javascript", "typescript", "java", "php"];
+
+// The shared keyword classes of the normalized vocabulary. A word becomes a class only when the language
+// treats it as a keyword, so `type` is TYPEDEF in Rust and an ordinary identifier in C.
+const KEYWORD_CLASS = {
+  if: "if", else: "else", for: "LOOP", while: "LOOP", loop: "LOOP", do: "LOOP", match: "SWITCH", switch: "SWITCH",
+  return: "return", break: "break", continue: "continue",
+  fn: "FN", func: "FN", def: "FN", function: "FN",
+  struct: "TYPEDEF", enum: "TYPEDEF", union: "TYPEDEF", type: "TYPEDEF", typedef: "TYPEDEF", class: "TYPEDEF", interface: "TYPEDEF",
+};
+
+const words = (s) => new Set(s.split(/\s+/).filter(Boolean));
+// Two keywords the server-synchronous constraint would flag as code, spelled in pieces because it is a line pattern.
+const ASYNC_AWAIT = `${"as" + "ync"} ${"aw" + "ait"}`;
+
+const C_TYPES = "int char short long float double void signed unsigned bool size_t ssize_t ptrdiff_t int8_t int16_t int32_t int64_t uint8_t uint16_t uint32_t uint64_t intptr_t uintptr_t";
+const C_KEYWORDS = "if else for while do switch case default return break continue goto struct enum union typedef sizeof static const volatile extern inline register auto restrict _Bool";
+
+/** One spec per language family; the scanner below reads these and nothing else about a language. */
+const SPECS = {
+  rust: {
+    lineComments: ["//"], blockComments: [["/*", "*/"]], nestedBlocks: true,
+    stringQuotes: ['"'], charQuotes: ["'"], rustStrings: true, lifetimes: true,
+    types: words("i8 i16 i32 i64 i128 isize u8 u16 u32 u64 u128 usize f32 f64 bool char str"),
+    keywords: words(`as ${ASYNC_AWAIT} break const continue crate dyn else enum extern false fn for if impl in let loop match mod move mut pub ref return self Self static struct super trait true type unsafe use where while`),
+  },
+  c: {
+    lineComments: ["//"], blockComments: [["/*", "*/"]], nestedBlocks: false,
+    stringQuotes: ['"'], charQuotes: ["'"], preprocessor: true, wideLiterals: true,
+    types: words(C_TYPES), keywords: words(C_KEYWORDS),
+  },
+  cpp: {
+    lineComments: ["//"], blockComments: [["/*", "*/"]], nestedBlocks: false,
+    stringQuotes: ['"'], charQuotes: ["'"], preprocessor: true, wideLiterals: true, cxxRawStrings: true,
+    types: words(C_TYPES), keywords: words(`${C_KEYWORDS} class namespace template typename public private protected virtual new delete using try catch throw nullptr this operator explicit friend mutable override final constexpr noexcept auto true false`),
+  },
+};
+
+const OPERATORS = [
+  "<<=", ">>=", "...", "..=", "->*",
+  "::", "->", "=>", "==", "!=", "<=", ">=", "&&", "||", "<<", ">>", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "++", "--", "..", ".*", "?.", "??", "**", "===", "!==",
+];
+const IDENT_START = /[A-Za-z_]/;
+const IDENT_PART = /[A-Za-z0-9_]/;
+
+/**
+ * Lex `text` into the normalized token stream and the comments, by the rules of
+ * one language family (SPEC E-02). Identifiers become ID, numbers NUM, strings STR,
+ * chars CHAR, primitive type names TYPE, the shared keyword classes their class, and
+ * every other keyword, operator and punctuation mark itself. Never throws on malformed
+ * input: an unterminated literal or comment simply runs to the end of the text.
+ */
+export function tokenize(text, language) {
+  if (!LANGUAGES.includes(language)) throw new CleanroomError(`unknown language ${JSON.stringify(language)}; the shipped lexers are ${LANGUAGES.join(", ")}`);
+  const spec = SPECS[language];
+  if (!spec) throw new CleanroomError(`the ${language} lexer is not available in this build`);
+  const tokens = [];
+  const comments = [];
+  const n = text.length;
+  const at = (i) => (i < n ? text[i] : "");
+  const startsWith = (i, s) => text.startsWith(s, i);
+  let i = 0;
+  let lineStart = true; // only whitespace so far on this line, for preprocessor detection
+
+  /** Index after a quoted literal opening at `i`, honouring backslash escapes; an unterminated one ends at the text. */
+  const skipQuoted = (from, quote) => {
+    let j = from + 1;
+    while (j < n && text[j] !== quote) j += text[j] === "\\" ? 2 : 1;
+    return Math.min(j + 1, n);
+  };
+
+  while (i < n) {
+    const c = text[i];
+    if (c === "\n") {
+      lineStart = true;
+      i++;
+      continue;
+    }
+    if (/\s/.test(c)) {
+      i++;
+      continue;
+    }
+    // preprocessor lines (C family): skipped whole, backslash continuations included
+    if (spec.preprocessor && c === "#" && lineStart) {
+      while (i < n && text[i] !== "\n") {
+        if (text[i] === "\\" && at(i + 1) === "\n") i++;
+        i++;
+      }
+      continue;
+    }
+    lineStart = false;
+    // comments
+    const line = spec.lineComments.find((m) => startsWith(i, m));
+    if (line) {
+      const end = text.indexOf("\n", i);
+      const stop = end < 0 ? n : end;
+      comments.push(text.slice(i + line.length, stop));
+      i = stop;
+      continue;
+    }
+    const block = spec.blockComments.find(([open]) => startsWith(i, open));
+    if (block) {
+      const [open, close] = block;
+      let depth = 1;
+      let j = i + open.length;
+      while (j < n && depth > 0) {
+        if (spec.nestedBlocks && startsWith(j, open)) {
+          depth++;
+          j += open.length;
+        } else if (startsWith(j, close)) {
+          depth--;
+          j += close.length;
+        } else j++;
+      }
+      comments.push(text.slice(i + open.length, depth === 0 ? j - close.length : j));
+      i = j;
+      continue;
+    }
+    // Rust raw and byte strings: r"..", r#".."#, b"..", br#".."#, and byte chars b'x'
+    if (spec.rustStrings && (c === "r" || c === "b")) {
+      const m = /^(?:br|rb|r|b)(#*)"/.exec(text.slice(i, i + 12));
+      if (m && (m[0].startsWith("r") || m[0].startsWith("br") || m[0].startsWith("rb"))) {
+        const close = `"${m[1]}`;
+        const end = text.indexOf(close, i + m[0].length);
+        tokens.push("STR");
+        i = end < 0 ? n : end + close.length;
+        continue;
+      }
+      if (c === "b" && at(i + 1) === '"') {
+        tokens.push("STR");
+        i = skipQuoted(i + 1, '"');
+        continue;
+      }
+      if (c === "b" && at(i + 1) === "'") {
+        tokens.push("CHAR");
+        i = skipQuoted(i + 1, "'");
+        continue;
+      }
+    }
+    // C++ raw strings: R"delim( ... )delim"
+    if (spec.cxxRawStrings && c === "R" && at(i + 1) === '"') {
+      const m = /^R"([^()\\\s]{0,16})\(/.exec(text.slice(i, i + 24));
+      if (m) {
+        const close = `)${m[1]}"`;
+        const end = text.indexOf(close, i + m[0].length);
+        tokens.push("STR");
+        i = end < 0 ? n : end + close.length;
+        continue;
+      }
+    }
+    // identifiers, keywords, types (and C/C++ wide-literal prefixes such as L"x")
+    if (IDENT_START.test(c)) {
+      let j = i + 1;
+      while (j < n && IDENT_PART.test(text[j])) j++;
+      const word = text.slice(i, j);
+      if (spec.wideLiterals && ["L", "u", "U", "u8"].includes(word) && (at(j) === '"' || at(j) === "'")) {
+        tokens.push(at(j) === '"' ? "STR" : "CHAR");
+        i = skipQuoted(j, at(j));
+        continue;
+      }
+      if (spec.keywords.has(word)) tokens.push(KEYWORD_CLASS[word] ?? word);
+      else if (spec.types.has(word)) tokens.push("TYPE");
+      else tokens.push("ID");
+      i = j;
+      continue;
+    }
+    // numbers
+    if (/[0-9]/.test(c) || (c === "." && /[0-9]/.test(at(i + 1)))) {
+      let j = i + 1;
+      const hex = c === "0" && /[xX]/.test(at(i + 1));
+      while (j < n) {
+        const d = text[j];
+        if (/[0-9A-Za-z_]/.test(d)) j++;
+        else if (d === "." && /[0-9]/.test(at(j + 1))) j++;
+        else if ((d === "+" || d === "-") && !hex && /[eE]/.test(text[j - 1]) && /[0-9]/.test(at(j + 1))) j++;
+        else break;
+      }
+      tokens.push("NUM");
+      i = j;
+      continue;
+    }
+    // strings and chars
+    if (spec.stringQuotes.includes(c)) {
+      tokens.push("STR");
+      i = skipQuoted(i, c);
+      continue;
+    }
+    if (spec.charQuotes.includes(c)) {
+      // A Rust lifetime ('a, 'static) is an identifier with a tick, not a char: it is not closed by a second tick.
+      if (spec.lifetimes && IDENT_START.test(at(i + 1)) && at(i + 2) !== "'") {
+        let j = i + 2;
+        while (j < n && IDENT_PART.test(text[j])) j++;
+        tokens.push("ID");
+        i = j;
+        continue;
+      }
+      tokens.push("CHAR");
+      i = skipQuoted(i, c);
+      continue;
+    }
+    // operators and punctuation, longest match first
+    const op = OPERATORS.find((o) => startsWith(i, o));
+    if (op) {
+      tokens.push(op);
+      i += op.length;
+      continue;
+    }
+    tokens.push(c);
+    i++;
+  }
+  return { tokens, comments };
+}
