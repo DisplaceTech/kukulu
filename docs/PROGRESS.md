@@ -26,7 +26,7 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] P1-12 Auto-merge unavailable names policies.finalize
 - [x] P1-13 pull-feedback never commits; Flight feedback moves to CONTRIBUTING
 - [x] P1-14 Phase 1 end: push and record the manual check
-- [ ] P2-01 Private-project labels in pull-feedback and CONTRIBUTING
+- [x] P2-01 Private-project labels in pull-feedback and CONTRIBUTING
 - [ ] P2-02 check-names reads the private-name denylist
 - [ ] P2-03 Phase 2 end: push and record the manual check
 - [ ] P3-01 mcp/cleanroom.mjs: the policy loader, the template and the cleanroom suite
@@ -140,3 +140,6 @@ Skill step 3 names .private-names, step 7 links CONTRIBUTING.md#flight-feedback,
 
 ### P1-14 — b8c5f08
 Push: pushed build/2026-10-19. Manual check: NOT VERIFIED (human): halt a throwaway flight with kukulu_run_halt, fix nothing, call kukulu_run_resume and confirm the refusal names the dirty tree; clean it and confirm the resume commit
+
+### P2-01 — d69df6e
+Label procedure in pull-feedback step 3 and CONTRIBUTING Flight feedback; four plugin assertions. The mechanical check is P2-02.
