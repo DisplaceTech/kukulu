@@ -412,3 +412,14 @@ Derived from docs/SPEC.md v0.1 on 2026-10-19. SPEC.md wins over this file.
 **Out of scope:** New rule 15 assertions; the prefers-color-scheme emulation guard (not injectable); site/; serve-site.mjs; check-site.mjs; docs/kukulu.json and CI wiring (already in place).
 **Verification:** kukulu_verify green. Reviewer re-runs kukulu_mutate on scripts/check-site-browser.mjs with commands ['node scripts/check-site-browser.mjs --self-test']: replacing `if (b.hidden || b.w === 0 || b.h === 0) failures.push(` with `if (b.hidden) failures.push(`; deleting `      events = [];\n      await page("Emulation.setDeviceMetricsOverride"` down to the await line (i.e. removing `events = [];` in visit); and deleting `      await new Promise((r) => setTimeout(r, SETTLE_MS));`. All three must be killed.
 **Depends on:** none
+
+## Review fixes (round 4)
+
+### R4-01: check-site-browser.mjs: fail when the page probe runs before the load event
+**Goal:** Make scripts/check-site-browser.mjs fail, naming the viewport and scheme, when PAGE_PROBE runs before the load event, so deleting the Page.loadEventFired wait in visit is caught by the self-test baseline.
+**Files touched:** scripts/check-site-browser.mjs
+**Design constraints:** SPEC 6 (the check waits for the load event and then document.fonts.ready; failures name the viewport and scheme) and SPEC 3.15; PLAN P2-01, R1-03. PAGE_PROBE additionally returns document.readyState; visit pushes `${label}: the page probe ran before the load event (readyState <state>); wait for Page.loadEventFired before probing` (or equivalent wording in the existing style) when it is not "complete". Do not change the load wait itself, SETTLE_MS, any other rule 15 assertion, the CASES list, or the normal run's output and exit codes. Node built-ins and the global WebSocket only (site-scripts-node-builtins); no literal from checks.json (no-hardcoded-site-tunables); a macron letter only as an escape (check-names).
+**Acceptance tests:** node scripts/check-site-browser.mjs --self-test still prints 'check-site-browser self-test: ok (12 cases)' and npm run check:site:browser still prints 'ok (6 runs)'. The existing 'baseline passes' case is the test that catches the finding: with the load wait deleted, the probe sees readyState 'interactive' and the baseline fails.
+**Out of scope:** New self-test cases; serve-site.mjs; check-site.mjs; site/; docs/kukulu.json and CI wiring; the favicon/server-close timing noted in REVIEW.md.
+**Verification:** kukulu_verify green. Reviewer re-runs kukulu_mutate on scripts/check-site-browser.mjs with commands ['node scripts/check-site-browser.mjs --self-test'], deleting the line `      await withTimeout(loaded, COMMAND_TIMEOUT_MS, `the load event at ${label}`);` (with its newline); it must be killed by 'baseline passes'.
+**Depends on:** none
