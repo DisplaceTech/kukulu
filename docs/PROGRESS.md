@@ -7,7 +7,7 @@ Started: 2026-10-19T16:52:28.587Z
 - [x] P1-02 styles.css foundation and index.html through How it works
 - [x] P1-03 index.html from Why it holds up to the footer
 - [x] P1-04 copy.js, 404.html and _headers
-- [ ] P1-05 check-site.mjs rules 3 to 7
+- [x] P1-05 check-site.mjs rules 3 to 7
 - [ ] P1-06 check-site.mjs rules 9 to 14, check:site and the lint line
 - [ ] P1-07 Measure the budgets and contrast against their assumptions
 - [ ] P1-08 serve-site.mjs and site:serve
@@ -31,3 +31,6 @@ index.html complete (all sections + footer); styles.css gained rules for them in
 
 ### P1-04 — 843dc24
 copy.js (1009 bytes, line 2 is the COPY_FEEDBACK_MS const), 404.html (no styles.css change needed; reuses site-header/nav/brand/sec-head/h1), _headers verbatim from SPEC 6. 404 main is `<main id="main" class="wrap sec sec-last">`. Interpretation: failed copy leaves the label as "Copy"; timer set in .finally so both outcomes reset.
+
+### P1-05 — 323b4ae
+Rules 3-7 + parseHtml/textContent/visibleText/findAll exported; 32 self-test cases. Helpers for later rules: need(ctx,rule,rel) reads a site file or reports it missing; byTag/byId/hasClass/collapse; sub(t,file,from,to) for cases (throws if the target text is absent); CASES.push block placed before makeTemp (add more there). Real page passed all rules unchanged. Interpretation: rule 4 also asserts copy.js line 2 literally.
