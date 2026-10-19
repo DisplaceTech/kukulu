@@ -494,6 +494,27 @@ const untouched = (repo, head) => {
   });
 }
 
+// Constraints are part of the check: a mutant only a rule catches is a kill.
+{
+  const NO_SUB = { id: "no-subtraction", pattern: "a - b", paths: ["src/"], shouldMatch: ["a - b"], shouldNotMatch: ["a + b"] };
+  const repo = mutationRepo({ config: { verify: ["true"], constraints: [NO_SUB] } });
+  const head = git(repo, ["rev-parse", "HEAD"]);
+  await withServer(repo, async ({ call }) => {
+    const r = await call("kukulu_mutate", { file: "src/add.mjs", find: "a + b", replace: "a - b", confirmKill: true });
+    eq(r.killed, true, "a mutant only a constraint catches is killed by that rule");
+    like(r.verdict, /killed: constraint no-subtraction caught the mutation/, "...with a verdict naming the rule");
+    eq(r.constraints.ok, false, "...and constraints.ok is false");
+    eq(r.constraints.results[0].hits[0].file, "src/add.mjs", "...with the hit");
+    eq(r.confirm, undefined, "confirmKill does not re-run anything for a constraint-only kill");
+    eq(readFile(repo, "src/add.mjs"), ADD_SRC, "the mutated file is restored after a constraint kill");
+    untouched(repo, head);
+    const s = await call("kukulu_mutate", { file: "src/add.mjs", find: "() => 1", replace: "() => 2" });
+    eq(s.killed, false, "a mutant nothing catches survives");
+    eq(s.constraints.ok, true, "...with constraints.ok true");
+    untouched(repo, head);
+  });
+}
+
 // A timed-out command still restores the file.
 {
   const repo = mutationRepo({ config: { verify: [{ cmd: "exec sleep 5", timeoutMs: 300 }] } });

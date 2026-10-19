@@ -2469,8 +2469,11 @@ function mutate({ file, find, replace, commands, timeoutMs, targeted, filter, co
   ensureLineInFile(gitPath("info/exclude"), rel(P.mutation));
   write(P.mutation, `${JSON.stringify({ file: relPath, at: new Date().toISOString(), original: git(["rev-parse", `HEAD:${relPath}`]).out })}\n`);
   let results;
+  let scan;
   try {
     fs.writeFileSync(abs, original.slice(0, first) + replace + original.slice(first + find.length));
+    // A rule a mutant breaks is a kill too: the mechanic is guarded by a constraint rather than a test.
+    scan = checkConstraints(cc.constraints, ROOT, loadState().preexistingUntracked);
     const progress = exists(P.progress) ? parseProgress() : null;
     results = cmds.map((c2) => {
       const waiting = inactiveUntil(c2.from, progress);
@@ -2489,17 +2492,24 @@ function mutate({ file, find, replace, commands, timeoutMs, targeted, filter, co
 
   const failedIdx = results.map((r, i) => (!r.skipped && !r.ok ? i : -1)).filter((i) => i >= 0);
   const failedCommands = failedIdx.map((i) => cmds[i].cmd);
-  let killed = failedIdx.length > 0;
-  let verdict = killed ? "killed: the tests caught the mutation" : "survived: no command failed — the mechanic is untested";
+  const caughtBy = scan.results.find((r) => r.hits.length > 0);
+  const constraintKill = Boolean(caughtBy);
+  let killed = failedIdx.length > 0 || constraintKill;
+  let verdict = failedIdx.length > 0
+    ? "killed: the tests caught the mutation"
+    : constraintKill
+      ? `killed: constraint ${caughtBy.id} caught the mutation`
+      : "survived: no command failed — the mechanic is untested";
   let confirm;
   let inconclusive;
-  if (killed && confirmKill) {
+  if (killed && confirmKill && failedIdx.length) {
     // A command that fails on the unmutated tree proves nothing about the
     // mutation, so each failure is re-run once where nothing is mutated.
     confirm = failedIdx.map((i) => runShell(cmds[i].cmd, cmds[i].timeoutMs));
     undoMutationResidue(before);
     const stillFailing = confirm.findIndex((r) => !r.ok);
-    if (stillFailing >= 0) {
+    // A kill by a constraint alone stands without the commands.
+    if (stillFailing >= 0 && !constraintKill) {
       killed = false;
       inconclusive = true;
       verdict = `inconclusive: ${failedCommands[stillFailing]} also fails without the mutation`;
@@ -2513,6 +2523,7 @@ function mutate({ file, find, replace, commands, timeoutMs, targeted, filter, co
     failedCommands,
     ...(confirm ? { confirm } : {}),
     results,
+    constraints: scan,
     restored: residue.restored,
     removed: residue.removed,
     recoveredMutation: recovered,
