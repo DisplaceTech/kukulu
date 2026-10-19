@@ -844,6 +844,36 @@ export function checkSite(overrides = {}) {
 
 export const formatFailure = (f) => `check-site: rule ${f.rule}: ${f.file}: ${f.message}`;
 
+// ---------------------------------------------------------------- report
+
+const round2 = (n) => Math.round(n * 100) / 100;
+
+// Every assumption in docs/site/checks.json beside what the site measures.
+export function report(overrides = {}) {
+  const opts = { ...defaultOpts(), ...overrides };
+  const config = loadConfig(opts.configPath);
+  const size = (rel) => {
+    const p = path.join(opts.siteDir, rel);
+    return fs.existsSync(p) ? fs.statSync(p).size : 0;
+  };
+  const files = {};
+  for (const f of ["index.html", "styles.css", "copy.js", "404.html"]) files[f] = size(f);
+  const fonts = walk(path.join(opts.siteDir, "fonts")).filter((f) => f.endsWith(".woff2")).reduce((n, f) => n + size(`fonts/${f}`), 0);
+  const cr = contrastReport(opts);
+  const lowest = (rows) => {
+    const worst = rows.filter((r) => r.ratio !== null).sort((a, b) => a.ratio - b.ratio)[0];
+    return { lowest: round2(worst.ratio), pair: `${worst.fg} on ${worst.bg}` };
+  };
+  return {
+    textBytes: { budget: config.budget.textBytes, measured: Object.values(files).reduce((a, b) => a + b, 0), files },
+    fontBytes: { budget: config.budget.fontBytes, measured: fonts },
+    scriptBytes: { budget: config.budget.scriptBytes, measured: files["copy.js"] },
+    contrast: { min: config.contrastMin, dark: lowest(cr.dark), light: lowest(cr.light) },
+    copyFeedbackMs: { value: config.copyFeedbackMs, measured: null },
+    servePort: { value: config.servePort, measured: null },
+  };
+}
+
 // ---------------------------------------------------------------- self-test
 
 const readJson = (p) => JSON.parse(fs.readFileSync(p, "utf8"));
@@ -967,6 +997,17 @@ CASES.push(
       writeJson(t.pkg, pkg);
     },
   },
+  {
+    rule: "report",
+    name: "report: textBytes.measured is the sum of the four files",
+    expect: "textBytes",
+    inject: () => {},
+    verify: (t, opts) => {
+      const sum = ["index.html", "styles.css", "copy.js", "404.html"].reduce((n, f) => n + fs.statSync(path.join(t.site, f)).size, 0);
+      const got = report(optsFor(t, opts)).textBytes.measured;
+      return got === sum ? null : `textBytes.measured is ${got}, not ${sum}`;
+    },
+  },
   { rule: 14, name: "rule 14: a third-party import", expect: 'imports "left-pad"', inject: (t) => fs.appendFileSync(path.join(t.scripts, "check-site.mjs"), ["", "import pad " + "from" + ' "left-pad";', ""].join("\n")) },
 );
 
@@ -1013,7 +1054,10 @@ export function selfTest() {
     const t = makeTemp(base);
     try {
       c.inject(t);
-      if (c.rule === "config") {
+      if (c.rule === "report") {
+        const bad = c.verify(t, base);
+        if (bad) problems.push(`${c.name}: ${bad}`);
+      } else if (c.rule === "config") {
         try {
           loadConfig(t.config);
           problems.push(`${c.name}: loadConfig accepted the bad config`);
@@ -1035,8 +1079,8 @@ export function selfTest() {
 
 function main(argv) {
   const flags = argv.slice(2);
-  if (flags.length > 1 || (flags.length === 1 && flags[0] !== "--self-test")) {
-    process.stderr.write("usage: node scripts/check-site.mjs [--self-test]\n");
+  if (flags.length > 1 || (flags.length === 1 && flags[0] !== "--self-test" && flags[0] !== "--report")) {
+    process.stderr.write("usage: node scripts/check-site.mjs [--self-test | --report]\n");
     return 2;
   }
   try {
@@ -1045,6 +1089,10 @@ function main(argv) {
       for (const p of r.problems) process.stderr.write(`check-site self-test: ${p}\n`);
       if (r.ok) process.stdout.write(`check-site self-test: ok (${r.count} cases)\n`);
       return r.ok ? 0 : 1;
+    }
+    if (flags[0] === "--report") {
+      process.stdout.write(`${JSON.stringify(report(), null, 2)}\n`);
+      return 0;
     }
     const failures = checkSite();
     for (const f of failures) process.stderr.write(`${formatFailure(f)}\n`);
