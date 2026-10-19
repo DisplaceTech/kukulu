@@ -150,6 +150,11 @@ if [ "$1 $2" = "pr create" ]; then
   echo https://github.invalid/pull/1
   exit 0
 fi
+if [ "$1 $2" = "pr checks" ]; then
+  if [ -f "$dir/checks.json" ]; then cat "$dir/checks.json"; else echo "[]"; fi
+  if [ -f "$dir/checks-exit" ]; then exit "$(cat "$dir/checks-exit")"; fi
+  exit 0
+fi
 if [ "$1 $2" = "pr ready" ]; then
   if [ -f "$dir/pr.json" ]; then sed 's/"isDraft":true/"isDraft":false/' "$dir/pr.json" > "$dir/pr.json.tmp" && mv "$dir/pr.json.tmp" "$dir/pr.json"; fi
   exit 0

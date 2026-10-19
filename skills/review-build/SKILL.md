@@ -29,7 +29,7 @@ Sample at least one test per module by calling `kukulu_mutate` with a `file` and
 
 **Round 1** (`reviewRound` is 1): sample as above. When a mutant survives, sweep the same file with at least three further mutations of neighbouring mechanics, then queue one R-task per file, listing every survivor found there, instead of one task per survivor.
 
-**Round 2 and later**: read `lastReviewCommit` from `kukulu_status` and mutate only the files in `git diff --name-only <lastReviewCommit>..HEAD`. A survivor outside that diff is not a fix task: put it under `## Notes` in `docs/REVIEW.md` as advisory, and the summarizer carries it into SUMMARY.md. When a round that queues tasks does so on mutation results alone, cite this rule in REVIEW.md. The rest of the fix loop is unchanged.
+**Round 2 and later**: read `prChecks` from `kukulu_status` first. A `fail` is a finding (category 3) that names each failing check, and the fix task's tests name that check, so the round that fixes it can prove it; `pending`, `none`, `null` and `unknown: …` are not findings, but say in REVIEW.md what you saw. Then read `lastReviewCommit` from `kukulu_status` and mutate only the files in `git diff --name-only <lastReviewCommit>..HEAD`. A survivor outside that diff is not a fix task: put it under `## Notes` in `docs/REVIEW.md` as advisory, and the summarizer carries it into SUMMARY.md. When a round that queues tasks does so on mutation results alone, cite this rule in REVIEW.md. The rest of the fix loop is unchanged.
 
 ## Output
 

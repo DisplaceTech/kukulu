@@ -44,6 +44,7 @@ Everything the pipeline knows from disk. It is read-only and safe to call at any
 | `artifacts` | Where each of `docs/`'s `SPEC.md`, `PLAN.md`, `PROGRESS.md`, `HANDOFF.md`, `REVIEW.md`, `SUMMARY.md` and `kukulu.json` stands: `"absent"`, `"untracked"` (on disk, not in git), `"modified"` (tracked, with uncommitted changes) or `"tracked"` |
 | `strayArtifacts` | The artifacts that are `"untracked"` while `PLAN.md` is `"absent"`: what an interrupted plan run leaves behind. `[]` otherwise |
 | `lastReviewCommit` | Short sha of the newest `review:` commit between `baseBranch` and `HEAD`; `null` when there is none |
+| `prChecks` | The pull request's CI checks, computed by this tool only (`kukulu_next` never calls `gh`): `null` when there is no `origin` remote, `gh` is unavailable, or the branch has no pull request; otherwise `{ state, failing }`, where `state` is `fail` (any check FAILURE, ERROR, CANCELLED, TIMED_OUT, ACTION_REQUIRED or STARTUP_FAILURE), else `pending` (any PENDING, QUEUED, IN_PROGRESS, WAITING, REQUESTED or EXPECTED), else `pass`, or `none` for an empty list, and `failing` is `[{ name, link }]`. `gh pr checks` runs with a 30 000 ms timeout; an error, a timeout or output that is not JSON gives `unknown: <why>` |
 | `reviewVerdictInFile` | The verdict parsed out of `REVIEW.md`, if one exists |
 | `agentsGenerated` | Role names whose `.claude/agents/kukulu-<role>.md` currently exists |
 | `agentsGeneratedThisSession` | Role names this MCP server process itself wrote. Diagnostic only, for understanding why `kukulu_next` reported `agentFallback` |

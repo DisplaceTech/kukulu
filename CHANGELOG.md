@@ -12,6 +12,7 @@ All notable changes to this plugin. Format follows
 - `scripts/check-site.mjs`, `scripts/check-site-browser.mjs` and `scripts/serve-site.mjs`, with the `check:site`, `check:site:browser` and `site:serve` npm scripts.
 - `kukulu_run_resume({ reason })` clears a halt that is not a round-cap halt with a `chore: run resumed` commit, so no operator edits `.kukulu/state.json` by hand.
 - `kukulu_mutate` runs the active constraints over the mutated tree, reports them as `constraints`, and counts a rule with hits as a kill (`killed: constraint <id> caught the mutation`).
+- `kukulu_status` reports the pull request's CI checks as `prChecks`, and the review-build skill reads them from round 2 on.
 - A `site` CI workflow that runs the static and browser checks.
 
 ### Fixed

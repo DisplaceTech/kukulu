@@ -398,6 +398,8 @@ like(goFlight, /"resume: <reason>".*kukulu_run_resume\(\{ reason \}\)/, "go-flig
   ok(!/\$EDITOR/.test(halts) && !/"halted": null/.test(ops), "operations.md's Halts section names no hand edit of .kukulu/state.json");
 }
 
+like(read("skills/review-build/SKILL.md"), /Round 2 and later\*\*: read `prChecks`/, "review-build reads prChecks from round 2");
+
 let unknownTool = null;
 let retiredMention = null;
 let unknownSkill = null;

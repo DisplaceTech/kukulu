@@ -5,10 +5,11 @@
 import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
+import { spawnSync } from "node:child_process";
 import {
   ROOT, finish, ok, eq, like, isError,
-  mkDir, specRepo, plannedRepo, withServer, useLegacyLayout,
-  writeFile, readFile, setState, markTasks, git, subject, planDoc, progressDoc,
+  mkDir, specRepo, plannedRepo, withServer, useLegacyLayout, mkBareRemote, mkFakeGhBin,
+  writeFile, readFile, hasFile, setState, markTasks, git, subject, planDoc, progressDoc,
 } from "./harness.mjs";
 
 const ALL_DONE = { "P0-01": "x", "P0-02": "x", "P0-03": "x" };
@@ -513,6 +514,57 @@ for (const [config, re, label] of [
   await withServer(repo, async ({ call }) => {
     isError(await call("kukulu_status"), re, `${label} is refused`);
   });
+}
+
+// ---------------------------------------------------------------- prChecks
+
+{
+  const withOrigin = () => {
+    const repo = plannedRepo();
+    git(repo, ["remote", "add", "origin", mkBareRemote()]);
+    return repo;
+  };
+  const ghEnv = (dir) => ({ env: { PATH: `${dir}:${process.env.PATH}` } });
+  // A PATH holding git and nothing else, so no gh on the developer's machine can answer.
+  const noGhPath = () => {
+    const bin = mkDir("kukulu-nogh-");
+    const gitBin = spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).stdout.trim();
+    fs.symlinkSync(gitBin, path.join(bin, "git"));
+    return bin;
+  };
+  const checks = async (repo, opts) => {
+    let out;
+    await withServer(repo, async ({ call }) => { out = (await call("kukulu_status")).prChecks; }, opts);
+    return out;
+  };
+  const ghWith = (list, exit) => {
+    const dir = mkFakeGhBin();
+    writeFile(dir, "pr.json", '{"url":"https://github.invalid/pull/1","state":"OPEN","isDraft":true,"baseRefName":"main"}\n');
+    if (list !== undefined) writeFile(dir, "checks.json", typeof list === "string" ? list : JSON.stringify(list));
+    if (exit !== undefined) writeFile(dir, "checks-exit", String(exit));
+    return dir;
+  };
+
+  eq(await checks(withOrigin(), { env: { PATH: noGhPath() } }), null, "prChecks is null without gh");
+  eq(await checks(plannedRepo(), ghEnv(ghWith([]))), null, "...null without an origin remote");
+  const noPr = mkFakeGhBin();
+  eq(await checks(withOrigin(), ghEnv(noPr)), null, "...null when the branch has no pull request");
+  eq(JSON.stringify(await checks(withOrigin(), ghEnv(ghWith([{ name: "lint", state: "SUCCESS", link: "u1" }, { name: "test", state: "SKIPPED", link: "u2" }])))), JSON.stringify({ state: "pass", failing: [] }), "...pass");
+  const fail = await checks(withOrigin(), ghEnv(ghWith([{ name: "lint", state: "SUCCESS", link: "u1" }, { name: "test", state: "FAILURE", link: "https://ci.invalid/test" }, { name: "slow", state: "PENDING", link: "u3" }], 1)));
+  eq(JSON.stringify(fail), JSON.stringify({ state: "fail", failing: [{ name: "test", link: "https://ci.invalid/test" }] }), "...fail lists the failing check with its link, though gh exited non-zero");
+  eq((await checks(withOrigin(), ghEnv(ghWith([{ name: "slow", state: "IN_PROGRESS", link: "u" }], 8)))).state, "pending", "...pending");
+  eq(JSON.stringify(await checks(withOrigin(), ghEnv(ghWith([])))), JSON.stringify({ state: "none", failing: [] }), "...none for an empty list");
+  like(await checks(withOrigin(), ghEnv(ghWith("no checks reported", 1))), /^unknown: /, "...unknown when gh pr checks prints no JSON");
+
+  const repo = withOrigin();
+  const dir = ghWith([{ name: "t", state: "FAILURE", link: "u" }]);
+  await withServer(repo, async ({ call }) => {
+    const calls = () => (hasFile(dir, "calls.log") ? readFile(dir, "calls.log") : "");
+    await call("kukulu_next");
+    ok(!calls().includes("pr checks"), "kukulu_next does not call gh pr checks");
+    await call("kukulu_status");
+    ok(calls().includes("pr checks"), "...while kukulu_status does");
+  }, ghEnv(dir));
 }
 
 // ---------------------------------------------------------------- plan_commit (S-06)
