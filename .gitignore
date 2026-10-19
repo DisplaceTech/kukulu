@@ -5,3 +5,4 @@ node_modules/
 # Claude Code local session settings
 .claude/settings.local.json
 .kukulu/implement.lock
+.site-shots/
