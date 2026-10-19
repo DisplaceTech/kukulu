@@ -34,7 +34,7 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] P3-03 Hook registration and the no-policy fast path
 - [x] P3-04 The hash chain
 - [x] P3-05 Entry fields from a hook payload
-- [ ] P3-06 The signing key and checkpoint primitives
+- [x] P3-06 The signing key and checkpoint primitives
 - [ ] P3-07 Genesis and sticky mode
 - [ ] P3-08 Checkpoints from the tools, and the log in their commits
 - [ ] P3-09 Path canonicalization and the Bash splitter
@@ -164,3 +164,6 @@ Chain primitives in mcp/cleanroom.mjs: ENTRY_KEYS, KINDS, ZERO_HASH, TARGET_MAX 
 
 ### P3-05 — c8f7b3a
 targetOf, projectContext, entryFields added to mcp/cleanroom.mjs; stage round comes from lock.round else state.round; agent_type matched by suffix planner/implementer/reviewer/summarizer after '-' or ':'. Missing Grep/Glob parts are omitted (SPEC), unlike cleanflate which prints empty ones.
+
+### P3-06 — 18aa77e
+Added generateKey/loadKey/keyFingerprint/CHECKPOINT_KEYS/signCheckpoint/verifyCheckpoint(entry,pub) to mcp/cleanroom.mjs. verifyCheckpoint takes a log entry ({kind:"checkpoint", data:{...,signature}}) and requires data to carry exactly the 8 fields + signature. Key directory created 0700, key 0600. Tests use temp dirs only.
