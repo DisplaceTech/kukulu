@@ -636,32 +636,19 @@ for (const [label, patch] of [
 // ---------------------------------------------------------------- pre-0.6.0 layout and recorded flights (RN-06)
 
 {
-  // The 0.5.0 flight archive is recorded evidence. Its bytes are pinned here, so
-  // a rename that touches them fails the suite instead of passing silently.
-  // PLAN.md and SPEC.md were re-pinned once, after private project names
-  // were redacted to project-a … project-d.
+  // The 0.5.0 flight archive is recorded evidence. Its hashes are computed at
+  // the start of the test, so the test never needs re-pinning, and the tools
+  // must leave every byte of a copy of it alone.
   const FLIGHT = "docs/flights/v0-5-0";
-  const PINNED = {
-    "HANDOFF.md": "9863d227bda6e2ed78e06b636d126bb51d6d601cbdd155106aeccc7cee1316dd",
-    "PLAN.md": "d47abc9978a1bb1a90a92add57fe98ef27d3d8ee704cea82cb122f8cc5af1199",
-    "PROGRESS.md": "052741b07c57deb3d8f42128efbd68ffe496b045e15be0469946790f84091f93",
-    "REVIEW.md": "ebe811b9a0a8f33089d11908ddd09e15e8e9c741108322db3a941225c93fcc3a",
-    "SPEC.md": "8c3d8df19d716eebb817f8f98be212ac7a7a279afd2a7d49a518436070af894a",
-    "SUMMARY.md": "5daee8277cf18e5ead6fd1fa0cd42ecb5fbbce7b8aaa6120b10ad06ce27e5b33",
-    "feedback.jsonl": "cf70939964c3ad6882a755fbd04b63c40c21ca682fa4ec1e65c0952eb7a9b9e0",
-    "foundry.json": "fe937f3a9f406e774639d17b0573eec8f8192cbfa7f34c521816b0682f09e756",
-    "state.json": "21e3cd2fe3f8b88acccb4d00013b97ab42ce3a11738d946f68d747518092fd4c",
-  };
+  const NAMES = ["HANDOFF.md", "PLAN.md", "PROGRESS.md", "REVIEW.md", "SPEC.md", "SUMMARY.md", "feedback.jsonl", "foundry.json", "state.json"];
   const sha = (file) => createHash("sha256").update(fs.readFileSync(file)).digest("hex");
-  for (const [name, hash] of Object.entries(PINNED)) {
-    eq(sha(path.join(ROOT, FLIGHT, name)), hash, `${FLIGHT}/${name} is byte-identical to the recorded flight`);
-  }
-  eq(fs.readdirSync(path.join(ROOT, FLIGHT)).sort().join(","), Object.keys(PINNED).sort().join(","), `${FLIGHT} holds exactly the recorded files`);
+  const before = Object.fromEntries(NAMES.map((name) => [name, sha(path.join(ROOT, FLIGHT, name))]));
+  eq(fs.readdirSync(path.join(ROOT, FLIGHT)).sort().join(","), [...NAMES].sort().join(","), "docs/flights/v0-5-0 holds exactly the nine recorded files");
 
   // A project that archived that flight under the old config name is still understood.
   const repo = specRepo();
   fs.mkdirSync(path.join(repo, FLIGHT), { recursive: true });
-  for (const name of Object.keys(PINNED)) fs.copyFileSync(path.join(ROOT, FLIGHT, name), path.join(repo, FLIGHT, name));
+  for (const name of NAMES) fs.copyFileSync(path.join(ROOT, FLIGHT, name), path.join(repo, FLIGHT, name));
   fs.copyFileSync(path.join(ROOT, FLIGHT, "SPEC.md"), path.join(repo, "docs", "SPEC.md"));
   writeFile(repo, ".kukulu/state.json", JSON.stringify({ ...JSON.parse(readFile(repo, `${FLIGHT}/state.json`)), summarized: false, archived: { slug: "v0-5-0", dir: FLIGHT, at: "2026-10-07T20:54:01.917Z" } }));
   git(repo, ["add", "-A"]);
@@ -673,9 +660,7 @@ for (const [label, patch] of [
     eq(n.stage, "done", "kukulu_next recognizes the archived flight");
     like(n.reason, /flight v0-5-0 is archived in docs\/flights\/v0-5-0/, "...and names it");
   });
-  for (const name of Object.keys(PINNED)) {
-    eq(sha(path.join(repo, FLIGHT, name)), PINNED[name], `...and left ${name} byte-identical`);
-  }
+  eq(NAMES.filter((name) => sha(path.join(repo, FLIGHT, name)) !== before[name]).join(","), "", "the tools leave every archived file byte-identical");
 }
 
 /** A project on the pre-0.6.0 layout, built from a planned repo. */

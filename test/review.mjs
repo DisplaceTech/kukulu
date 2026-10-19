@@ -1091,7 +1091,17 @@ function resignRepo({ extraState = {} } = {}) {
   git(repo, ["mv", "docs/flights/w1-share/kukulu.json", "docs/flights/w1-share/foundry.json"]);
   git(repo, ["commit", "-qm", "chore: pre-0.6.0 archive"]);
   await withServer(repo, async ({ call }) => {
-    isError(await call("kukulu_pr_finalize", { breaking: false }), /merge base with baseBranch 'no-such-base'/, "finalize reads the config of a flight archived as foundry.json");
+    isError(await call("kukulu_pr_finalize", { breaking: false }), /merge base with baseBranch 'no-such-base'/, "kukulu_pr_finalize reads an archive's foundry.json when it has no kukulu.json");
+  });
+  // The same archive naming a base branch that exists: finalize uses it and is not refused.
+  const oldCfg = JSON.parse(readFile(repo, "docs/flights/w1-share/foundry.json"));
+  git(repo, ["branch", "alt-base"]);
+  writeFile(repo, "docs/flights/w1-share/foundry.json", JSON.stringify({ ...oldCfg, baseBranch: "alt-base" }, null, 2) + "\n");
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-qm", "chore: archived config names an existing base"]);
+  await withServer(repo, async ({ call }) => {
+    const r = await call("kukulu_pr_finalize", { breaking: false });
+    ok(!r.error, "...and a foundry.json naming an existing base branch is used, not refused for a missing merge base");
   });
 }
 
