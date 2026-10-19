@@ -4,6 +4,8 @@
 // run inside a hook and inside the test suite (SPEC section 4).
 
 import { createHash } from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 
 /** A policy or log problem the caller reports: the server maps it to a ToolError, the hooks print its message. */
 export class CleanroomError extends Error {
@@ -131,4 +133,147 @@ export function loadPolicy(text) {
 /** SHA-256 of a file's bytes, as lowercase hex; a string is hashed as UTF-8. */
 export function policyHash(bytes) {
   return createHash("sha256").update(bytes).digest("hex");
+}
+
+// ---------------------------------------------------------------- the hash chain
+
+export const ENTRY_KEYS = ["seq", "prev", "at", "kind", "stage", "task", "role", "model", "session", "tool", "target", "decision", "reason"];
+export const KINDS = ["genesis", "allowed", "denied", "human", "gate", "checkpoint", "score", "attest", "resume"];
+export const ZERO_HASH = "0".repeat(64);
+
+// ⚠️ ASSUMPTION: a logged target longer than this is cut; cleanflate's log used the same bound.
+export const TARGET_MAX = 4000;
+
+const LOCK_WAIT_MS = 2000;
+const LOCK_RETRY_MS = 10;
+
+/** A string cut to TARGET_MAX characters; anything else passes through. */
+export const truncateTarget = (s) => (typeof s === "string" && s.length > TARGET_MAX ? s.slice(0, TARGET_MAX) : s);
+
+/**
+ * The bytes a hash covers: `JSON.stringify` of the entry's fields in ENTRY_KEYS
+ * order, then `data` when there is one, and nothing else. A field this format
+ * does not know is refused rather than dropped, because a dropped field would
+ * be a field the hash does not protect.
+ */
+export function canonical(entry) {
+  const known = new Set([...ENTRY_KEYS, "data", "hash"]);
+  for (const key of Object.keys(entry)) {
+    if (!known.has(key)) throw new CleanroomError(`log entry has an unknown field '${key}'; the fields are ${ENTRY_KEYS.join(", ")} and data`);
+  }
+  const ordered = {};
+  for (const key of ENTRY_KEYS) ordered[key] = entry[key] === undefined ? null : entry[key];
+  if (entry.data !== undefined) ordered.data = entry.data;
+  return JSON.stringify(ordered);
+}
+
+/** SHA-256 hex of `prev + "\n" + canonical(entry)`. */
+export const entryHash = (prev, entry) => createHash("sha256").update(`${prev}\n${canonical(entry)}`).digest("hex");
+
+export const logPathFor = (root, env = {}) => env.KUKULU_CLEANROOM_LOG || path.join(root, ".kukulu", "cleanroom", "log.jsonl");
+
+const sleepSync = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+
+function withLock(logPath, fn) {
+  const lock = `${logPath}.lock`;
+  const deadline = Date.now() + LOCK_WAIT_MS;
+  for (;;) {
+    try {
+      fs.mkdirSync(lock);
+      break;
+    } catch (e) {
+      if (e.code !== "EEXIST") throw new CleanroomError(`cannot take the clean-room log lock ${lock}: ${e.message}`);
+      if (Date.now() >= deadline) {
+        throw new CleanroomError(`the clean-room log lock ${lock} has been held for over ${LOCK_WAIT_MS / 1000} seconds; if no kukulu process is writing the log, remove that directory and try again`);
+      }
+      sleepSync(LOCK_RETRY_MS);
+    }
+  }
+  try {
+    return fn();
+  } finally {
+    fs.rmSync(lock, { recursive: true, force: true });
+  }
+}
+
+const NON_CALLER_FIELDS = new Set(["seq", "prev", "at", "hash"]);
+
+/**
+ * Append one entry to the log under a directory lock, so the hook scripts and
+ * the server can write at the same time without forking the chain. The caller
+ * supplies the descriptive fields; `seq`, `prev`, `at` and `hash` are ours.
+ */
+export function appendEntry(logPath, fields) {
+  for (const key of Object.keys(fields)) {
+    if (NON_CALLER_FIELDS.has(key)) throw new CleanroomError(`appendEntry fills '${key}' itself; do not pass it`);
+  }
+  if (!KINDS.includes(fields.kind)) throw new CleanroomError(`log entry kind must be one of ${KINDS.join(", ")} (got ${JSON.stringify(fields.kind)})`);
+  fs.mkdirSync(path.dirname(logPath), { recursive: true });
+  return withLock(logPath, () => {
+    let prev = ZERO_HASH;
+    let seq = 1;
+    if (fs.existsSync(logPath)) {
+      const last = fs.readFileSync(logPath, "utf8").split("\n").filter(Boolean).pop();
+      if (last) {
+        let parsed;
+        try {
+          parsed = JSON.parse(last);
+        } catch {
+          throw new CleanroomError(`the last line of ${logPath} is not JSON; the chain is broken, so nothing more can be appended`);
+        }
+        prev = parsed.hash;
+        seq = parsed.seq + 1;
+      }
+    }
+    const entry = { seq, prev, at: new Date().toISOString() };
+    for (const key of ENTRY_KEYS) if (!(key in entry)) entry[key] = fields[key] === undefined ? null : key === "target" ? truncateTarget(fields[key]) : fields[key];
+    if (fields.data !== undefined) entry.data = fields.data;
+    for (const key of Object.keys(fields)) {
+      if (!ENTRY_KEYS.includes(key) && key !== "data") throw new CleanroomError(`log entry has an unknown field '${key}'; the fields are ${ENTRY_KEYS.join(", ")} and data`);
+    }
+    const stored = { ...entry, hash: entryHash(prev, entry) };
+    const fd = fs.openSync(logPath, "a");
+    try {
+      fs.writeSync(fd, `${JSON.stringify(stored)}\n`);
+    } finally {
+      fs.closeSync(fd);
+    }
+    return stored;
+  });
+}
+
+/** The log's entries in order; an absent file is an empty log. A line that is not JSON is reported by verifyChain, not here. */
+export function readEntries(logPath) {
+  if (!fs.existsSync(logPath)) return [];
+  return fs.readFileSync(logPath, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line));
+}
+
+/**
+ * Recompute the whole chain from its lines: every line parses, carries exactly
+ * the format's keys in order, numbers `seq` densely from 1, links `prev` to the
+ * line before and hashes to its own `hash`. `firstBad` names the first line that
+ * fails and why.
+ */
+export function verifyChain(lines) {
+  const entries = [];
+  let tip = ZERO_HASH;
+  for (let i = 0; i < lines.length; i++) {
+    const bad = (reason, seq = null) => ({ ok: false, entries, tip, firstBad: { line: i + 1, seq, reason } });
+    let entry;
+    try {
+      entry = JSON.parse(lines[i]);
+    } catch {
+      return bad("the line is not valid JSON");
+    }
+    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) return bad("the line is not a JSON object");
+    const want = [...ENTRY_KEYS, ...("data" in entry ? ["data"] : []), "hash"];
+    if (Object.keys(entry).join(",") !== want.join(",")) return bad(`the keys are not exactly ${want.join(", ")}, in that order`, entry.seq ?? null);
+    if (entry.seq !== i + 1) return bad(`seq is ${JSON.stringify(entry.seq)} but this is entry ${i + 1}; an entry was dropped, added or reordered`, entry.seq);
+    if (entry.prev !== tip) return bad("prev does not match the previous entry's hash", entry.seq);
+    const { hash, ...rest } = entry;
+    if (entryHash(entry.prev, rest) !== hash) return bad("the hash does not match the entry's content; the entry was edited", entry.seq);
+    entries.push(entry);
+    tip = hash;
+  }
+  return { ok: true, entries, tip, firstBad: null };
 }

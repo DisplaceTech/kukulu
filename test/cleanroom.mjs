@@ -7,8 +7,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { finish, ok, eq, like, isError, ROOT, plannedRepo, withServer, runHook, mkDir, writeFile } from "./harness.mjs";
-import { spawnSync } from "node:child_process";
-import { CleanroomError, loadPolicy, policyHash } from "../mcp/cleanroom.mjs";
+import { spawn, spawnSync } from "node:child_process";
+import {
+  CleanroomError, loadPolicy, policyHash,
+  ENTRY_KEYS, KINDS, ZERO_HASH, TARGET_MAX, truncateTarget, canonical, entryHash, appendEntry, readEntries, verifyChain, logPathFor,
+} from "../mcp/cleanroom.mjs";
 
 const EXAMPLE = fs.readFileSync(path.join(ROOT, "templates", "cleanroom.example.json"), "utf8");
 
@@ -167,6 +170,113 @@ const LOGGER = path.join(ROOT, "scripts", "cleanroom-log.mjs");
   eq(runHook(GUARD, { cwd: repo }, env).status, 2, "...and its presence turns the mode on");
   writeFile(repo, "docs/kukulu.json", "{ not json");
   eq(runHook(GUARD, { cwd: repo }, env).status, 2, "an unparseable docs/kukulu.json means the default policy path");
+}
+
+// ---------------------------------------------------------------- the hash chain
+
+const tmpLog = () => path.join(mkDir("kukulu-chain-"), ".kukulu", "cleanroom", "log.jsonl");
+const linesOf = (log) => fs.readFileSync(log, "utf8").split("\n").filter(Boolean);
+const call = (n) => ({ kind: "allowed", stage: "implement", task: "P0-01", role: "session", tool: "Read", target: `/x/${n}`, decision: "allowed" });
+
+{
+  const log = tmpLog();
+  const first = appendEntry(log, call(1));
+  eq(first.seq, 1, "appendEntry writes seq 1");
+  eq(first.prev, ZERO_HASH, "...with a 64-zero prev");
+  eq(ZERO_HASH.length, 64, "ZERO_HASH is 64 characters");
+  like(first.at, /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/, "...a millisecond UTC timestamp");
+  eq(first.model, null, "...and every field the caller left out is null");
+  const second = appendEntry(log, { ...call(2), data: { k: 1 } });
+  eq(second.seq + "|" + second.prev, `2|${first.hash}`, "appendEntry links the second entry to the first");
+  eq(Object.keys(second).join(","), [...ENTRY_KEYS, "data", "hash"].join(","), "a stored entry has the format's keys in order, data before hash");
+  eq(entryHash(second.prev, (({ hash, ...r }) => r)(second)), second.hash, "the hash is SHA-256 of prev, a newline and the canonical entry");
+  eq(readEntries(log).length, 2, "readEntries returns both");
+  eq(readEntries(path.join(path.dirname(log), "absent.jsonl")).length, 0, "...and none for an absent file");
+  eq(KINDS.length, 9, "there are nine entry kinds");
+  eq(logPathFor("/p", {}), path.join("/p", ".kukulu", "cleanroom", "log.jsonl"), "the log lives under .kukulu/cleanroom/");
+  eq(logPathFor("/p", { KUKULU_CLEANROOM_LOG: "/tmp/x.jsonl" }), "/tmp/x.jsonl", "...unless KUKULU_CLEANROOM_LOG says otherwise");
+  let refused = null;
+  try { appendEntry(log, { kind: "bogus" }); } catch (e) { refused = e; }
+  ok(refused instanceof CleanroomError && /kind must be one of/.test(refused.message), "appendEntry refuses an unknown kind");
+  try { appendEntry(log, { ...call(3), seq: 9 }); refused = null; } catch (e) { refused = e; }
+  like(refused?.message, /fills 'seq' itself/, "...and a caller-supplied seq");
+  try { appendEntry(log, { ...call(3), extra: 1 }); refused = null; } catch (e) { refused = e; }
+  like(refused?.message, /unknown field 'extra'/, "...and an unknown field");
+  eq(readEntries(log).length, 2, "...and a refusal writes nothing");
+}
+
+{
+  const body = { seq: 1, prev: ZERO_HASH, at: "2026-01-01T00:00:00.000Z", kind: "allowed" };
+  const shuffled = { kind: "allowed", at: body.at, prev: body.prev, seq: 1, data: { b: 1, a: 2 } };
+  const c = canonical(shuffled);
+  ok(c.indexOf('"seq"') < c.indexOf('"prev"') && c.indexOf('"prev"') < c.indexOf('"at"') && c.indexOf('"kind"') < c.indexOf('"stage"') && c.indexOf('"reason"') < c.indexOf('"data"'), "canonical orders the keys");
+  ok(!c.includes(" ") && c.includes('"stage":null'), "...with no whitespace and null for a missing field");
+  let refused = null;
+  try { canonical({ ...body, nope: 1 }); } catch (e) { refused = e; }
+  like(refused?.message, /unknown field 'nope'/, "...and refuses an unknown field");
+}
+
+{
+  const log = tmpLog();
+  for (let i = 1; i <= 5; i++) appendEntry(log, call(i));
+  const lines = linesOf(log);
+  const v = verifyChain(lines);
+  eq(v.ok + "|" + v.entries.length + "|" + (v.tip === JSON.parse(lines[4]).hash) + "|" + v.firstBad, "true|5|true|null", "verifyChain accepts an intact chain");
+  eq(verifyChain([]).ok, true, "...and an empty one");
+  const edited = lines.slice();
+  edited[2] = edited[2].replace("/x/3", "/x/evil");
+  const t = verifyChain(edited);
+  eq(t.ok + "|" + t.firstBad.line + "|" + t.firstBad.seq, "false|3|3", "verifyChain names a tampered middle line");
+  like(t.firstBad.reason, /edited/, "...and says the entry was edited");
+  const swapped = lines.slice();
+  [swapped[1], swapped[2]] = [swapped[2], swapped[1]];
+  eq(verifyChain(swapped).firstBad.line, 2, "verifyChain names a reordered line");
+  const dropped = lines.slice(0, 2).concat(lines.slice(3));
+  const d = verifyChain(dropped);
+  eq(d.ok + "|" + d.firstBad.line, "false|3", "verifyChain names a dropped line");
+  like(verifyChain(["{nope"]).firstBad.reason, /not valid JSON/, "...a line that is not JSON");
+  const reKeyed = JSON.stringify({ hash: JSON.parse(lines[0]).hash, ...JSON.parse(lines[0]) });
+  like(verifyChain([reKeyed]).firstBad.reason, /keys are not exactly/, "...and keys out of order");
+  eq(verifyChain(lines.slice(1)).firstBad.line, 1, "...and a chain that does not start at seq 1");
+}
+
+{
+  // Two processes appending at once leave one dense chain.
+  const log = tmpLog();
+  const mod = path.join(ROOT, "mcp", "cleanroom.mjs");
+  const script = `import { appendEntry } from ${JSON.stringify("file://" + mod)}; for (let i = 0; i < 50; i++) appendEntry(${JSON.stringify(log)}, { kind: "allowed", role: process.argv[1], target: String(i) });`;
+  const runChild = (name) => new Promise((resolve) => {
+    const p = spawn(process.execPath, ["--input-type=module", "-e", script, name], { stdio: ["ignore", "ignore", "inherit"] });
+    p.on("exit", resolve);
+  });
+  const codes = await Promise.all([runChild("a"), runChild("b")]);
+  eq(codes.join(","), "0,0", "two child processes appended without error");
+  const v = verifyChain(linesOf(log));
+  eq(v.ok + "|" + v.entries.length, "true|100", "two processes appending 50 entries each leave one dense chain");
+  eq(["a", "b"].map((r) => v.entries.filter((e) => e.role === r).length).join(","), "50,50", "...with every entry present");
+  ok(!fs.existsSync(log + ".lock"), "...and no lock left behind");
+}
+
+{
+  const log = tmpLog();
+  fs.mkdirSync(path.dirname(log), { recursive: true });
+  fs.mkdirSync(log + ".lock");
+  const started = Date.now();
+  let refused = null;
+  try { appendEntry(log, call(1)); } catch (e) { refused = e; }
+  const waited = Date.now() - started;
+  ok(refused instanceof CleanroomError && refused.message.includes(log + ".lock"), "appendEntry gives up on a lock held over two seconds, naming the lock");
+  ok(waited >= 1900 && waited < 6000, `...after about two seconds (${waited} ms)`);
+  ok(!fs.existsSync(log), "...and writes nothing");
+  fs.rmdirSync(log + ".lock");
+  eq(appendEntry(log, call(1)).seq, 1, "...and works again once the lock is gone");
+}
+
+{
+  eq(truncateTarget("x".repeat(TARGET_MAX + 10)).length, TARGET_MAX, "targets are truncated to TARGET_MAX");
+  eq(truncateTarget("short"), "short", "...and a short one is untouched");
+  const log = tmpLog();
+  eq(appendEntry(log, { kind: "allowed", target: "y".repeat(TARGET_MAX * 2) }).target.length, TARGET_MAX, "appendEntry truncates the logged target");
 }
 
 finish();

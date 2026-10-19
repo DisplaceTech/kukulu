@@ -233,6 +233,7 @@ Environment variables:
 | `KUKULU_GUARD_CAP` | `60` | Re-blocks since the last task state change before the guard gives up; `docs/kukulu.json`'s `guardCap` wins over this when set |
 | `KUKULU_CONFIG` | `~/.config/kukulu/config.json` (or `$XDG_CONFIG_HOME/kukulu/config.json`) | Path to the global routing config |
 | `KUKULU_CLEANROOM_KEY` | `cleanroom.signingKey` | Path of the checkpoint-signing key; wins over the config key |
+| `KUKULU_CLEANROOM_LOG` | `.kukulu/cleanroom/log.jsonl` | Where the clean-room hash chain is written; for tests and the guard's self-test only |
 | `KUKULU_PROFILE` | the global file's own `"profile"` key, if any | Which profile in the global file to apply; wins over the file's own choice |
 
 Flights archived before 0.6.0 keep `foundry.json` in their archive directory, and finalizing one still reads it; an archive is a record and is never rewritten.
