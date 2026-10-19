@@ -39,7 +39,7 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] P3-08 Checkpoints from the tools, and the log in their commits
 - [x] P3-09 Path canonicalization and the Bash splitter
 - [x] P3-10 evaluate: the guard's rules
-- [ ] P3-11 The guard hook and its self-test
+- [x] P3-11 The guard hook and its self-test
 - [ ] P3-12 The logger hook
 - [ ] P3-13 Tune the hook fast path and TARGET_MAX
 - [ ] P3-14 Self-protection: the always-protected set
@@ -179,3 +179,6 @@ Added splitSegments, shellWords, commandWord ({word (basename), raw, args}), tok
 
 ### P3-10 — 286a824
 evaluate(policy, hookInput, {root, home, progressText, protected?}) + lockdownActive + NETWORK_COMMANDS/READ_FAMILY/WRITE_FAMILY in mcp/cleanroom.mjs; test/fixtures/guard-cases.json (70 cases, recorded calls with __ROOT__ substitution). RESULT for the eight recorded cleanflate false positives under the template: #2 (16:11:51), #3 (16:11:56), #4 (17:00:19), #5 (17:21:39) are allowed; #1 (14:40:33 sed expression), #6 (17:23:20 grep -v regex), #7 (18:13:45) and #8 (20:53:01) are still DENIED by rule 6, read-family "forbidden word in path argument": a token with a slash and a denied word (zlib in a sed or grep regex) is path-like and, resolved against cwd, lies outside allow.paths. Cases keep their actual decision; rules unchanged. The real attempt (find / -path libz-sys) is denied as expected. WebSearch with the template is denied by deny.tools (rule 1) before the network rule. WebFetch obeys deny.network as well as the URL list. Tool-level word reasons read "forbidden word in <path|pattern|glob>: <value>".
+
+### P3-11 — b043e99
+Guard hook implemented: fast path, then dynamic import of ../mcp/cleanroom.mjs, evaluate, deny() = log denied entry (if possible) + stderr line + exit 2; every exception becomes "guard internal error: <message>". --self-test <policy> sets KUKULU_CLEANROOM_LOG to a temp file, runs the 70 shipped cases (template resolves to the plugin's template) plus each pattern fixture of the given policy via a one-pattern policy; template run prints "guard self-test: ok (74 cases)". extraVerify self-test commands (from P3-11) are active from this task. The P3-03 stub tests were rewritten around a denied Read probe.
