@@ -269,7 +269,7 @@ for (const round of [0, 1, 5]) {
   await withServer(repo, async ({ call }) => {
     const n = await call("kukulu_next");
     eq(n.stage, "halt", "a halted state stays halted");
-    eq(n.reason, "stopped by hand", "the recorded halt reason is passed through");
+    eq(n.reason, `stopped by hand — once the cause is fixed, call kukulu_run_resume({ reason: "<what you fixed>" })`, "the recorded halt reason is passed through, followed by the resume instruction");
   });
 }
 

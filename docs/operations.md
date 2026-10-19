@@ -96,7 +96,7 @@ To continue anyway, make the call the halt message names: `kukulu_flight_options
 
 **An operator-level problem.** `kukulu_run_halt` records a reason when the implementer hits something no task-level retry fixes: a signing agent that died, a full disk, a `verify` command that cannot even run, a vanished base branch. Nothing is reset or cleaned up, so you can read the branch exactly as the run left it.
 
-To continue once the problem is fixed: set `"halted": null` in `.kukulu/state.json`, commit it, and re-run the flight.
+To continue once the problem is fixed, call `kukulu_run_resume({ reason: "<what you fixed>" })` (or tell `/kukulu:go-flight` `resume: <what you fixed>`). It clears the halt and commits `chore: run resumed`; it refuses while the tree is dirty or a stream worktree exists. A stream-merge halt is cleared the same way, after you merge or delete the stream's branch.
 
 **A stream merge conflict.** When a parallel stream's branch conflicts on merge, `kukulu_stream_finish` aborts the merge, keeps the stream's branch and worktree, and halts with the conflicting paths in the reason. Kūkulu cannot guess a merge. See [Parallel streams](#parallel-streams) for the recovery.
 
@@ -104,7 +104,7 @@ To continue once the problem is fixed: set `"halted": null` in `.kukulu/state.js
 
 | Symptom | What it means | What to do |
 |---|---|---|
-| Controller stops immediately with `halt` | Read the `reason`: missing spec, or `halted` in state | Fix the named cause, re-run |
+| Controller stops immediately with `halt` | Read the `reason`: missing spec, or `halted` in state | Fix the named cause; for a halt other than a round cap, call `kukulu_run_resume`, then re-run |
 | The controller session itself gets blocked from stopping | Should not happen after 0.3.0: the guard only considers a stop it can attribute to the implementer | Check that `hooks/hooks.json`'s `SubagentStop` matcher is intact and that no project override replaced it; otherwise, file a bug |
 | Implementer stops with tasks open mid-task | The guard blocked and the agent still stopped, or the per-task stall cap tripped | Check `kukulu_status`'s `lockCounter` against the effective cap (`guardCap`, else `KUKULU_GUARD_CAP`, else 60); at the cap, something is wedged on one task: read its log and block it by hand |
 | Every task blocks with the same error | The plan assumes something that is not there | Stop the flight. Fix `SPEC.md` and re-plan; do not let it grind through 40 blocked tasks |
@@ -117,7 +117,7 @@ To continue once the problem is fixed: set `"halted": null` in `.kukulu/state.js
 | `Agent` call fails with `Agent type 'kukulu-<role>' not found` | Same cause as above, hit mid-flight instead of at the start | Same fix: relaunch and re-run |
 | Flight stops immediately with a routing config error | The global file, a profile, or `docs/kukulu.json`'s `roles`/`permissionMode` is malformed | Run `kukulu_config_show` to see what is wrong and where; fix it and re-run |
 | `kukulu_run_start` refuses with a signing message | `policies.signing` is `"required"` and either signing is not configured or a real signed commit failed | Fix the signing agent, or set `policies.signing` to `"off"` in `docs/kukulu.json` |
-| Flight halts with a reason naming a dead tool or agent | `kukulu_run_halt` was called | Read the reason, fix the problem, clear `halted` in `.kukulu/state.json`, re-run |
+| Flight halts with a reason naming a dead tool or agent | `kukulu_run_halt` was called | Read the reason, fix the problem, call `kukulu_run_resume({ reason })`, re-run |
 | Flight halts with "non-converging" or "hard cap" in the reason | Review findings stopped shrinking for `maxRounds` rounds, or the round count reached `maxRoundsHard` | Read `kukulu_status`'s `state.rounds` for the trail of counts; if the reviewer is still converging, raise `maxRounds`/`maxRoundsHard`; otherwise a human needs to look at why findings keep recurring |
 | `kukulu_review_submit` refuses over the `Round:` line | `docs/REVIEW.md`'s `Round:` line is missing or does not equal `reviewRound` | The error names the expected value; `kukulu_status`'s `reviewRound` always has it too |
 | `kukulu_next` keeps handing out the same stream | A stream's implementer stops before `kukulu_stream_finish` (the guard cap, a crash, a refused call) | Expected: `kukulu_run_start({ stream })` resumes its worktree. If it never makes progress, read that stream's task log; see [Parallel streams](#parallel-streams) to abandon it |
@@ -330,8 +330,7 @@ ls .kukulu/worktrees/
 git merge --no-ff <build-branch>--<stream>     # resolve the conflicts, then commit
 git worktree remove --force .kukulu/worktrees/<stream>
 git branch -d <build-branch>--<stream>
-$EDITOR .kukulu/state.json                    # set "halted": null
-git commit -am "chore: stream <stream> merged by hand"
+# then call kukulu_run_resume({ reason: "merged stream <stream> by hand" }), which commits chore: run resumed
 ```
 
 Then re-run the flight; the stream's tasks are already done, so it goes on to the next wave or the handoff.

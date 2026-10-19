@@ -1644,7 +1644,7 @@ function next() {
   };
 
   if (!s.specPresent) return stage("halt", "docs/SPEC.md is missing; nothing to build from");
-  if (st.halted) return stage("halt", st.halted);
+  if (st.halted) return stage("halt", st.haltCap || st.halted.includes("kukulu_run_resume") ? st.halted : `${st.halted} — ${RESUME_HINT}`);
   if (st.awaitingSigning) {
     const mb = git(["merge-base", c.baseBranch, "HEAD"], { allowFail: true }).out || "<merge-base>";
     return stage("done", `awaiting signing: ${st.awaitingSigning.unsigned} unsigned commit(s), oldest ${String(st.awaitingSigning.first).slice(0, 7)}. ${nextSteps(mb)}`);
@@ -1907,7 +1907,7 @@ function streamFinish({ stream } = {}) {
     // conflict paths, and git's own message is the only useful explanation.
     const gitSays = (merge.err || merge.out || "unknown error").split("\n").filter(Boolean).slice(0, 4).join(" ").replace(/\s+/g, " ");
     const what = conflicts.length ? `conflicted in ${conflicts.join(", ")}` : `failed: ${gitSays}`;
-    const halted = `merging stream '${stream}' (branch ${streamBranch}) into ${g.branch} ${what}; the stream's branch and worktree ${rel(dir)} are kept. A human must resolve it: from the main checkout run \`git merge --no-ff ${streamBranch}\`, fix what it reports and commit, then \`git worktree remove --force ${rel(dir)}\` and clear 'halted' in ${rel(P.state)}.`;
+    const halted = `merging stream '${stream}' (branch ${streamBranch}) into ${g.branch} ${what}; the stream's branch and worktree ${rel(dir)} are kept. A human must resolve it: from the main checkout run \`git merge --no-ff ${streamBranch}\`, fix what it reports and commit, then \`git worktree remove --force ${rel(dir)}\` and call kukulu_run_resume({ reason: "merged stream ${stream} by hand" }).`;
     const cur = loadState();
     cur.halted = halted;
     delete cur.haltCap;
@@ -2655,8 +2655,10 @@ function runHalt({ reason }) {
   });
   const g = gitFacts();
   const dirty = git(["status", "--porcelain"], { allowFail: true }).out !== "";
-  return { halted: reason, branch: g.branch, head: g.head, commit, dirty };
+  return { halted: reason, branch: g.branch, head: g.head, commit, dirty, next: RESUME_HINT };
 }
+
+const RESUME_HINT = 'once the cause is fixed, call kukulu_run_resume({ reason: "<what you fixed>" })';
 
 /**
  * Clear a halt that is not a round-cap halt, with a commit, so no operator

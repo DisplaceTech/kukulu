@@ -499,7 +499,7 @@ const UI = [["P1-03", "src/ui/a.txt", "u\n"], ["P1-04", "src/ui/b.txt", "v\n"]];
     const second = await call("kukulu_stream_finish", { stream: "ui" });
     eq(second.merged, false, "the second conflicts");
     like(second.halted, /merging stream 'ui' .* conflicted in shared\.txt/, "the halt reason names the stream and the conflicting path");
-    like(second.halted, /git merge --no-ff .*--ui.*git worktree remove --force \.kukulu\/worktrees\/ui.*clear 'halted'/, "and the manual steps");
+    like(second.halted, /git merge --no-ff .*--ui.*git worktree remove --force \.kukulu\/worktrees\/ui.*kukulu_run_resume/, "a stream-merge halt names kukulu_run_resume, after the manual steps");
     eq(second.conflicts.join(","), "shared.txt", "the conflicting paths are returned");
     eq(git(repo, ["status", "--porcelain", "--untracked-files=no"]), "", "the merge is aborted: the main checkout is clean");
     ok(!hasFile(repo, ".git/MERGE_HEAD"), "no merge is left in progress");

@@ -863,6 +863,7 @@ for (const [bad, re] of [
     isError(await call("kukulu_run_halt", {}), /reason is required/, "run_halt needs a reason");
 
     const r = await call("kukulu_run_halt", { reason: "signing agent died: connection refused" });
+    like(r.next, /kukulu_run_resume\(\{ reason: "<what you fixed>" \}\)/, "kukulu_run_halt's result names kukulu_run_resume");
     eq(r.halted, "signing agent died: connection refused", "run_halt reports the reason it recorded");
     ok(!hasFile(repo, ".kukulu/implement.lock"), "run_halt disarms the lock");
     eq(JSON.parse(readFile(repo, ".kukulu/state.json")).halted, "signing agent died: connection refused", "the reason is persisted in state");
@@ -881,7 +882,7 @@ for (const [bad, re] of [
 
     const n = await call("kukulu_next");
     eq(n.stage, "halt", "the flight now halts");
-    eq(n.reason, "signing agent died: connection refused", "...with the recorded reason");
+    like(n.reason, /^signing agent died: connection refused — once the cause is fixed, call kukulu_run_resume/, "...with the recorded reason, and kukulu_next's reason for an operator halt names kukulu_run_resume");
   });
 }
 

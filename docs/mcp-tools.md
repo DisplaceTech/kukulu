@@ -314,11 +314,11 @@ Stop the flight for an operator-level reason the implementer cannot resolve itse
 
 **Does:** records `reason` as `state.halted`, deletes the lock, and commits `.kukulu/state.json` and `docs/PROGRESS.md` together as `chore: run halted` if either changed. It never resets or cleans the working tree; the tree is left as it was when the run stopped.
 
-**Returns:** `{ halted, branch, head, commit, dirty }`. `dirty` is true when anything is left uncommitted, which after a halt is expected, not an error.
+**Returns:** `{ halted, branch, head, commit, dirty, next }`. `next` is the instruction to call `kukulu_run_resume` once the cause is fixed. `dirty` is true when anything is left uncommitted, which after a halt is expected, not an error.
 
 **Refuses when:** `reason` is missing.
 
-The next `kukulu_next` call returns `{ stage: "halt", reason }` with the same reason. Clearing it is the same hand edit as any other halt; see [operations.md](./operations.md#halts).
+The next `kukulu_next` call returns `{ stage: "halt", reason }` with the same reason. Once the cause is fixed, clear it with [`kukulu_run_resume`](#kukulu_run_resume); the `halt` reason from `kukulu_next` ends with that instruction. See [operations.md](./operations.md#halts).
 
 ---
 

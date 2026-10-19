@@ -361,6 +361,13 @@ for (const name of skillNames) {
 }
 ok(!/FOUNDRY_/.test(read("docs/operations.md")), "operations.md no longer documents the FOUNDRY_* fallbacks");
 
+like(goFlight, /"resume: <reason>".*kukulu_run_resume\(\{ reason \}\)/, "go-flight maps resume: <reason> to kukulu_run_resume");
+{
+  const ops = read("docs/operations.md");
+  const halts = ops.slice(ops.indexOf("## Halts"), ops.indexOf("## Halts") + ops.slice(ops.indexOf("## Halts") + 3).indexOf("\n## ") + 3);
+  ok(!/\$EDITOR/.test(halts) && !/"halted": null/.test(ops), "operations.md's Halts section names no hand edit of .kukulu/state.json");
+}
+
 let unknownTool = null;
 let retiredMention = null;
 let unknownSkill = null;

@@ -17,6 +17,7 @@ Whatever text follows `/kukulu:go-flight` (or the request that named you) is the
 
 - "max review rounds N", "maximum review depth of N rounds", or any phrasing that plainly asks for at most N review rounds: `{ maxRounds: N, maxRoundsHard: N }`.
 - "continue, allow N rounds", or any phrasing that plainly asks to continue a halted flight with N rounds: when `kukulu_next` returns `halt` and its reason names `resume: true`, call `kukulu_flight_options({ maxRounds: N, maxRoundsHard: N, resume: true })` once, print its result, then go back to step 1 of the loop. If it refuses, print the refusal and stop.
+- "resume: <reason>" (or "continue: <reason>" when the halt reason does not name `resume: true`), or any phrasing that plainly says the cause of a halt is fixed: call `kukulu_run_resume({ reason })` once with that reason, print its result, then go back to step 1 of the loop. If it refuses, print the refusal and stop.
 - "signing is unlocked, finish it", or plainly the same request: call `kukulu_pr_finalize({ resign: true })` once, print its result, and stop. This is the only way you ever call `kukulu_pr_finalize`, and the only `resign: true` anywhere in the pipeline: a human asks for it after unlocking the signing agent, you never decide it yourself.
 - `flight=<slug>`: when `kukulu_next` returns `plan`, append one space and the sentence `Flight slug: <slug>.` to its prompt; otherwise pass prompts verbatim, as everywhere else.
 
