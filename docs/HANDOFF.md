@@ -57,3 +57,13 @@ Review-fix round: 3 tasks (R1-01..R1-03), all done, none blocked. Head at handof
 - Hand check: none. Old `/tmp/check-site-browser-*` directories from before this fix may remain; the count no longer grows.
 
 Codebase notes (round 1): the site CSP blocks style attributes, which Chrome reports as a console error; `document.fonts.check` does return false when the latin-ext face URL is missing.
+
+## Round 2
+
+Review-fix round: 2 tasks (R2-01, R2-02), both done, none blocked.
+
+- R2-01: check-site-browser.mjs self-test gains 'a console.error is caught', 'an uncaught exception is caught' and 'a page with no copy buttons is caught' (9 cases). withBrowser now hands its callback the Chrome pid; the profile case also asserts the process exited (kill 0 gives ESRCH) and the profile is still absent after PROFILE_SETTLE_MS.
+- R2-02: serve-site.mjs self-test gains three checks (29 total): SITE_PORT above 65535, empty SITE_PORT, and the siteDir 404.html. Interpretation: the over-range value is `String(0xffff + 1)`, since constraint no-hardcoded-site-tunables forbids the literal 65536.
+- Hand check: none. Reviewer re-runs kukulu_mutate as listed in the tasks.
+
+Codebase notes (round 2): none.
