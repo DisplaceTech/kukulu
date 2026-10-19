@@ -46,7 +46,7 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] P3-15 Clean-room commit trailers
 - [x] P3-16 The gate: checks 1 to 6
 - [x] P3-17 Gate liveness
-- [ ] P3-18 Human entries and kukulu_cleanroom_record
+- [x] P3-18 Human entries and kukulu_cleanroom_record
 - [ ] P3-19 Clean-room status, prompts, skills and docs/cleanroom.md
 - [ ] P3-20 An end-to-end clean-room flight in the drive suite
 - [ ] P3-21 Phase 3 end: push and record the manual check
@@ -200,3 +200,6 @@ runGate/requireGate in the server: 6 checks (mode, policy, guard incl. hooks.jso
 
 ### P3-17 — c49125d
 Check 7 liveness added (checks:7). Harness logCall(repo). In test/cleanroom.mjs the post-genesis flows use live(repo, fn), a withServer wrapper that logs a call before each tool call (a few places that compare log bytes use raw withServer plus logCall). Lesson: a gate refusal also counts as an isError, so a commit-failure test must prove the failure is the commit's, not the gate's (the failed-progress-commit test did not at first).
+
+### P3-18 — 247df17
+New tool kukulu_cleanroom_record (23 tools; after flight_options; go-flight allowed-tools both spellings, mapping for record:/record intervention:/record verdict:, no agent). Logger now logs UserPromptSubmit as human/operator (target truncated). humanEntry() helper appends the operator entry in flight_options, run_resume and the resign path (committed before the rebase in its own commit). Interpretation: record is not behind the gate; refused before genesis. Review test for resign added to test/review.mjs using resignRepo with a seeded genesis. Docs/README/CHANGELOG updated.
