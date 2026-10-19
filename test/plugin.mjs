@@ -174,6 +174,14 @@ for (const name of ["plan-build", "implement"]) {
 like(read("docs/operations.md"), /^## Running flight after flight$/m, "operations.md explains running flight after flight");
 like(read("docs/operations.md"), /^## Signing$/m, "operations.md has a signing section");
 like(read("skills/pull-feedback/SKILL.md"), /docs\/flights\/\*\/feedback\.jsonl/, "pull-feedback reads archived flight logs too");
+{
+  const pull = read("skills/pull-feedback/SKILL.md");
+  ok(!/git commit|Commit the new/.test(pull) && /Do not commit/.test(pull), "pull-feedback never runs git commit");
+  like(pull, /docs\/feedback\/\.private-names/, "...names .private-names");
+  like(pull, /CONTRIBUTING\.md#flight-feedback/, "...links CONTRIBUTING.md#flight-feedback, a tracked target");
+  ok(trackedFiles(ROOT).includes("CONTRIBUTING.md"), "...and CONTRIBUTING.md is tracked");
+  like(read("CONTRIBUTING.md"), /^## Flight feedback$/m, "CONTRIBUTING.md has a Flight feedback section");
+}
 like(read("skills/pull-feedback/SKILL.md"), /how many items came from each/, "...and its header names every source log with its count");
 
 {

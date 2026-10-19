@@ -89,6 +89,16 @@ Every suite creates its own throwaway repos under the system temp directory and 
 - Diagrams are Mermaid. Box-drawing characters are only allowed in a ` ```text ` fence (the repo-layout tree), and the `plugin` suite enforces it.
 - Markdown prose is not hard-wrapped: each paragraph and list item is one line, and the renderer wraps it. `.markdownlint.yaml` turns the line-length rule off for this reason.
 
+## Flight feedback
+
+Flight feedback is how a real flight's friction reaches the next release. During a flight, `kukulu_feedback_log` appends one JSON line to `.kukulu/feedback.jsonl` with `at`, `stage`, `round`, `category`, `message` and `source`, and commits it. A maintainer runs `/kukulu:pull-feedback` against that project's checkout, which turns its log, and every `docs/flights/*/feedback.jsonl` an archive moved, into a file in `docs/feedback/` of this repository, deduping by exact `at`. The pulled files are gitignored and stay on the maintainer's machine.
+
+- One file per flight, named `<date>-<project>.md`, with items `F-01`, `F-02`, … that are never renumbered.
+- Each item says what happened, why it cost time, and the workaround used.
+- The header names the source logs with the number of items from each and the plugin version the flight ran against, and, once one exists, the release plan or spec that addressed the file.
+- A release plan gives every item a decision: fixed, deferred, or declined, with the reason.
+- Only Kūkulu is named. Another project appears under its `project-<letter>` label, never its real name.
+
 ## CI
 
 Three workflows, all of which must be green:
