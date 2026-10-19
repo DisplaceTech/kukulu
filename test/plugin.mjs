@@ -178,6 +178,10 @@ like(read("skills/pull-feedback/SKILL.md"), /docs\/flights\/\*\/feedback\.jsonl/
   const pull = read("skills/pull-feedback/SKILL.md");
   ok(!/git commit|Commit the new/.test(pull) && /Do not commit/.test(pull), "pull-feedback never runs git commit");
   like(pull, /docs\/feedback\/\.private-names/, "...names .private-names");
+  like(pull, /next letter after the highest label in `docs\/feedback\/\.private-names`, never earlier than `project-e`/, "pull-feedback assigns project-<letter> labels after the highest in .private-names");
+  like(pull, /creating it with mode 0600/, "...creates .private-names with mode 0600");
+  like(pull, /write the real name nowhere else: not in the feedback file, a commit, a plan, a spec, a test name or the changelog/, "...writes the real name nowhere else");
+  like(read("CONTRIBUTING.md"), /`<date>-<label>\.md`/, "CONTRIBUTING's Flight feedback names files by label");
   like(pull, /CONTRIBUTING\.md#flight-feedback/, "...links CONTRIBUTING.md#flight-feedback, a tracked target");
   ok(trackedFiles(ROOT).includes("CONTRIBUTING.md"), "...and CONTRIBUTING.md is tracked");
   like(read("CONTRIBUTING.md"), /^## Flight feedback$/m, "CONTRIBUTING.md has a Flight feedback section");

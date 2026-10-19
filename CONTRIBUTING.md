@@ -97,7 +97,7 @@ Flight feedback is how a real flight's friction reaches the next release. During
 - Each item says what happened, why it cost time, and the workaround used.
 - The header names the source logs with the number of items from each and the plugin version the flight ran against, and, once one exists, the release plan or spec that addressed the file.
 - A release plan gives every item a decision: fixed, deferred, or declined, with the reason.
-- Only Kūkulu is named. Another project appears under its `project-<letter>` label, never its real name.
+- Only Kūkulu and cleanflate are named. The file is `<date>-<label>.md` (or the public name): any other project is written under the next free `project-<letter>` label, from `project-e` on, its real name is recorded only in the gitignored `docs/feedback/.private-names` (one `<label> <real name>` line each, mode 0600), and items are cited as `<label> F-nn`.
 
 ## CI
 
