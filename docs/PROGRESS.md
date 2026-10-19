@@ -24,7 +24,7 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] P1-10 Tune review.mutationFixRounds from the archived trails
 - [x] P1-11 The flight slug rule and the -spec note
 - [x] P1-12 Auto-merge unavailable names policies.finalize
-- [ ] P1-13 pull-feedback never commits; Flight feedback moves to CONTRIBUTING
+- [x] P1-13 pull-feedback never commits; Flight feedback moves to CONTRIBUTING
 - [ ] P1-14 Phase 1 end: push and record the manual check
 - [ ] P2-01 Private-project labels in pull-feedback and CONTRIBUTING
 - [ ] P2-02 check-names reads the private-name denylist
@@ -134,3 +134,6 @@ Slug rule in plan-build (both examples verbatim); plan_commit returns notes[] (e
 
 ### P1-12 — 4c150ea
 STOP_ASKING suffix appended to both unavailable: strings in pr_finalize. Docs and review test updated. Process note: never put a unicode escape for the macron letter in a log param (the JSON decodes it and check-names then fails on PROGRESS.md); I fixed the one P1-11 log line by hand, noted in feedback.
+
+### P1-13 — 1722273
+Skill step 3 names .private-names, step 7 links CONTRIBUTING.md#flight-feedback, step 8 says Do not commit. CONTRIBUTING.md gains ## Flight feedback (before ## CI). Plugin tests added.
