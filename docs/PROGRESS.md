@@ -48,7 +48,7 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] P3-17 Gate liveness
 - [x] P3-18 Human entries and kukulu_cleanroom_record
 - [x] P3-19 Clean-room status, prompts, skills and docs/cleanroom.md
-- [ ] P3-20 An end-to-end clean-room flight in the drive suite
+- [x] P3-20 An end-to-end clean-room flight in the drive suite
 - [ ] P3-21 Phase 3 end: push and record the manual check
 - [ ] P4-01 cleanroom.similarity configuration
 - [ ] P4-02 The lexer core, Rust and the C family
@@ -206,3 +206,6 @@ New tool kukulu_cleanroom_record (23 tools; after flight_options; go-flight allo
 
 ### P3-19 — fa172c9
 cleanroomStatus(st) in status(); CLEANROOM_SENTENCE appended to the run-policies sentence in next() when a policy file exists (implement, stream, review, summarize prompts end with it). Implement and review-build skills, docs/cleanroom.md (new, linked from README and operations/mcp-tools), README Clean-room mode section ("patent pending"). Note: a new doc must be git-added before kukulu_verify or the link check cannot see it.
+
+### P3-20 — 825dd49
+Clean-room drive flight: genesis, plan added after genesis, run_start, two tasks with simulated Write/Bash calls and one guard-denied Read under deny.paths, run_finish, APPROVED review, summary, final next; hooks invoked through runHook with CLAUDE_PROJECT_DIR and CLAUDE_PLUGIN_ROOT. 6 checkpoints verify, 8 server commits carry trailers. No harness change needed.
