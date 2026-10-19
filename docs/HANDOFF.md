@@ -46,3 +46,14 @@ None.
 
 - `site/` is hand-written from the mockup with semantic classes; the seeded assets are byte-identical copies. `scripts/check-site.mjs` holds rules 1 to 14 with a 52-case self-test and a baseline that must be clean.
 - Nothing under `docs/site/`, `mcp/`, `skills/`, `agents/`, `hooks/` or `.claude-plugin/` changed.
+
+## Round 1
+
+Review-fix round: 3 tasks (R1-01..R1-03), all done, none blocked. Head at handoff: e892d30 plus this file.
+
+- R1-01: 17 new check-site.mjs self-test cases (69 total) for the surviving branches of rules 4, 5, 8, 9, 10, 12, 14 and the contrastMin config check. No rule changed.
+- R1-02: serve-site.mjs gains `choosePort` (port argument, then SITE_PORT, then servePort). Interpretation: an empty SITE_PORT counts as unset; a non-integer or above 65535 value rejects start() with a message naming SITE_PORT. Self-test covers precedence and `GET /%00` is 403 (26 checks after R1-03). It never binds servePort.
+- R1-03: check-site-browser.mjs has `--self-test` (6 cases, one Chrome for all). Chrome shutdown now sends Browser.close, falls back to SIGKILL, awaits exit, then removes the profile. serve-site `start()` takes `siteDir`. `docs/kukulu.json` extraVerify and `.github/workflows/site.yml` run the self-test. Interpretation: the overflow case adds its width by appending a CSS rule to the temp copy, since the page CSP blocks inline styles.
+- Hand check: none. Old `/tmp/check-site-browser-*` directories from before this fix may remain; the count no longer grows.
+
+Codebase notes (round 1): the site CSP blocks style attributes, which Chrome reports as a console error; `document.fonts.check` does return false when the latin-ext face URL is missing.
