@@ -12,7 +12,7 @@ Started: 2026-10-19T16:52:28.587Z
 - [x] P1-07 Measure the budgets and contrast against their assumptions
 - [x] P1-08 serve-site.mjs and site:serve
 - [x] P1-09 Phase 1 end: push and record the manual check
-- [ ] P2-01 check-site-browser.mjs, check:site:browser and .site-shots/
+- [x] P2-01 check-site-browser.mjs, check:site:browser and .site-shots/
 - [ ] P2-02 The site CI workflow
 - [ ] P2-03 README, CONTRIBUTING and CHANGELOG for the site
 - [ ] P2-04 Phase 2 end: push and record the manual check
@@ -47,3 +47,6 @@ scripts/serve-site.mjs: exports async start({port}) -> {url, close}; port arg, S
 ### P1-09 — fc9cc90
 Push: origin build/landing pushed (empty task commit follows the push; run_finish pushes again).
 Manual check: NOT VERIFIED (human): run `npm run site:serve`, open it on desktop and at 360 px (device emulation or phone), both color schemes, and compare with docs/site/screens/. Tab through: skip link first, 2 px focus ring on every link and button. Confirm 44 px touch targets. Press all four copy buttons and paste. Judge whether "Copied" lasts long enough (copyFeedbackMs 2400, ASSUMPTION). Note: the page was written without a browser render in this run; all visual fidelity to the mockup is unverified.
+
+### P2-01 — cab9422
+scripts/check-site-browser.mjs works with /usr/bin/google-chrome (Node 24): 6 runs ok in ~4 s; --shots writes .site-shots/ (gitignored). Negative overflow check done by hand and reverted; CHROME_PATH=/nonexistent exits 1. Screenshot of 1440 dark viewed: structure matches mockup. No site/ changes needed.
