@@ -50,7 +50,7 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] P3-19 Clean-room status, prompts, skills and docs/cleanroom.md
 - [x] P3-20 An end-to-end clean-room flight in the drive suite
 - [x] P3-21 Phase 3 end: push and record the manual check
-- [ ] P4-01 cleanroom.similarity configuration
+- [x] P4-01 cleanroom.similarity configuration
 - [ ] P4-02 The lexer core, Rust and the C family
 - [ ] P4-03 Lexers for Go, Python, JavaScript, TypeScript, Java and PHP
 - [ ] P4-04 Metrics, positioning and the verdict
@@ -212,3 +212,6 @@ Clean-room drive flight: genesis, plan added after genesis, run_start, two tasks
 
 ### P3-21 — b4969b2
 Push: pushed build/2026-10-19. Also committed 387b6bd (outside a task): plan-build writes docs/kukulu.json before PLAN.md in clean-room mode, because the guard protects it once PLAN.md exists. Manual check: NOT VERIFIED (human): copy templates/cleanroom.example.json into a throwaway Rust project as docs/cleanroom.json, start a new Claude Code session with the working-tree plugin, ask it to read ~/.cargo/registry, confirm the denial appears in the session and in .kukulu/cleanroom/log.jsonl, type one instruction and confirm a human entry, then run /kukulu:go-flight and confirm 'gate: ok (7 checks)' before the plan stage
+
+### P4-01 — 2c96318
+validateSimilarity + normalizeSimilarity (defaults: ngram [5,10], minIdentLen 6, commentNgram 5, near 0.25, separationMargin 0.0 under the ASSUMPTION comment; languages default to the common extension map; identExclusions null). No tool exposes the normalized block yet, so default values are asserted in P4-07's tests. docs/operations.md row avoids naming kukulu_similarity (plugin prose test forbids tool names that do not exist yet); P4-07 should name it.
