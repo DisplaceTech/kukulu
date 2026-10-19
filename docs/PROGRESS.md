@@ -25,7 +25,7 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] P1-11 The flight slug rule and the -spec note
 - [x] P1-12 Auto-merge unavailable names policies.finalize
 - [x] P1-13 pull-feedback never commits; Flight feedback moves to CONTRIBUTING
-- [ ] P1-14 Phase 1 end: push and record the manual check
+- [x] P1-14 Phase 1 end: push and record the manual check
 - [ ] P2-01 Private-project labels in pull-feedback and CONTRIBUTING
 - [ ] P2-02 check-names reads the private-name denylist
 - [ ] P2-03 Phase 2 end: push and record the manual check
@@ -137,3 +137,6 @@ STOP_ASKING suffix appended to both unavailable: strings in pr_finalize. Docs an
 
 ### P1-13 — 1722273
 Skill step 3 names .private-names, step 7 links CONTRIBUTING.md#flight-feedback, step 8 says Do not commit. CONTRIBUTING.md gains ## Flight feedback (before ## CI). Plugin tests added.
+
+### P1-14 — b8c5f08
+Push: pushed build/2026-10-19. Manual check: NOT VERIFIED (human): halt a throwaway flight with kukulu_run_halt, fix nothing, call kukulu_run_resume and confirm the refusal names the dirty tree; clean it and confirm the resume commit
