@@ -15,6 +15,36 @@ const json = (rel) => JSON.parse(read(rel));
 const exists = (rel) => fs.existsSync(path.join(ROOT, rel));
 const listDir = (rel) => fs.readdirSync(path.join(ROOT, rel));
 
+/** The files git tracks in `root`, repo-relative with forward slashes; a link may only land on one of these. */
+function trackedFiles(root) {
+  const r = spawnSync("git", ["ls-files", "-z"], { cwd: root, encoding: "utf8" });
+  return r.status === 0 ? r.stdout.split("\0").filter(Boolean) : [];
+}
+
+/** The documentation set: tracked README, CONTRIBUTING, CHANGELOG and top-level docs/*.md. */
+const docFiles = (tracked) => tracked.filter((f) => ["README.md", "CONTRIBUTING.md", "CHANGELOG.md"].includes(f) || /^docs\/[^/]+\.md$/.test(f));
+
+/**
+ * Every relative link in the documentation that does not land on a tracked
+ * file (or a directory holding one), as `<file> → <target>`. A gitignored file
+ * on the maintainer's machine must not make a link pass.
+ */
+function brokenLinks(root, content = (f) => fs.readFileSync(path.join(root, f), "utf8")) {
+  const tracked = trackedFiles(root);
+  const broken = [];
+  for (const file of docFiles(tracked)) {
+    const dir = path.posix.dirname(file);
+    // Inline code spans quote example link text (a PLAN task shows the line it will add elsewhere), so they are not links.
+    for (const m of content(file).replace(/`[^`\n]*`/g, "").matchAll(/\[[^\]]*\]\(([^)]+)\)/g)) {
+      const target = m[1].split("#")[0];
+      if (!target || /^(https?:|mailto:)/.test(target)) continue;
+      const resolved = path.posix.normalize(path.posix.join(dir, target)).replace(/\/$/, "");
+      if (!tracked.some((f) => f === resolved || f.startsWith(`${resolved}/`))) broken.push(`${file} → ${m[1]}`);
+    }
+  }
+  return broken;
+}
+
 const MODELS = ["fable", "opus", "sonnet", "haiku", "inherit"];
 const EFFORTS = ["low", "medium", "high"];
 
@@ -388,18 +418,22 @@ eq(retiredMention, null, "kukulu_migrate appears only in CHANGELOG.md and README
 ok(!/migrate/.test(goFlight) && !allowed.some((t) => t.endsWith("kukulu_migrate")), "go-flight no longer offers migrate");
 eq(unknownSkill, null, "every kukulu:* skill or agent named in prose exists");
 
-// Documentation links have to land somewhere.
-let brokenLink = null;
-for (const file of MD) {
-  const dir = path.dirname(path.join(ROOT, file));
-  // Inline code spans quote example link text (a PLAN task shows the line it will add elsewhere), so they are not links.
-  for (const m of read(file).replace(/`[^`\n]*`/g, "").matchAll(/\[[^\]]*\]\(([^)]+)\)/g)) {
-    const target = m[1].split("#")[0];
-    if (!target || /^(https?:|mailto:)/.test(target)) continue;
-    if (!fs.existsSync(path.resolve(dir, target)) && !brokenLink) brokenLink = `${file} → ${m[1]}`;
-  }
+// Documentation links have to land somewhere that git tracks.
+eq(brokenLinks(ROOT).join("\n"), "", "every relative link in the documentation resolves");
+
+{
+  const tmp = mkDir("kukulu-links-");
+  const git = (...args) => spawnSync("git", args, { cwd: tmp, encoding: "utf8" });
+  git("init", "-q");
+  fs.mkdirSync(path.join(tmp, "docs"));
+  fs.writeFileSync(path.join(tmp, "README.md"), "See [x](docs/x.md).\n");
+  fs.writeFileSync(path.join(tmp, "docs", "x.md"), "# x\n");
+  git("add", "README.md");
+  eq(brokenLinks(tmp).join("\n"), "README.md → docs/x.md", "a link to an untracked file fails the link check, naming the file and target");
+  git("add", "docs/x.md");
+  eq(brokenLinks(tmp).join("\n"), "", "...and passes once the target is tracked");
 }
-eq(brokenLink, null, "every relative link in the documentation resolves");
+
 
 // Diagrams are Mermaid, not ASCII art: box-drawing belongs only in a `text`
 // fence (a file tree), never in a fence pretending to be a diagram.
@@ -533,7 +567,7 @@ ok(versions.length >= 3, `the matrix covers several Node versions (${versions.jo
 // Every document in docs/ is reachable from the README.
 const readme = read("README.md");
 let orphan = null;
-for (const f of listDir("docs").filter((f) => f.endsWith(".md"))) {
+for (const f of docFiles(trackedFiles(ROOT)).filter((f) => f.startsWith("docs/")).map((f) => f.slice(5))) {
   if (!readme.includes(`docs/${f}`) && !orphan) orphan = f;
 }
 eq(orphan, null, "every document in docs/ is linked from the README");
