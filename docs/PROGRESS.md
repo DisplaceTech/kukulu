@@ -30,7 +30,7 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] P2-02 check-names reads the private-name denylist
 - [x] P2-03 Phase 2 end: push and record the manual check
 - [x] P3-01 mcp/cleanroom.mjs: the policy loader, the template and the cleanroom suite
-- [ ] P3-02 validateCleanroom in docs/kukulu.json
+- [x] P3-02 validateCleanroom in docs/kukulu.json
 - [ ] P3-03 Hook registration and the no-policy fast path
 - [ ] P3-04 The hash chain
 - [ ] P3-05 Entry fields from a hook payload
@@ -152,3 +152,6 @@ Push: pushed build/2026-10-19. Manual check: NOT VERIFIED (human): create docs/f
 
 ### P3-01 — eb44bde
 mcp/cleanroom.mjs (CleanroomError, loadPolicy, policyHash), templates/cleanroom.example.json (SPEC 5.2 JSON verbatim), test/cleanroom.mjs registered in run.mjs, suite counts 11 to 12 in CONTRIBUTING and README. Interpretation: every policy message starts "policy "; pattern ids unique within each list; lockdown.after defaults to null in the returned policy; defaults: deny.network true, lists []. CLAUDE.md still says eleven suites (project file, not edited).
+
+### P3-02 — d161913
+validateCleanroom + cfgFrom.cleanroom { policy, signingKey } (signingKey absolute via expandHome, KUKULU_CLEANROOM_KEY wins, default ~/.config/kukulu/cleanroom/ed25519.pem). Docs rows and env row, CHANGELOG Added, plugin cleanroom branch. The resolved paths are not yet asserted by a test (no tool exposes them until P3-06/P3-07). No link to docs/cleanroom.md until P3-19 creates it.
