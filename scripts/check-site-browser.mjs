@@ -126,9 +126,11 @@ function connect(url) {
 }
 
 const PAGE_PROBE = `(async () => {
+  const readyState = document.readyState;
   await document.fonts.ready;
   const root = document.documentElement;
   return {
+    readyState,
     scrollWidth: root.scrollWidth,
     clientWidth: root.clientWidth,
     buttons: [...document.querySelectorAll("[data-copy-for]")].map((b) => {
@@ -191,6 +193,7 @@ async function withBrowser(fn) {
         failures.push(`${label}: the page probe threw: ${evaluated.exceptionDetails.exception?.description || evaluated.exceptionDetails.text}`);
       } else {
         const r = evaluated.result.value;
+        if (r.readyState !== "complete") failures.push(`${label}: the page probe ran before the load event (readyState ${r.readyState}); wait for Page.loadEventFired before probing`);
         if (r.scrollWidth > r.clientWidth) failures.push(`${label}: the page scrolls sideways (scrollWidth ${r.scrollWidth} > clientWidth ${r.clientWidth}); find the element wider than the viewport and constrain it`);
         if (r.buttons.length === 0) failures.push(`${label}: no [data-copy-for] buttons were found`);
         for (const b of r.buttons) {
