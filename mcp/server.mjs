@@ -1911,6 +1911,7 @@ function streamFinish({ stream } = {}) {
     const cur = loadState();
     cur.halted = halted;
     delete cur.haltCap;
+    cur.haltStream = stream; // so kukulu_run_resume can tell a merge halt from any other
     saveState(cur);
     if (cc.policies.feedback) appendFeedback("implement", halted, "stream-merge", "auto");
     gitCommitIfChanged([P.state, P.feedback], `chore: run halted (stream ${stream} merge conflict)`);
@@ -2645,6 +2646,7 @@ function runHalt({ reason }) {
   const st = loadState();
   st.halted = reason;
   delete st.haltCap; // only a round-cap halt is resumable through kukulu_flight_options
+  delete st.haltStream;
   const commit = withRollback([P.state, P.progress, P.feedback], () => {
     saveState(st);
     if (exists(P.lock)) fs.unlinkSync(P.lock);
@@ -2654,6 +2656,45 @@ function runHalt({ reason }) {
   const g = gitFacts();
   const dirty = git(["status", "--porcelain"], { allowFail: true }).out !== "";
   return { halted: reason, branch: g.branch, head: g.head, commit, dirty };
+}
+
+/**
+ * Clear a halt that is not a round-cap halt, with a commit, so no operator
+ * edits state.json by hand. Every refusal comes before anything is written.
+ */
+function runResume({ reason } = {}) {
+  if (typeof reason !== "string" || !reason.trim()) throw new ToolError("reason must be a non-empty string: say what you fixed so the flight can continue");
+  const st = loadState();
+  if (!st.halted) throw new ToolError("the flight is not halted; there is nothing to resume");
+  if (st.haltCap) throw new ToolError("a round-cap halt is lifted by `kukulu_flight_options({ …, resume: true })`, not by kukulu_run_resume");
+  const dirty = porcelainExcludingPreexisting(st.preexistingUntracked);
+  if (dirty.length) throw new ToolError(`the working tree is not clean:\n${dirty.join("\n")}\nCommit or discard these, then call kukulu_run_resume again.`);
+  const open = streamWorktrees();
+  if (open.length) {
+    throw new ToolError(`stream worktree ${open.map((n) => rel(streamDir(n))).join(", ")} still exists; merge or remove it (git worktree remove --force <dir>), then call kukulu_run_resume again`);
+  }
+  const c = cfg();
+  if (!git(["rev-parse", "--verify", "--quiet", `refs/heads/${c.baseBranch}`], { allowFail: true }).ok) {
+    throw new ToolError(`baseBranch '${c.baseBranch}' does not exist as a local branch; create it or fix baseBranch in docs/kukulu.json, then call kukulu_run_resume again`);
+  }
+  if (st.haltStream) {
+    const current = git(["rev-parse", "--abbrev-ref", "HEAD"]).out;
+    const branch = `${current}--${st.haltStream}`;
+    const branchExists = git(["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`], { allowFail: true }).ok;
+    const merged = git(["branch", "--merged", current, "--format=%(refname:short)"], { allowFail: true }).out.split("\n").includes(branch);
+    if (branchExists && !merged) {
+      throw new ToolError(`the halt came from merging stream '${st.haltStream}', and its branch ${branch} is not merged into ${current}; run git merge --no-ff ${branch}, resolve any conflict and commit, then call kukulu_run_resume again`);
+    }
+  }
+  const previousHalt = st.halted;
+  st.halted = null;
+  delete st.haltStream;
+  const commit = withRollback([P.state, P.feedback], () => {
+    saveState(st);
+    if (c.policies.feedback) appendFeedback("controller", `Run resumed: ${reason.trim()}`, "resume", "human");
+    return gitCommitIfChanged([P.state, P.feedback], "chore: run resumed");
+  });
+  return { resumed: true, previousHalt, commit };
 }
 
 function formatTask(id, t) {
@@ -3337,6 +3378,12 @@ const TOOLS = [
     description: "Stop the flight for an operator-level reason the implementer cannot resolve (a dead signing agent, a full disk, a vanished base branch): records the reason, disarms the lock, commits state and PROGRESS.md if they changed. Never resets or cleans the tree.",
     inputSchema: S({ reason: { type: "string", description: "why the flight cannot continue" } }, ["reason"]),
     fn: runHalt,
+  },
+  {
+    name: "kukulu_run_resume",
+    description: "Clear a halt that is not a round-cap halt once its cause is fixed, and commit `chore: run resumed`; a round-cap halt is lifted by kukulu_flight_options({ resume: true }). Refuses when the flight is not halted, the tree is dirty, a stream worktree exists, baseBranch is missing, or a stream-merge halt's branch is still unmerged.",
+    inputSchema: S({ reason: { type: "string", description: "what you fixed so the flight can continue" } }, ["reason"]),
+    fn: runResume,
   },
   {
     name: "kukulu_flight_options",

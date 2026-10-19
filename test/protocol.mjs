@@ -17,6 +17,7 @@ const EXPECTED_TOOLS = [
   "kukulu_stream_finish",
   "kukulu_run_finish",
   "kukulu_run_halt",
+  "kukulu_run_resume",
   "kukulu_flight_options",
   "kukulu_feedback_log",
   "kukulu_mutate",

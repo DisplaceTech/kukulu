@@ -1,6 +1,6 @@
 # MCP tool reference
 
-Twenty-one tools, served over stdio by `mcp/server.mjs` with no dependencies. The server is launched by Claude Code from [`.mcp.json`](../.mcp.json) with `KUKULU_PROJECT_DIR` set to the project root; every path below is relative to that root.
+Twenty-two tools, served over stdio by `mcp/server.mjs` with no dependencies. The server is launched by Claude Code from [`.mcp.json`](../.mcp.json) with `KUKULU_PROJECT_DIR` set to the project root; every path below is relative to that root.
 
 Three of them are read-only: `kukulu_status`, `kukulu_next` and `kukulu_config_show`. The flight controller may call those three and four more. `kukulu_agents_sync` writes only the generated agent files, the MCP allow rule and a `.git/info/exclude` line, never a task or a verdict. It may call `kukulu_run_halt` itself when it cannot even spawn a stage, so the next flight sees a clean halt instead of retrying blindly. `kukulu_flight_options` applies the operator's own go-flight options to the review-loop bounds (and, with `resume`, lifts a round-cap halt). `kukulu_pr_finalize` is allowed for the human-initiated re-sign only (`resign: true`, when the operator says signing is unlocked). Everything else changes project state and belongs to a stage agent. (`kukulu_mutate` changes a source file only for the length of one call and always restores it, and a stream's tools work in that stream's own worktree.)
 
@@ -319,6 +319,20 @@ Stop the flight for an operator-level reason the implementer cannot resolve itse
 **Refuses when:** `reason` is missing.
 
 The next `kukulu_next` call returns `{ stage: "halt", reason }` with the same reason. Clearing it is the same hand edit as any other halt; see [operations.md](./operations.md#halts).
+
+---
+
+## `kukulu_run_resume`
+
+Clear a halt once whatever caused it is fixed, so nobody edits `.kukulu/state.json` by hand. A round-cap halt is not cleared here: it is lifted by [`kukulu_flight_options`](#kukulu_flight_options) with `resume: true`.
+
+**Arguments:** `{ reason }`: what you fixed, a non-empty string.
+
+**Does:** sets `state.halted` to `null` and deletes `state.haltStream`, appends one feedback entry (`stage: "controller"`, `category: "resume"`, `source: "human"`; skipped when `policies.feedback` is false) naming the reason, and commits state and feedback together as `chore: run resumed`. If the commit fails, both files are put back exactly.
+
+**Returns:** `{ resumed: true, previousHalt, commit }`.
+
+**Refuses when** (in this order, before anything is written): `reason` is empty; the flight is not halted; the halt is a round-cap halt; the working tree is dirty apart from files untracked before the run started (the lines are listed); a stream worktree still exists (it is named); `baseBranch` does not exist as a local branch; or the halt came from merging a stream (`kukulu_stream_finish` records `state.haltStream`) and that stream's branch still exists unmerged into the build branch.
 
 ---
 

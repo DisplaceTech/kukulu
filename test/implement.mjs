@@ -894,6 +894,65 @@ for (const [bad, re] of [
   });
 }
 
+// ---------------------------------------------------------------- run_resume
+
+{
+  const repo = startedRepo();
+  await withServer(repo, async ({ call }) => {
+    isError(await call("kukulu_run_resume", { reason: "fixed" }), /the flight is not halted; there is nothing to resume/, "kukulu_run_resume refuses when the flight is not halted");
+    await call("kukulu_run_halt", { reason: "signing agent died" });
+    isError(await call("kukulu_run_resume", { reason: "  " }), /reason must be a non-empty string/, "kukulu_run_resume refuses an empty reason");
+    isError(await call("kukulu_run_resume", {}), /reason must be a non-empty string/, "...and a missing one");
+    writeFile(repo, "stray.txt", "x\n");
+    isError(await call("kukulu_run_resume", { reason: "fixed" }), /not clean:\n\?\? stray\.txt/, "kukulu_run_resume refuses a dirty tree listing the paths");
+    fs.rmSync(path.join(repo, "stray.txt"));
+    git(repo, ["branch", "-m", "main", "trunk"]);
+    isError(await call("kukulu_run_resume", { reason: "fixed" }), /baseBranch 'main' does not exist as a local branch/, "kukulu_run_resume refuses when baseBranch is missing");
+    git(repo, ["branch", "-m", "trunk", "main"]);
+    const head = git(repo, ["rev-parse", "HEAD"]);
+    const r = await call("kukulu_run_resume", { reason: "restarted the signing agent" });
+    eq(r.resumed, true, "kukulu_run_resume clears the halt");
+    eq(r.previousHalt, "signing agent died", "...reporting the halt it cleared");
+    eq(subject(repo), "chore: run resumed", "...and commits chore: run resumed");
+    ok(git(repo, ["rev-parse", "HEAD"]) !== head, "...as a new commit");
+    eq(JSON.parse(readFile(repo, ".kukulu/state.json")).halted, null, "state.halted is null afterwards");
+    const entries = readFile(repo, ".kukulu/feedback.jsonl").trim().split("\n").map((l) => JSON.parse(l));
+    const last = entries[entries.length - 1];
+    eq(last.category + "/" + last.source + "/" + last.stage, "resume/human/controller", "kukulu_run_resume logs a resume feedback entry with source human");
+    like(last.message, /restarted the signing agent/, "...naming the reason");
+    ok((await call("kukulu_next")).stage !== "halt", "kukulu_next no longer halts after a resume");
+  });
+}
+
+{
+  const repo = startedRepo();
+  await withServer(repo, async ({ call }) => {
+    await call("kukulu_run_halt", { reason: "operator stop" });
+  });
+  const hook = path.join(repo, ".git", "hooks", "commit-msg");
+  fs.mkdirSync(path.dirname(hook), { recursive: true });
+  fs.writeFileSync(hook, `#!/bin/sh\nif head -n1 "$1" | grep -q '^chore: run resumed'; then echo rejected >&2; exit 1; fi\n`);
+  fs.chmodSync(hook, 0o755);
+  const files = [".kukulu/state.json", ".kukulu/feedback.jsonl"];
+  const before = files.map((f) => readFile(repo, f));
+  const head = git(repo, ["rev-parse", "HEAD"]);
+  await withServer(repo, async ({ call }) => {
+    ok((await call("kukulu_run_resume", { reason: "fixed" })).error, "a failed resume commit is an error");
+    files.forEach((f, i) => eq(readFile(repo, f), before[i], `...${f} is byte-identical`));
+    eq(git(repo, ["diff", "--cached", "--name-only"]), "", "...nothing is staged");
+    eq(git(repo, ["rev-parse", "HEAD"]), head, "...HEAD did not move");
+  });
+}
+
+{
+  const repo = startedRepo();
+  await withServer(repo, async ({ call }) => {
+    setState(repo, { halted: "review round 2 exceeds the cap", haltCap: { cap: "maxRounds", round: 2 } });
+    git(repo, ["commit", "-qam", "chore: round-cap halt"]);
+    isError(await call("kukulu_run_resume", { reason: "fixed" }), /kukulu_flight_options.*resume: true/, "kukulu_run_resume refuses a round-cap halt naming kukulu_flight_options");
+  });
+}
+
 // ---------------------------------------------------------------- commit signing (S-02)
 
 function failingSignerRepo(config) {

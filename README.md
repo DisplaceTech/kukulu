@@ -195,7 +195,7 @@ Checkbox states in `PROGRESS.md`: `[ ]` todo · `[~]` in progress · `[x]` done 
 
 ## MCP tools
 
-The server exposes twenty-one tools.
+The server exposes twenty-two tools.
 
 | Tool | Does |
 |---|---|
@@ -211,6 +211,7 @@ The server exposes twenty-one tools.
 | `kukulu_stream_finish` | Finish one stream of a parallel wave: require no open tasks and a clean worktree, merge its branch into the build branch, remove the worktree and branch. A merge conflict aborts, keeps the stream, and halts |
 | `kukulu_run_finish` | Requires zero open tasks and `HANDOFF.md`; commit, push, draft a PR against `baseBranch` (unless policies say otherwise), disarm the lock, report a whole-tree constraint scan |
 | `kukulu_run_halt` | Record an operator-level reason the run cannot continue; disarm the lock; commit state; never resets or cleans the tree |
+| `kukulu_run_resume` | Clear a halt other than a round-cap halt once its cause is fixed, and commit `chore: run resumed` |
 | `kukulu_flight_options` | Apply go-flight's options (`maxRounds`, `maxRoundsHard`) to `docs/kukulu.json` and commit; with `resume: true`, also lift a round-cap halt |
 | `kukulu_feedback_log` | Append one pipeline-friction entry to `.kukulu/feedback.jsonl` and commit it immediately, so it survives a flight that never reaches summarize |
 | `kukulu_mutate` | Mutation-test one file for the reviewer: apply one exact find/replace, run the verify commands that file triggers (or a `targeted` command with a `filter`; optionally with a shorter `timeoutMs`), always restore it and undo any residue the commands left, commit nothing; reports whether the tests noticed and lists `failedCommands`, and with `confirmKill` re-runs a kill on the unmutated tree |

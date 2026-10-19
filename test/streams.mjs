@@ -513,6 +513,13 @@ const UI = [["P1-03", "src/ui/a.txt", "u\n"], ["P1-04", "src/ui/b.txt", "v\n"]];
     eq(fb.filter((e) => e.category === "stream-merge").length, 1, "exactly one stream-merge feedback entry");
     eq(fb[0].source, "auto", "written by the MCP");
     eq(subject(repo), "chore: run halted (stream ui merge conflict)", "state and feedback are committed together");
+    eq(JSON.parse(readFile(repo, ".kukulu/state.json")).haltStream, "ui", "the merge halt records which stream it came from");
+    isError(await call("kukulu_run_resume", { reason: "resolved" }), /stream worktree .*\.kukulu\/worktrees\/ui still exists/, "kukulu_run_resume refuses while a stream worktree exists");
+    git(repo, ["worktree", "remove", "--force", u.cwd]);
+    isError(await call("kukulu_run_resume", { reason: "resolved" }), /stream 'ui'.*not merged into/, "kukulu_run_resume refuses a stream-merge halt whose branch is unmerged");
+    git(repo, ["branch", "-D", u.streamBranch]);
+    eq((await call("kukulu_run_resume", { reason: "dropped the ui stream" })).resumed, true, "...and resumes once the stream's branch is gone");
+    ok(!("haltStream" in JSON.parse(readFile(repo, ".kukulu/state.json"))), "...clearing haltStream");
   });
 }
 
