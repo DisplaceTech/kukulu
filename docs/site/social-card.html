@@ -1,0 +1,47 @@
+<!doctype html>
+<!-- Source for assets/og.png (1200×630). Rendered once; the PNG is the shipped asset. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Kūkulu social card</title>
+<style>
+@font-face{font-family:"Hanken Grotesk";font-style:normal;font-weight:100 900;src:url(assets/fonts/hanken-grotesk-latin-ext-wght-normal.woff2) format("woff2-variations");unicode-range:U+0100-02BA}
+@font-face{font-family:"Hanken Grotesk";font-style:normal;font-weight:100 900;src:url(assets/fonts/hanken-grotesk-latin-wght-normal.woff2) format("woff2-variations");unicode-range:U+0000-00FF,U+2000-206F}
+@font-face{font-family:"JetBrains Mono";font-style:normal;font-weight:100 800;src:url(assets/fonts/jetbrains-mono-latin-wght-normal.woff2) format("woff2-variations")}
+body{margin:0}
+.card{width:1200px;height:630px;box-sizing:border-box;position:relative;overflow:hidden;padding:64px;display:flex;flex-direction:column;justify-content:space-between;background-color:#0B1620;background-image:linear-gradient(rgba(140,178,210,.07) 1px,transparent 1px),linear-gradient(90deg,rgba(140,178,210,.07) 1px,transparent 1px);background-size:24px 24px;color:#ECE7DC;font-family:"Hanken Grotesk",sans-serif}
+.c{position:absolute;width:20px;height:20px;border-color:#E8A951;border-style:solid;border-width:0}
+.mono{font-family:"JetBrains Mono",monospace}
+.box{height:60px;box-sizing:border-box;padding:0 18px;display:flex;align-items:center;border:1.5px solid #2F4A63;border-radius:8px;background:#112131;font-size:16px;font-weight:500;letter-spacing:.06em}
+</style>
+</head>
+<body>
+<div class="card">
+<span class="c" style="left:24px;top:24px;border-left-width:2px;border-top-width:2px"></span>
+<span class="c" style="right:24px;top:24px;border-right-width:2px;border-top-width:2px"></span>
+<span class="c" style="left:24px;bottom:24px;border-left-width:2px;border-bottom-width:2px"></span>
+<span class="c" style="right:24px;bottom:24px;border-right-width:2px;border-bottom-width:2px"></span>
+<div style="display:flex;align-items:center;justify-content:space-between">
+<div style="display:flex;align-items:center;gap:14px">
+<svg width="48" height="48" viewBox="0 0 32 32" style="fill:none;stroke:#E8A951;stroke-width:3;stroke-linecap:square"><path d="M9 7 H23"/><path d="M9 12 V19 A7 7 0 0 0 23 19 V12"/></svg>
+<span style="font-size:38px;font-weight:800;letter-spacing:-.02em">Kūkulu</span>
+</div>
+<span class="mono" style="font-size:20px;color:#F0B866">kukulu.tech</span>
+</div>
+<div style="display:flex;flex-direction:column;gap:18px">
+<h1 style="margin:0;font-size:84px;line-height:1;letter-spacing:-.035em;font-weight:800">Rebuild from the spec.<br>Prove nothing leaked.</h1>
+<p style="margin:0;font-size:24px;color:#A7B3BD">Spec-driven builds for Claude Code. Clean-room mode coming in 0.7.0.</p>
+</div>
+<div style="display:flex;align-items:center;justify-content:space-between;gap:24px">
+<div class="mono" style="display:flex;align-items:center;gap:14px">
+<span class="box" style="border-color:#E8A951">SPEC.md</span>
+<svg width="28" height="12" viewBox="0 0 28 12" style="fill:none;stroke:#E8A951;stroke-width:2"><path d="M2 6 H18"/><path d="M17 1 L26 6 L17 11 Z" style="fill:#E8A951;stroke:none"/></svg>
+<span class="box" style="font-size:15px;letter-spacing:.04em">PLAN → IMPLEMENT → REVIEW → SUMMARIZE</span>
+<svg width="28" height="12" viewBox="0 0 28 12" style="fill:none;stroke:#E8A951;stroke-width:2"><path d="M2 6 H18"/><path d="M17 1 L26 6 L17 11 Z" style="fill:#E8A951;stroke:none"/></svg>
+<span class="box" style="border-color:#E8A951">REVIEWED BRANCH</span>
+</div>
+<p style="margin:0;text-align:right;font-size:17px;line-height:1.5;color:#A7B3BD">Apache-2.0<br>Patent pending</p>
+</div>
+</div>
+</body>
+</html>

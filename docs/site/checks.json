@@ -1,0 +1,28 @@
+{
+  "budget": {
+    "textBytes": 65536,
+    "fontBytes": 184320,
+    "scriptBytes": 2048
+  },
+  "viewports": [360, 768, 1440],
+  "contrastMin": 4.5,
+  "contrastPairs": [
+    ["--ink", "--bg"],
+    ["--ink", "--bg2"],
+    ["--ink", "--panel"],
+    ["--muted", "--bg"],
+    ["--muted", "--bg2"],
+    ["--muted", "--panel"],
+    ["--accent-text", "--bg"],
+    ["--accent-text", "--bg2"],
+    ["--accent-text", "--panel"],
+    ["--deny", "--bg2"],
+    ["--deny", "--panel"],
+    ["--on-accent", "--accent"],
+    ["--code-ink", "--code-bg"],
+    ["--code-accent", "--code-bg"],
+    ["--code-muted", "--code-bg"]
+  ],
+  "copyFeedbackMs": 2400,
+  "servePort": 8788
+}

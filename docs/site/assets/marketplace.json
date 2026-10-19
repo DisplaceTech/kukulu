@@ -1,0 +1,13 @@
+{
+  "name": "displacetech",
+  "description": "Claude Code plugins from Displace Technologies LLC.",
+  "owner": { "name": "Displace Technologies LLC" },
+  "plugins": [
+    {
+      "name": "kukulu",
+      "source": { "source": "url", "url": "https://github.com/DisplaceTech/kukulu.git" },
+      "license": "Apache-2.0",
+      "description": "Spec-driven plan → implement → review → fix → summarize pipeline with per-stage model/effort switching."
+    }
+  ]
+}
