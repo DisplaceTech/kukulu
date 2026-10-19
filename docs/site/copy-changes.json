@@ -1,0 +1,19 @@
+{
+    "approved": "Eric Mann",
+    "approvedAt": "2026-10-19",
+    "changes": [
+      { "old": "Kūkulu is an open-source Claude Code plugin that turns a written spec into a planned, built, reviewed branch. Clean-room mode is coming in 0.7.0.\">", "new": "Kūkulu is an open-source Claude Code plugin that turns a written spec into a planned, built, reviewed branch, with a clean-room mode that guards, logs and attests the build.\">" },
+      { "old": "An open-source Claude Code plugin that turns a written spec into a planned, built, reviewed branch. Clean-room mode is coming in 0.7.0.\">", "new": "An open-source Claude Code plugin that turns a written spec into a planned, built, reviewed branch, with a clean-room mode that guards, logs and attests the build.\">" },
+      { "old": "Clean-room mode, coming in 0.7.0, adds an enforced guard, a tamper-evident log, calibrated similarity scoring and evidence a third party can verify offline.", "new": "Clean-room mode, in the plugin since 0.7.0, adds an enforced guard, a tamper-evident log, calibrated similarity scoring and evidence a third party can verify offline." },
+      { "old": "Coming in 0.7.0", "new": "In the plugin as of 0.7.0" },
+      { "old": "The pipeline runs today. The clean room goes around it next.", "new": "The pipeline runs the build. The clean room goes around it." },
+      { "old": "Dashed: clean-room mode, coming in 0.7.0", "new": "Clean-room mode, in the plugin" },
+      { "old": "CLEAN ROOM · 0.7.0 · GUARD CHECKS EVERY TOOL CALL", "new": "CLEAN ROOM · GUARD CHECKS EVERY TOOL CALL" },
+      { "old": "Clean-room mode · coming in 0.7.0", "new": "Clean-room mode" },
+      { "old": "A guard checks every tool call’s target against a declarative policy before it runs. The policy and the guard are protected from the agents.", "new": "A hook checks every tool call’s target against a declarative policy before it runs. The policy, the guard, the log and the signing key are protected from the agents." },
+      { "old": "Similarity scored on a scale where 0 is an independent pair of implementations and 1 is a known derivation.", "new": "Similarity scored on a scale where 0 is an independent pair of implementations and 1 is a known derivation, against control pairs you supply." },
+      { "old": "under the clean-room controls that come to the plugin in 0.7.0.", "new": "under project-local clean-room controls; their general form is the plugin’s clean-room mode, fromas of 0.7.0." },
+      { "old": "NEXT 01 · 0.7.0", "new": "NEXT 01" },
+      { "old": "Clean-room mode in the plugin, for modernizing legacy software into memory-safe code.", "new": "A hotfix lane: a short, reviewed stage for an operator fix, flagged in the attestation." }
+    ]
+  }
