@@ -14,7 +14,7 @@ Started: 2026-10-19T16:52:28.587Z
 - [x] P1-09 Phase 1 end: push and record the manual check
 - [x] P2-01 check-site-browser.mjs, check:site:browser and .site-shots/
 - [x] P2-02 The site CI workflow
-- [ ] P2-03 README, CONTRIBUTING and CHANGELOG for the site
+- [x] P2-03 README, CONTRIBUTING and CHANGELOG for the site
 - [ ] P2-04 Phase 2 end: push and record the manual check
 
 ## Log
@@ -53,3 +53,6 @@ scripts/check-site-browser.mjs works with /usr/bin/google-chrome (Node 24): 6 ru
 
 ### P2-02 — fd9e313
 .github/workflows/site.yml added (checkout@v7, setup-node@v7 node 24, check:site, browser step with CHROME_PATH from command -v google-chrome). Manual check: NOT VERIFIED (human): the PR's `site` check is green on GitHub Actions (not run locally).
+
+### P2-03 — cc2b17d
+README (layout line, Website doc-map line, hosted-marketplace sentence under Quickstart 1), CONTRIBUTING (4 new rows), CHANGELOG (Unreleased/Added above 0.6.1). Version unchanged. Interpretation: sentence placed as an indented paragraph in the list item after the code block.
