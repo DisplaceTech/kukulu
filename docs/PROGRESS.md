@@ -35,7 +35,7 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] P3-04 The hash chain
 - [x] P3-05 Entry fields from a hook payload
 - [x] P3-06 The signing key and checkpoint primitives
-- [ ] P3-07 Genesis and sticky mode
+- [x] P3-07 Genesis and sticky mode
 - [ ] P3-08 Checkpoints from the tools, and the log in their commits
 - [ ] P3-09 Path canonicalization and the Bash splitter
 - [ ] P3-10 evaluate: the guard's rules
@@ -167,3 +167,6 @@ targetOf, projectContext, entryFields added to mcp/cleanroom.mjs; stage round co
 
 ### P3-06 — 18aa77e
 Added generateKey/loadKey/keyFingerprint/CHECKPOINT_KEYS/signCheckpoint/verifyCheckpoint(entry,pub) to mcp/cleanroom.mjs. verifyCheckpoint takes a log entry ({kind:"checkpoint", data:{...,signature}}) and requires data to carry exactly the 8 fields + signature. Key directory created 0700, key 0600. Tests use temp dirs only.
+
+### P3-07 — 1dc9c48
+Server: cleanroomOn/cleanroomLogPath/pluginHashes/ensureKey/cleanroomModeBreak/cleanroomGenesis; next() runs mode-break halt then genesis (before st.halted); run_start generates the key and records mode general; run_resume refuses mode-break first. CleanroomError mapped to its message in handle(). Harness: addPlan, cleanroomRepo({planned, policy}), testKeyFor(repo) (stable per-repo temp key via KUKULU_CLEANROOM_KEY). Interpretation: entries the server writes use role "session"; next() does not record general mode (run_start does). Genesis is a second write in kukulu_next, docs updated.
