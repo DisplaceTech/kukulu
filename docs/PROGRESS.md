@@ -11,7 +11,7 @@ Started: 2026-10-19T16:52:28.587Z
 - [x] P1-06 check-site.mjs rules 9 to 14, check:site and the lint line
 - [x] P1-07 Measure the budgets and contrast against their assumptions
 - [x] P1-08 serve-site.mjs and site:serve
-- [ ] P1-09 Phase 1 end: push and record the manual check
+- [x] P1-09 Phase 1 end: push and record the manual check
 - [ ] P2-01 check-site-browser.mjs, check:site:browser and .site-shots/
 - [ ] P2-02 The site CI workflow
 - [ ] P2-03 README, CONTRIBUTING and CHANGELOG for the site
@@ -43,3 +43,7 @@ Rules 9-14 + rule 1 missing half; 51 self-test cases; ok line lists 1..14. packa
 
 ### P1-08 — 223d23e
 scripts/serve-site.mjs: exports async start({port}) -> {url, close}; port arg, SITE_PORT, then config servePort. Self-test 21 checks. close() calls closeAllConnections so it resolves promptly. CLI: --port N, --self-test; bad args exit 2. package.json gains site:serve. Interpretation: bad %-escape -> 403; missing file -> 404.html with headers for its own path.
+
+### P1-09 — fc9cc90
+Push: origin build/landing pushed (empty task commit follows the push; run_finish pushes again).
+Manual check: NOT VERIFIED (human): run `npm run site:serve`, open it on desktop and at 360 px (device emulation or phone), both color schemes, and compare with docs/site/screens/. Tab through: skip link first, 2 px focus ring on every link and button. Confirm 44 px touch targets. Press all four copy buttons and paste. Judge whether "Copied" lasts long enough (copyFeedbackMs 2400, ASSUMPTION). Note: the page was written without a browser render in this run; all visual fidelity to the mockup is unverified.
