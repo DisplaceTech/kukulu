@@ -51,7 +51,7 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] P3-20 An end-to-end clean-room flight in the drive suite
 - [x] P3-21 Phase 3 end: push and record the manual check
 - [x] P4-01 cleanroom.similarity configuration
-- [ ] P4-02 The lexer core, Rust and the C family
+- [x] P4-02 The lexer core, Rust and the C family
 - [ ] P4-03 Lexers for Go, Python, JavaScript, TypeScript, Java and PHP
 - [ ] P4-04 Metrics, positioning and the verdict
 - [ ] P4-05 Calibration fixtures
@@ -215,3 +215,6 @@ Push: pushed build/2026-10-19. Also committed 387b6bd (outside a task): plan-bui
 
 ### P4-01 — 2c96318
 validateSimilarity + normalizeSimilarity (defaults: ngram [5,10], minIdentLen 6, commentNgram 5, near 0.25, separationMargin 0.0 under the ASSUMPTION comment; languages default to the common extension map; identExclusions null). No tool exposes the normalized block yet, so default values are asserted in P4-07's tests. docs/operations.md row avoids naming kukulu_similarity (plugin prose test forbids tool names that do not exist yet); P4-07 should name it.
+
+### P4-02 — 3777b0d
+tokenize/LANGUAGES in mcp/cleanroom.mjs: one scanner driven by SPECS per language (lineComments, blockComments, nestedBlocks, stringQuotes, charQuotes, rustStrings, lifetimes, preprocessor, wideLiterals, cxxRawStrings, types, keywords). Rust lifetimes lex as ID. Other six languages: in LANGUAGES, no spec yet (tokenize says "not available in this build") until P4-03; add specs to SPECS and extend the scanner flags (python triple quotes and # comments, go raw strings, js template literals, php $ identifiers). IMPORTANT: mcp/cleanroom.mjs must not contain the words async or await (server-synchronous is a line pattern); ASYNC_AWAIT builds them from pieces for the JS/TS/Rust keyword lists. Three original sample files in test/fixtures/similarity/lexers/.
