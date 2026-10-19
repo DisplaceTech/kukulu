@@ -42,7 +42,7 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] P3-11 The guard hook and its self-test
 - [x] P3-12 The logger hook
 - [x] P3-13 Tune the hook fast path and TARGET_MAX
-- [ ] P3-14 Self-protection: the always-protected set
+- [x] P3-14 Self-protection: the always-protected set
 - [ ] P3-15 Clean-room commit trailers
 - [ ] P3-16 The gate: checks 1 to 6
 - [ ] P3-17 Gate liveness
@@ -188,3 +188,6 @@ Logger implemented (PostToolUse only; UserPromptSubmit exits 0 until P3-18). Int
 
 ### P3-13 — c44901f
 Measurement: hook fast path before 50 ms, after 50 ms (unchanged): overhead over bare node guard median 6.0 / p90 23.9 / max 34.2 ms, logger 2.3 / 13.1 / 15.0 ms (30 runs each). TARGET_MAX before 4000, after 4000 (unchanged): cleanflate snapshot 3,314 entries, median 93, p95 2,058, p99 = max = 4,000, 85 entries (2.6%) exactly at the cap since cleanflate's own logger truncated; true maximum unobservable. Human may want to decide about raising it. Evidence: docs/spikes/P3-13.md.
+
+### P3-14 — 075fa2e
+protectedPaths(policy, env) exported; evaluate uses env.protected ?? protectedPaths(policy, env) and read-denies env.keyPath (as deny.paths). Guard script builds policyPath, pluginRoot (CLAUDE_PLUGIN_ROOT else its own ..), keyPath (KUKULU_CLEANROOM_KEY, else cleanroom.signingKey, else default) and planExists. Fixtures: 160 cases (16 categories x 4 write tools + Bash forms); each case may carry planExists. Self-test now 164 cases. tokenPath also unwraps name=value (dd of=). NOTE for P3-19: because docs/kukulu.json is protected as soon as docs/PLAN.md exists, the plan-build skill must write docs/kukulu.json BEFORE PLAN.md in clean-room mode (and the plan stage must write nothing else protected).
