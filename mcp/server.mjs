@@ -1030,7 +1030,8 @@ function planTaskFrom(lines, id) {
     if (/^###? /.test(lines[i])) { end = i; break; }
   }
   const text = lines.slice(start, end).join("\n").replace(/\s+$/, "");
-  const dep = text.match(/\*\*Depends on:\*\*\s*(.*)/i);
+  // Only the field line counts: the bold label quoted mid-sentence in another field must not replace the real dependencies.
+  const dep = text.match(/^\*\*Depends on:\*\*\s*(.*)$/im);
   const depends = dep && !/^\s*none\b/i.test(dep[1]) ? Array.from(dep[1].matchAll(TASK_ID), (m) => m[0]) : [];
   const files = (text.match(/\*\*Files touched:\*\*\s*([\s\S]*?)(?=\n\*\*|$)/i) || [])[1] || "";
   // `**Stream:**` is absent, empty or `none` for a serial task; anything else

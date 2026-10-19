@@ -311,6 +311,27 @@ for (const missing of ["docs/SPEC.md", "docs/PLAN.md", "docs/PROGRESS.md", "docs
   });
 }
 
+// The dependency label quoted in prose does not replace the real field.
+{
+  const tasks = [
+    { id: "P0-01", title: "First", files: "a.txt" },
+    { id: "P0-02", title: "Second", files: "b.txt", depends: ["P0-01"], constraints: "Quote the format as **Depends on:** P0-03 in the docs." },
+    { id: "P0-03", title: "Third", files: "c.txt" },
+  ];
+  const repo = plannedRepo({ tasks });
+  await withServer(repo, async ({ call }) => {
+    const p = await call("kukulu_plan_commit");
+    ok(!p.error, "kukulu_plan_commit reports no depends problem for a quoted label");
+    await call("kukulu_run_start");
+    await call("kukulu_task_next");
+    commitTask(repo, "P0-01", "First", { "a.txt": "a\n" });
+    await call("kukulu_task_done", { id: "P0-01", log: "ok" });
+    const n = await call("kukulu_task_next");
+    eq(n.id, "P0-02", "the second task is selected");
+    eq(JSON.stringify(n.dependsOn), JSON.stringify(["P0-01"]), "a quoted dependency label in a task's prose does not replace its real dependency");
+  });
+}
+
 // PLAN.md and PROGRESS.md written in the 0.6 spacing (no blank line after a heading) still parse.
 {
   const repo = plannedRepo();
