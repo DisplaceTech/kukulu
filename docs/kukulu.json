@@ -1,0 +1,673 @@
+{
+  "verify": [
+    "npm run lint",
+    "pre-commit run --all-files",
+    {
+      "cmd": "npm test",
+      "timeoutMs": 900000
+    }
+  ],
+  "extraVerify": {
+    "site/": [
+      "npm run check:site",
+      {
+        "cmd": "npm run check:site:browser",
+        "timeoutMs": 300000,
+        "exclusive": true
+      }
+    ],
+    "docs/site/": [
+      "npm run check:site",
+      {
+        "cmd": "npm run check:site:browser",
+        "timeoutMs": 300000,
+        "exclusive": true
+      }
+    ],
+    "scripts/check-site.mjs": [
+      "npm run check:site",
+      {
+        "cmd": "npm run check:site:browser",
+        "timeoutMs": 300000,
+        "exclusive": true
+      }
+    ],
+    "scripts/serve-site.mjs": [
+      "npm run check:site",
+      {
+        "cmd": "npm run check:site:browser",
+        "timeoutMs": 300000,
+        "exclusive": true
+      }
+    ],
+    "scripts/check-site-browser.mjs": [
+      "npm run check:site",
+      {
+        "cmd": "npm run check:site:browser",
+        "timeoutMs": 300000,
+        "exclusive": true
+      }
+    ],
+    "scripts/cleanroom-guard.mjs": [
+      {
+        "cmd": "node scripts/cleanroom-guard.mjs --self-test templates/cleanroom.example.json",
+        "from": "P3-11"
+      }
+    ],
+    "mcp/cleanroom.mjs": [
+      {
+        "cmd": "node scripts/cleanroom-guard.mjs --self-test templates/cleanroom.example.json",
+        "from": "P3-11"
+      }
+    ],
+    "templates/cleanroom.example.json": [
+      {
+        "cmd": "node scripts/cleanroom-guard.mjs --self-test templates/cleanroom.example.json",
+        "from": "P3-11"
+      }
+    ]
+  },
+  "build": [],
+  "baseBranch": "cleanroom",
+  "branchPrefix": "build/",
+  "maxRounds": 3,
+  "maxRoundsHard": 6,
+  "flight": "v0-7-0",
+  "mutation": {
+    "targeted": {
+      "suite": {
+        "cmd": "node test/{filter}.mjs"
+      }
+    }
+  },
+  "constraints": [
+    {
+      "id": "server-synchronous",
+      "description": "No async/await in mcp/server.mjs or mcp/cleanroom.mjs: every tool handler and every clean-room function is synchronous (SPEC 3.5).",
+      "paths": [
+        "mcp/server.mjs",
+        "mcp/cleanroom.mjs"
+      ],
+      "pattern": "\\b(async|await)\\b",
+      "shouldMatch": [
+        "async function f() {}",
+        "  const r = await run();",
+        "const g = async () => 1;"
+      ],
+      "shouldNotMatch": [
+        "function f() {}",
+        "// handlers stay synchronous",
+        "const asynchronous = false;"
+      ]
+    },
+    {
+      "id": "no-dependencies",
+      "description": "package.json declares no dependencies or devDependencies (SPEC 3.14).",
+      "paths": [
+        "package.json"
+      ],
+      "pattern": "\"(dependencies|devDependencies|optionalDependencies|peerDependencies)\"\\s*:",
+      "shouldMatch": [
+        "  \"dependencies\": {",
+        "\"devDependencies\":{}",
+        "  \"optionalDependencies\": {"
+      ],
+      "shouldNotMatch": [
+        "  \"engines\": {",
+        "  \"description\": \"no dependencies\",",
+        "    \"check:site\": \"node scripts/check-site.mjs --self-test && node scripts/check-site.mjs\","
+      ]
+    },
+    {
+      "id": "no-fable-default",
+      "description": "No plugin agent defaults to fable.",
+      "paths": [
+        "agents/"
+      ],
+      "pattern": "^model:\\s*fable\\b",
+      "shouldMatch": [
+        "model: fable",
+        "model:fable"
+      ],
+      "shouldNotMatch": [
+        "model: opus",
+        "  model: fable is no longer the default"
+      ]
+    },
+    {
+      "id": "no-sync-merge",
+      "description": "Kūkulu never runs gh pr merge without --auto: the gh pr merge arguments are one inline array literal that includes --auto.",
+      "paths": [
+        "mcp/server.mjs"
+      ],
+      "pattern": "\\[\\s*[\"']pr[\"'],\\s*[\"']merge[\"'](?![^\\]]*[\"']--auto[\"'])",
+      "shouldMatch": [
+        "const r = spawnSync(\"gh\", [\"pr\", \"merge\", \"--squash\"], { cwd: ROOT });",
+        "const args = ['pr', 'merge', '--merge'];",
+        "gh([\"pr\",\"merge\"]);"
+      ],
+      "shouldNotMatch": [
+        "const r = spawnSync(\"gh\", [\"pr\", \"merge\", \"--auto\", `--${method}`], { cwd: ROOT });",
+        "git([\"merge\", \"--no-ff\", \"-m\", msg, branch]);",
+        "spawnSync(\"gh\", [\"pr\", \"ready\"], { cwd: ROOT });"
+      ]
+    },
+    {
+      "id": "no-gnu-sed-inplace",
+      "description": "No GNU-only sed -i in test/, scripts/ or mcp/ (BSD sed on macOS rejects it). test/fixtures/ holds recorded commands as data, never run.",
+      "paths": [
+        "test/",
+        "scripts/",
+        "mcp/"
+      ],
+      "pattern": "\\bsed\\s+(-[A-Za-z]+\\s+)*-[A-Za-z]*i",
+      "shouldMatch": [
+        "sed -i 's/a/b/' f",
+        "sed -E -i 's/a/b/' f",
+        "sed -ri 's/a/b/' f",
+        "sed -i.bak 's/a/b/' f",
+        "  if [ -f \"$dir/pr.json\" ]; then sed -i 's/\"isDraft\":true/\"isDraft\":false/' \"$dir/pr.json\"; fi"
+      ],
+      "shouldNotMatch": [
+        "  if [ -f \"$dir/pr.json\" ]; then sed 's/\"isDraft\":true/\"isDraft\":false/' \"$dir/pr.json\" > \"$dir/pr.json.tmp\" && mv \"$dir/pr.json.tmp\" \"$dir/pr.json\"; fi",
+        "sed -n 1p file",
+        "sed -e 's/i/j/' f"
+      ],
+      "exclude": [
+        "test/fixtures/"
+      ]
+    },
+    {
+      "id": "site-no-inline-style",
+      "description": "No style= attribute (inline SVG included) and no <style> element in the site's HTML (SPEC 3.3). Styling lives in site/styles.css.",
+      "paths": [
+        "site/index.html",
+        "site/404.html"
+      ],
+      "pattern": "\\sstyle\\s*=|<style[\\s>]",
+      "flags": "i",
+      "shouldMatch": [
+        "<div class=\"wrap\" style=\"display: flex\">",
+        "<path d=\"M1 41 L6 51 Z\" style='fill: var(--accent)'></path>",
+        "<style>",
+        "<STYLE type=\"text/css\">",
+        "<p STYLE = \"margin:0\">x</p>"
+      ],
+      "shouldNotMatch": [
+        "<link rel=\"stylesheet\" href=\"/styles.css\">",
+        "<p class=\"stylebox\">Styled by class</p>",
+        "<svg class=\"fwd\" viewBox=\"0 0 56 12\" aria-hidden=\"true\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\">"
+      ]
+    },
+    {
+      "id": "site-no-inline-handler",
+      "description": "No attribute whose name starts with on in the site's HTML (SPEC 3.4).",
+      "paths": [
+        "site/index.html",
+        "site/404.html"
+      ],
+      "pattern": "<[^>]*\\son[a-z]+\\s*=",
+      "flags": "i",
+      "shouldMatch": [
+        "<button type=\"button\" onclick=\"copy()\">",
+        "<body onload='init()'>",
+        "<img src=\"/og.png\" alt=\"\" onerror=alert(1)>",
+        "<a href=\"#top\" ONCLICK = \"x()\">Top</a>"
+      ],
+      "shouldNotMatch": [
+        "<meta name=\"description\" content=\"Kūkulu is an open-source Claude Code plugin\">",
+        "<button type=\"button\" class=\"copy\" data-copy-for=\"install-shell\" aria-label=\"Copy the shell install commands\" hidden>",
+        "<p>Turn it on = done, once the script ran.</p>"
+      ]
+    },
+    {
+      "id": "site-404-no-script",
+      "description": "site/404.html has no script at all (SPEC 3.4, 6).",
+      "paths": [
+        "site/404.html"
+      ],
+      "pattern": "<script\\b",
+      "flags": "i",
+      "shouldMatch": [
+        "<script src=\"/copy.js\" defer></script>",
+        "<SCRIPT>",
+        "  <script type=\"module\">"
+      ],
+      "shouldNotMatch": [
+        "<p>There is nothing at this address.</p>",
+        "<a href=\"/\">Go to the home page</a>"
+      ]
+    },
+    {
+      "id": "site-one-script-form",
+      "description": "The only script tag in site/index.html is exactly <script src=\"/copy.js\" defer></script> (SPEC 3.4).",
+      "paths": [
+        "site/index.html"
+      ],
+      "pattern": "<script(?! src=\"/copy\\.js\" defer></script>)",
+      "flags": "i",
+      "shouldMatch": [
+        "<script>console.log(1)</script>",
+        "<script src=\"/copy.js\"></script>",
+        "<script type=\"module\" src=\"/copy.js\"></script>",
+        "<script async src=\"https://www.googletagmanager.com/gtag/js\"></script>"
+      ],
+      "shouldNotMatch": [
+        "<script src=\"/copy.js\" defer></script>",
+        "</body>",
+        "<p>One small script copies the commands.</p>"
+      ]
+    },
+    {
+      "id": "site-root-relative-src",
+      "description": "Every src= and <link href= in the site's HTML is a root-relative path; the only absolute link href is the canonical https://kukulu.tech/ (SPEC 3.5).",
+      "paths": [
+        "site/index.html",
+        "site/404.html"
+      ],
+      "pattern": "\\ssrc\\s*=(?!\\s*[\"']?/(?!/))|<link\\b[^>]*\\shref\\s*=(?!\\s*[\"']?(/(?!/)|https://kukulu\\.tech/[\"']))",
+      "flags": "i",
+      "shouldMatch": [
+        "<img src=\"https://example.com/logo.png\" alt=\"\">",
+        "<script src=\"//cdn.example.com/x.js\" defer></script>",
+        "<img src=\"assets/og.png\" alt=\"\">",
+        "<img src=\"data:image/png;base64,AAAA\" alt=\"\">",
+        "<link rel=\"stylesheet\" href=\"https://fonts.googleapis.com/css2?family=Hanken+Grotesk\">",
+        "<link rel=\"icon\" href=\"assets/favicon.svg\" type=\"image/svg+xml\">",
+        "<link rel=\"canonical\" href=\"https://kukulu.tech/index.html\">"
+      ],
+      "shouldNotMatch": [
+        "<script src=\"/copy.js\" defer></script>",
+        "<link rel=\"icon\" href=\"/favicon.svg\" type=\"image/svg+xml\">",
+        "<link rel=\"preload\" as=\"font\" type=\"font/woff2\" crossorigin href=\"/fonts/hanken-grotesk-latin-wght-normal.woff2\">",
+        "<link rel=\"canonical\" href=\"https://kukulu.tech/\">",
+        "<a href=\"https://github.com/DisplaceTech/kukulu\">GitHub</a>"
+      ]
+    },
+    {
+      "id": "site-css-root-relative",
+      "description": "Every url(...) in site/styles.css is root-relative, and there is no @import (SPEC 3.5; all styling lives in one file).",
+      "paths": [
+        "site/styles.css"
+      ],
+      "pattern": "url\\((?!\\s*[\"']?/(?!/))|@import\\b",
+      "flags": "i",
+      "shouldMatch": [
+        "@font-face{font-family:\"Hanken Grotesk\";src:url(https://fonts.gstatic.com/s/x.woff2) format(\"woff2\")}",
+        "src:url(\"//cdn.example.com/a.woff2\")",
+        "src:url(fonts/hanken-grotesk-latin-wght-normal.woff2) format(\"woff2-variations\");",
+        ".x{background:url(data:image/png;base64,AAAA)}",
+        "@import url(\"/other.css\");",
+        "@import \"https://fonts.googleapis.com/css2?family=JetBrains+Mono\";"
+      ],
+      "shouldNotMatch": [
+        "src:url(/fonts/hanken-grotesk-latin-wght-normal.woff2) format(\"woff2-variations\");",
+        "src:url(\"/fonts/jetbrains-mono-latin-wght-normal.woff2\") format(\"woff2-variations\");",
+        "src:url( '/fonts/a.woff2' );",
+        ".grid-bg{background-image:linear-gradient(var(--grid) 1px,transparent 1px)}"
+      ]
+    },
+    {
+      "id": "site-display-name-ascii",
+      "description": "The site's HTML never writes the display name in ASCII; prose uses the precomposed macron, URLs and identifiers use lowercase kukulu (SPEC 3.6, 3.11).",
+      "paths": [
+        "site/index.html",
+        "site/404.html"
+      ],
+      "pattern": "\\bKukulu\\b",
+      "shouldMatch": [
+        "<h1>Kukulu builds from the spec</h1>",
+        "<title>Page not found — Kukulu</title>",
+        "<meta property=\"og:site_name\" content=\"Kukulu\">"
+      ],
+      "shouldNotMatch": [
+        "<a href=\"https://github.com/DisplaceTech/kukulu\">GitHub</a>",
+        "<span class=\"wordmark\">Kūkulu</span>",
+        "<code id=\"install-session\">/plugin install kukulu@displacetech</code>",
+        "<code id=\"flight-cmd\">/kukulu:go-flight</code>"
+      ]
+    },
+    {
+      "id": "site-self-contained",
+      "description": "Nothing in site/ references docs/, scripts/, assets/ or a relative parent path (SPEC 4 boundaries).",
+      "paths": [
+        "site/index.html",
+        "site/404.html",
+        "site/styles.css",
+        "site/copy.js",
+        "site/_headers",
+        "site/robots.txt"
+      ],
+      "pattern": "[\"'(=]\\s*(\\.\\.?/|/?(docs|scripts|assets)/)",
+      "shouldMatch": [
+        "<link rel=\"icon\" href=\"assets/favicon.svg\">",
+        "<a href=\"../docs/SPEC.md\">spec</a>",
+        "src:url(../fonts/a.woff2)",
+        "<a href=\"/docs/site/DEPLOY.md\">deploy</a>",
+        "<script src='scripts/check-site.mjs'></script>",
+        "<img src=\"./og.png\" alt=\"\">"
+      ],
+      "shouldNotMatch": [
+        "<a href=\"https://github.com/DisplaceTech/kukulu/blob/main/docs/writing-specs.md\">The spec guide</a>",
+        "<dd><code>docs/SPEC.md</code></dd>",
+        "src:url(/fonts/hanken-grotesk-latin-wght-normal.woff2) format(\"woff2-variations\");",
+        "<script src=\"/copy.js\" defer></script>"
+      ]
+    },
+    {
+      "id": "site-no-theme-attr",
+      "description": "The mockup's data-theme preview attribute does not ship (SPEC 6, Theme).",
+      "paths": [
+        "site/index.html",
+        "site/404.html",
+        "site/styles.css",
+        "site/copy.js"
+      ],
+      "pattern": "data-theme",
+      "shouldMatch": [
+        "<html lang=\"en\" data-theme=\"light\">",
+        ":root[data-theme=\"light\"]{--bg:#F3F0E8}",
+        "document.documentElement.dataset.theme = 'dark'; // data-theme"
+      ],
+      "shouldNotMatch": [
+        "@media (prefers-color-scheme: light){:root{--bg:#F3F0E8}}",
+        "<html lang=\"en\">"
+      ]
+    },
+    {
+      "id": "site-no-cache-control",
+      "description": "site/_headers sets no Cache-Control; Cloudflare Pages' own caching stands (SPEC 6).",
+      "paths": [
+        "site/_headers"
+      ],
+      "pattern": "^\\s*Cache-Control\\s*:",
+      "flags": "i",
+      "shouldMatch": [
+        "  Cache-Control: max-age=3600",
+        "cache-control:no-store"
+      ],
+      "shouldNotMatch": [
+        "  X-Content-Type-Options: nosniff",
+        "  Content-Type: application/json; charset=utf-8"
+      ]
+    },
+    {
+      "id": "copy-buttons-start-hidden",
+      "description": "Every [data-copy-for] button carries the hidden attribute, so it stays hidden without JavaScript or the clipboard API (SPEC 6, Copy-to-clipboard).",
+      "paths": [
+        "site/index.html"
+      ],
+      "pattern": "<button\\b(?=[^>]*\\sdata-copy-for\\s*=)(?![^>]*\\shidden(\\s|>|=))[^>]*>",
+      "flags": "i",
+      "shouldMatch": [
+        "<button type=\"button\" class=\"copy\" data-copy-for=\"install-session\" aria-label=\"Copy install commands\">",
+        "<button type=\"button\" class=\"copy small\" data-copy-for=\"flight-cmd\" aria-hidden=\"false\" aria-label=\"Copy the flight command\">"
+      ],
+      "shouldNotMatch": [
+        "<button type=\"button\" class=\"copy small\" data-copy-for=\"install-shell\" aria-label=\"Copy the shell install commands\" hidden>",
+        "<button type=\"button\" class=\"copy\" hidden data-copy-for=\"install-session\" aria-label=\"Copy install commands\">",
+        "<button type=\"button\" class=\"menu\">Menu</button>"
+      ]
+    },
+    {
+      "id": "no-hardcoded-copy-feedback",
+      "description": "copyFeedbackMs (2400, ⚠️ ASSUMPTION) appears as a literal only in copy.js's line const COPY_FEEDBACK_MS = 2400; the checkers read it from docs/site/checks.json (SPEC 5).",
+      "paths": [
+        "site/copy.js",
+        "site/index.html",
+        "site/404.html",
+        "site/styles.css",
+        "scripts/check-site.mjs",
+        "scripts/check-site-browser.mjs",
+        "scripts/serve-site.mjs"
+      ],
+      "pattern": "(?<!const COPY_FEEDBACK_MS = )(?<![\\w.])2400(?!\\d)",
+      "shouldMatch": [
+        "  setTimeout(reset, 2400);",
+        "const DELAY = 2400;",
+        "  copyFeedbackMs: 2400,",
+        ".copy-label{transition:opacity 2400ms}",
+        "if (ms !== \"2400\") fail(4, msg);"
+      ],
+      "shouldNotMatch": [
+        "  const COPY_FEEDBACK_MS = 2400;",
+        "  setTimeout(reset, COPY_FEEDBACK_MS);",
+        "const port = 24000;",
+        "const n = 12400;"
+      ]
+    },
+    {
+      "id": "no-hardcoded-site-tunables",
+      "description": "The checkers and the server read every ⚠️ ASSUMPTION value (budget.textBytes, budget.fontBytes, budget.scriptBytes, contrastMin, servePort) from docs/site/checks.json and never write the number (SPEC 5).",
+      "paths": [
+        "scripts/check-site.mjs",
+        "scripts/check-site-browser.mjs",
+        "scripts/serve-site.mjs"
+      ],
+      "pattern": "(?<![\\w.])(65536|184320|2048|8788)(?!\\d)|(?<![\\w.])4\\.5(?!\\d)",
+      "shouldMatch": [
+        "const TEXT_BUDGET = 65536;",
+        "  fontBytes: 184320,",
+        "if (size > 2048) fail(4, file, \"copy.js is too big\");",
+        "const port = Number(process.env.SITE_PORT || 8788);",
+        "const MIN_CONTRAST = 4.5;",
+        "  'contrastMin' => 4.5,"
+      ],
+      "shouldNotMatch": [
+        "const { textBytes, fontBytes, scriptBytes } = config.budget;",
+        "if (ratio < config.contrastMin) fail(9, file, msg);",
+        "const port = Number(process.env.SITE_PORT || config.servePort);",
+        "const size = 20480;",
+        "const ratio = 14.5;",
+        "\"version\": \"0.4.5\""
+      ]
+    },
+    {
+      "id": "scripts-node-builtins",
+      "description": "Every scripts/*.mjs imports only node: built-ins or sibling files under scripts/ or mcp/ (SPEC 3.6). check-diagrams.mjs is CI-only and documented to need mermaid and jsdom; lint.sh is shell.",
+      "paths": [
+        "scripts/"
+      ],
+      "exclude": [
+        "scripts/check-diagrams.mjs",
+        "scripts/lint.sh"
+      ],
+      "pattern": "^\\s*(?:import|export)\\b[^;]*\\bfrom\\s*[\"'](?!node:|\\.\\.?/)|^\\s*\\}\\s*from\\s*[\"'](?!node:|\\.\\.?/)|\\bimport\\s*\\(\\s*[\"'](?!node:|\\.\\.?/)|^\\s*import\\s+[\"'](?!node:|\\.\\.?/)|\\brequire\\s*\\(",
+      "shouldMatch": [
+        "import ws from \"ws\";",
+        "import { chromium } from 'playwright';",
+        "  const { chromium } = await import(\"playwright\");",
+        "const fs = require(\"fs\");",
+        "import \"dotenv/config\";",
+        "import fs from \"fs\";",
+        "} from \"some-package\";",
+        "export { x } from \"pkg\";"
+      ],
+      "shouldNotMatch": [
+        "import fs from \"node:fs\";",
+        "import { chain } from \"../mcp/cleanroom.mjs\";",
+        "import { start } from \"./serve-site.mjs\";",
+        "  const cr = await import(\"../mcp/cleanroom.mjs\");",
+        "// Playwright and Puppeteer are not used here"
+      ]
+    },
+    {
+      "id": "no-foundry-names",
+      "description": "No foundry name at runtime once the removal tasks have landed (SPEC 3.10, A-01). The verifier's legacy reader and the test fixture are history; the archive-name fallback is spelled \"foun\" + \"dry.json\".",
+      "paths": [
+        "mcp/",
+        "scripts/",
+        "hooks/",
+        "skills/",
+        "agents/",
+        ".mcp.json"
+      ],
+      "exclude": [
+        "scripts/verify-attestation.mjs",
+        "test/fixtures/"
+      ],
+      "pattern": "foundry|FOUNDRY",
+      "flags": "i",
+      "shouldMatch": [
+        "const old = process.env[`FOUNDRY_${name}`];",
+        "\"foundry-implementer\"",
+        "// the pre-0.6.0 Foundry layout",
+        "        \"FOUNDRY_CONFIG\": \"${FOUNDRY_CONFIG:-}\","
+      ],
+      "shouldNotMatch": [
+        "const ROOT = envVar(\"PROJECT_DIR\");",
+        "    const archived = [\"kukulu.json\", \"foun\" + \"dry.json\"].map((n) => path.join(ROOT, st.archived.dir, n)).find(exists);",
+        "const LEGACY = \"foun\" + \"dry\";"
+      ],
+      "from": "P0-05"
+    },
+    {
+      "id": "one-hash-one-signature",
+      "description": "SHA-256 is the only digest and Ed25519 the only signature (SPEC 3.12).",
+      "paths": [
+        "mcp/",
+        "scripts/"
+      ],
+      "pattern": "createHash\\(\\s*(?:[\"'])(?!sha256[\"'])|generateKeyPairSync\\(\\s*(?:[\"'])(?!ed25519[\"'])|\\bcreateHmac\\s*\\(|\\bcreateSign\\s*\\(|\\bcreateVerify\\s*\\(",
+      "shouldMatch": [
+        "createHash(\"sha1\")",
+        "generateKeyPairSync(\"rsa\", {",
+        "const h = crypto.createHash('md5').update(x);",
+        "createHash(\"sha512\").update(bytes).digest(\"hex\")",
+        "const mac = createHmac(\"sha256\", key);",
+        "const s = createSign(\"RSA-SHA256\");"
+      ],
+      "shouldNotMatch": [
+        "createHash(\"sha256\")",
+        "generateKeyPairSync(\"ed25519\")",
+        "const sha256 = (file) => crypto.createHash(\"sha256\").update(fs.readFileSync(file)).digest(\"hex\");",
+        "const sig = sign(null, Buffer.from(canonical(data)), privateKey).toString(\"base64\");"
+      ]
+    },
+    {
+      "id": "site-no-patented",
+      "description": "The clean-room method is patent pending; \"patented\" never appears on the page, the mockup, the README or the changelog (SPEC G-04).",
+      "paths": [
+        "site/",
+        "docs/site/mockup.html",
+        "README.md",
+        "CHANGELOG.md"
+      ],
+      "pattern": "\\bpatented\\b",
+      "flags": "i",
+      "shouldMatch": [
+        "<p>Clean-room mode is patented.</p>",
+        "- The method is Patented in the US."
+      ],
+      "shouldNotMatch": [
+        "<span>Patent pending</span>",
+        "The method behind cleanflate, and the subject of a pending patent.",
+        "patent-pending"
+      ]
+    },
+    {
+      "id": "cleanroom-module-pure",
+      "description": "mcp/cleanroom.mjs is pure and synchronous: node: imports only, no child processes, no process.exit, no console (SPEC 4 boundaries).",
+      "paths": [
+        "mcp/cleanroom.mjs"
+      ],
+      "pattern": "\\bprocess\\.exit\\b|\\bconsole\\.[a-z]+\\s*\\(|[\"'](?:node:)?child_process[\"']|\\b(?:spawnSync|execFileSync|execSync)\\b|^\\s*(?:import|export)\\b[^;]*\\bfrom\\s*[\"'](?!node:)|\\bimport\\s*\\(",
+      "shouldMatch": [
+        "import { spawnSync } from \"node:child_process\";",
+        "  process.exit(1);",
+        "  console.error(\"guard failed\");",
+        "const r = spawnSync(\"git\", [\"status\"]);",
+        "import { helper } from \"./helper.mjs\";",
+        "const m = import(\"node:fs\");"
+      ],
+      "shouldNotMatch": [
+        "import fs from \"node:fs\";",
+        "import { createHash, sign, verify } from \"node:crypto\";",
+        "  const m = /^([A-Z_]+)=/.exec(token);",
+        "// the hook scripts own exit codes and stderr"
+      ]
+    },
+    {
+      "id": "hooks-lazy-cleanroom",
+      "description": "The hook scripts never import mcp/cleanroom.mjs statically, so the no-policy fast path exits before loading it (SPEC D-02).",
+      "paths": [
+        "scripts/cleanroom-guard.mjs",
+        "scripts/cleanroom-log.mjs"
+      ],
+      "pattern": "^\\s*import\\b[^;(]*\\bfrom\\s*[\"'][^\"']*cleanroom\\.mjs[\"']|^\\s*import\\s+[\"'][^\"']*cleanroom\\.mjs[\"']",
+      "shouldMatch": [
+        "import { evaluate } from \"../mcp/cleanroom.mjs\";",
+        "import * as cr from '../mcp/cleanroom.mjs';",
+        "import \"../mcp/cleanroom.mjs\";"
+      ],
+      "shouldNotMatch": [
+        "const cr = await import(\"../mcp/cleanroom.mjs\");",
+        "import fs from \"node:fs\";",
+        "import path from \"node:path\";"
+      ]
+    },
+    {
+      "id": "verifier-node-only",
+      "description": "scripts/verify-attestation.mjs imports nothing but node: modules, so the copy inside a bundle runs alone (SPEC 4, F-03).",
+      "paths": [
+        "scripts/verify-attestation.mjs"
+      ],
+      "pattern": "^\\s*(?:import|export)\\b[^;]*\\bfrom\\s*[\"'](?!node:)|^\\s*\\}\\s*from\\s*[\"'](?!node:)|\\bimport\\s*\\(\\s*[\"'](?!node:)|^\\s*import\\s+[\"'](?!node:)|\\brequire\\s*\\(",
+      "shouldMatch": [
+        "import { verifyChain } from \"../mcp/cleanroom.mjs\";",
+        "import { x } from \"./helper.mjs\";",
+        "const m = await import(\"./x.mjs\");",
+        "const fs = require(\"fs\");"
+      ],
+      "shouldNotMatch": [
+        "import { createHash, verify } from \"node:crypto\";",
+        "import fs from \"node:fs\";",
+        "const { createPublicKey } = await import(\"node:crypto\");"
+      ]
+    },
+    {
+      "id": "no-hardcoded-target-max",
+      "description": "The log target length (4,000, ⚠️ ASSUMPTION) is written once, as const TARGET_MAX = 4000; in mcp/cleanroom.mjs (SPEC 5.3).",
+      "paths": [
+        "mcp/cleanroom.mjs",
+        "scripts/cleanroom-guard.mjs",
+        "scripts/cleanroom-log.mjs"
+      ],
+      "pattern": "(?<!const TARGET_MAX = )(?<![\\w.])4_?000(?![\\d_])",
+      "shouldMatch": [
+        "  const max = 4000;",
+        "  return target.slice(0, 4000);",
+        "  TARGET_MAX: 4000,",
+        "const LIMIT = 4_000;"
+      ],
+      "shouldNotMatch": [
+        "export const TARGET_MAX = 4000;",
+        "  return target.slice(0, TARGET_MAX);",
+        "const port = 40000;",
+        "const ms = 14000;"
+      ]
+    },
+    {
+      "id": "no-hardcoded-mutation-fix-rounds",
+      "description": "review.mutationFixRounds' default (2, ⚠️ ASSUMPTION) is written once, on cfgFrom's review line; every other use reads the key (SPEC 5.3, B-03).",
+      "paths": [
+        "mcp/server.mjs",
+        "skills/",
+        "agents/"
+      ],
+      "pattern": "^(?!\\s*review: \\{ mutationFixRounds: c\\.review\\?\\.mutationFixRounds \\?\\? 2 \\},\\s*$).*(?:\\bmutationFixRounds\\b.*(?<![\\w.-])2(?![\\w.])|(?<![\\w.-])2(?![\\w.]).*\\bmutationFixRounds\\b|\\bMUTATION_FIX_ROUNDS\\s*=)",
+      "shouldMatch": [
+        "const MUTATION_FIX_ROUNDS = 2; // review.mutationFixRounds",
+        "    review: { mutationFixRounds: c.review?.mutationFixRounds || 2 },",
+        "  if (N > (c.review.mutationFixRounds ?? 2)) {",
+        "From round 3 (mutationFixRounds is 2) a survivor is a note."
+      ],
+      "shouldNotMatch": [
+        "    review: { mutationFixRounds: c.review?.mutationFixRounds ?? 2 },",
+        "  if (N > c.review.mutationFixRounds && t.source === \"mutation\") {",
+        "    `round ${N} is past review.mutationFixRounds=${c.review.mutationFixRounds}: a surviving mutant is advisory now.`",
+        "From round `mutationFixRounds + 1` on, a survivor in R2-01's file never becomes a task."
+      ]
+    }
+  ]
+}
