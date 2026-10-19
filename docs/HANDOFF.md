@@ -67,3 +67,10 @@ Review-fix round: 2 tasks (R2-01, R2-02), both done, none blocked.
 - Hand check: none. Reviewer re-runs kukulu_mutate as listed in the tasks.
 
 Codebase notes (round 2): none.
+
+## Round 3
+
+- R3-01 (12e055d): `scripts/check-site-browser.mjs --self-test` gains three checks (12 cases): zero-size copy buttons, a console error after load (delay `Math.floor(SETTLE_MS / 3)`), and a clean page after the failing cases. Only that file changed.
+- Interpretation: the late-error delay is a third of SETTLE_MS, so it fires inside the settle window.
+- Mutants run by hand: dropping the bounding-box check, `events = [];` or the SETTLE_MS wait each made the self-test exit 1.
+- 19 of 19 tasks done, none blocked. `kukulu_verify` green.
