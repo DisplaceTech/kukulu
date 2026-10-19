@@ -74,3 +74,9 @@ Codebase notes (round 2): none.
 - Interpretation: the late-error delay is a third of SETTLE_MS, so it fires inside the settle window.
 - Mutants run by hand: dropping the bounding-box check, `events = [];` or the SETTLE_MS wait each made the self-test exit 1.
 - 19 of 19 tasks done, none blocked. `kukulu_verify` green.
+
+## Round 4
+
+- R4-01 (`scripts/check-site-browser.mjs`): `PAGE_PROBE` now returns `document.readyState`, read before awaiting `document.fonts.ready`. `visit` fails, naming viewport and scheme, when it is not `complete`. Deleting the load wait is now killed by the self-test "baseline passes" (checked by hand: readyState `interactive`). Self-test still 12 cases; the run still 6 runs.
+- Interpretation: readyState is captured first so a load that finishes during the fonts wait cannot mask the early probe.
+- Tasks: 20 done, 0 blocked, 0 skipped.
