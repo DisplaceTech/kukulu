@@ -5,7 +5,7 @@ Started: 2026-10-19T20:19:40.028Z
 
 ## Tasks
 
-- [ ] P0-01 Keep pre-commit from rewriting the approved-copy file
+- [x] P0-01 Keep pre-commit from rewriting the approved-copy file
 - [ ] P0-02 Remove the FOUNDRY_* fallbacks and the deprecations field
 - [ ] P0-03 Refuse the pre-0.6.0 layout and remove kukulu_migrate
 - [ ] P0-04 The guard and hooks accept only the kukulu names
@@ -77,3 +77,6 @@ Started: 2026-10-19T20:19:40.028Z
 ## Log
 
 (one entry per task, appended by implement)
+
+### P0-01 — 9f634f6
+Added exclude for docs/site/copy-changes.json to end-of-file-fixer. pre-commit passes, tree clean, npm test green. Note: the first attempt via a python heredoc was denied by the auto-mode classifier; Edit tool worked.
