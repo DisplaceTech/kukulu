@@ -38,7 +38,7 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] P3-07 Genesis and sticky mode
 - [x] P3-08 Checkpoints from the tools, and the log in their commits
 - [x] P3-09 Path canonicalization and the Bash splitter
-- [ ] P3-10 evaluate: the guard's rules
+- [x] P3-10 evaluate: the guard's rules
 - [ ] P3-11 The guard hook and its self-test
 - [ ] P3-12 The logger hook
 - [ ] P3-13 Tune the hook fast path and TARGET_MAX
@@ -176,3 +176,6 @@ checkpoint(event, stage, st) + cleanroomPaths(st) helpers; wired into run_start,
 
 ### P3-09 — aa68450
 Added splitSegments, shellWords, commandWord ({word (basename), raw, args}), tokenPath, isPathLike, canonicalPaths to mcp/cleanroom.mjs. Interpretation: redirection & (2>&1, &>) does not split; canonicalPaths adds the real path via the nearest existing ancestor; nice -n takes its value. Backslash escapes in test strings: write them with String.fromCharCode(92) when scripting edits.
+
+### P3-10 — 286a824
+evaluate(policy, hookInput, {root, home, progressText, protected?}) + lockdownActive + NETWORK_COMMANDS/READ_FAMILY/WRITE_FAMILY in mcp/cleanroom.mjs; test/fixtures/guard-cases.json (70 cases, recorded calls with __ROOT__ substitution). RESULT for the eight recorded cleanflate false positives under the template: #2 (16:11:51), #3 (16:11:56), #4 (17:00:19), #5 (17:21:39) are allowed; #1 (14:40:33 sed expression), #6 (17:23:20 grep -v regex), #7 (18:13:45) and #8 (20:53:01) are still DENIED by rule 6, read-family "forbidden word in path argument": a token with a slash and a denied word (zlib in a sed or grep regex) is path-like and, resolved against cwd, lies outside allow.paths. Cases keep their actual decision; rules unchanged. The real attempt (find / -path libz-sys) is denied as expected. WebSearch with the template is denied by deny.tools (rule 1) before the network rule. WebFetch obeys deny.network as well as the URL list. Tool-level word reasons read "forbidden word in <path|pattern|glob>: <value>".
