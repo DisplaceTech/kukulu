@@ -385,7 +385,8 @@ Record a verdict. Call it exactly once per review. It is all-or-nothing: if its 
       "constraints": "…",
       "outOfScope": "…",
       "verification": "…",
-      "dependsOn": ["R1-01"]
+      "dependsOn": ["R1-01"],
+      "source": "review"          // required: "review", "mutation" or "blocked"
     }
   ],
   "unblock": [                     // CHANGES REQUESTED only
@@ -396,13 +397,13 @@ Record a verdict. Call it exactly once per review. It is all-or-nothing: if its 
 
 `unblock` also accepts bare id strings, which get a default reason.
 
-**Does, for `APPROVED`:** records the verdict, appends an entry to `state.rounds`, commits `REVIEW.md` as `review: round N approved`, and pushes the branch per `policies.push`.
+**Does, for `APPROVED`:** records the verdict, appends an entry to `state.rounds` (with `sources: { review: 0, mutation: 0, blocked: 0 }`), commits `REVIEW.md` as `review: round N approved`, and pushes the branch per `policies.push`.
 
-**Does, for `CHANGES REQUESTED`:** assigns `R<N>-<nn>` ids, appends `## Review fixes (round N)` to `PLAN.md` in task format, appends the checkbox lines to `PROGRESS.md` above `## Log`, resets unblocked tasks to `[ ]` with their reasons logged, along with every task skipped because of them (transitively, each logged with its cause), bumps the round, appends an entry to `state.rounds`, commits everything as `review: round N`, and pushes the branch per `policies.push`. It halts (writes a `halted` reason into `.kukulu/state.json`, which stops the next flight) when the new round reaches `maxRoundsHard`, or when the count of non-converging rounds so far reaches `maxRounds`. [architecture.md](./architecture.md#review-rounds) defines "non-converging".
+**Does, for `CHANGES REQUESTED`:** assigns `R<N>-<nn>` ids, appends `## Review fixes (round N)` to `PLAN.md` in task format, appends the checkbox lines to `PROGRESS.md` above `## Log`, resets unblocked tasks to `[ ]` with their reasons logged, along with every task skipped because of them (transitively, each logged with its cause), bumps the round, appends an entry to `state.rounds` (its `sources` counts the fix tasks by `source`), commits everything as `review: round N`, and pushes the branch per `policies.push`. It halts (writes a `halted` reason into `.kukulu/state.json`, which stops the next flight) when the new round reaches `maxRoundsHard`, or when the count of non-converging rounds so far reaches `maxRounds`. [architecture.md](./architecture.md#review-rounds) defines "non-converging".
 
 **Returns:** `{ verdict, round, fixRounds, commit, push }` for an approval; `{ verdict, round, fixTasks, unblocked, reopenedDependents, commit, halted, counts, push }` for changes. `round` is always the number this review was stamped with (`N`), never the count of fix rounds; for an approval, `fixRounds` is that count. `push` is the same shape `kukulu_run_finish` returns. `counts` describes `PROGRESS.md` as this call left it, including the fix tasks it just queued. Either shape also carries `recoveredMutation` (a path) when the call first had to restore a file a crashed [`kukulu_mutate`](#kukulu_mutate) left edited.
 
-**Refuses when:** the verdict is neither legal value; `REVIEW.md` does not exist; no implementation handoff has been recorded for this round; `REVIEW.md`'s `Round:` line is missing or does not equal `reviewRound`; an approval carries fix tasks or unblocks; changes are requested with neither; a fix task is missing `title`, `goal`, `files` or `tests`; a fix task's `dependsOn` names something that is neither an existing task nor one of this submission's own ids; or an unblock names a task that does not exist or is not blocked or skipped.
+**Refuses when:** the verdict is neither legal value; `REVIEW.md` does not exist; no implementation handoff has been recorded for this round; `REVIEW.md`'s `Round:` line is missing or does not equal `reviewRound`; an approval carries fix tasks or unblocks; changes are requested with neither; a fix task is missing `title`, `goal`, `files` or `tests`, or its `source` is not `review`, `mutation` or `blocked`; the round is past `review.mutationFixRounds` and a fix task has `source: "mutation"` (a surviving mutant is a note in `REVIEW.md` by then); a fix task's `dependsOn` names something that is neither an existing task nor one of this submission's own ids; or an unblock names a task that does not exist or is not blocked or skipped.
 
 ---
 

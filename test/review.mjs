@@ -40,6 +40,7 @@ const FIX = {
   outOfScope: "the rest of phase 0",
   verification: "npm test",
   dependsOn: [],
+  source: "review",
 };
 
 // ---------------------------------------------------------------- refusals
@@ -130,6 +131,71 @@ const FIX = {
       /depends on 'R2-01', which is neither an existing task/,
       "a dependsOn naming a future round's id is refused",
     );
+  });
+}
+
+// ---------------------------------------------------------------- fix-task source and the mutation-round cap
+
+{
+  const repo = reviewableRepo();
+  await withServer(repo, async ({ call }) => {
+    const { source: _omitted, ...noSource } = FIX;
+    isError(await call("kukulu_review_submit", { verdict: "CHANGES REQUESTED", tasks: [noSource] }), /fix task 'Fix hello' needs a source: "review", "mutation" or "blocked"/, "a fix task without source is refused naming the legal values");
+    isError(await call("kukulu_review_submit", { verdict: "CHANGES REQUESTED", tasks: [{ ...FIX, source: "hunch" }] }), /needs a source: "review", "mutation" or "blocked"/, "...with another source is refused");
+  });
+}
+
+{
+  const repo = reviewableRepo({ round: 2 });
+  const files = ["docs/REVIEW.md", "docs/PLAN.md", "docs/PROGRESS.md", ".kukulu/state.json"];
+  const before = files.map((f) => readFile(repo, f));
+  const head = git(repo, ["rev-parse", "HEAD"]);
+  await withServer(repo, async ({ call }) => {
+    isError(
+      await call("kukulu_review_submit", { verdict: "CHANGES REQUESTED", tasks: [{ ...FIX, source: "mutation" }] }),
+      /round 3 is past review\.mutationFixRounds=2: a surviving mutant is advisory now\. Put it under `## Notes` in REVIEW\.md/,
+      "a mutation task past mutationFixRounds is refused",
+    );
+    files.forEach((f, i) => eq(readFile(repo, f), before[i], `...${f} is byte-identical`));
+    eq(git(repo, ["rev-parse", "HEAD"]), head, "...and HEAD did not move");
+    const r = await call("kukulu_review_submit", { verdict: "CHANGES REQUESTED", tasks: [FIX] });
+    eq(r.fixTasks.join(","), "R3-01", "a review task past mutationFixRounds is accepted");
+  });
+}
+
+{
+  const repo = reviewableRepo({ config: { review: { mutationFixRounds: 1 } }, round: 1 });
+  await withServer(repo, async ({ call }) => {
+    isError(await call("kukulu_review_submit", { verdict: "CHANGES REQUESTED", tasks: [{ ...FIX, source: "mutation" }] }), /round 2 is past review\.mutationFixRounds=1/, "the cap is the configured value, not a constant");
+  });
+}
+
+{
+  const repo = reviewableRepo();
+  await withServer(repo, async ({ call }) => {
+    await call("kukulu_review_submit", { verdict: "CHANGES REQUESTED", tasks: [FIX, { ...FIX, title: "b", source: "mutation" }, { ...FIX, title: "c", source: "mutation" }, { ...FIX, title: "d", source: "blocked" }] });
+    const rounds = JSON.parse(readFile(repo, ".kukulu/state.json")).rounds;
+    eq(JSON.stringify(rounds[0].sources), JSON.stringify({ review: 1, mutation: 2, blocked: 1 }), "state.rounds records sources counts");
+  });
+}
+
+{
+  const repo = reviewableRepo({ verdict: "APPROVED" });
+  await withServer(repo, async ({ call }) => {
+    await call("kukulu_review_submit", { verdict: "APPROVED" });
+    eq(JSON.stringify(JSON.parse(readFile(repo, ".kukulu/state.json")).rounds[0].sources), JSON.stringify({ review: 0, mutation: 0, blocked: 0 }), "an APPROVED round records zero sources");
+  });
+}
+
+for (const [bad, re, label] of [
+  [{ mutationFixRounds: 0 }, /review\.mutationFixRounds must be a positive integer/, "review.mutationFixRounds must be a positive integer"],
+  [{ mutationFixRounds: 1.5 }, /must be a positive integer/, "...a fraction is refused"],
+  [{ other: 1 }, /review has an unknown key 'other'/, "review has an unknown key"],
+  [[], /'review' must be an object/, "review must be an object"],
+]) {
+  const repo = reviewableRepo({ config: { review: bad } });
+  await withServer(repo, async ({ call }) => {
+    isError(await call("kukulu_review_submit", { verdict: "CHANGES REQUESTED", tasks: [FIX] }), re, label);
   });
 }
 

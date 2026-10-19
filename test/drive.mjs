@@ -124,7 +124,7 @@ await withServer(repo, async ({ call }) => {
     verdict: "CHANGES REQUESTED",
     tasks: [{
       title: "Fix hello", goal: "hello must actually greet", files: ["hello.txt"],
-      constraints: "lowercase only", tests: "test.sh", outOfScope: "none", verification: "cat hello.txt", dependsOn: [],
+      constraints: "lowercase only", tests: "test.sh", outOfScope: "none", verification: "cat hello.txt", dependsOn: [], source: "review",
     }],
     unblock: [{ id: "P0-02", reason: "reviewer clarified the interface" }],
   });
@@ -425,7 +425,7 @@ const ALL_IDS = PARALLEL_PLAN.map((t) => t.id);
     writeFile(repo, "docs/REVIEW.md", "# Review\nRound: 1\n**Verdict**: CHANGES REQUESTED\n");
     await call("kukulu_review_submit", {
       verdict: "CHANGES REQUESTED",
-      tasks: [{ title: "Tidy readme", goal: "tidy", files: ["README.md"], tests: "none", dependsOn: [] }],
+      tasks: [{ title: "Tidy readme", goal: "tidy", files: ["README.md"], tests: "none", dependsOn: [], source: "review" }],
       unblock: [{ id: "P1-01", reason: "the API exists" }, { id: "P1-02", reason: "follows P1-01" }],
     });
     like(readFile(repo, "docs/PROGRESS.md"), /- \[ \] P1-01 Task P1-01 \{stream: api\}/, "the unblocked task keeps its stream tag");

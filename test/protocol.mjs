@@ -88,8 +88,8 @@ eq(
 );
 eq(
   byName.kukulu_review_submit.inputSchema.properties.tasks.items.required.join(","),
-  "title,goal,files,tests",
-  "fix tasks require title, goal, files and tests",
+  "title,goal,files,tests,source",
+  "fix tasks require title, goal, files, tests and source",
 );
 
 // -------------------------------------------------------------- error mapping

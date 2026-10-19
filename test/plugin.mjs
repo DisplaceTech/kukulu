@@ -398,6 +398,7 @@ like(goFlight, /"resume: <reason>".*kukulu_run_resume\(\{ reason \}\)/, "go-flig
   ok(!/\$EDITOR/.test(halts) && !/"halted": null/.test(ops), "operations.md's Halts section names no hand edit of .kukulu/state.json");
 }
 
+like(read("skills/review-build/SKILL.md"), /Capping mutation-only rounds[\s\S]*review\.mutationFixRounds/, "review-build caps mutation-only rounds at mutationFixRounds");
 like(read("skills/review-build/SKILL.md"), /Round 2 and later\*\*: read `prChecks`/, "review-build reads prChecks from round 2");
 
 let unknownTool = null;
@@ -526,6 +527,10 @@ ok(read("skills/plan-build/SKILL.md").includes("templates/constraints.example.js
     }
     if (key === "mutation") {
       ok(opsDoc.includes("`mutation.targeted`"), "operations.md documents mutation.targeted");
+      continue;
+    }
+    if (key === "review") {
+      ok(opsDoc.includes("`review.mutationFixRounds`"), "operations.md documents review.mutationFixRounds");
       continue;
     }
     if (key === "parallel") {

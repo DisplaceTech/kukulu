@@ -219,6 +219,7 @@ The controller calls `kukulu_pr_finalize({ resign: true })` only when you tell g
 | `parallel.maxStreams` | `3` | The most streams of one wave handed to implementers at once; `1` runs every wave serially, silently |
 | `parallel.setup` | `[]` | Commands (same entries as `verify`) run once in each newly created stream worktree, before its implementer starts, such as the dependency install a fresh checkout needs (`npm ci`, `composer install`) |
 | `mutation.targeted` | `{}` | Name → `{ cmd, timeoutMs }`: a test command with exactly one `{filter}` slot that `kukulu_mutate` can run instead of the whole verify set, e.g. `{ "php": { "cmd": "vendor/bin/phpunit --filter {filter}" } }`. The reviewer passes `targeted` and `filter`; the filter is limited to letters, digits and `_ . : / -` and is substituted as one single-quoted word. `timeoutMs` defaults to `commandTimeoutMs` |
+| `review.mutationFixRounds` | `2` | ⚠️ ASSUMPTION. The number of fix rounds that a surviving mutant alone may open. A fix task is submitted with a `source` of `review`, `mutation` or `blocked`; once the review's round is past this value, `kukulu_review_submit` refuses a `mutation` task, and the survivor is a note in REVIEW.md instead. A positive integer |
 | `constraints` | `[]` | `CLAUDE.md` rules expressed as data and checked by `kukulu_verify`; see [Constraints](#constraints) below |
 
 Environment variables:

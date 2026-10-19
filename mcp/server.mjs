@@ -411,6 +411,21 @@ function validateMutation(mutation) {
   }
 }
 
+const REVIEW_KEYS = ["mutationFixRounds"];
+const FIX_SOURCES = ["review", "mutation", "blocked"];
+
+/** Validate `docs/kukulu.json`'s `review` block: how many fix rounds a surviving mutant alone may open. */
+function validateReview(review) {
+  if (review === undefined) return;
+  if (typeof review !== "object" || review === null || Array.isArray(review)) throw new ToolError("docs/kukulu.json 'review' must be an object");
+  for (const k of Object.keys(review)) {
+    if (!REVIEW_KEYS.includes(k)) throw new ToolError(`docs/kukulu.json review has an unknown key '${k}'`);
+  }
+  if (review.mutationFixRounds !== undefined && (!Number.isInteger(review.mutationFixRounds) || review.mutationFixRounds < 1)) {
+    throw new ToolError("docs/kukulu.json review.mutationFixRounds must be a positive integer");
+  }
+}
+
 const CONSTRAINT_KEYS = ["id", "description", "paths", "exclude", "pattern", "flags", "shouldMatch", "shouldNotMatch", "from"];
 
 /**
@@ -468,6 +483,7 @@ function cfgFrom(c, planIds) {
   validateConstraints(c.constraints, planIds);
   validateParallel(c.parallel);
   validateMutation(c.mutation);
+  validateReview(c.review);
   const commandTimeoutMs = c.commandTimeoutMs || 10 * 60 * 1000;
   const targeted = Object.fromEntries(
     Object.entries(c.mutation?.targeted || {}).map(([name, e]) => [name, { cmd: e.cmd, timeoutMs: e.timeoutMs ?? commandTimeoutMs }]),
@@ -493,6 +509,8 @@ function cfgFrom(c, planIds) {
     constraints: c.constraints || [],
     flight: c.flight ?? null,
     mutation: { targeted },
+    // ⚠️ ASSUMPTION: the number of fix rounds that a surviving mutant alone may open, before it is only a note.
+    review: { mutationFixRounds: c.review?.mutationFixRounds ?? 2 },
     policies: {
       signing: c.policies?.signing ?? "auto",
       push: c.policies?.push ?? true,
@@ -2768,7 +2786,7 @@ function reviewSubmit({ verdict, tasks = [], unblock = [] }) {
   if (verdict === "APPROVED") {
     if (tasks.length || unblock.length) throw new ToolError("an APPROVED verdict cannot carry fix tasks or unblocks");
     st.reviewed = true; st.verdict = "APPROVED";
-    st.rounds = [...st.rounds, { round: N, fixTasks: 0, unblocked: 0, verdict: "APPROVED", at: new Date().toISOString() }];
+    st.rounds = [...st.rounds, { round: N, fixTasks: 0, unblocked: 0, verdict: "APPROVED", sources: { review: 0, mutation: 0, blocked: 0 }, at: new Date().toISOString() }];
     const sha = withRollback([P.review, P.state], () => {
       saveState(st);
       return gitCommitIfChanged([P.review, P.state], `review: round ${N} approved`, { stage: "review" });
@@ -2783,7 +2801,14 @@ function reviewSubmit({ verdict, tasks = [], unblock = [] }) {
   const pr = parseProgress();
   for (const t of tasks) {
     for (const k of ["title", "goal", "files", "tests"]) if (!t[k] || (Array.isArray(t[k]) && !t[k].length)) throw new ToolError(`fix task '${t.title || "?"}' is missing '${k}'`);
+    if (!FIX_SOURCES.includes(t.source)) throw new ToolError(`fix task '${t.title}' needs a source: ${FIX_SOURCES.map((x) => `"${x}"`).join(", ").replace(/, ("blocked")$/, " or $1")}`);
   }
+  if (N > c.review.mutationFixRounds && tasks.some((t) => t.source === "mutation")) {
+    throw new ToolError(
+      `round ${N} is past review.mutationFixRounds=${c.review.mutationFixRounds}: a surviving mutant is advisory now. Put it under \`## Notes\` in REVIEW.md (the summarizer carries it) and resubmit; if the survivor shows a SPEC requirement is untested, resubmit it as source "review" naming that requirement.`,
+    );
+  }
+  const sources = Object.fromEntries(FIX_SOURCES.map((x) => [x, tasks.filter((t) => t.source === x).length]));
   const ids = tasks.map((_, i) => `R${N}-${String(i + 1).padStart(2, "0")}`);
   // Every dependsOn must resolve to something that actually exists: an
   // already-known task, or one of this same submission's own new ids.
@@ -2825,7 +2850,7 @@ function reviewSubmit({ verdict, tasks = [], unblock = [] }) {
     const priorFixRounds = st.rounds.filter((r) => r.verdict === "CHANGES REQUESTED");
     const prevRound = priorFixRounds[priorFixRounds.length - 1];
     const nonConverging = Boolean(prevRound) && thisCount >= prevRound.fixTasks + prevRound.unblocked;
-    st.rounds = [...st.rounds, { round: N, fixTasks: ids.length, unblocked: unblocked.length, verdict: "CHANGES REQUESTED", nonConverging, at: new Date().toISOString() }];
+    st.rounds = [...st.rounds, { round: N, fixTasks: ids.length, unblocked: unblocked.length, verdict: "CHANGES REQUESTED", nonConverging, sources, at: new Date().toISOString() }];
     const nonConvergingSoFar = st.rounds.filter((r) => r.nonConverging).length;
     const trail = st.rounds.filter((r) => r.verdict === "CHANGES REQUESTED").map((r) => r.fixTasks + r.unblocked).join(" → ");
 
@@ -3495,7 +3520,8 @@ const TOOLS = [
           title: { type: "string" }, goal: { type: "string" }, files: { type: "array", items: { type: "string" } },
           constraints: { type: "string" }, tests: { type: "string" }, outOfScope: { type: "string" },
           verification: { type: "string" }, dependsOn: { type: "array", items: { type: "string" } },
-        }, ["title", "goal", "files", "tests"]),
+          source: { type: "string", enum: FIX_SOURCES, description: "what produced this task: a review finding, a surviving mutant, or an unblocked/blocked task" },
+        }, ["title", "goal", "files", "tests", "source"]),
       },
       unblock: { type: "array", items: S({ id: { type: "string" }, reason: { type: "string" } }, ["id"]) },
     }, ["verdict"]),
