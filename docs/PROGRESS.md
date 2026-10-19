@@ -21,7 +21,7 @@ Started: 2026-10-19T16:52:28.587Z
 - [x] R1-03 check-site-browser.mjs --self-test and no leaked Chrome profile
 - [x] R2-01 check-site-browser.mjs self-test: console.error, uncaught exception, no buttons, and Chrome really exited
 - [x] R2-02 serve-site.mjs self-test: SITE_PORT above 65535, empty SITE_PORT, and the siteDir 404 page
-- [ ] R3-01 check-site-browser.mjs self-test: zero-size copy buttons, a late console error, and a clean page after failing cases
+- [x] R3-01 check-site-browser.mjs self-test: zero-size copy buttons, a late console error, and a clean page after failing cases
 
 ## Log
 (one entry per task, appended by implement)
@@ -81,3 +81,6 @@ Added 3 CASES (console.error, uncaught exception, no copy buttons via replaceAll
 
 ### R2-02 — 9593711
 Added 3 serve-site self-test checks via choosePort directly (SITE_PORT over-range, empty, altdir 404). Over-range value built as String(0xffff + 1) to satisfy no-hardcoded-site-tunables. 29 checks ok; verify green.
+
+### R3-01 — 12e055d
+Added 3 self-test checks (12 cases total). Manually mutated the three named lines (bounding-box check, events reset, SETTLE_MS wait); each made the self-test exit 1. Interpretation: late-error delay = Math.floor(SETTLE_MS / 3). verify green.
