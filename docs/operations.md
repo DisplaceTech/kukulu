@@ -220,6 +220,9 @@ The controller calls `kukulu_pr_finalize({ resign: true })` only when you tell g
 | `parallel.setup` | `[]` | Commands (same entries as `verify`) run once in each newly created stream worktree, before its implementer starts, such as the dependency install a fresh checkout needs (`npm ci`, `composer install`) |
 | `mutation.targeted` | `{}` | Name → `{ cmd, timeoutMs }`: a test command with exactly one `{filter}` slot that `kukulu_mutate` can run instead of the whole verify set, e.g. `{ "php": { "cmd": "vendor/bin/phpunit --filter {filter}" } }`. The reviewer passes `targeted` and `filter`; the filter is limited to letters, digits and `_ . : / -` and is substituted as one single-quoted word. `timeoutMs` defaults to `commandTimeoutMs` |
 | `review.mutationFixRounds` | `2` | ⚠️ ASSUMPTION. The number of fix rounds that a surviving mutant alone may open. A fix task is submitted with a `source` of `review`, `mutation` or `blocked`; once the review's round is past this value, `kukulu_review_submit` refuses a `mutation` task, and the survivor is a note in REVIEW.md instead. A positive integer |
+| `cleanroom` | absent | An object that configures clean-room mode: `policy` and `signingKey`. Any other key is refused. The mode is on when the policy file exists; there is no flag |
+| `cleanroom.policy` | `docs/cleanroom.json` | Repo-relative path of the policy file; absolute paths, `~` and `..` are refused |
+| `cleanroom.signingKey` | `~/.config/kukulu/cleanroom/ed25519.pem` | Path of the Ed25519 private key that signs checkpoints; a leading `~` is the home directory. `KUKULU_CLEANROOM_KEY` wins over it |
 | `constraints` | `[]` | `CLAUDE.md` rules expressed as data and checked by `kukulu_verify`; see [Constraints](#constraints) below |
 
 Environment variables:
@@ -229,6 +232,7 @@ Environment variables:
 | `KUKULU_PROJECT_DIR` | `cwd` | Project root the server operates on; set by `.mcp.json` |
 | `KUKULU_GUARD_CAP` | `60` | Re-blocks since the last task state change before the guard gives up; `docs/kukulu.json`'s `guardCap` wins over this when set |
 | `KUKULU_CONFIG` | `~/.config/kukulu/config.json` (or `$XDG_CONFIG_HOME/kukulu/config.json`) | Path to the global routing config |
+| `KUKULU_CLEANROOM_KEY` | `cleanroom.signingKey` | Path of the checkpoint-signing key; wins over the config key |
 | `KUKULU_PROFILE` | the global file's own `"profile"` key, if any | Which profile in the global file to apply; wins over the file's own choice |
 
 Flights archived before 0.6.0 keep `foundry.json` in their archive directory, and finalizing one still reads it; an archive is a record and is never rewritten.

@@ -6,7 +6,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
-import { finish, ok, eq, like, ROOT } from "./harness.mjs";
+import { finish, ok, eq, like, isError, ROOT, plannedRepo, withServer } from "./harness.mjs";
 import { CleanroomError, loadPolicy, policyHash } from "../mcp/cleanroom.mjs";
 
 const EXAMPLE = fs.readFileSync(path.join(ROOT, "templates", "cleanroom.example.json"), "utf8");
@@ -74,5 +74,30 @@ like(refusal(base({ lockdown: { after: "soon" } })), /lockdown\.after must be a 
 like(refusal(base({ lockdown: { when: "P0-01" } })), /lockdown has an unknown key 'when'/, "...an unknown lockdown key");
 eq(refusal(base({ lockdown: { after: "R2-01" } })), null, "lockdown.after accepts a fix-task id");
 eq(refusal(base({ deny: { pathPatterns: [pattern({ flags: "gi" })] } })), null, "a global flag does not break fixture self-testing");
+
+// ---------------------------------------------------------------- docs/kukulu.json: the cleanroom object
+
+for (const [block, re, label] of [
+  [{ policy: "/etc/policy.json" }, /cleanroom\.policy must be repo-relative/, "cleanroom.policy must be repo-relative: an absolute path is refused"],
+  [{ policy: "../x" }, /cleanroom\.policy must be repo-relative/, "...and so is ../x"],
+  [{ policy: "~/policy.json" }, /cleanroom\.policy must be repo-relative/, "...and ~"],
+  [{ policy: "" }, /cleanroom\.policy must be a non-empty string/, "...and an empty one"],
+  [{ other: 1 }, /cleanroom has an unknown key 'other'/, "cleanroom has an unknown key"],
+  [{ signingKey: 3 }, /cleanroom\.signingKey must be a non-empty string/, "cleanroom.signingKey must be a string"],
+  [[], /'cleanroom' must be an object/, "cleanroom must be an object"],
+]) {
+  const repo = plannedRepo({ config: { cleanroom: block } });
+  await withServer(repo, async ({ call }) => {
+    isError(await call("kukulu_status"), re, label);
+  });
+}
+
+{
+  const repo = plannedRepo({ config: { cleanroom: { policy: "policy/cr.json", signingKey: "~/keys/k.pem" } } });
+  await withServer(repo, async ({ call }) => {
+    const st = await call("kukulu_status");
+    ok(!st.error, "a valid cleanroom block is accepted");
+  });
+}
 
 finish();

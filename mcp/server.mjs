@@ -411,6 +411,32 @@ function validateMutation(mutation) {
   }
 }
 
+const CLEANROOM_KEYS = ["policy", "signingKey"];
+const DEFAULT_CLEANROOM_POLICY = "docs/cleanroom.json";
+const DEFAULT_SIGNING_KEY = "~/.config/kukulu/cleanroom/ed25519.pem";
+
+/** Validate `docs/kukulu.json`'s `cleanroom` object: where the policy lives and where the checkpoint-signing key is kept. */
+function validateCleanroom(cleanroom) {
+  if (cleanroom === undefined) return;
+  if (typeof cleanroom !== "object" || cleanroom === null || Array.isArray(cleanroom)) throw new ToolError("docs/kukulu.json 'cleanroom' must be an object");
+  for (const k of Object.keys(cleanroom)) {
+    if (!CLEANROOM_KEYS.includes(k)) throw new ToolError(`docs/kukulu.json cleanroom has an unknown key '${k}'; the legal keys are ${CLEANROOM_KEYS.join(", ")}`);
+  }
+  const p = cleanroom.policy;
+  if (p !== undefined) {
+    if (typeof p !== "string" || !p) throw new ToolError("docs/kukulu.json cleanroom.policy must be a non-empty string: a repo-relative path");
+    if (path.isAbsolute(p) || p.startsWith("~") || p.split(/[\\/]/).includes("..")) {
+      throw new ToolError(`docs/kukulu.json cleanroom.policy must be repo-relative, with no '~' and no '..' (got ${JSON.stringify(p)}); use a path such as ${DEFAULT_CLEANROOM_POLICY}`);
+    }
+  }
+  if (cleanroom.signingKey !== undefined && (typeof cleanroom.signingKey !== "string" || !cleanroom.signingKey)) {
+    throw new ToolError("docs/kukulu.json cleanroom.signingKey must be a non-empty string: the path of an Ed25519 private key in PEM form");
+  }
+}
+
+/** A leading `~` is the home directory; the result is always absolute. */
+const expandHome = (p) => path.resolve(p === "~" || p.startsWith("~/") ? path.join(os.homedir(), p.slice(1)) : p);
+
 const REVIEW_KEYS = ["mutationFixRounds"];
 const FIX_SOURCES = ["review", "mutation", "blocked"];
 
@@ -484,6 +510,7 @@ function cfgFrom(c, planIds) {
   validateParallel(c.parallel);
   validateMutation(c.mutation);
   validateReview(c.review);
+  validateCleanroom(c.cleanroom);
   const commandTimeoutMs = c.commandTimeoutMs || 10 * 60 * 1000;
   const targeted = Object.fromEntries(
     Object.entries(c.mutation?.targeted || {}).map(([name, e]) => [name, { cmd: e.cmd, timeoutMs: e.timeoutMs ?? commandTimeoutMs }]),
@@ -511,6 +538,11 @@ function cfgFrom(c, planIds) {
     mutation: { targeted },
     // ⚠️ ASSUMPTION: the number of fix rounds that a surviving mutant alone may open, before it is only a note.
     review: { mutationFixRounds: c.review?.mutationFixRounds ?? 2 },
+    // Clean-room mode is on when the file at `policy` exists; there is no flag. KUKULU_CLEANROOM_KEY wins over the configured key path.
+    cleanroom: {
+      policy: c.cleanroom?.policy ?? DEFAULT_CLEANROOM_POLICY,
+      signingKey: expandHome(envVar("CLEANROOM_KEY") || c.cleanroom?.signingKey || DEFAULT_SIGNING_KEY),
+    },
     policies: {
       signing: c.policies?.signing ?? "auto",
       push: c.policies?.push ?? true,

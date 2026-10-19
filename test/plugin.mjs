@@ -546,6 +546,11 @@ ok(read("skills/plan-build/SKILL.md").includes("templates/constraints.example.js
       ok(opsDoc.includes("`mutation.targeted`"), "operations.md documents mutation.targeted");
       continue;
     }
+    if (key === "cleanroom") {
+      ok(opsDoc.includes("`cleanroom.policy`") && opsDoc.includes("`cleanroom.signingKey`"), "operations.md documents cleanroom.policy and cleanroom.signingKey");
+      ok(opsDoc.includes("`KUKULU_CLEANROOM_KEY`"), "operations.md documents KUKULU_CLEANROOM_KEY");
+      continue;
+    }
     if (key === "review") {
       ok(opsDoc.includes("`review.mutationFixRounds`"), "operations.md documents review.mutationFixRounds");
       continue;
