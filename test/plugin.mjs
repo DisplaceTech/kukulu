@@ -430,6 +430,8 @@ like(read("skills/review-build/SKILL.md"), /Round 2 and later\*\*: read `prCheck
   ok(/kukulu\.tech — Specification" gives `kukulu-tech`/.test(planSkill) && /K\u016bkulu 0\.7\.0 — Specification" gives `kukulu-0-7-0`/.test(planSkill), "plan-build states the slug rule with both examples");
 }
 
+like(goFlight, /print `gate: ok \(<n> checks\)`/, "go-flight prints the gate line");
+
 let unknownTool = null;
 let retiredMention = null;
 let unknownSkill = null;

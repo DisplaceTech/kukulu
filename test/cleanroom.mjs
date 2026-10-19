@@ -7,7 +7,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import {
-  finish, ok, eq, like, isError, ROOT, plannedRepo, cleanroomRepo, withServer, runHook, mkDir, writeFile, readFile, hasFile, git, subject, testKeyFor, addPlan, commitTask, setState,
+  finish, ok, eq, like, isError, ROOT, plannedRepo, cleanroomRepo, withServer, runHook, mkDir, writeFile, readFile, hasFile, git, subject, testKeyFor, addPlan, commitTask, setState, tempPlugin, markTasks, startServer,
 } from "./harness.mjs";
 import { spawn, spawnSync } from "node:child_process";
 import { createHash as sha, generateKeyPairSync } from "node:crypto";
@@ -386,7 +386,7 @@ const stateOf = (repo) => (hasFile(repo, ".kukulu/state.json") ? JSON.parse(read
     const n = await call("kukulu_next");
     eq(n.stage, "plan", "the first kukulu_next in a clean-room project goes on to the plan stage");
     const log = logOf(repo);
-    eq(log.length + "|" + log[0].kind + "|" + log[0].stage, "1|genesis|controller", "the first kukulu_next with a policy appends a genesis entry");
+    eq(log.length + "|" + log[0].kind + "|" + log[0].stage + "|" + log[1].kind, "2|genesis|controller|gate", "the first kukulu_next with a policy appends a genesis entry, then the gate's");
     const d = log[0].data;
     eq(Object.keys(d).join(","), "mode,policyHash,guardHash,loggerHash,hooksHash,pluginVersion,keyFingerprint,baseBranch,head", "...whose data names mode, the four hashes, pluginVersion, keyFingerprint, baseBranch and head");
     eq(d.mode + "|" + d.baseBranch, "clean-room|main", "...in clean-room mode on main");
@@ -400,8 +400,8 @@ const stateOf = (repo) => (hasFile(repo, ".kukulu/state.json") ? JSON.parse(read
     ok(fs.existsSync(testKeyFor(repo)), "...generating the key at KUKULU_CLEANROOM_KEY");
     eq(d.keyFingerprint, loadKey(testKeyFor(repo)).fingerprint, "...and the genesis names its fingerprint");
     await call("kukulu_next");
-    eq(logOf(repo).length, 1, "a second kukulu_next appends no second genesis");
-    eq(git(repo, ["status", "--porcelain"]), "", "...and the tree is clean");
+    eq(logOf(repo).filter((e) => e.kind === "genesis").length, 1, "a second kukulu_next appends no second genesis");
+    eq(git(repo, ["status", "--porcelain"]), "M .kukulu/cleanroom/log.jsonl", "...and leaves only the log (the gate's entries) uncommitted");
   });
 }
 
@@ -872,6 +872,137 @@ async function genesisRepo(planOpts = {}) {
   eq(list.map((p) => p.replace(/\/$/, "")).join("\n"), want.join("\n"), "protectedPaths lists the always-protected set, then the policy's own");
   ok(!protectedPaths(policy, { ...env, planExists: false }).includes("/p/docs/kukulu.json"), "docs/kukulu.json is not protected before docs/PLAN.md exists");
   eq(protectedPaths(policy, { root: "/p", home: "/h" }).length > 0, true, "a missing piece of the environment is skipped, not a crash");
+}
+
+// ---------------------------------------------------------------- the gate
+
+const gateEntries = (repo) => logOf(repo).filter((e) => e.kind === "gate");
+const withPlugin = (plugin) => ({ server: path.join(plugin, "mcp", "server.mjs") });
+const gateCheck = (reason) => (reason.match(/^clean-room gate failed: ([\w-]+):/) || [])[1];
+
+{
+  const repo = cleanroomRepo();
+  await withServer(repo, async ({ call }) => {
+    const n = await call("kukulu_next");
+    eq(JSON.stringify(n.gate), JSON.stringify({ ok: true, checked: ["mode", "policy", "guard", "self-test", "lockdown", "chain"] }), "the gate passes on an intact clean-room project and kukulu_next reports it");
+    const g = gateEntries(repo);
+    eq(g.length + "|" + JSON.stringify(g[0].data), '1|{"checks":6,"ok":true}', "a passing gate appends a gate entry");
+    eq(verifyChain(linesOf(LOG(repo))).ok, true, "...in a chain that verifies");
+  });
+  const general = plannedRepo();
+  await withServer(general, async ({ call }) => {
+    eq((await call("kukulu_next")).gate, null, "gate is null in general mode");
+  });
+}
+
+{
+  // An edited policy halts kukulu_next, and the failure is in the chain.
+  const repo = cleanroomRepo();
+  await withServer(repo, async ({ call }) => {
+    await call("kukulu_next");
+    writeFile(repo, "docs/cleanroom.json", EXAMPLE.replace('"WebSearch"', '"WebSearch", "Agent"'));
+    git(repo, ["add", "-A"]);
+    git(repo, ["commit", "-qm", "edit the policy"]);
+    const n = await call("kukulu_next");
+    eq(n.stage + "|" + gateCheck(n.reason), "halt|policy", "an edited policy halts kukulu_next naming policy");
+    eq(n.gate.ok + "|" + n.gate.checked.join(","), "false|mode,policy", "...with the checks that ran");
+    const last = gateEntries(repo).at(-1);
+    eq(last.data.failed + "|" + /changed since genesis/.test(last.data.reason), "policy|true", "a failing gate appends a gate entry with failed and reason");
+    eq(verifyChain(linesOf(LOG(repo))).ok, true, "...and the chain still verifies");
+    isError(await call("kukulu_review_submit", { verdict: "APPROVED" }), /^clean-room gate failed: policy: /, "kukulu_review_submit refuses when the gate fails");
+    isError(await call("kukulu_summary_commit", { content: "# s\n" }), /^clean-room gate failed: policy: /, "kukulu_summary_commit refuses likewise");
+  });
+}
+
+{
+  const repo = cleanroomRepo();
+  await withServer(repo, async ({ call }) => { await call("kukulu_next"); });
+  addPlan(repo);
+  await withServer(repo, async ({ call }) => {
+    writeFile(repo, "docs/cleanroom.json", EXAMPLE.replace('"WebSearch"', '"WebSearch", "Agent"'));
+    git(repo, ["add", "-A"]);
+    git(repo, ["commit", "-qm", "edit the policy"]);
+    isError(await call("kukulu_run_start"), /^clean-room gate failed: policy: /, "kukulu_run_start refuses when the gate fails");
+    isError(await call("kukulu_task_next"), /^clean-room gate failed: policy: /, "kukulu_task_next refuses when the gate fails");
+    ok(!hasFile(repo, ".kukulu/implement.lock"), "...before any write");
+  });
+}
+
+{
+  // The guard, the hooks file, the self-test: each against a temp copy of the plugin.
+  const edited = async (label, expectCheck, mutate, { before = false } = {}) => {
+    const plugin = tempPlugin();
+    if (before) mutate(plugin);
+    const repo = cleanroomRepo();
+    await withServer(repo, async ({ call }) => {
+      const first = await call("kukulu_next");
+      if (!before) {
+        eq(first.gate?.ok, true, `${label}: the gate passes before the edit`);
+        mutate(plugin);
+      }
+      const n = await call("kukulu_next");
+      eq(n.stage + "|" + gateCheck(n.reason), `halt|${expectCheck}`, label);
+      return n;
+    }, withPlugin(plugin));
+  };
+  await edited("an edited guard under a temp PLUGIN_ROOT halts naming guard", "guard", (p) => fs.appendFileSync(path.join(p, "scripts", "cleanroom-guard.mjs"), "\n// tampered\n"));
+  await edited("an edited logger halts naming guard", "guard", (p) => fs.appendFileSync(path.join(p, "scripts", "cleanroom-log.mjs"), "\n// tampered\n"));
+  await edited("an edited hooks.json halts naming guard", "guard", (p) => fs.appendFileSync(path.join(p, "hooks", "hooks.json"), "\n"));
+  await edited("hooks.json without the PreToolUse registration halts naming guard", "guard", (p) => {
+    const file = path.join(p, "hooks", "hooks.json");
+    const j = JSON.parse(fs.readFileSync(file, "utf8"));
+    delete j.hooks.PreToolUse;
+    fs.writeFileSync(file, JSON.stringify(j, null, 2));
+  }, { before: true });
+  await edited("a failing self-test halts naming self-test", "self-test", (p) => {
+    const file = path.join(p, "test", "fixtures", "guard-cases.json");
+    const cases = JSON.parse(fs.readFileSync(file, "utf8"));
+    cases[0].expect = cases[0].expect === "denied" ? "allowed" : "denied";
+    fs.writeFileSync(file, JSON.stringify(cases));
+  });
+}
+
+{
+  // A lockdown that does not deny: a plugin whose lockdownActive says false and whose self-test is a stub,
+  // both edited before genesis so the recorded hashes are the doctored ones.
+  const plugin = tempPlugin();
+  const mod = path.join(plugin, "mcp", "cleanroom.mjs");
+  fs.writeFileSync(mod, fs.readFileSync(mod, "utf8").replace("export function lockdownActive(policy, progressText) {", "export function lockdownActive(policy, progressText) {\n  return false;"));
+  const gfile = path.join(plugin, "scripts", "cleanroom-guard.mjs");
+  fs.writeFileSync(gfile, fs.readFileSync(gfile, "utf8").replace('if (process.argv[2] === "--self-test") {', 'if (process.argv[2] === "--self-test") {\n  process.stdout.write("guard self-test: ok (0 cases)\\n");\n  process.exit(0);'));
+  const policy = JSON.stringify({ version: 1, allow: { urls: ["https://example.invalid/a"] }, lockdown: { after: "P0-01" } });
+  const repo = cleanroomRepo({ policy });
+  await withServer(repo, async ({ call }) => {
+    ok((await call("kukulu_next")).gate.ok, "(the doctored plugin passes its first gate)");
+    addPlan(repo);
+    markTasks(repo, { "P0-01": "x" });
+    const n = await call("kukulu_next");
+    eq(n.stage + "|" + gateCheck(n.reason), "halt|lockdown", "a lockdown that does not deny halts naming lockdown");
+  }, withPlugin(plugin));
+}
+
+{
+  // The chain: a tampered line, and a checkpoint signed by another key.
+  const repo = await genesisRepo();
+  await withServer(repo, async ({ call }) => {
+    await call("kukulu_run_start");
+    appendEntry(LOG(repo), sample(1));
+    appendEntry(LOG(repo), sample(2));
+    ok((await call("kukulu_next")).gate.ok, "the gate passes on a chain with checkpoints");
+    const lines = linesOf(LOG(repo));
+    const keep = lines.slice();
+    lines[1] = lines[1].replace('"kind":"gate"', '"kind":"gatx"');
+    fs.writeFileSync(LOG(repo), lines.join("\n") + "\n");
+    const n = await call("kukulu_next");
+    eq(n.stage + "|" + gateCheck(n.reason), "halt|chain", "a tampered chain halts naming chain");
+    fs.writeFileSync(LOG(repo), keep.join("\n") + "\n");
+    ok((await call("kukulu_next")).gate.ok, "(restoring the log clears it)");
+    fs.rmSync(testKeyFor(repo));
+    generateKey(testKeyFor(repo));
+    const m = await call("kukulu_next");
+    eq(m.stage + "|" + gateCheck(m.reason), "halt|chain", "a checkpoint signed by another key halts naming chain");
+    like(m.reason, /does not verify with the signing key/, "...saying so");
+  });
 }
 
 finish();

@@ -15,7 +15,9 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { CleanroomError, loadPolicy, policyHash, appendEntry, readEntries, logPathFor, generateKey, loadKey, signCheckpoint, ZERO_HASH } from "./cleanroom.mjs";
+import {
+  CleanroomError, loadPolicy, policyHash, appendEntry, readEntries, logPathFor, generateKey, loadKey, signCheckpoint, verifyCheckpoint, verifyChain, evaluate, ZERO_HASH,
+} from "./cleanroom.mjs";
 
 /**
  * An environment variable by its Kūkulu name. An empty value counts as unset,
@@ -141,6 +143,97 @@ function cleanroomGenesis(cc, st) {
     saveState(st);
     gitCommitIfChanged(paths, "chore: clean-room genesis", { stage: "controller" });
   });
+}
+
+const GATE_SELF_TEST_MS = 60_000;
+const shellQuote = (p) => `'${String(p).replaceAll("'", "'\\''")}'`;
+
+/**
+ * The gate (SPEC D-08): before a stage starts, prove the clean-room machinery
+ * is still the machinery the flight began with. Checks run in order and the
+ * first failure stops them. A failing gate appends its own `gate` entry
+ * before anything is refused, which is the one sanctioned write before a
+ * refusal: the refusal itself belongs in the chain. Returns null in general
+ * mode, else `{ ok, checked, failed? }`.
+ */
+function runGate(stage, st = loadState()) {
+  if (!st.cleanroom?.genesis) return null;
+  const cc = cfg();
+  const recorded = st.cleanroom;
+  const logPath = cleanroomLogPath();
+  const policyPath = cleanroomPolicyPath(cc);
+  const checked = [];
+  const failed = (check, reason) => {
+    appendEntry(logPath, { kind: "gate", stage, role: "session", data: { failed: check, reason } });
+    return { ok: false, checked, failed: { check, reason } };
+  };
+
+  // 1. mode
+  checked.push("mode");
+  if (!exists(policyPath)) return failed("mode", `the policy file ${cc.cleanroom.policy} is missing`);
+  if (recorded.mode === "general") return failed("mode", "the flight was recorded in general mode");
+
+  // 2. policy
+  checked.push("policy");
+  const policyBytes = fs.readFileSync(policyPath);
+  if (policyHash(policyBytes) !== recorded.policyHash) return failed("policy", `${cc.cleanroom.policy} changed since genesis (its SHA-256 no longer matches the recorded one)`);
+
+  // 3. guard: the two hook scripts and hooks.json are the ones recorded, and hooks.json still registers them
+  checked.push("guard");
+  const now = pluginHashes();
+  for (const [key, label] of [["guardHash", "scripts/cleanroom-guard.mjs"], ["loggerHash", "scripts/cleanroom-log.mjs"], ["hooksHash", "hooks/hooks.json"]]) {
+    if (now[key] !== recorded[key]) return failed("guard", `${label} changed since genesis`);
+  }
+  let hooks;
+  try {
+    hooks = JSON.parse(fs.readFileSync(path.join(PLUGIN_ROOT, "hooks", "hooks.json"), "utf8")).hooks || {};
+  } catch (e) {
+    return failed("guard", `hooks/hooks.json cannot be read: ${e.message}`);
+  }
+  const registers = (event, script) => (hooks[event] || []).some((entry) => (entry.hooks || []).some((h) => String(h.command || "").includes(script)));
+  for (const [event, script] of [["PreToolUse", "cleanroom-guard.mjs"], ["PostToolUse", "cleanroom-log.mjs"], ["UserPromptSubmit", "cleanroom-log.mjs"]]) {
+    if (!registers(event, script)) return failed("guard", `hooks/hooks.json no longer registers ${script} on ${event}`);
+  }
+
+  // 4. self-test
+  checked.push("self-test");
+  const selfTest = runShell(`node ${shellQuote(path.join(PLUGIN_ROOT, "scripts", "cleanroom-guard.mjs"))} --self-test ${shellQuote(policyPath)}`, GATE_SELF_TEST_MS);
+  if (!selfTest.ok) return failed("self-test", (selfTest.stderrTail || selfTest.stdoutTail || `exit ${selfTest.exitCode}`).split("\n")[0]);
+
+  // 5. lockdown: once the lockdown task is done, an allowed URL must be denied
+  checked.push("lockdown");
+  const policy = loadPolicy(policyBytes.toString("utf8"));
+  const progressText = exists(P.progress) ? read(P.progress) : null;
+  if (policy.lockdown.after && policy.allow.urls.length && progressText && new RegExp(`^- \\[x\\] ${policy.lockdown.after}\\b`, "m").test(progressText)) {
+    const probe = evaluate(policy, { tool_name: "WebFetch", tool_input: { url: policy.allow.urls[0] }, cwd: ROOT }, { root: ROOT, home: os.homedir(), progressText });
+    if (probe.decision !== "denied") return failed("lockdown", `lockdown.after ${policy.lockdown.after} is done, but a WebFetch of ${policy.allow.urls[0]} is still allowed`);
+  }
+
+  // 6. chain: every hash recomputes, the genesis is the recorded one, and the newest checkpoint verifies
+  checked.push("chain");
+  const lines = exists(logPath) ? read(logPath).split("\n").filter(Boolean) : [];
+  const chain = verifyChain(lines);
+  if (!chain.ok) return failed("chain", `entry ${chain.firstBad.seq ?? chain.firstBad.line} (line ${chain.firstBad.line}): ${chain.firstBad.reason}`);
+  if (chain.entries[0]?.hash !== recorded.genesis) return failed("chain", "the first entry is not the genesis entry recorded in state.json");
+  const newest = [...chain.entries].reverse().find((e) => e.kind === "checkpoint");
+  if (newest) {
+    let publicKey;
+    try {
+      publicKey = loadKey(cc.cleanroom.signingKey).publicKey;
+    } catch (e) {
+      return failed("chain", e.message);
+    }
+    if (!verifyCheckpoint(newest, publicKey)) return failed("chain", `the newest checkpoint (entry ${newest.seq}) does not verify with the signing key`);
+  }
+
+  appendEntry(logPath, { kind: "gate", stage, role: "session", data: { checks: checked.length, ok: true } });
+  return { ok: true, checked };
+}
+
+/** A tool's gate: the refusal that comes before any write when the clean-room machinery has changed. */
+function requireGate(stage) {
+  const g = runGate(stage);
+  if (g && !g.ok) throw new ToolError(`clean-room gate failed: ${g.failed.check}: ${g.failed.reason}`);
 }
 
 /** The log, as a path list for withRollback and a commit, when this flight is in clean-room mode and the log lives in the repository. */
@@ -1757,6 +1850,7 @@ function next() {
   // Read fresh from kukulu.json rather than state, so the sentence is
   // accurate even before this round's kukulu_run_start has recorded
   // state.policies (round 0, before the implementer's first call).
+  let gateResult = null;
   const policySentence = `Run policies: signing=${c.policies.signing}, push=${c.policies.push ? "on" : "off"}, pr=${c.policies.pr}.`;
   const stage = (name, reason, extra = {}) => {
     const info = agentInfo(name);
@@ -1772,6 +1866,7 @@ function next() {
       round: st.round,
       reviewRound: st.round + 1,
       reason,
+      gate: gateResult ? { ok: gateResult.ok, checked: gateResult.checked } : null,
       prompt: PROMPTS[name] ? PROMPTS[name](st.round, s, policySentence, st.round + 1) : null,
       ...extra,
     };
@@ -1822,6 +1917,8 @@ function next() {
   const broken = cleanroomModeBreak(st, policyPresent, s.planPresent);
   if (broken) return stage("halt", modeBreakText(broken));
   if (policyPresent && !st.cleanroom) cleanroomGenesis(c, st);
+  gateResult = runGate("controller", st);
+  if (gateResult && !gateResult.ok) return stage("halt", `clean-room gate failed: ${gateResult.failed.check}: ${gateResult.failed.reason}`);
   if (st.halted) return stage("halt", st.haltCap || st.halted.includes("kukulu_run_resume") ? st.halted : `${st.halted} — ${RESUME_HINT}`);
   if (st.awaitingSigning) {
     const mb = git(["merge-base", c.baseBranch, "HEAD"], { allowFail: true }).out || "<merge-base>";
@@ -1903,6 +2000,7 @@ function probeSigning(signingPolicy) {
 }
 
 function startRun() {
+  requireGate(implementStage(loadState()));
   for (const [k, p] of Object.entries({ spec: P.spec, plan: P.plan, progress: P.progress, config: P.config })) {
     if (!exists(p)) throw new ToolError(`${rel(p)} is missing (${k}); run the plan stage first`);
   }
@@ -2109,6 +2207,7 @@ function streamFinish({ stream } = {}) {
 }
 
 function taskNext({ stream } = {}) {
+  requireGate(implementStage(loadState()));
   const pr = parseProgress();
   let inScope = () => true;
   if (stream !== undefined) {
@@ -2935,6 +3034,7 @@ function ordinal(n) {
 }
 
 function reviewSubmit({ verdict, tasks = [], unblock = [] }) {
+  requireGate("review");
   // A crashed kukulu_mutate must not leave a mutated file under review.
   const recovered = recoverMutation();
   const recoveredField = recovered ? { recoveredMutation: recovered } : {};
@@ -3117,6 +3217,7 @@ function prChecks() {
 const SUMMARY_MAX_BYTES = 1024 * 1024;
 
 function summaryCommit({ content } = {}) {
+  requireGate("summarize");
   const st = loadState();
   if (content === undefined) {
     // 0.4.0 behavior: the summarizer wrote the file itself.

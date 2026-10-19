@@ -364,6 +364,20 @@ export function runHook(script, payload, env = {}) {
   return { status: r.status, stdout: r.stdout, stderr: r.stderr, ms: Number(process.hrtime.bigint() - started) / 1e6 };
 }
 
+/**
+ * A throwaway copy of the plugin (server, scripts, hooks, templates, agents, skills and the guard
+ * fixtures), so a test can edit "the installed plugin" without touching this checkout. Start a
+ * server from it with `startServer(repo, { server: <dir>/mcp/server.mjs })`.
+ */
+export function tempPlugin() {
+  const dir = mkDir("kukulu-plugin-");
+  for (const d of ["mcp", "scripts", "hooks", "templates", "agents", "skills", "test/fixtures"]) {
+    fs.cpSync(path.join(ROOT, d), path.join(dir, d), { recursive: true });
+  }
+  fs.copyFileSync(path.join(ROOT, "package.json"), path.join(dir, "package.json"));
+  return dir;
+}
+
 /** Force `.kukulu/state.json` into a given shape, bypassing the tools. */
 export function setState(repo, patch) {
   const p = path.join(repo, ".kukulu", "state.json");
