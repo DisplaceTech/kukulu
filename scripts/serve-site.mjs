@@ -7,6 +7,7 @@
 
 import fs from "node:fs";
 import http from "node:http";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { loadConfig } from "./check-site.mjs";
@@ -78,9 +79,10 @@ function choosePort(port) {
   return n;
 }
 
-export async function start({ port } = {}) {
+export async function start({ port, siteDir = SITE_DIR } = {}) {
+  const root = path.resolve(siteDir);
   const chosen = choosePort(port);
-  const rules = parseHeaders(fs.readFileSync(path.join(SITE_DIR, "_headers"), "utf8"));
+  const rules = parseHeaders(fs.readFileSync(path.join(root, "_headers"), "utf8"));
 
   const send = (req, res, status, urlPath, type, body, extra) => {
     const headers = headersFor(rules, urlPath);
@@ -108,9 +110,9 @@ export async function start({ port } = {}) {
     }
     const forbid = () => send(req, res, 403, "/*", "text/plain; charset=utf-8", Buffer.from("Forbidden\n"));
     if (decoded === null || decoded.includes("\0")) return forbid();
-    const target = path.resolve(SITE_DIR, `.${decoded === "/" ? "/index.html" : decoded}`);
-    if (target !== SITE_DIR && !target.startsWith(SITE_DIR + path.sep)) return forbid();
-    const rel = path.relative(SITE_DIR, target);
+    const target = path.resolve(root, `.${decoded === "/" ? "/index.html" : decoded}`);
+    if (target !== root && !target.startsWith(root + path.sep)) return forbid();
+    const rel = path.relative(root, target);
     let body = null;
     if (rel !== "_headers") {
       try {
@@ -120,7 +122,7 @@ export async function start({ port } = {}) {
       }
     }
     if (body === null) {
-      const page = fs.readFileSync(path.join(SITE_DIR, "404.html"));
+      const page = fs.readFileSync(path.join(root, "404.html"));
       send(req, res, 404, decoded, "text/html; charset=utf-8", page);
       return;
     }
@@ -223,6 +225,21 @@ async function selfTest() {
     const head = await request(server.url, "HEAD", "/");
     check("HEAD / is 200 with no body", head.status === 200 && head.body === "");
     await portChecks(check);
+    const alt = fs.mkdtempSync(path.join(os.tmpdir(), "serve-site-dir-"));
+    try {
+      fs.writeFileSync(path.join(alt, "_headers"), "/*\n  X-Alt: yes\n");
+      fs.writeFileSync(path.join(alt, "index.html"), "alt home\n");
+      fs.writeFileSync(path.join(alt, "404.html"), "alt 404\n");
+      const other = await start({ port: 0, siteDir: alt });
+      try {
+        const r = await request(other.url, "GET", "/");
+        check("start({ siteDir }) serves that directory", r.body === "alt home\n" && r.headers["x-alt"] === "yes");
+      } finally {
+        await other.close();
+      }
+    } finally {
+      fs.rmSync(alt, { recursive: true, force: true });
+    }
   } finally {
     await server.close();
   }

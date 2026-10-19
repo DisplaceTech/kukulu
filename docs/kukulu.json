@@ -7,9 +7,9 @@
     { "cmd": "node scripts/serve-site.mjs --self-test", "from": "P1-08" }
   ],
   "extraVerify": {
-    "site/": [{ "cmd": "npm run check:site:browser", "timeoutMs": 300000, "exclusive": true, "from": "P2-01" }],
-    "scripts/check-site-browser.mjs": [{ "cmd": "npm run check:site:browser", "timeoutMs": 300000, "exclusive": true, "from": "P2-01" }],
-    "scripts/serve-site.mjs": [{ "cmd": "npm run check:site:browser", "timeoutMs": 300000, "exclusive": true, "from": "P2-01" }],
+    "site/": [{ "cmd": "node scripts/check-site-browser.mjs --self-test", "timeoutMs": 300000, "from": "R1-03" }, { "cmd": "npm run check:site:browser", "timeoutMs": 300000, "exclusive": true, "from": "P2-01" }],
+    "scripts/check-site-browser.mjs": [{ "cmd": "node scripts/check-site-browser.mjs --self-test", "timeoutMs": 300000, "from": "R1-03" }, { "cmd": "npm run check:site:browser", "timeoutMs": 300000, "exclusive": true, "from": "P2-01" }],
+    "scripts/serve-site.mjs": [{ "cmd": "node scripts/check-site-browser.mjs --self-test", "timeoutMs": 300000, "from": "R1-03" }, { "cmd": "npm run check:site:browser", "timeoutMs": 300000, "exclusive": true, "from": "P2-01" }],
     "README.md": ["npm test"],
     "CONTRIBUTING.md": ["npm test"],
     "CHANGELOG.md": ["npm test"],

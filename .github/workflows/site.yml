@@ -36,4 +36,5 @@ jobs:
         run: |
           CHROME_PATH="$(command -v google-chrome)"
           export CHROME_PATH
+          node scripts/check-site-browser.mjs --self-test
           npm run check:site:browser

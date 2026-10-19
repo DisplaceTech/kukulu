@@ -5,6 +5,7 @@
 // kahako. Node built-ins only: Node's global WebSocket, no Playwright.
 //
 //   node scripts/check-site-browser.mjs [--shots]
+//   node scripts/check-site-browser.mjs --self-test
 //
 // --shots writes full-page PNGs to .site-shots/<width>-<scheme>.png and nothing else.
 // The macron letter is written as an escape so that check-names stays quiet.
@@ -22,6 +23,7 @@ const SCHEMES = ["dark", "light"];
 const COMMAND_TIMEOUT_MS = 30000;
 const LAUNCH_TIMEOUT_MS = 30000;
 const SETTLE_MS = 150;
+const CLOSE_TIMEOUT_MS = 5000;
 const MAC_CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 
 function isExecutable(p) {
@@ -83,8 +85,10 @@ function launch(chrome, profile) {
     });
     child.on("exit", (code) => reject(new Error(`check-site-browser: Chrome exited with ${code} before it was ready; stderr so far:\n${seen}`)));
   });
+  url.catch(() => {});
+  const exited = new Promise((resolve) => child.once("exit", resolve));
   const ready = withTimeout(url, LAUNCH_TIMEOUT_MS, "Chrome to print its DevTools URL");
-  return { child, ready };
+  return { child, ready, exited };
 }
 
 function connect(url) {
@@ -136,17 +140,19 @@ const PAGE_PROBE = `(async () => {
   };
 })()`;
 
-async function run({ shots }) {
-  const config = loadConfig(path.join(ROOT, "docs/site/checks.json"));
+// Starts Chrome with a throwaway profile, hands fn a session, and always ends with the
+// browser gone and the profile removed. Call it after the page server is up.
+async function withBrowser(fn) {
   const chrome = findChrome();
   const profile = fs.mkdtempSync(path.join(os.tmpdir(), "check-site-browser-"));
-  const server = await start({});
-  const { child, ready } = launch(chrome, profile);
+  let child = null;
+  let exited = null;
   let conn = null;
-  const failures = [];
-  let runs = 0;
   try {
-    conn = connect(await ready);
+    const l = launch(chrome, profile);
+    child = l.child;
+    exited = l.exited;
+    conn = connect(await l.ready);
     await withTimeout(conn.opened, COMMAND_TIMEOUT_MS, "the DevTools WebSocket to open");
     const { targetId } = await conn.send("Target.createTarget", { url: "about:blank" });
     const { sessionId } = await conn.send("Target.attachToTarget", { targetId, flatten: true });
@@ -169,66 +175,178 @@ async function run({ shots }) {
     });
     for (const domain of ["Runtime", "Log", "Page"]) await page(`${domain}.enable`);
 
-    for (const width of config.viewports) {
-      for (const scheme of SCHEMES) {
-        const label = `${width} ${scheme}`;
-        events = [];
-        await page("Emulation.setDeviceMetricsOverride", { width, height: 900, deviceScaleFactor: 1, mobile: false });
-        await page("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: scheme }] });
-        const loaded = new Promise((resolve) => loadWaiters.push(resolve));
-        await page("Page.navigate", { url: server.url });
-        await withTimeout(loaded, COMMAND_TIMEOUT_MS, `the load event at ${label}`);
-        const evaluated = await page("Runtime.evaluate", { expression: PAGE_PROBE, awaitPromise: true, returnByValue: true });
-        await new Promise((r) => setTimeout(r, SETTLE_MS));
-        runs++;
-        const before = failures.length;
-        if (evaluated.exceptionDetails) {
-          failures.push(`${label}: the page probe threw: ${evaluated.exceptionDetails.exception?.description || evaluated.exceptionDetails.text}`);
-        } else {
-          const r = evaluated.result.value;
-          if (r.scrollWidth > r.clientWidth) failures.push(`${label}: the page scrolls sideways (scrollWidth ${r.scrollWidth} > clientWidth ${r.clientWidth}); find the element wider than the viewport and constrain it`);
-          if (r.buttons.length === 0) failures.push(`${label}: no [data-copy-for] buttons were found`);
-          for (const b of r.buttons) {
-            if (b.hidden || b.w === 0 || b.h === 0) failures.push(`${label}: copy button for ${b.id} is not shown (hidden ${b.hidden}, ${b.w}x${b.h}); copy.js did not run or navigator.clipboard is missing`);
-          }
-          if (!r.font) failures.push(`${label}: the Hanken Grotesk latin-ext subset did not load, so the kahako has no font; check the @font-face url and the CSP`);
-          if (r.light !== (scheme === "light")) failures.push(`${label}: prefers-color-scheme emulation did not take effect`);
+    // One page load at one width and scheme; returns the failures it found.
+    const visit = async (url, width, scheme, { shots = false } = {}) => {
+      const label = `${width} ${scheme}`;
+      const failures = [];
+      events = [];
+      await page("Emulation.setDeviceMetricsOverride", { width, height: 900, deviceScaleFactor: 1, mobile: false });
+      await page("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: scheme }] });
+      const loaded = new Promise((resolve) => loadWaiters.push(resolve));
+      await page("Page.navigate", { url });
+      await withTimeout(loaded, COMMAND_TIMEOUT_MS, `the load event at ${label}`);
+      const evaluated = await page("Runtime.evaluate", { expression: PAGE_PROBE, awaitPromise: true, returnByValue: true });
+      await new Promise((r) => setTimeout(r, SETTLE_MS));
+      if (evaluated.exceptionDetails) {
+        failures.push(`${label}: the page probe threw: ${evaluated.exceptionDetails.exception?.description || evaluated.exceptionDetails.text}`);
+      } else {
+        const r = evaluated.result.value;
+        if (r.scrollWidth > r.clientWidth) failures.push(`${label}: the page scrolls sideways (scrollWidth ${r.scrollWidth} > clientWidth ${r.clientWidth}); find the element wider than the viewport and constrain it`);
+        if (r.buttons.length === 0) failures.push(`${label}: no [data-copy-for] buttons were found`);
+        for (const b of r.buttons) {
+          if (b.hidden || b.w === 0 || b.h === 0) failures.push(`${label}: copy button for ${b.id} is not shown (hidden ${b.hidden}, ${b.w}x${b.h}); copy.js did not run or navigator.clipboard is missing`);
         }
-        for (const e of events) failures.push(`${label}: ${e}`);
-        if (shots) {
-          const m = await page("Page.getLayoutMetrics");
-          const size = m.cssContentSize || m.contentSize;
-          const shot = await page("Page.captureScreenshot", {
-            format: "png",
-            captureBeyondViewport: true,
-            clip: { x: 0, y: 0, width: size.width, height: size.height, scale: 1 },
-          });
-          const dir = path.join(ROOT, ".site-shots");
-          fs.mkdirSync(dir, { recursive: true });
-          fs.writeFileSync(path.join(dir, `${width}-${scheme}.png`), Buffer.from(shot.data, "base64"));
-        }
-        if (failures.length === before) process.stdout.write(`check-site-browser: ${label} ok\n`);
+        if (!r.font) failures.push(`${label}: the Hanken Grotesk latin-ext subset did not load, so the kahako has no font; check the @font-face url and the CSP`);
+        if (r.light !== (scheme === "light")) failures.push(`${label}: prefers-color-scheme emulation did not take effect`);
       }
-    }
+      for (const e of events) failures.push(`${label}: ${e}`);
+      if (shots) {
+        const m = await page("Page.getLayoutMetrics");
+        const size = m.cssContentSize || m.contentSize;
+        const shot = await page("Page.captureScreenshot", {
+          format: "png",
+          captureBeyondViewport: true,
+          clip: { x: 0, y: 0, width: size.width, height: size.height, scale: 1 },
+        });
+        const dir = path.join(ROOT, ".site-shots");
+        fs.mkdirSync(dir, { recursive: true });
+        fs.writeFileSync(path.join(dir, `${width}-${scheme}.png`), Buffer.from(shot.data, "base64"));
+      }
+      return failures;
+    };
+    return await fn({ visit, profile });
   } finally {
+    // Ask Chrome to quit, then insist: a profile removed under a live browser is recreated.
+    if (conn) {
+      conn.send("Browser.close").catch(() => {});
+    }
+    if (child && exited) {
+      const timer = setTimeout(() => child.kill("SIGKILL"), CLOSE_TIMEOUT_MS);
+      if (child.exitCode === null && child.signalCode === null) await exited;
+      clearTimeout(timer);
+    }
     try {
       conn?.ws.close();
     } catch {
-      // The browser is killed next either way.
+      // The browser has already exited.
     }
-    child.kill("SIGKILL");
+    fs.rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  }
+}
+
+async function run({ shots }) {
+  const config = loadConfig(path.join(ROOT, "docs/site/checks.json"));
+  const server = await start({});
+  const failures = [];
+  let runs = 0;
+  try {
+    await withBrowser(async ({ visit }) => {
+      for (const width of config.viewports) {
+        for (const scheme of SCHEMES) {
+          const found = await visit(server.url, width, scheme, { shots });
+          runs++;
+          failures.push(...found);
+          if (found.length === 0) process.stdout.write(`check-site-browser: ${width} ${scheme} ok\n`);
+        }
+      }
+    });
+  } finally {
     await server.close();
-    fs.rmSync(profile, { recursive: true, force: true });
   }
   return { failures, runs };
 }
 
-const flags = process.argv.slice(2);
-if (flags.some((f) => f !== "--shots")) {
-  process.stderr.write("usage: node scripts/check-site-browser.mjs [--shots]\n");
-  process.exit(2);
+// ---------------------------------------------------------------- self-test
+
+function replaceIn(dir, file, from, to) {
+  const p = path.join(dir, file);
+  const text = fs.readFileSync(p, "utf8");
+  if (!text.includes(from)) throw new Error(`check-site-browser: self-test case cannot find ${JSON.stringify(from)} in ${file}`);
+  fs.writeFileSync(p, text.replace(from, () => to));
 }
+
+const CASES = [
+  {
+    name: "overflow is caught",
+    expect: "the page scrolls sideways",
+    // The page's CSP blocks inline styles, so the wide element gets its width from the stylesheet.
+    inject: (dir) => {
+      replaceIn(dir, "index.html", "</main>", '<div class="self-test-wide">x</div></main>');
+      fs.appendFileSync(path.join(dir, "styles.css"), "\n.self-test-wide{width:5000px;height:4px}\n");
+    },
+  },
+  {
+    name: "a CSP violation is caught",
+    expect: "console log error",
+    inject: (dir) => replaceIn(dir, "index.html", "</main>", '<img src="https://example.com/x.png" alt=""></main>'),
+  },
+  {
+    name: "hidden copy buttons are caught",
+    expect: "is not shown",
+    inject: (dir) => replaceIn(dir, "index.html", '<script src="/copy.js" defer></script>', ""),
+  },
+  {
+    name: "a missing latin-ext font is caught",
+    expect: "latin-ext subset did not load",
+    inject: (dir) => replaceIn(dir, "styles.css", "/fonts/hanken-grotesk-latin-ext-wght-normal.woff2", "/fonts/missing.woff2"),
+  },
+];
+
+async function selfTest() {
+  const config = loadConfig(path.join(ROOT, "docs/site/checks.json"));
+  const width = config.viewports[0];
+  const problems = [];
+  let count = 0;
+  const temps = [];
+  const report = (name, ok, detail) => {
+    count++;
+    process.stdout.write(`check-site-browser self-test: ${name}${ok ? "" : " FAILED"}\n`);
+    if (!ok) problems.push(`${name}: ${detail}`);
+  };
+  const copyOfSite = () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "check-site-browser-case-"));
+    temps.push(dir);
+    fs.cpSync(path.join(ROOT, "site"), dir, { recursive: true });
+    return dir;
+  };
+  let profile = null;
+  try {
+    // One browser serves every case, each against its own server and site copy.
+    await withBrowser(async (session) => {
+      profile = session.profile;
+      const probe = async (dir) => {
+        const server = await start({ port: 0, siteDir: dir });
+        try {
+          return await session.visit(server.url, width, "dark");
+        } finally {
+          await server.close();
+        }
+      };
+      const clean = await probe(copyOfSite());
+      report("baseline passes", clean.length === 0, clean.join("; "));
+      for (const c of CASES) {
+        const dir = copyOfSite();
+        c.inject(dir);
+        const found = await probe(dir);
+        report(c.name, found.some((f) => f.includes(c.expect)), `expected a failure containing ${JSON.stringify(c.expect)}, got ${found.length ? found.join("; ") : "none"}`);
+      }
+    });
+    report("the Chrome profile is removed", profile !== null && !fs.existsSync(profile), `${profile} still exists`);
+  } finally {
+    for (const dir of temps) fs.rmSync(dir, { recursive: true, force: true });
+  }
+  for (const p of problems) process.stderr.write(`check-site-browser self-test: FAILED ${p}\n`);
+  if (problems.length === 0) process.stdout.write(`check-site-browser self-test: ok (${count} cases)\n`);
+  return problems.length === 0 ? 0 : 1;
+}
+
+const flags = process.argv.slice(2);
 try {
+  if (flags.length === 1 && flags[0] === "--self-test") process.exit(await selfTest());
+  if (flags.some((f) => f !== "--shots")) {
+    process.stderr.write("usage: node scripts/check-site-browser.mjs [--shots | --self-test]\n");
+    process.exit(2);
+  }
   const { failures, runs } = await run({ shots: flags.includes("--shots") });
   for (const f of failures) process.stderr.write(`check-site-browser: ${f}\n`);
   if (failures.length === 0) process.stdout.write(`check-site-browser: ok (${runs} runs)\n`);
