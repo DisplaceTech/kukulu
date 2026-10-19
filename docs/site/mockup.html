@@ -1,0 +1,542 @@
+<!doctype html>
+<!--
+  Kūkulu landing page: REFERENCE MOCKUP, not production.
+  This file is the approved design and the approved copy for kukulu.tech.
+  It uses inline styles and a <style> block on purpose; the production page in
+  site/ must not (see docs/SPEC.md §3). Open it straight from disk: fonts load
+  from assets/fonts/ beside it. Add data-theme="light" to <html> to see the
+  light variant regardless of your OS setting.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kūkulu — rebuild from the spec, prove nothing leaked</title>
+<meta name="description" content="Kūkulu is an open-source Claude Code plugin that turns a written spec into a planned, built, reviewed branch. Clean-room mode is coming in 0.7.0.">
+<link rel="canonical" href="https://kukulu.tech/">
+<meta name="color-scheme" content="dark light">
+<meta name="theme-color" content="#0B1620" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#F3F0E8" media="(prefers-color-scheme: light)">
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="assets/favicon.ico" sizes="32x32">
+<link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Kūkulu">
+<meta property="og:title" content="Kūkulu — rebuild from the spec, prove nothing leaked">
+<meta property="og:description" content="An open-source Claude Code plugin that turns a written spec into a planned, built, reviewed branch. Clean-room mode is coming in 0.7.0.">
+<meta property="og:url" content="https://kukulu.tech/">
+<meta property="og:image" content="https://kukulu.tech/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Kūkulu — Rebuild from the spec. Prove nothing leaked.">
+<meta name="twitter:card" content="summary_large_image">
+<style>
+@font-face{font-family:"Hanken Grotesk";font-style:normal;font-weight:100 900;font-display:swap;src:url(assets/fonts/hanken-grotesk-latin-ext-wght-normal.woff2) format("woff2-variations");unicode-range:U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF}
+@font-face{font-family:"Hanken Grotesk";font-style:normal;font-weight:100 900;font-display:swap;src:url(assets/fonts/hanken-grotesk-latin-wght-normal.woff2) format("woff2-variations");unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
+@font-face{font-family:"Hanken Grotesk";font-style:italic;font-weight:100 900;font-display:swap;src:url(assets/fonts/hanken-grotesk-latin-ext-wght-italic.woff2) format("woff2-variations");unicode-range:U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF}
+@font-face{font-family:"Hanken Grotesk";font-style:italic;font-weight:100 900;font-display:swap;src:url(assets/fonts/hanken-grotesk-latin-wght-italic.woff2) format("woff2-variations");unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
+@font-face{font-family:"JetBrains Mono";font-style:normal;font-weight:100 800;font-display:swap;src:url(assets/fonts/jetbrains-mono-latin-ext-wght-normal.woff2) format("woff2-variations");unicode-range:U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF}
+@font-face{font-family:"JetBrains Mono";font-style:normal;font-weight:100 800;font-display:swap;src:url(assets/fonts/jetbrains-mono-latin-wght-normal.woff2) format("woff2-variations");unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
+
+:root{--bg:#0B1620;--bg2:#0E1B27;--panel:#112131;--line:#22364A;--line2:#2F4A63;--grid:rgba(140,178,210,.07);--ink:#ECE7DC;--muted:#A7B3BD;--accent:#E8A951;--accent-text:#F0B866;--on-accent:#1B1206;--deny:#E0857A;--code-bg:#07111A;--code-ink:#ECE7DC;--code-accent:#E8A951;--code-muted:#7D8C99;--mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;color-scheme:dark}
+@media (prefers-color-scheme: light){:root:not([data-theme="dark"]){--bg:#F3F0E8;--bg2:#ECE7DC;--panel:#FBFAF6;--line:#D6CDBC;--line2:#BCB09A;--grid:rgba(30,60,90,.075);--ink:#0F1E2A;--muted:#4A5866;--accent:#C47A22;--accent-text:#8E4C0B;--deny:#A63A2E;--code-bg:#0F1E2A;color-scheme:light}}
+:root[data-theme="light"]{--bg:#F3F0E8;--bg2:#ECE7DC;--panel:#FBFAF6;--line:#D6CDBC;--line2:#BCB09A;--grid:rgba(30,60,90,.075);--ink:#0F1E2A;--muted:#4A5866;--accent:#C47A22;--accent-text:#8E4C0B;--deny:#A63A2E;--code-bg:#0F1E2A;color-scheme:light}
+*{box-sizing:border-box}
+[hidden]{display:none !important}
+html{scroll-behavior:smooth}
+@media (prefers-reduced-motion: reduce){html{scroll-behavior:auto}}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:"Hanken Grotesk",system-ui,sans-serif;font-size:17px;line-height:1.55;overflow-x:clip}
+a{color:var(--accent-text);text-underline-offset:3px}
+a:hover{color:var(--ink)}
+a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:6px}
+::selection{background:var(--accent);color:var(--on-accent)}
+code,pre{font-family:var(--mono)}
+.skip{position:absolute;left:16px;top:-80px;z-index:10;background:var(--accent);color:var(--on-accent);padding:12px 16px;border-radius:6px;font-weight:600;text-decoration:none}
+.skip:focus{top:16px}
+.grid-bg{background-image:linear-gradient(var(--grid) 1px,transparent 1px),linear-gradient(90deg,var(--grid) 1px,transparent 1px);background-size:24px 24px}
+.wrap{width:100%;max-width:1200px;margin:0 auto;padding-left:40px;padding-right:40px}
+.sec{padding-top:128px}
+.eyebrow{margin:0;font-family:var(--mono);font-size:13px;letter-spacing:.12em;text-transform:uppercase;color:var(--accent-text)}
+.h2{margin:0;font-size:clamp(30px,3.8vw,48px);line-height:1.1;letter-spacing:-.025em;font-weight:750;text-wrap:balance}
+.btn-outline:hover{background:var(--ink);color:var(--bg)}
+.copy{min-height:44px;display:inline-flex;align-items:center;gap:10px;padding:0 20px;border:0;border-radius:8px;background:var(--code-accent);color:#1B1206;font-family:"Hanken Grotesk",system-ui,sans-serif;font-size:16px;font-weight:700;cursor:pointer}
+.copy:hover{filter:brightness(1.08)}
+.copy.small{min-height:44px;padding:0 14px;font-size:14px}
+pre.lines{counter-reset:line}
+pre.lines .ln{counter-increment:line}
+pre.lines .ln::before{content:counter(line);display:inline-block;width:2.2em;color:var(--code-muted);user-select:none}
+.pipe{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));column-gap:56px;row-gap:0;position:relative}
+.ev{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));column-gap:56px;row-gap:0}
+.stage{position:relative}
+.fwd{position:absolute;left:100%;top:calc(50% - 6px);width:56px;height:12px;display:block}
+.loop{grid-column:2 / span 2;position:relative;height:84px}
+.loop-m{display:none}
+.conn{display:block}
+.conn-m{display:none}
+.room{padding:44px 24px 20px}
+.tag{display:inline-block;font-family:var(--mono);font-size:11px;letter-spacing:.08em;padding:2px 7px;border:1px dashed var(--accent-text);border-radius:4px;color:var(--accent-text);white-space:nowrap}
+@media (max-width:860px){
+.pipe,.ev{grid-template-columns:minmax(0,1fr);row-gap:64px}
+.fwd{top:calc(100% + 26px);left:calc(50% - 28px);transform:rotate(90deg)}
+.loop{display:none}
+.loop-m{display:flex}
+.conn{display:none}
+.conn-m{display:flex}
+.room{padding:40px 14px 14px}
+}
+@media (max-width:640px){
+.wrap{padding-left:16px;padding-right:16px}
+.sec{padding-top:80px}
+.fig{padding:20px !important}
+.step{grid-template-columns:minmax(0,1fr) !important}
+.codebox{flex-direction:column;align-items:stretch !important}
+.codebox .copy{align-self:flex-end}
+}
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="grid-bg" style="border-bottom: 1px solid var(--line)">
+<div class="wrap">
+<nav aria-label="Primary" style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px 28px; padding-top: 28px; padding-bottom: 28px">
+<a href="#top" style="display: flex; align-items: center; gap: 12px; text-decoration: none; color: var(--ink)">
+<svg width="36" height="36" viewBox="0 0 32 32" aria-hidden="true" style="display: block; fill: none; stroke: var(--accent); stroke-width: 3; stroke-linecap: square"><path d="M9 7 H23"></path><path d="M9 12 V19 A7 7 0 0 0 23 19 V12"></path></svg>
+<span style="font-size: 26px; font-weight: 800; letter-spacing: -0.02em">Kūkulu</span>
+</a>
+<ul style="list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 28px; font-size: 15px; font-weight: 500">
+<li><a href="#how" style="color: var(--ink); text-decoration: none">How it works</a></li>
+<li><a href="#start" style="color: var(--ink); text-decoration: none">Get started</a></li>
+<li><a href="#proof" style="color: var(--ink); text-decoration: none">Proof</a></li>
+<li><a href="https://github.com/DisplaceTech/kukulu" style="color: var(--ink); text-decoration: none">GitHub</a></li>
+</ul>
+</nav>
+
+<div id="top" style="padding-top: 56px; padding-bottom: 96px; display: flex; flex-direction: column; gap: 40px">
+<div style="display: flex; flex-wrap: wrap; gap: 48px; align-items: flex-end">
+<div style="flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column; gap: 28px">
+<p class="eyebrow">Spec-driven builds · a Claude Code plugin</p>
+<h1 style="margin: 0; font-size: clamp(42px, 6.6vw, 88px); line-height: 1.0; letter-spacing: -0.035em; font-weight: 800; text-wrap: balance">Rebuild from the spec. Prove nothing leaked.</h1>
+<p style="margin: 0; max-width: 660px; font-size: 19px; line-height: 1.6; color: var(--muted)">Kūkulu is an open-source Claude Code plugin that turns a written spec into a planned, built, reviewed and summarized branch. A deterministic pipeline decides what runs next, and each stage runs on the model that fits it. Clean-room mode, coming in 0.7.0, adds an enforced guard, a tamper-evident log, calibrated similarity scoring and evidence a third party can verify offline.</p>
+</div>
+<div style="flex: 1 1 320px; min-width: 0; border: 1px solid var(--line2); border-radius: 10px; background: var(--bg); font-size: 15px">
+<div style="display: flex; justify-content: space-between; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--line2); font-family: var(--mono); font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted)"><span>Sheet 01</span><span>Specification</span></div>
+<dl style="margin: 0">
+<div style="display: grid; grid-template-columns: 104px minmax(0, 1fr); gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--line)"><dt style="font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); padding-top: 2px">Input</dt><dd style="margin: 0"><code style="font-size: 14px">docs/SPEC.md</code></dd></div>
+<div style="display: grid; grid-template-columns: 104px minmax(0, 1fr); gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--line)"><dt style="font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); padding-top: 2px">Pipeline</dt><dd style="margin: 0">plan → implement → review → summarize</dd></div>
+<div style="display: grid; grid-template-columns: 104px minmax(0, 1fr); gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--line)"><dt style="font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); padding-top: 2px">Models</dt><dd style="margin: 0">Anthropic · OpenRouter · Ollama</dd></div>
+<div style="display: grid; grid-template-columns: 104px minmax(0, 1fr); gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--line)"><dt style="font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); padding-top: 2px">Clean room</dt><dd style="margin: 0">Coming in 0.7.0</dd></div>
+<div style="display: grid; grid-template-columns: 104px minmax(0, 1fr); gap: 12px; padding: 12px 16px"><dt style="font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); padding-top: 2px">License</dt><dd style="margin: 0">Apache-2.0 · patent pending</dd></div>
+</dl>
+</div>
+</div>
+
+<div role="region" aria-labelledby="install-label" style="background: var(--code-bg); border: 1.5px solid var(--accent); border-radius: 12px; box-shadow: 0 0 0 6px rgba(232, 169, 81, 0.12); overflow: hidden">
+<div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 12px 12px 20px; border-bottom: 1px solid rgba(232, 169, 81, 0.28)">
+<h2 id="install-label" style="margin: 0; font-family: var(--mono); font-size: 13px; font-weight: 500; letter-spacing: 0.1em; text-transform: uppercase; color: var(--code-accent)">Install · in a Claude Code session</h2>
+<button type="button" class="copy" data-copy-for="install-session" aria-label="Copy install commands">
+<svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" style="fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><rect x="9" y="9" width="12" height="12" rx="2"></rect><path d="M5 15 H4 a1 1 0 0 1 -1 -1 V4 a1 1 0 0 1 1 -1 H14 a1 1 0 0 1 1 1 V5"></path></svg>
+<span class="copy-label">Copy</span>
+</button>
+</div>
+<div style="overflow-x: auto; padding: 22px 0">
+<pre class="lines" style="margin: 0; padding: 0 20px; font-size: clamp(14px, 1.5vw, 18px); line-height: 2; color: var(--code-ink); white-space: pre"><code id="install-session"><span class="ln">/plugin marketplace add https://kukulu.tech/marketplace.json</span>
+<span class="ln">/plugin install kukulu@displacetech</span></code></pre>
+</div>
+<p class="copy-status" id="install-session-status" role="status" aria-live="polite" style="margin: 0; padding: 0 20px 14px; min-height: 14px; font-family: var(--mono); font-size: 12px; color: var(--code-accent)"></p>
+</div>
+
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 16px 24px">
+<a href="#start" class="btn-outline" style="min-height: 48px; display: inline-flex; align-items: center; padding: 0 24px; border: 1.5px solid var(--ink); border-radius: 8px; color: var(--ink); text-decoration: none; font-weight: 700">Get started</a>
+<a href="#proof" style="min-height: 48px; display: inline-flex; align-items: center; gap: 8px; font-weight: 600">See the cleanflate results <span aria-hidden="true">→</span></a>
+</div>
+<p style="margin: 0; font-style: italic; font-size: 15px; color: var(--muted)">Kūkulu is Hawaiian for “to build.”</p>
+</div>
+</div>
+</header>
+
+<main id="main">
+
+<section class="sec" aria-labelledby="problem-h">
+<div class="wrap" style="display: flex; flex-wrap: wrap; gap: 48px 72px">
+<div style="flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column; gap: 20px">
+<p class="eyebrow">02 — The problem</p>
+<h2 id="problem-h" class="h2">AI can rewrite legacy code. It can’t show where the code came from.</h2>
+<p style="margin: 0; max-width: 680px; color: var(--muted)">Memory-unsafe C and C++ still sits under critical systems, and replacing it has meant funded teams working for months or years. AI coding agents can do the same work in hours.</p>
+<p style="margin: 0; max-width: 680px; color: var(--muted)">But they keep the model away from prior art with instructions in a prompt, record nothing verifiable about what it read, and never measure how close the output is to existing code. A model that has seen the original can reproduce it, and nothing in the result would show it. That output can’t support a clean-room claim.</p>
+</div>
+<aside aria-label="Why memory-safe rewrites matter" style="flex: 1 1 300px; min-width: 0; align-self: flex-end; border-top: 1px solid var(--line2); display: grid; grid-template-columns: repeat(2, minmax(0, 1fr))">
+<div style="padding: 20px 16px 0 0; border-right: 1px solid var(--line)"><p style="margin: 0; font-size: 46px; font-weight: 800; letter-spacing: -0.03em; line-height: 1; white-space: nowrap">~70%</p><p style="margin: 10px 0 0; font-size: 14px; line-height: 1.45; color: var(--muted)">of Chromium’s high-severity security bugs are memory-safety bugs (<a href="https://www.chromium.org/Home/chromium-security/memory-safety/">source</a>)</p></div>
+<div style="padding: 20px 0 0 20px"><p style="margin: 0; font-size: 46px; font-weight: 800; letter-spacing: -0.03em; line-height: 1; white-space: nowrap">21 mo</p><p style="margin: 10px 0 0; font-size: 14px; line-height: 1.45; color: var(--muted)">for a funded team to take zlib’s Rust port from first release to a stable API (<a href="https://trifectatech.org/projects/zlib-rs/">source</a>)</p></div>
+</aside>
+</div>
+</section>
+
+<section id="how" class="sec" aria-labelledby="how-h">
+<div class="wrap" style="display: flex; flex-direction: column; gap: 40px">
+<div style="display: flex; flex-direction: column; gap: 20px">
+<p class="eyebrow">03 — How it works</p>
+<h2 id="how-h" class="h2">The pipeline runs today. The clean room goes around it next.</h2>
+</div>
+
+<figure class="fig grid-bg" aria-labelledby="fig1" style="margin: 0; position: relative; padding: 48px; border: 1px solid var(--line2); border-radius: 12px; background-color: var(--bg2)">
+<span aria-hidden="true" style="position: absolute; left: 10px; top: 10px; width: 14px; height: 14px; border-left: 1.5px solid var(--accent); border-top: 1.5px solid var(--accent)"></span>
+<span aria-hidden="true" style="position: absolute; right: 10px; top: 10px; width: 14px; height: 14px; border-right: 1.5px solid var(--accent); border-top: 1.5px solid var(--accent)"></span>
+<span aria-hidden="true" style="position: absolute; left: 10px; bottom: 10px; width: 14px; height: 14px; border-left: 1.5px solid var(--accent); border-bottom: 1.5px solid var(--accent)"></span>
+<span aria-hidden="true" style="position: absolute; right: 10px; bottom: 10px; width: 14px; height: 14px; border-right: 1.5px solid var(--accent); border-bottom: 1.5px solid var(--accent)"></span>
+<figcaption id="fig1" style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px 24px; margin-bottom: 32px; font-family: var(--mono); font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted)">
+<span>Fig. 1 — The Kūkulu pipeline and its clean room</span>
+<span style="display: flex; flex-wrap: wrap; gap: 8px 20px; text-transform: none; letter-spacing: 0.02em">
+<span style="display: inline-flex; align-items: center; gap: 8px"><span aria-hidden="true" style="width: 24px; height: 0; border-top: 2px solid var(--line2)"></span>Solid: in the plugin today</span>
+<span style="display: inline-flex; align-items: center; gap: 8px"><span aria-hidden="true" style="width: 24px; height: 0; border-top: 2px dashed var(--accent)"></span>Dashed: clean-room mode, coming in 0.7.0</span>
+</span>
+</figcaption>
+
+<div style="display: flex; flex-wrap: wrap; gap: 16px 56px">
+<div style="flex: 1 1 280px; min-width: 0; display: flex; flex-direction: column; align-items: center">
+<p style="margin: 0; width: 100%; display: flex; flex-direction: column; gap: 4px; padding: 14px 18px; border: 1.5px solid var(--accent); border-radius: 10px; background: var(--panel)"><span style="font-family: var(--mono); font-size: 12px; letter-spacing: 0.1em; color: var(--accent-text)">INPUT</span><span style="font-weight: 700; font-size: 18px">Your spec, and in clean-room mode its RFCs</span></p>
+<svg class="conn" width="12" height="52" viewBox="0 0 12 52" aria-hidden="true" style="fill: none; stroke: var(--accent); stroke-width: 2"><path d="M6 2 V42"></path><path d="M1 41 L6 51 L11 41 Z" style="fill: var(--accent); stroke: none"></path></svg>
+</div>
+<div style="flex: 1 1 280px; min-width: 0; display: flex; flex-direction: column; align-items: center">
+<p style="margin: 0; width: 100%; display: flex; flex-direction: column; gap: 4px; padding: 14px 18px; border: 1.5px dashed var(--deny); border-radius: 10px; background: var(--panel)"><span style="font-family: var(--mono); font-size: 12px; letter-spacing: 0.1em; color: var(--deny)">BLOCKED BY THE GUARD</span><span style="font-weight: 700; font-size: 18px">The original source and other existing implementations</span></p>
+<div class="conn" aria-hidden="true" style="position: relative; width: 12px; height: 52px">
+<svg width="12" height="26" viewBox="0 0 12 26" style="display: block; fill: none; stroke: var(--deny); stroke-width: 2"><path d="M6 2 V22"></path><path d="M0 24 H12" style="stroke-width: 3"></path></svg>
+<span style="position: absolute; left: 22px; top: 12px; white-space: nowrap; font-family: var(--mono); font-size: 12px; color: var(--deny)">denied, and logged</span>
+</div>
+</div>
+</div>
+<div class="conn-m" aria-hidden="true" style="justify-content: center; padding: 12px 0">
+<svg width="12" height="40" viewBox="0 0 12 40" style="fill: none; stroke: var(--accent); stroke-width: 2"><path d="M6 2 V30"></path><path d="M1 29 L6 39 L11 29 Z" style="fill: var(--accent); stroke: none"></path></svg>
+</div>
+
+<div class="room" role="group" aria-labelledby="room-label" style="position: relative; border: 2px dashed var(--accent); border-radius: 14px">
+<p id="room-label" style="position: absolute; left: 16px; right: 16px; top: -13px; margin: 0; display: flex; flex-wrap: wrap; gap: 4px 10px; font-family: var(--mono); font-size: 12px; letter-spacing: 0.1em; color: var(--accent-text)"><span style="padding: 0 10px; background: var(--bg2)">CLEAN ROOM · 0.7.0 · GUARD CHECKS EVERY TOOL CALL</span></p>
+<ol class="pipe" style="list-style: none; margin: 0; padding: 0">
+<li class="stage" style="background: var(--panel); border: 1px solid var(--line2); border-radius: 10px; padding: 20px; display: flex; flex-direction: column; gap: 10px; min-height: 220px">
+<p style="margin: 0; font-family: var(--mono); font-size: 12px; letter-spacing: 0.1em; color: var(--muted)">STAGE 01</p>
+<h3 style="margin: 0; font-size: 26px; font-weight: 750; letter-spacing: -0.02em">Plan</h3>
+<p style="margin: 0; font-size: 15px; line-height: 1.5; color: var(--muted)">Reads the spec and turns it into an ordered build plan.</p>
+<p style="margin: auto 0 0; align-self: flex-start; font-family: var(--mono); font-size: 12px; padding: 4px 9px; border: 1px solid var(--accent-text); border-radius: 4px; color: var(--accent-text)">model · frontier</p>
+<svg class="fwd" viewBox="0 0 56 12" aria-hidden="true" style="fill: none; stroke: var(--accent); stroke-width: 2"><path d="M4 6 H46"></path><path d="M45 1 L54 6 L45 11 Z" style="fill: var(--accent); stroke: none"></path></svg>
+</li>
+<li class="stage" style="background: var(--panel); border: 1px solid var(--line2); border-radius: 10px; padding: 20px; display: flex; flex-direction: column; gap: 10px; min-height: 220px">
+<p style="margin: 0; font-family: var(--mono); font-size: 12px; letter-spacing: 0.1em; color: var(--muted)">STAGE 02</p>
+<h3 style="margin: 0; font-size: 26px; font-weight: 750; letter-spacing: -0.02em">Implement</h3>
+<p style="margin: 0; font-size: 15px; line-height: 1.5; color: var(--muted)">Writes the code, one planned task and one commit at a time.</p>
+<p style="margin: auto 0 0; align-self: flex-start; font-family: var(--mono); font-size: 12px; padding: 4px 9px; border: 1px solid var(--line2); border-radius: 4px; color: var(--ink)">model · efficient or local</p>
+<svg class="fwd" viewBox="0 0 56 12" aria-hidden="true" style="fill: none; stroke: var(--accent); stroke-width: 2"><path d="M4 6 H46"></path><path d="M45 1 L54 6 L45 11 Z" style="fill: var(--accent); stroke: none"></path></svg>
+</li>
+<li class="stage" style="background: var(--panel); border: 1px solid var(--line2); border-radius: 10px; padding: 20px; display: flex; flex-direction: column; gap: 10px; min-height: 220px">
+<p style="margin: 0; font-family: var(--mono); font-size: 12px; letter-spacing: 0.1em; color: var(--muted)">STAGE 03</p>
+<h3 style="margin: 0; font-size: 26px; font-weight: 750; letter-spacing: -0.02em">Review</h3>
+<p style="margin: 0; font-size: 15px; line-height: 1.5; color: var(--muted)">Checks the build against the spec and plan, and flags what it missed.</p>
+<p style="margin: auto 0 0; align-self: flex-start; font-family: var(--mono); font-size: 12px; padding: 4px 9px; border: 1px solid var(--accent-text); border-radius: 4px; color: var(--accent-text)">model · frontier</p>
+<p class="loop-m" style="margin: 4px 0 0; align-items: center; gap: 8px; padding: 10px 12px; border: 1.5px solid var(--line2); border-radius: 8px; font-family: var(--mono); font-size: 13px; color: var(--ink)"><svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" style="flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><path d="M9 14 L4 9 L9 4"></path><path d="M4 9 H14 a6 6 0 0 1 0 12 H11"></path></svg><span>Misses go back to Implement for fixes</span></p>
+<svg class="fwd" viewBox="0 0 56 12" aria-hidden="true" style="fill: none; stroke: var(--accent); stroke-width: 2"><path d="M4 6 H46"></path><path d="M45 1 L54 6 L45 11 Z" style="fill: var(--accent); stroke: none"></path></svg>
+</li>
+<li class="stage" style="background: var(--panel); border: 1px solid var(--line2); border-radius: 10px; padding: 20px; display: flex; flex-direction: column; gap: 10px; min-height: 220px">
+<p style="margin: 0; font-family: var(--mono); font-size: 12px; letter-spacing: 0.1em; color: var(--muted)">STAGE 04</p>
+<h3 style="margin: 0; font-size: 26px; font-weight: 750; letter-spacing: -0.02em">Summarize</h3>
+<p style="margin: 0; font-size: 15px; line-height: 1.5; color: var(--muted)">Writes up what was built, what changed, and what is left.</p>
+<p style="margin: auto 0 0; align-self: flex-start; font-family: var(--mono); font-size: 12px; padding: 4px 9px; border: 1px solid var(--line2); border-radius: 4px; color: var(--ink)">model · any</p>
+</li>
+<li class="loop" aria-label="Review sends misses back to Implement for fixes">
+<span aria-hidden="true" style="position: absolute; left: calc(25% - 14px); right: calc(25% - 14px); top: 0; height: 40px; border: 2px solid var(--line2); border-top: 0; border-radius: 0 0 12px 12px"></span>
+<svg aria-hidden="true" width="14" height="11" viewBox="0 0 14 11" style="position: absolute; left: calc(25% - 20px); top: -1px; fill: var(--line2)"><path d="M7 0 L14 11 L0 11 Z"></path></svg>
+<span style="position: absolute; left: 0; right: 0; top: 50px; text-align: center; font-family: var(--mono); font-size: 13px; color: var(--ink)">misses go back for fixes</span>
+</li>
+</ol>
+<p style="margin: 24px 0 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding-top: 16px; border-top: 1px dashed var(--accent); font-family: var(--mono); font-size: 13px; color: var(--muted)">
+<svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" style="flex: none; fill: none; stroke: var(--accent); stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round"><rect x="3" y="9" width="7" height="6" rx="3"></rect><rect x="14" y="9" width="7" height="6" rx="3"></rect><path d="M10 12 H14"></path></svg>
+<span><b style="color: var(--ink); font-weight: 600">Provenance log:</b> every call, allowed or denied, hash-chained</span>
+<span><b style="color: var(--ink); font-weight: 600">Controller:</b> no stage advances until isolation checks out</span>
+</p>
+</div>
+
+<div aria-hidden="true" style="display: flex; justify-content: center; padding: 12px 0">
+<svg width="12" height="44" viewBox="0 0 12 44" style="fill: none; stroke: var(--accent); stroke-width: 2"><path d="M6 2 V34"></path><path d="M1 33 L6 43 L11 33 Z" style="fill: var(--accent); stroke: none"></path></svg>
+</div>
+
+<ol class="ev" aria-label="Evidence clean-room mode produces after the build" style="list-style: none; margin: 0; padding: 0">
+<li class="stage" style="border: 1.5px dashed var(--accent); border-radius: 10px; padding: 18px 20px; display: flex; flex-direction: column; gap: 8px; background: var(--bg)">
+<p style="margin: 0; font-family: var(--mono); font-size: 12px; letter-spacing: 0.1em; color: var(--accent-text)">EVIDENCE 01</p>
+<h3 style="margin: 0; font-size: 20px; font-weight: 700">Equivalence</h3>
+<p style="margin: 0; font-size: 15px; line-height: 1.5; color: var(--muted)">The original is used only as a black box. Conformance corpora and differential fuzzing compare outputs byte for byte.</p>
+<svg class="fwd" viewBox="0 0 56 12" aria-hidden="true" style="fill: none; stroke: var(--accent); stroke-width: 2"><path d="M4 6 H46"></path><path d="M45 1 L54 6 L45 11 Z" style="fill: var(--accent); stroke: none"></path></svg>
+</li>
+<li class="stage" style="border: 1.5px dashed var(--accent); border-radius: 10px; padding: 18px 20px; display: flex; flex-direction: column; gap: 8px; background: var(--bg)">
+<p style="margin: 0; font-family: var(--mono); font-size: 12px; letter-spacing: 0.1em; color: var(--accent-text)">EVIDENCE 02</p>
+<h3 style="margin: 0; font-size: 20px; font-weight: 700">Contamination score</h3>
+<p style="margin: 0; font-size: 15px; line-height: 1.5; color: var(--muted)">Similarity to existing code, placed on a scale from independent implementations to known derivations.</p>
+<svg class="fwd" viewBox="0 0 56 12" aria-hidden="true" style="fill: none; stroke: var(--accent); stroke-width: 2"><path d="M4 6 H46"></path><path d="M45 1 L54 6 L45 11 Z" style="fill: var(--accent); stroke: none"></path></svg>
+</li>
+<li class="stage" style="border: 1.5px dashed var(--accent); border-radius: 10px; padding: 18px 20px; display: flex; flex-direction: column; gap: 8px; background: var(--bg)">
+<p style="margin: 0; font-family: var(--mono); font-size: 12px; letter-spacing: 0.1em; color: var(--accent-text)">EVIDENCE 03</p>
+<h3 style="margin: 0; font-size: 20px; font-weight: 700">Attestation bundle</h3>
+<p style="margin: 0; font-size: 15px; line-height: 1.5; color: var(--muted)">Policy history, log, checkpoints and results in a signed manifest that a third party can verify offline.</p>
+</li>
+</ol>
+</figure>
+
+<p style="margin: 0; font-size: 20px; line-height: 1.6">Put a <code style="font-size: 0.85em; padding: 2px 6px; border-radius: 4px; background: var(--panel); border: 1px solid var(--line)">SPEC.md</code> in <code style="font-size: 0.85em; padding: 2px 6px; border-radius: 4px; background: var(--panel); border: 1px solid var(--line)">docs/</code>, run <code style="font-size: 0.85em; padding: 2px 6px; border-radius: 4px; background: var(--panel); border: 1px solid var(--line)">/kukulu:go-flight</code>, and come back to a reviewed branch with a draft pull request.</p>
+</div>
+</section>
+
+<section class="sec" aria-labelledby="why-h">
+<div class="wrap" style="display: flex; flex-direction: column; gap: 40px">
+<div style="display: flex; flex-direction: column; gap: 20px">
+<p class="eyebrow">04 — Why it holds up</p>
+<h2 id="why-h" class="h2">Built to finish the run, and then to show its work.</h2>
+</div>
+
+<div style="display: flex; flex-direction: column; gap: 16px">
+<h3 style="margin: 0; font-family: var(--mono); font-size: 13px; font-weight: 500; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted)">In the plugin today</h3>
+<ul style="list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 16px">
+<li style="flex: 1 1 200px; min-width: 0; border: 1px solid var(--line2); border-radius: 10px; padding: 22px; display: flex; flex-direction: column; gap: 12px; background: var(--bg)">
+<svg width="28" height="28" viewBox="0 0 24 24" aria-hidden="true" style="fill: none; stroke: var(--accent); stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round"><rect x="3" y="4" width="6" height="6" rx="1"></rect><rect x="15" y="14" width="6" height="6" rx="1"></rect><path d="M9 7 H15 a3 3 0 0 1 3 3 V14"></path></svg>
+<h4 style="margin: 0; font-size: 19px; font-weight: 700; line-height: 1.25">Deterministic orchestration</h4>
+<p style="margin: 0; font-size: 15px; line-height: 1.5; color: var(--muted)">A dependency-free MCP server decides which stage and task run next. No model picks its own next step, so a flight survives a crash or a restart.</p>
+</li>
+<li style="flex: 1 1 200px; min-width: 0; border: 1px solid var(--line2); border-radius: 10px; padding: 22px; display: flex; flex-direction: column; gap: 12px; background: var(--bg)">
+<svg width="28" height="28" viewBox="0 0 24 24" aria-hidden="true" style="fill: none; stroke: var(--accent); stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round"><path d="M4 6 H20"></path><path d="M4 12 H20"></path><path d="M4 18 H20"></path><circle cx="9" cy="6" r="2" style="fill: var(--bg)"></circle><circle cx="15" cy="12" r="2" style="fill: var(--bg)"></circle><circle cx="7" cy="18" r="2" style="fill: var(--bg)"></circle></svg>
+<h4 style="margin: 0; font-size: 19px; font-weight: 700; line-height: 1.25">The right model for each stage</h4>
+<p style="margin: 0; font-size: 15px; line-height: 1.5; color: var(--muted)">Frontier models plan and review; a cheaper or local model implements. Route any role to Anthropic, OpenRouter or Ollama.</p>
+</li>
+<li style="flex: 1 1 200px; min-width: 0; border: 1px solid var(--line2); border-radius: 10px; padding: 22px; display: flex; flex-direction: column; gap: 12px; background: var(--bg)">
+<svg width="28" height="28" viewBox="0 0 24 24" aria-hidden="true" style="fill: none; stroke: var(--accent); stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round"><circle cx="11" cy="11" r="6"></circle><path d="M20 20 L15.5 15.5"></path><path d="M8.5 11 L10.5 13 L13.5 9"></path></svg>
+<h4 style="margin: 0; font-size: 19px; font-weight: 700; line-height: 1.25">Adversarial review</h4>
+<p style="margin: 0; font-size: 15px; line-height: 1.5; color: var(--muted)">A separate reviewer checks the branch against the spec, mutation-tests the tests, and queues fixes until it approves.</p>
+</li>
+<li style="flex: 1 1 200px; min-width: 0; border: 1px solid var(--line2); border-radius: 10px; padding: 22px; display: flex; flex-direction: column; gap: 12px; background: var(--bg)">
+<svg width="28" height="28" viewBox="0 0 24 24" aria-hidden="true" style="fill: none; stroke: var(--accent); stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round"><rect x="4" y="10" width="16" height="10" rx="2"></rect><path d="M8 10 V7 a4 4 0 0 1 8 0 V10"></path><path d="M12 14 V16"></path></svg>
+<h4 style="margin: 0; font-size: 19px; font-weight: 700; line-height: 1.25">Scoped tools</h4>
+<p style="margin: 0; font-size: 15px; line-height: 1.5; color: var(--muted)">Each stage agent gets only the tools its job calls for. Its tool list is the contract.</p>
+</li>
+<li style="flex: 1 1 200px; min-width: 0; border: 1px solid var(--line2); border-radius: 10px; padding: 22px; display: flex; flex-direction: column; gap: 12px; background: var(--bg)">
+<svg width="28" height="28" viewBox="0 0 24 24" aria-hidden="true" style="fill: none; stroke: var(--accent); stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round"><path d="M12 3 L21 19 H3 Z"></path><path d="M12 10 V14"></path><path d="M12 17 V17.01"></path></svg>
+<h4 style="margin: 0; font-size: 19px; font-weight: 700; line-height: 1.25">No silent stops</h4>
+<p style="margin: 0; font-size: 15px; line-height: 1.5; color: var(--muted)">A flight finishes approved, or halts with a recorded reason a human can act on.</p>
+</li>
+</ul>
+</div>
+
+<div role="group" aria-labelledby="cr-h" style="position: relative; border: 2px dashed var(--accent); border-radius: 14px; padding: clamp(20px, 3vw, 32px); display: flex; flex-direction: column; gap: 20px">
+<div style="display: flex; flex-direction: column; gap: 6px">
+<h3 id="cr-h" style="margin: 0; font-family: var(--mono); font-size: 13px; font-weight: 500; letter-spacing: 0.1em; text-transform: uppercase; color: var(--accent-text)">Clean-room mode · coming in 0.7.0</h3>
+<p style="margin: 0; font-size: 16px; color: var(--muted)">The method behind cleanflate, and the subject of a pending patent.</p>
+</div>
+<ul style="list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 20px 32px">
+<li style="display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 4px 14px">
+<svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true" style="grid-row: span 2; fill: none; stroke: var(--accent); stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round"><path d="M12 3 L20 6 V12 C20 16.5 16.5 19.5 12 21 C7.5 19.5 4 16.5 4 12 V6 Z"></path><path d="M9 9 L15 15"></path><path d="M15 9 L9 15"></path></svg>
+<h4 style="margin: 0; font-size: 17px; font-weight: 700">Enforced isolation</h4>
+<p style="margin: 0; font-size: 15px; line-height: 1.5; color: var(--muted)">A guard checks every tool call’s target against a declarative policy before it runs. The policy and the guard are protected from the agents.</p>
+</li>
+<li style="display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 4px 14px">
+<svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true" style="grid-row: span 2; fill: none; stroke: var(--accent); stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round"><rect x="4" y="4" width="16" height="16" rx="2"></rect><path d="M4 12 H20"></path><path d="M12 4 V20"></path></svg>
+<h4 style="margin: 0; font-size: 17px; font-weight: 700">Gated stages</h4>
+<p style="margin: 0; font-size: 15px; line-height: 1.5; color: var(--muted)">Before each stage, the controller verifies the policy, the guard, a self-test and the log, and stops if anything fails.</p>
+</li>
+<li style="display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 4px 14px">
+<svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true" style="grid-row: span 2; fill: none; stroke: var(--accent); stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round"><rect x="2" y="9" width="7" height="6" rx="3"></rect><rect x="15" y="9" width="7" height="6" rx="3"></rect><path d="M9 12 H15"></path></svg>
+<h4 style="margin: 0; font-size: 17px; font-weight: 700">Tamper-evident provenance</h4>
+<p style="margin: 0; font-size: 15px; line-height: 1.5; color: var(--muted)">Every tool call, allowed or denied, and every human instruction goes into a hash-chained log with signed checkpoints.</p>
+</li>
+<li style="display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 4px 14px">
+<svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true" style="grid-row: span 2; fill: none; stroke: var(--accent); stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round"><path d="M3 15 H21"></path><path d="M4 13 V17"></path><path d="M20 13 V17"></path><circle cx="9" cy="15" r="2.2" style="fill: var(--bg)"></circle><path d="M12 7 L12 10"></path><path d="M9 7 H15"></path></svg>
+<h4 style="margin: 0; font-size: 17px; font-weight: 700">Calibrated contamination scoring</h4>
+<p style="margin: 0; font-size: 15px; line-height: 1.5; color: var(--muted)">Similarity scored on a scale where 0 is an independent pair of implementations and 1 is a known derivation.</p>
+</li>
+<li style="display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 4px 14px">
+<svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true" style="grid-row: span 2; fill: none; stroke: var(--accent); stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round"><path d="M6 3 H14 L19 8 V21 H6 Z"></path><path d="M14 3 V8 H19"></path><path d="M9 14 L11 16 L15 12"></path></svg>
+<h4 style="margin: 0; font-size: 17px; font-weight: 700">Offline attestation</h4>
+<p style="margin: 0; font-size: 15px; line-height: 1.5; color: var(--muted)">The evidence ships as a signed bundle a reviewer can verify without access to your systems.</p>
+</li>
+</ul>
+</div>
+</div>
+</section>
+
+<section id="start" class="sec" aria-labelledby="start-h">
+<div class="wrap" style="display: flex; flex-direction: column; gap: 40px">
+<div style="display: flex; flex-direction: column; gap: 20px">
+<p class="eyebrow">05 — Get started</p>
+<h2 id="start-h" class="h2">Your first flight.</h2>
+<p style="margin: 0; max-width: 680px; color: var(--muted)">You need Claude Code, Node 22 or later, and git. There is nothing to <code style="font-size: 0.9em">npm install</code>.</p>
+</div>
+<ol style="list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; border-top: 1px solid var(--line2)">
+
+<li class="step" style="display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 8px 24px; padding: 28px 0; border-bottom: 1px solid var(--line)">
+<p aria-hidden="true" style="margin: 0; font-family: var(--mono); font-size: 13px; letter-spacing: 0.1em; color: var(--accent-text); padding-top: 4px">STEP 1</p>
+<div style="min-width: 0; display: flex; flex-direction: column; gap: 12px">
+<h3 style="margin: 0; font-size: 22px; font-weight: 700">Install the plugin</h3>
+<p style="margin: 0; color: var(--muted)">In a Claude Code session, run the two commands at the top of this page. From a shell, it’s the same two steps:</p>
+<div class="codebox" style="display: flex; align-items: flex-start; gap: 8px; background: var(--code-bg); border: 1px solid var(--line2); border-radius: 10px; padding: 10px 10px 10px 16px">
+<pre style="flex: 1 1 auto; min-width: 0; margin: 0; padding: 8px 0; overflow-x: auto; font-size: 15px; line-height: 1.8; color: var(--code-ink)"><code id="install-shell">claude plugin marketplace add https://kukulu.tech/marketplace.json
+claude plugin install kukulu@displacetech</code></pre>
+<button type="button" class="copy small" data-copy-for="install-shell" aria-label="Copy the shell install commands"><span class="copy-label">Copy</span></button>
+</div>
+<p class="copy-status" id="install-shell-status" role="status" aria-live="polite" style="margin: 0; min-height: 14px; font-family: var(--mono); font-size: 12px; color: var(--accent-text)"></p>
+</div>
+</li>
+
+<li class="step" style="display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 8px 24px; padding: 28px 0; border-bottom: 1px solid var(--line)">
+<p aria-hidden="true" style="margin: 0; font-family: var(--mono); font-size: 13px; letter-spacing: 0.1em; color: var(--accent-text); padding-top: 4px">STEP 2</p>
+<div style="min-width: 0; display: flex; flex-direction: column; gap: 12px">
+<h3 style="margin: 0; font-size: 22px; font-weight: 700">Write a spec</h3>
+<p style="margin: 0; color: var(--muted)">Start from the template, fill it in, and commit it on your base branch. <a href="https://github.com/DisplaceTech/kukulu/blob/main/docs/writing-specs.md">The spec guide</a> says what the planner needs from each section.</p>
+<div class="codebox" style="display: flex; align-items: flex-start; gap: 8px; background: var(--code-bg); border: 1px solid var(--line2); border-radius: 10px; padding: 10px 10px 10px 16px">
+<pre style="flex: 1 1 auto; min-width: 0; margin: 0; padding: 8px 0; overflow-x: auto; font-size: 15px; line-height: 1.8; color: var(--code-ink)"><code id="spec-template">mkdir -p docs
+curl -fsSL https://raw.githubusercontent.com/DisplaceTech/kukulu/main/templates/SPEC.md -o docs/SPEC.md
+git add docs/SPEC.md &amp;&amp; git commit -m "spec"</code></pre>
+<button type="button" class="copy small" data-copy-for="spec-template" aria-label="Copy the spec template commands"><span class="copy-label">Copy</span></button>
+</div>
+<p class="copy-status" id="spec-template-status" role="status" aria-live="polite" style="margin: 0; min-height: 14px; font-family: var(--mono); font-size: 12px; color: var(--accent-text)"></p>
+</div>
+</li>
+
+<li class="step" style="display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 8px 24px; padding: 28px 0; border-bottom: 1px solid var(--line)">
+<p aria-hidden="true" style="margin: 0; font-family: var(--mono); font-size: 13px; letter-spacing: 0.1em; color: var(--accent-text); padding-top: 4px">STEP 3</p>
+<div style="min-width: 0; display: flex; flex-direction: column; gap: 12px">
+<h3 style="margin: 0; font-size: 22px; font-weight: 700">Start the flight</h3>
+<p style="margin: 0; color: var(--muted)">Run it in a Claude Code session and leave it. The first run sets up the stage agents and the permission rule an unattended run needs.</p>
+<div class="codebox" style="display: flex; align-items: flex-start; gap: 8px; background: var(--code-bg); border: 1px solid var(--line2); border-radius: 10px; padding: 10px 10px 10px 16px">
+<pre style="flex: 1 1 auto; min-width: 0; margin: 0; padding: 8px 0; overflow-x: auto; font-size: 15px; line-height: 1.8; color: var(--code-ink)"><code id="flight-cmd">/kukulu:go-flight</code></pre>
+<button type="button" class="copy small" data-copy-for="flight-cmd" aria-label="Copy the flight command"><span class="copy-label">Copy</span></button>
+</div>
+<p class="copy-status" id="flight-cmd-status" role="status" aria-live="polite" style="margin: 0; min-height: 14px; font-family: var(--mono); font-size: 12px; color: var(--accent-text)"></p>
+</div>
+</li>
+
+<li class="step" style="display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 8px 24px; padding: 28px 0; border-bottom: 1px solid var(--line)">
+<p aria-hidden="true" style="margin: 0; font-family: var(--mono); font-size: 13px; letter-spacing: 0.1em; color: var(--accent-text); padding-top: 4px">STEP 4</p>
+<div style="min-width: 0; display: flex; flex-direction: column; gap: 12px">
+<h3 style="margin: 0; font-size: 22px; font-weight: 700">Review and merge</h3>
+<p style="margin: 0; color: var(--muted)">Read <code style="font-size: 0.9em">docs/SUMMARY.md</code>, then review the draft pull request from the <code style="font-size: 0.9em">build/&lt;date&gt;</code> branch. Kūkulu never merges on its own.</p>
+</div>
+</li>
+</ol>
+<p style="margin: 0; padding: 18px 22px; border: 1px solid var(--line); border-radius: 10px; font-size: 16px; line-height: 1.55; color: var(--muted)"><b style="color: var(--ink); font-weight: 700">Run a stage somewhere else.</b> Every role defaults to an Anthropic model. To point one at OpenRouter or a local Ollama model, copy the routing example to <code style="font-size: 0.9em">~/.config/kukulu/config.json</code> and follow <a href="https://github.com/DisplaceTech/kukulu/blob/main/docs/routing.md">the routing guide</a>.</p>
+</div>
+</section>
+
+<section id="proof" class="sec" aria-labelledby="proof-h">
+<div class="wrap" style="display: flex; flex-direction: column; gap: 32px">
+<div style="display: flex; flex-direction: column; gap: 20px">
+<p class="eyebrow">06 — Proof</p>
+<h2 id="proof-h" class="h2"><span style="font-family: var(--mono); font-weight: 600; letter-spacing: -0.02em">cleanflate</span></h2>
+<p style="margin: 0; max-width: 760px; font-size: 20px; line-height: 1.55; color: var(--muted)">A clean-room DEFLATE decompressor in safe Rust, built by Kūkulu from RFCs 1950–1952 alone, without access to zlib’s source.</p>
+<p style="margin: 0; max-width: 760px; font-size: 16px; line-height: 1.55; color: var(--muted)">Built with Kūkulu 0.3.2, then named Foundry, under the clean-room controls that come to the plugin in 0.7.0.</p>
+</div>
+
+<figure aria-labelledby="cal-h" style="margin: 0; padding: clamp(20px, 3vw, 32px); border: 1px solid var(--line2); border-radius: 10px; background: var(--bg2)">
+<figcaption style="display: flex; flex-direction: column; gap: 6px; margin-bottom: 20px">
+<span id="cal-h" style="font-size: 19px; font-weight: 700">Did anything leak from zlib?</span>
+<span style="font-size: 15px; color: var(--muted)">Identifier overlap with C zlib (Jaccard index). Lower means more independent.</span>
+</figcaption>
+<div role="img" aria-label="Identifier overlap with C zlib: cleanflate 0.021, an independently written decoder 0.019, a known port 0.095." style="position: relative; height: 118px">
+<span aria-hidden="true" style="position: absolute; left: 0; right: 0; top: 46px; height: 2px; background: var(--line2)"></span>
+<span aria-hidden="true" style="position: absolute; left: 0; top: 40px; width: 2px; height: 14px; background: var(--line2)"></span>
+<span aria-hidden="true" style="position: absolute; left: calc(50% - 1px); top: 40px; width: 2px; height: 14px; background: var(--line2)"></span>
+<span aria-hidden="true" style="position: absolute; right: 0; top: 40px; width: 2px; height: 14px; background: var(--line2)"></span>
+<span aria-hidden="true" style="position: absolute; left: calc(21% - 9px); top: 38px; width: 18px; height: 18px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 4px var(--bg2)"></span>
+<span aria-hidden="true" style="position: absolute; left: calc(19% - 7px); top: 40px; width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--ink); background: var(--bg2)"></span>
+<span aria-hidden="true" style="position: absolute; left: calc(95% - 7px); top: 40px; width: 14px; height: 14px; background: var(--muted)"></span>
+<span aria-hidden="true" style="position: absolute; left: calc(21% - 4px); top: 6px; white-space: nowrap; font-family: var(--mono); font-size: 13px; font-weight: 600; color: var(--accent-text)">cleanflate 0.021</span>
+<span aria-hidden="true" style="position: absolute; left: calc(19% - 4px); top: 66px; white-space: nowrap; font-family: var(--mono); font-size: 13px; color: var(--ink)">independent decoder 0.019</span>
+<span aria-hidden="true" style="position: absolute; right: calc(5% - 7px); top: 6px; white-space: nowrap; font-family: var(--mono); font-size: 13px; color: var(--muted)">known port 0.095</span>
+<span aria-hidden="true" style="position: absolute; left: 0; top: 98px; font-family: var(--mono); font-size: 11px; color: var(--muted)">0</span>
+<span aria-hidden="true" style="position: absolute; left: calc(50% - 16px); top: 98px; font-family: var(--mono); font-size: 11px; color: var(--muted)">0.05</span>
+<span aria-hidden="true" style="position: absolute; right: 0; top: 98px; font-family: var(--mono); font-size: 11px; color: var(--muted)">0.10</span>
+</div>
+<p style="margin: 16px 0 0; font-size: 15px; line-height: 1.55; color: var(--muted)">cleanflate sits with an independently written decoder, at about a fifth of a known port. Comment overlap is near zero: 0.0003, against 0.032 for the port.</p>
+</figure>
+
+<div style="overflow-x: auto; border: 1px solid var(--line2); border-radius: 10px; background: var(--bg2)">
+<table style="width: 100%; min-width: 320px; border-collapse: collapse; font-size: 16px">
+<caption style="caption-side: bottom; text-align: left; padding: 14px 20px; border-top: 1px solid var(--line); font-size: 13px; line-height: 1.55; color: var(--muted)">From <a href="https://github.com/ericmann/cleanflate-bench">cleanflate-bench</a> at commit <code>7f50ce6</code>, which reproduces every number from a clean clone. Measured on one ARM and one x86 machine. <b style="color: var(--ink); font-weight: 600">Limits:</b> one target library; two operator fixes bypassed pipeline review and are recorded in the log.</caption>
+<thead>
+<tr>
+<th scope="col" style="text-align: left; padding: 14px 20px; font-family: var(--mono); font-size: 12px; font-weight: 500; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); border-bottom: 1px solid var(--line2); width: 168px">Claim</th>
+<th scope="col" style="text-align: left; padding: 14px 20px; font-family: var(--mono); font-size: 12px; font-weight: 500; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); border-bottom: 1px solid var(--line2)">Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<th scope="row" style="text-align: left; vertical-align: top; padding: 16px 20px; font-weight: 700; border-bottom: 1px solid var(--line)">Clean room</th>
+<td style="padding: 16px 20px; border-bottom: 1px solid var(--line)">0 forbidden reads among 2,226 read-capable tool calls. The one agent attempt to reach prior-art source was blocked.</td>
+</tr>
+<tr>
+<th scope="row" style="text-align: left; vertical-align: top; padding: 16px 20px; font-weight: 700; border-bottom: 1px solid var(--line)">Equivalent</th>
+<td style="padding: 16px 20px; border-bottom: 1px solid var(--line)">2,962 of 2,962 conformance streams byte-identical to C zlib. 0 divergences in 1.24M differential-fuzz executions against C zlib, zlib-rs and miniz_oxide.</td>
+</tr>
+<tr>
+<th scope="row" style="text-align: left; vertical-align: top; padding: 16px 20px; font-weight: 700; border-bottom: 1px solid var(--line)">Memory-safe</th>
+<td style="padding: 16px 20px; border-bottom: 1px solid var(--line)">0 lines of <code>unsafe</code> code, 0 runtime dependencies.</td>
+</tr>
+<tr>
+<th scope="row" style="text-align: left; vertical-align: top; padding: 16px 20px; font-weight: 700; border-bottom: 1px solid var(--line)">Viable</th>
+<td style="padding: 16px 20px; border-bottom: 1px solid var(--line)">0.71–0.76× C zlib throughput on the Silesia corpus, with no SIMD and no <code>unsafe</code>.</td>
+</tr>
+<tr>
+<th scope="row" style="text-align: left; vertical-align: top; padding: 16px 20px; font-weight: 700">Cost</th>
+<td style="padding: 16px 20px">About 28 hours of pipeline time, $361 in model usage, 11 operator interventions.</td>
+</tr>
+</tbody>
+</table>
+</div>
+<div style="display: flex; flex-wrap: wrap; gap: 12px 28px">
+<a href="https://github.com/ericmann/cleanflate" style="min-height: 44px; display: inline-flex; align-items: center; gap: 8px; font-weight: 600">cleanflate repository <span aria-hidden="true">↗</span></a>
+<a href="https://github.com/ericmann/cleanflate-bench" style="min-height: 44px; display: inline-flex; align-items: center; gap: 8px; font-weight: 600">cleanflate-bench <span aria-hidden="true">↗</span></a>
+</div>
+</div>
+</section>
+
+<section class="sec" aria-labelledby="next-h">
+<div class="wrap" style="display: flex; flex-direction: column; gap: 40px">
+<div style="display: flex; flex-direction: column; gap: 20px">
+<p class="eyebrow">07 — Where it’s going</p>
+<h2 id="next-h" class="h2">Next on the bench.</h2>
+</div>
+<ol style="list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; border-top: 1px solid var(--line2)">
+<li style="flex: 1 1 280px; min-width: 0; padding: 24px 28px 8px 0; display: flex; flex-direction: column; gap: 10px">
+<p style="margin: 0; font-family: var(--mono); font-size: 12px; letter-spacing: 0.1em; color: var(--accent-text)">NEXT 01 · 0.7.0</p>
+<p style="margin: 0; font-size: 20px; font-weight: 600; line-height: 1.35">Clean-room mode in the plugin, for modernizing legacy software into memory-safe code.</p>
+</li>
+<li style="flex: 1 1 280px; min-width: 0; padding: 24px 28px 8px 0; display: flex; flex-direction: column; gap: 10px">
+<p style="margin: 0; font-family: var(--mono); font-size: 12px; letter-spacing: 0.1em; color: var(--accent-text)">NEXT 02</p>
+<p style="margin: 0; font-size: 20px; font-weight: 600; line-height: 1.35">A vendor-agnostic package.</p>
+</li>
+<li style="flex: 1 1 280px; min-width: 0; padding: 24px 28px 8px 0; display: flex; flex-direction: column; gap: 10px">
+<p style="margin: 0; font-family: var(--mono); font-size: 12px; letter-spacing: 0.1em; color: var(--accent-text)">NEXT 03</p>
+<p style="margin: 0; font-size: 20px; font-weight: 600; line-height: 1.35">Continuous fuzzing and multi-pair similarity calibration.</p>
+</li>
+</ol>
+</div>
+</section>
+
+<section class="sec" aria-labelledby="by-h" style="padding-bottom: 128px">
+<div class="wrap">
+<div style="border: 1px solid var(--line2); border-radius: 12px; padding: clamp(24px, 4vw, 48px); display: flex; flex-wrap: wrap; gap: 32px 64px; align-items: flex-start">
+<div style="flex: 1 1 280px; min-width: 0; display: flex; flex-direction: column; gap: 14px">
+<p class="eyebrow">08 — Built by</p>
+<h2 id="by-h" style="margin: 0; font-size: clamp(26px, 3vw, 36px); line-height: 1.15; letter-spacing: -0.02em; font-weight: 750">Displace Technologies LLC</h2>
+<p style="margin: 0; font-family: var(--mono); font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted)">Oregon</p>
+</div>
+<p style="flex: 999 1 420px; min-width: 0; margin: 0; font-size: 19px; line-height: 1.6; color: var(--muted)"><b style="color: var(--ink); font-weight: 700">Eric Mann</b> has spent 20 years in software. He was release manager for PHP 8.3 and 8.4, wrote O’Reilly’s <i>PHP Cookbook</i>, served as VP of Engineering at a defense AI company and VP of Information Security at a public company, and has been building agentic orchestration since 2023.</p>
+</div>
+</div>
+</section>
+
+</main>
+
+<footer style="border-top: 1px solid var(--line); background: var(--bg2)">
+<div class="wrap" style="padding-top: 32px; padding-bottom: 32px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px 32px">
+<div style="display: flex; align-items: center; gap: 10px">
+<svg width="24" height="24" viewBox="0 0 32 32" aria-hidden="true" style="display: block; fill: none; stroke: var(--accent); stroke-width: 3; stroke-linecap: square"><path d="M9 7 H23"></path><path d="M9 12 V19 A7 7 0 0 0 23 19 V12"></path></svg>
+<span style="font-weight: 800; font-size: 18px; letter-spacing: -0.02em">Kūkulu</span>
+</div>
+<p style="margin: 0; display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 14px; color: var(--muted)"><span>Apache-2.0</span><span aria-hidden="true">·</span><span>Patent pending</span><span aria-hidden="true">·</span><span>© 2026 Displace Technologies LLC</span><span aria-hidden="true">·</span><a href="https://github.com/DisplaceTech/kukulu">GitHub</a></p>
+</div>
+</footer>
+</body>
+</html>

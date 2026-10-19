@@ -7,7 +7,10 @@
   "scripts": {
     "test": "node test/run.mjs",
     "lint": "./scripts/lint.sh",
-    "check": "npm run lint && npm test"
+    "check": "npm run lint && npm test",
+    "check:site": "node scripts/check-site.mjs --self-test && node scripts/check-site.mjs",
+    "check:site:browser": "node scripts/check-site-browser.mjs",
+    "site:serve": "node scripts/serve-site.mjs"
   },
   "engines": {
     "node": ">=22"

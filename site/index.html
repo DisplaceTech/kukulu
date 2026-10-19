@@ -1,0 +1,475 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kūkulu — rebuild from the spec, prove nothing leaked</title>
+<meta name="description" content="Kūkulu is an open-source Claude Code plugin that turns a written spec into a planned, built, reviewed branch. Clean-room mode is coming in 0.7.0.">
+<link rel="canonical" href="https://kukulu.tech/">
+<meta name="color-scheme" content="dark light">
+<meta name="theme-color" content="#0B1620" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#F3F0E8" media="(prefers-color-scheme: light)">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon.ico" sizes="32x32">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Kūkulu">
+<meta property="og:title" content="Kūkulu — rebuild from the spec, prove nothing leaked">
+<meta property="og:description" content="An open-source Claude Code plugin that turns a written spec into a planned, built, reviewed branch. Clean-room mode is coming in 0.7.0.">
+<meta property="og:url" content="https://kukulu.tech/">
+<meta property="og:image" content="https://kukulu.tech/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Kūkulu — Rebuild from the spec. Prove nothing leaked.">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="stylesheet" href="/styles.css">
+<link rel="preload" as="font" type="font/woff2" crossorigin href="/fonts/hanken-grotesk-latin-wght-normal.woff2">
+<link rel="preload" as="font" type="font/woff2" crossorigin href="/fonts/hanken-grotesk-latin-ext-wght-normal.woff2">
+<script src="/copy.js" defer></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="site-header grid-bg">
+<div class="wrap">
+<nav class="nav" aria-label="Primary">
+<a class="brand" href="#top">
+<svg class="brand-mark" width="36" height="36" viewBox="0 0 32 32" aria-hidden="true"><path d="M9 7 H23"></path><path d="M9 12 V19 A7 7 0 0 0 23 19 V12"></path></svg>
+<span class="brand-name">Kūkulu</span>
+</a>
+<ul class="nav-links">
+<li><a href="#how">How it works</a></li>
+<li><a href="#start">Get started</a></li>
+<li><a href="#proof">Proof</a></li>
+<li><a href="https://github.com/DisplaceTech/kukulu">GitHub</a></li>
+</ul>
+</nav>
+
+<div id="top" class="hero">
+<div class="hero-top">
+<div class="hero-copy">
+<p class="eyebrow">Spec-driven builds · a Claude Code plugin</p>
+<h1 class="h1">Rebuild from the spec. Prove nothing leaked.</h1>
+<p class="lede">Kūkulu is an open-source Claude Code plugin that turns a written spec into a planned, built, reviewed and summarized branch. A deterministic pipeline decides what runs next, and each stage runs on the model that fits it. Clean-room mode, coming in 0.7.0, adds an enforced guard, a tamper-evident log, calibrated similarity scoring and evidence a third party can verify offline.</p>
+</div>
+<div class="sheet">
+<div class="sheet-head"><span>Sheet 01</span><span>Specification</span></div>
+<dl>
+<div class="sheet-row"><dt>Input</dt><dd><code>docs/SPEC.md</code></dd></div>
+<div class="sheet-row"><dt>Pipeline</dt><dd>plan → implement → review → summarize</dd></div>
+<div class="sheet-row"><dt>Models</dt><dd>Anthropic · OpenRouter · Ollama</dd></div>
+<div class="sheet-row"><dt>Clean room</dt><dd>Coming in 0.7.0</dd></div>
+<div class="sheet-row"><dt>License</dt><dd>Apache-2.0 · patent pending</dd></div>
+</dl>
+</div>
+</div>
+
+<div class="install" role="region" aria-labelledby="install-label">
+<div class="install-head">
+<h2 class="install-title" id="install-label">Install · in a Claude Code session</h2>
+<button type="button" class="copy" data-copy-for="install-session" aria-label="Copy install commands" hidden>
+<svg class="icon" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"></rect><path d="M5 15 H4 a1 1 0 0 1 -1 -1 V4 a1 1 0 0 1 1 -1 H14 a1 1 0 0 1 1 1 V5"></path></svg>
+<span class="copy-label">Copy</span>
+</button>
+</div>
+<div class="install-body">
+<pre class="lines"><code id="install-session"><span class="ln">/plugin marketplace add https://kukulu.tech/marketplace.json</span>
+<span class="ln">/plugin install kukulu@displacetech</span></code></pre>
+</div>
+<p class="copy-status" id="install-session-status" role="status" aria-live="polite"></p>
+</div>
+
+<div class="cta-row">
+<a href="#start" class="btn-outline">Get started</a>
+<a href="#proof" class="link-arrow">See the cleanflate results <span aria-hidden="true">→</span></a>
+</div>
+<p class="meaning">Kūkulu is Hawaiian for “to build.”</p>
+</div>
+</div>
+</header>
+
+<main id="main">
+
+<section class="sec" aria-labelledby="problem-h">
+<div class="wrap wrap-split">
+<div class="problem-copy">
+<p class="eyebrow">02 — The problem</p>
+<h2 id="problem-h" class="h2">AI can rewrite legacy code. It can’t show where the code came from.</h2>
+<p class="body-text">Memory-unsafe C and C++ still sits under critical systems, and replacing it has meant funded teams working for months or years. AI coding agents can do the same work in hours.</p>
+<p class="body-text">But they keep the model away from prior art with instructions in a prompt, record nothing verifiable about what it read, and never measure how close the output is to existing code. A model that has seen the original can reproduce it, and nothing in the result would show it. That output can’t support a clean-room claim.</p>
+</div>
+<aside class="stats" aria-label="Why memory-safe rewrites matter">
+<div class="stat"><p class="stat-fig">~70%</p><p class="stat-note">of Chromium’s high-severity security bugs are memory-safety bugs (<a href="https://www.chromium.org/Home/chromium-security/memory-safety/">source</a>)</p></div>
+<div class="stat"><p class="stat-fig">21 mo</p><p class="stat-note">for a funded team to take zlib’s Rust port from first release to a stable API (<a href="https://trifectatech.org/projects/zlib-rs/">source</a>)</p></div>
+</aside>
+</div>
+</section>
+
+<section id="how" class="sec" aria-labelledby="how-h">
+<div class="wrap wrap-stack">
+<div class="sec-head">
+<p class="eyebrow">03 — How it works</p>
+<h2 id="how-h" class="h2">The pipeline runs today. The clean room goes around it next.</h2>
+</div>
+
+<figure class="fig grid-bg" aria-labelledby="fig1">
+<span class="corner corner-tl" aria-hidden="true"></span>
+<span class="corner corner-tr" aria-hidden="true"></span>
+<span class="corner corner-bl" aria-hidden="true"></span>
+<span class="corner corner-br" aria-hidden="true"></span>
+<figcaption id="fig1" class="fig-cap">
+<span>Fig. 1 — The Kūkulu pipeline and its clean room</span>
+<span class="legend">
+<span class="legend-item"><span class="swatch" aria-hidden="true"></span>Solid: in the plugin today</span>
+<span class="legend-item"><span class="swatch swatch-dashed" aria-hidden="true"></span>Dashed: clean-room mode, coming in 0.7.0</span>
+</span>
+</figcaption>
+
+<div class="inputs">
+<div class="input-col">
+<p class="node"><span class="node-kicker">INPUT</span><span class="node-title">Your spec, and in clean-room mode its RFCs</span></p>
+<svg class="conn arrow" width="12" height="52" viewBox="0 0 12 52" aria-hidden="true"><path d="M6 2 V42"></path><path class="arrow-head" d="M1 41 L6 51 L11 41 Z"></path></svg>
+</div>
+<div class="input-col">
+<p class="node node-blocked"><span class="node-kicker">BLOCKED BY THE GUARD</span><span class="node-title">The original source and other existing implementations</span></p>
+<div class="conn conn-deny" aria-hidden="true">
+<svg class="deny-stem" width="12" height="26" viewBox="0 0 12 26"><path d="M6 2 V22"></path><path class="deny-bar" d="M0 24 H12"></path></svg>
+<span class="deny-label">denied, and logged</span>
+</div>
+</div>
+</div>
+<div class="conn-m" aria-hidden="true">
+<svg class="arrow" width="12" height="40" viewBox="0 0 12 40"><path d="M6 2 V30"></path><path class="arrow-head" d="M1 29 L6 39 L11 29 Z"></path></svg>
+</div>
+
+<div class="room" role="group" aria-labelledby="room-label">
+<p id="room-label" class="room-label"><span>CLEAN ROOM · 0.7.0 · GUARD CHECKS EVERY TOOL CALL</span></p>
+<ol class="pipe">
+<li class="stage">
+<p class="stage-no">STAGE 01</p>
+<h3 class="stage-name">Plan</h3>
+<p class="stage-desc">Reads the spec and turns it into an ordered build plan.</p>
+<p class="model model-frontier">model · frontier</p>
+<svg class="fwd arrow" viewBox="0 0 56 12" aria-hidden="true"><path d="M4 6 H46"></path><path class="arrow-head" d="M45 1 L54 6 L45 11 Z"></path></svg>
+</li>
+<li class="stage">
+<p class="stage-no">STAGE 02</p>
+<h3 class="stage-name">Implement</h3>
+<p class="stage-desc">Writes the code, one planned task and one commit at a time.</p>
+<p class="model">model · efficient or local</p>
+<svg class="fwd arrow" viewBox="0 0 56 12" aria-hidden="true"><path d="M4 6 H46"></path><path class="arrow-head" d="M45 1 L54 6 L45 11 Z"></path></svg>
+</li>
+<li class="stage">
+<p class="stage-no">STAGE 03</p>
+<h3 class="stage-name">Review</h3>
+<p class="stage-desc">Checks the build against the spec and plan, and flags what it missed.</p>
+<p class="model model-frontier">model · frontier</p>
+<p class="loop-m"><svg class="icon loop-icon" width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14 L4 9 L9 4"></path><path d="M4 9 H14 a6 6 0 0 1 0 12 H11"></path></svg><span>Misses go back to Implement for fixes</span></p>
+<svg class="fwd arrow" viewBox="0 0 56 12" aria-hidden="true"><path d="M4 6 H46"></path><path class="arrow-head" d="M45 1 L54 6 L45 11 Z"></path></svg>
+</li>
+<li class="stage">
+<p class="stage-no">STAGE 04</p>
+<h3 class="stage-name">Summarize</h3>
+<p class="stage-desc">Writes up what was built, what changed, and what is left.</p>
+<p class="model">model · any</p>
+</li>
+<li class="loop" aria-label="Review sends misses back to Implement for fixes">
+<span class="loop-bracket" aria-hidden="true"></span>
+<svg class="loop-tip" aria-hidden="true" width="14" height="11" viewBox="0 0 14 11"><path d="M7 0 L14 11 L0 11 Z"></path></svg>
+<span class="loop-label">misses go back for fixes</span>
+</li>
+</ol>
+<p class="room-foot">
+<svg class="icon icon-accent room-icon" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="9" width="7" height="6" rx="3"></rect><rect x="14" y="9" width="7" height="6" rx="3"></rect><path d="M10 12 H14"></path></svg>
+<span><b>Provenance log:</b> every call, allowed or denied, hash-chained</span>
+<span><b>Controller:</b> no stage advances until isolation checks out</span>
+</p>
+</div>
+
+<div class="drop" aria-hidden="true">
+<svg class="arrow" width="12" height="44" viewBox="0 0 12 44"><path d="M6 2 V34"></path><path class="arrow-head" d="M1 33 L6 43 L11 33 Z"></path></svg>
+</div>
+
+<ol class="ev" aria-label="Evidence clean-room mode produces after the build">
+<li class="stage">
+<p class="stage-no">EVIDENCE 01</p>
+<h3 class="stage-name">Equivalence</h3>
+<p class="stage-desc">The original is used only as a black box. Conformance corpora and differential fuzzing compare outputs byte for byte.</p>
+<svg class="fwd arrow" viewBox="0 0 56 12" aria-hidden="true"><path d="M4 6 H46"></path><path class="arrow-head" d="M45 1 L54 6 L45 11 Z"></path></svg>
+</li>
+<li class="stage">
+<p class="stage-no">EVIDENCE 02</p>
+<h3 class="stage-name">Contamination score</h3>
+<p class="stage-desc">Similarity to existing code, placed on a scale from independent implementations to known derivations.</p>
+<svg class="fwd arrow" viewBox="0 0 56 12" aria-hidden="true"><path d="M4 6 H46"></path><path class="arrow-head" d="M45 1 L54 6 L45 11 Z"></path></svg>
+</li>
+<li class="stage">
+<p class="stage-no">EVIDENCE 03</p>
+<h3 class="stage-name">Attestation bundle</h3>
+<p class="stage-desc">Policy history, log, checkpoints and results in a signed manifest that a third party can verify offline.</p>
+</li>
+</ol>
+</figure>
+
+<p class="fig-lead">Put a <code class="inline-code">SPEC.md</code> in <code class="inline-code">docs/</code>, run <code class="inline-code">/kukulu:go-flight</code>, and come back to a reviewed branch with a draft pull request.</p>
+</div>
+</section>
+
+<section class="sec" aria-labelledby="why-h">
+<div class="wrap wrap-stack">
+<div class="sec-head">
+<p class="eyebrow">04 — Why it holds up</p>
+<h2 id="why-h" class="h2">Built to finish the run, and then to show its work.</h2>
+</div>
+
+<div class="block">
+<h3 class="kicker">In the plugin today</h3>
+<ul class="cards">
+<li class="card">
+<svg class="icon icon-accent" width="28" height="28" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="6" height="6" rx="1"></rect><rect x="15" y="14" width="6" height="6" rx="1"></rect><path d="M9 7 H15 a3 3 0 0 1 3 3 V14"></path></svg>
+<h4 class="card-title">Deterministic orchestration</h4>
+<p class="card-text">A dependency-free MCP server decides which stage and task run next. No model picks its own next step, so a flight survives a crash or a restart.</p>
+</li>
+<li class="card">
+<svg class="icon icon-accent" width="28" height="28" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6 H20"></path><path d="M4 12 H20"></path><path d="M4 18 H20"></path><circle class="icon-dot" cx="9" cy="6" r="2"></circle><circle class="icon-dot" cx="15" cy="12" r="2"></circle><circle class="icon-dot" cx="7" cy="18" r="2"></circle></svg>
+<h4 class="card-title">The right model for each stage</h4>
+<p class="card-text">Frontier models plan and review; a cheaper or local model implements. Route any role to Anthropic, OpenRouter or Ollama.</p>
+</li>
+<li class="card">
+<svg class="icon icon-accent" width="28" height="28" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"></circle><path d="M20 20 L15.5 15.5"></path><path d="M8.5 11 L10.5 13 L13.5 9"></path></svg>
+<h4 class="card-title">Adversarial review</h4>
+<p class="card-text">A separate reviewer checks the branch against the spec, mutation-tests the tests, and queues fixes until it approves.</p>
+</li>
+<li class="card">
+<svg class="icon icon-accent" width="28" height="28" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="10" width="16" height="10" rx="2"></rect><path d="M8 10 V7 a4 4 0 0 1 8 0 V10"></path><path d="M12 14 V16"></path></svg>
+<h4 class="card-title">Scoped tools</h4>
+<p class="card-text">Each stage agent gets only the tools its job calls for. Its tool list is the contract.</p>
+</li>
+<li class="card">
+<svg class="icon icon-accent" width="28" height="28" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 L21 19 H3 Z"></path><path d="M12 10 V14"></path><path d="M12 17 V17.01"></path></svg>
+<h4 class="card-title">No silent stops</h4>
+<p class="card-text">A flight finishes approved, or halts with a recorded reason a human can act on.</p>
+</li>
+</ul>
+</div>
+
+<div class="cleanroom" role="group" aria-labelledby="cr-h">
+<div class="cleanroom-head">
+<h3 id="cr-h" class="kicker kicker-accent">Clean-room mode · coming in 0.7.0</h3>
+<p class="cleanroom-sub">The method behind cleanflate, and the subject of a pending patent.</p>
+</div>
+<ul class="features">
+<li class="feature">
+<svg class="icon icon-accent" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 L20 6 V12 C20 16.5 16.5 19.5 12 21 C7.5 19.5 4 16.5 4 12 V6 Z"></path><path d="M9 9 L15 15"></path><path d="M15 9 L9 15"></path></svg>
+<h4 class="feature-title">Enforced isolation</h4>
+<p class="card-text">A guard checks every tool call’s target against a declarative policy before it runs. The policy and the guard are protected from the agents.</p>
+</li>
+<li class="feature">
+<svg class="icon icon-accent" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2"></rect><path d="M4 12 H20"></path><path d="M12 4 V20"></path></svg>
+<h4 class="feature-title">Gated stages</h4>
+<p class="card-text">Before each stage, the controller verifies the policy, the guard, a self-test and the log, and stops if anything fails.</p>
+</li>
+<li class="feature">
+<svg class="icon icon-accent" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="9" width="7" height="6" rx="3"></rect><rect x="15" y="9" width="7" height="6" rx="3"></rect><path d="M9 12 H15"></path></svg>
+<h4 class="feature-title">Tamper-evident provenance</h4>
+<p class="card-text">Every tool call, allowed or denied, and every human instruction goes into a hash-chained log with signed checkpoints.</p>
+</li>
+<li class="feature">
+<svg class="icon icon-accent" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 15 H21"></path><path d="M4 13 V17"></path><path d="M20 13 V17"></path><circle class="icon-dot" cx="9" cy="15" r="2.2"></circle><path d="M12 7 L12 10"></path><path d="M9 7 H15"></path></svg>
+<h4 class="feature-title">Calibrated contamination scoring</h4>
+<p class="card-text">Similarity scored on a scale where 0 is an independent pair of implementations and 1 is a known derivation.</p>
+</li>
+<li class="feature">
+<svg class="icon icon-accent" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3 H14 L19 8 V21 H6 Z"></path><path d="M14 3 V8 H19"></path><path d="M9 14 L11 16 L15 12"></path></svg>
+<h4 class="feature-title">Offline attestation</h4>
+<p class="card-text">The evidence ships as a signed bundle a reviewer can verify without access to your systems.</p>
+</li>
+</ul>
+</div>
+</div>
+</section>
+
+<section id="start" class="sec" aria-labelledby="start-h">
+<div class="wrap wrap-stack">
+<div class="sec-head">
+<p class="eyebrow">05 — Get started</p>
+<h2 id="start-h" class="h2">Your first flight.</h2>
+<p class="body-text">You need Claude Code, Node 22 or later, and git. There is nothing to <code class="code-sm">npm install</code>.</p>
+</div>
+<ol class="steps">
+
+<li class="step">
+<p class="step-no" aria-hidden="true">STEP 1</p>
+<div class="step-body">
+<h3 class="step-title">Install the plugin</h3>
+<p class="step-text">In a Claude Code session, run the two commands at the top of this page. From a shell, it’s the same two steps:</p>
+<div class="codebox">
+<pre><code id="install-shell">claude plugin marketplace add https://kukulu.tech/marketplace.json
+claude plugin install kukulu@displacetech</code></pre>
+<button type="button" class="copy small" data-copy-for="install-shell" aria-label="Copy the shell install commands" hidden><span class="copy-label">Copy</span></button>
+</div>
+<p class="copy-status" id="install-shell-status" role="status" aria-live="polite"></p>
+</div>
+</li>
+
+<li class="step">
+<p class="step-no" aria-hidden="true">STEP 2</p>
+<div class="step-body">
+<h3 class="step-title">Write a spec</h3>
+<p class="step-text">Start from the template, fill it in, and commit it on your base branch. <a href="https://github.com/DisplaceTech/kukulu/blob/main/docs/writing-specs.md">The spec guide</a> says what the planner needs from each section.</p>
+<div class="codebox">
+<pre><code id="spec-template">mkdir -p docs
+curl -fsSL https://raw.githubusercontent.com/DisplaceTech/kukulu/main/templates/SPEC.md -o docs/SPEC.md
+git add docs/SPEC.md &amp;&amp; git commit -m "spec"</code></pre>
+<button type="button" class="copy small" data-copy-for="spec-template" aria-label="Copy the spec template commands" hidden><span class="copy-label">Copy</span></button>
+</div>
+<p class="copy-status" id="spec-template-status" role="status" aria-live="polite"></p>
+</div>
+</li>
+
+<li class="step">
+<p class="step-no" aria-hidden="true">STEP 3</p>
+<div class="step-body">
+<h3 class="step-title">Start the flight</h3>
+<p class="step-text">Run it in a Claude Code session and leave it. The first run sets up the stage agents and the permission rule an unattended run needs.</p>
+<div class="codebox">
+<pre><code id="flight-cmd">/kukulu:go-flight</code></pre>
+<button type="button" class="copy small" data-copy-for="flight-cmd" aria-label="Copy the flight command" hidden><span class="copy-label">Copy</span></button>
+</div>
+<p class="copy-status" id="flight-cmd-status" role="status" aria-live="polite"></p>
+</div>
+</li>
+
+<li class="step">
+<p class="step-no" aria-hidden="true">STEP 4</p>
+<div class="step-body">
+<h3 class="step-title">Review and merge</h3>
+<p class="step-text">Read <code class="code-sm">docs/SUMMARY.md</code>, then review the draft pull request from the <code class="code-sm">build/&lt;date&gt;</code> branch. Kūkulu never merges on its own.</p>
+</div>
+</li>
+</ol>
+<p class="note-box"><b>Run a stage somewhere else.</b> Every role defaults to an Anthropic model. To point one at OpenRouter or a local Ollama model, copy the routing example to <code class="code-sm">~/.config/kukulu/config.json</code> and follow <a href="https://github.com/DisplaceTech/kukulu/blob/main/docs/routing.md">the routing guide</a>.</p>
+</div>
+</section>
+
+<section id="proof" class="sec" aria-labelledby="proof-h">
+<div class="wrap wrap-stack-tight">
+<div class="sec-head">
+<p class="eyebrow">06 — Proof</p>
+<h2 id="proof-h" class="h2"><span class="mono-title">cleanflate</span></h2>
+<p class="proof-lede">A clean-room DEFLATE decompressor in safe Rust, built by Kūkulu from RFCs 1950–1952 alone, without access to zlib’s source.</p>
+<p class="proof-sub">Built with Kūkulu 0.3.2, then named Foundry, under the clean-room controls that come to the plugin in 0.7.0.</p>
+</div>
+
+<figure class="chart-fig" aria-labelledby="cal-h">
+<figcaption class="chart-cap">
+<span id="cal-h" class="chart-q">Did anything leak from zlib?</span>
+<span class="chart-sub">Identifier overlap with C zlib (Jaccard index). Lower means more independent.</span>
+</figcaption>
+<div class="chart" role="img" aria-label="Identifier overlap with C zlib: cleanflate 0.021, an independently written decoder 0.019, a known port 0.095.">
+<span class="axis" aria-hidden="true"></span>
+<span class="tick tick-start" aria-hidden="true"></span>
+<span class="tick tick-mid" aria-hidden="true"></span>
+<span class="tick tick-end" aria-hidden="true"></span>
+<span class="mark mark-cleanflate" aria-hidden="true"></span>
+<span class="mark mark-independent" aria-hidden="true"></span>
+<span class="mark mark-port" aria-hidden="true"></span>
+<span class="chart-label label-cleanflate" aria-hidden="true">cleanflate 0.021</span>
+<span class="chart-label label-independent" aria-hidden="true">independent decoder 0.019</span>
+<span class="chart-label label-port" aria-hidden="true">known port 0.095</span>
+<span class="scale scale-min" aria-hidden="true">0</span>
+<span class="scale scale-mid" aria-hidden="true">0.05</span>
+<span class="scale scale-max" aria-hidden="true">0.10</span>
+</div>
+<p class="chart-note">cleanflate sits with an independently written decoder, at about a fifth of a known port. Comment overlap is near zero: 0.0003, against 0.032 for the port.</p>
+</figure>
+
+<div class="table-wrap">
+<table class="proof-table">
+<caption>From <a href="https://github.com/ericmann/cleanflate-bench">cleanflate-bench</a> at commit <code>7f50ce6</code>, which reproduces every number from a clean clone. Measured on one ARM and one x86 machine. <b>Limits:</b> one target library; two operator fixes bypassed pipeline review and are recorded in the log.</caption>
+<thead>
+<tr>
+<th scope="col">Claim</th>
+<th scope="col">Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<th scope="row">Clean room</th>
+<td>0 forbidden reads among 2,226 read-capable tool calls. The one agent attempt to reach prior-art source was blocked.</td>
+</tr>
+<tr>
+<th scope="row">Equivalent</th>
+<td>2,962 of 2,962 conformance streams byte-identical to C zlib. 0 divergences in 1.24M differential-fuzz executions against C zlib, zlib-rs and miniz_oxide.</td>
+</tr>
+<tr>
+<th scope="row">Memory-safe</th>
+<td>0 lines of <code>unsafe</code> code, 0 runtime dependencies.</td>
+</tr>
+<tr>
+<th scope="row">Viable</th>
+<td>0.71–0.76× C zlib throughput on the Silesia corpus, with no SIMD and no <code>unsafe</code>.</td>
+</tr>
+<tr>
+<th scope="row">Cost</th>
+<td>About 28 hours of pipeline time, $361 in model usage, 11 operator interventions.</td>
+</tr>
+</tbody>
+</table>
+</div>
+<div class="links-row">
+<a href="https://github.com/ericmann/cleanflate" class="link-arrow link-ext">cleanflate repository <span aria-hidden="true">↗</span></a>
+<a href="https://github.com/ericmann/cleanflate-bench" class="link-arrow link-ext">cleanflate-bench <span aria-hidden="true">↗</span></a>
+</div>
+</div>
+</section>
+
+<section class="sec" aria-labelledby="next-h">
+<div class="wrap wrap-stack">
+<div class="sec-head">
+<p class="eyebrow">07 — Where it’s going</p>
+<h2 id="next-h" class="h2">Next on the bench.</h2>
+</div>
+<ol class="next">
+<li>
+<p class="next-no">NEXT 01 · 0.7.0</p>
+<p class="next-text">Clean-room mode in the plugin, for modernizing legacy software into memory-safe code.</p>
+</li>
+<li>
+<p class="next-no">NEXT 02</p>
+<p class="next-text">A vendor-agnostic package.</p>
+</li>
+<li>
+<p class="next-no">NEXT 03</p>
+<p class="next-text">Continuous fuzzing and multi-pair similarity calibration.</p>
+</li>
+</ol>
+</div>
+</section>
+
+<section class="sec sec-last" aria-labelledby="by-h">
+<div class="wrap">
+<div class="byline">
+<div class="byline-id">
+<p class="eyebrow">08 — Built by</p>
+<h2 id="by-h" class="byline-name">Displace Technologies LLC</h2>
+<p class="byline-place">Oregon</p>
+</div>
+<p class="byline-bio"><b>Eric Mann</b> has spent 20 years in software. He was release manager for PHP 8.3 and 8.4, wrote O’Reilly’s <i>PHP Cookbook</i>, served as VP of Engineering at a defense AI company and VP of Information Security at a public company, and has been building agentic orchestration since 2023.</p>
+</div>
+</div>
+</section>
+
+</main>
+
+<footer class="site-footer">
+<div class="wrap footer-inner">
+<div class="footer-brand">
+<svg class="brand-mark" width="24" height="24" viewBox="0 0 32 32" aria-hidden="true"><path d="M9 7 H23"></path><path d="M9 12 V19 A7 7 0 0 0 23 19 V12"></path></svg>
+<span class="footer-brand-name">Kūkulu</span>
+</div>
+<p class="footer-meta"><span>Apache-2.0</span><span aria-hidden="true">·</span><span>Patent pending</span><span aria-hidden="true">·</span><span>© 2026 Displace Technologies LLC</span><span aria-hidden="true">·</span><a href="https://github.com/DisplaceTech/kukulu">GitHub</a></p>
+</div>
+</footer>
+</body>
+</html>

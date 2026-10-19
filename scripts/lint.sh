@@ -31,6 +31,9 @@ done
 # identifier; see CONTRIBUTING.md "Names".
 check node scripts/check-names.mjs
 
+# The site rules of SPEC section 3 run on every lint, so a bad edit to site/ fails fast.
+check node scripts/check-site.mjs
+
 # Scripts the hook system executes directly must stay executable.
 for f in scripts/*.sh scripts/implement-guard.mjs; do
   if [ ! -x "$f" ]; then

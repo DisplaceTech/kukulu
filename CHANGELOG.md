@@ -4,6 +4,14 @@ All notable changes to this plugin. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- The kukulu.tech landing page in `site/`, with the hosted `marketplace.json` that `claude plugin marketplace add https://kukulu.tech/marketplace.json` reads.
+- `scripts/check-site.mjs`, `scripts/check-site-browser.mjs` and `scripts/serve-site.mjs`, with the `check:site`, `check:site:browser` and `site:serve` npm scripts.
+- A `site` CI workflow that runs the static and browser checks.
+
 ## [0.6.1] — 2026-10-16
 
 Documentation only. No code or behavior change.

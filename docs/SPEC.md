@@ -1,712 +1,211 @@
-# Foundry 0.5.0 — Specification
+# kukulu.tech — Specification
 
-Version: 0.5.0
-Status: ready for flight
+Version: 0.1 Status: ready for a flight
 
-The Foundry planner reads this file in full and derives the build plan from
-it. This flight is Foundry building its own next release from the friction
-its last two field deployments logged. The plugin running the flight is the
-installed 0.4.0, read from the plugin cache. The code this flight edits is
-the working tree, and nothing it changes affects the server that is running
-the flight.
+The Kūkulu planner reads this file in full and derives the build plan from it. The previous spec (the 0.5.0 plugin flight) is archived unchanged at [flights/v0-5-0/SPEC.md](flights/v0-5-0/SPEC.md). Clean-room mode (0.7.0) gets its own spec after this flight is archived; nothing in this flight touches the plugin's behavior.
 
 ## 1. Overview
 
-Foundry is a Claude Code plugin. It runs a spec-driven
-plan → implement → review → fix → summarize pipeline unattended, with
-mechanics in a dependency-free MCP server (`mcp/server.mjs`) and judgment
-in skills (`skills/*/SKILL.md`). Release 0.5.0 closes every item in two
-feedback files:
-[`docs/feedback/2026-10-07-project-c.md`](feedback/2026-10-07-project-c.md)
-(F-01–F-23, ten flights on 0.3.2 and 0.4.0) and
-[`docs/feedback/2026-10-07-project-d.md`](feedback/2026-10-07-project-d.md)
-(F-01–F-06, two flights on 0.4.0). It also makes Opus the default model for
-every judgment role. Done means four things: every F-item in the appendix
-map is closed by the requirement it names, `npm run check` and
-`pre-commit run --all-files` pass, the version reads 0.5.0 everywhere, and
-a draft PR against `main` is open.
-
-**Why a minor version, not 0.4.1:** this release adds three tools
-(eighteen becomes twenty-one) and new `docs/foundry.json` keys (`flight`,
-`mutation`, `from`, `policies.archive`, `policies.finalize`,
-`policies.mergeMethod`). It also adds a new end-of-flight lifecycle: a
-signed, non-breaking flight's PR now marks itself ready and auto-merges
-once CI is green, and a finished flight can be archived so the next one can
-start in the same repository. That
-lifecycle is the multi-flight work the 0.4 plan deferred to 0.5
-(cleanflate F-12 and F-27). Both new feedback files show operators doing it
-by hand: nine `chore(foundry): archive …` commits in project-c, and a
-hand-made `docs/flights/1/` in project-d. The release also
-changes the default model for three roles, which changes behavior for
-every user who has not pinned their routing.
+Build the public landing page for Kūkulu as a static site in `site/`, deployed to Cloudflare Pages at `https://kukulu.tech`. The page also serves the plugin marketplace file that its install command points at, so `site/marketplace.json` is a shipped product surface and not decoration. In this spec, `site/` always means the deploy directory at the repo root and `docs/site/` the flight's inputs. Done means: `site/` matches the approved mockup at 360, 768 and 1440 px in both color schemes, passes every check in §7, and a human has deployed a preview build and run the checklist in [docs/site/DEPLOY.md](site/DEPLOY.md).
 
 ## 2. Goals and non-goals
 
-- Goal: a summarizer never touches the `Write` tool for `docs/SUMMARY.md`.
-  This refusal was logged eleven times across both projects and both
-  versions (S-01).
-- Goal: Foundry's own commits never hang or half-apply on a signing
-  failure, including the planner's commit (S-02).
-- Goal: a constraint or `extraVerify` command can say which task makes it
-  true, so the plan does not need guard-wrapped commands (S-03).
-- Goal: mutation testing can run a targeted subset of tests, a kill by an
-  unrelated flaky test can be told apart from a real kill, and the review
-  loop converges instead of re-sampling forever (S-04, S-05, S-11).
-- Goal: the planner validates, renumbers and commits its plan through a
-  tool, not with a hand-written regex (S-06).
-- Goal: a finished flight is archived in one tool call, and a repository
-  can run flight after flight (S-07, S-08).
-- Goal: an operator recovers from a round-cap halt with a tool call, not
-  a hand edit of `.foundry/state.json` (S-09).
-- Goal: how a flight's PR ends depends on signing. If every commit is
-  signed, the PR is marked ready and, unless the change is breaking, set
-  to auto-merge once CI is green. If any commit is unsigned, the PR stays
-  draft and the flight waits for a human to unlock signing, re-sign the
-  branch, and finalize (S-14).
-- Goal: Opus is the default for planner, reviewer and summarizer, and
-  Sonnet for the implementer (S-10).
-- Non-goal: background jobs for long verify commands (cleanflate F-13 and
-  F-28). These remain deferred: the synchronous-handler invariant still
-  holds, and neither new feedback file asks for them.
-- Non-goal: a flight-id prefix on task ids. Archiving makes ids per-flight,
-  so `TASK_ID`, `TASK_LINE` and the guard's regexes stay as they are, apart
-  from the temporary split suffix S-06 allows in the planner's drafts.
-- Non-goal: moving or trimming another flight's notes in a project's
-  `CLAUDE.md`. The owner keeps them on purpose (project-c F-20).
-- Non-goal: parsing test-runner output to name failing tests. Runner
-  formats vary too much. S-05 settles the same question by re-running.
-- Non-goal: merging, tagging or publishing *this* release. This flight
-  runs on 0.4.0, which has no S-14, so its PR stays draft. The release is
-  breaking (S-10, S-14 defaults), so a human would merge it in any case.
-- Non-goal: a synchronous merge. S-14 only ever enables GitHub
-  auto-merge, which waits for CI. It never runs `gh pr merge` without
-  `--auto`.
-- Non-goal: anything under `docs/plans/` or `docs/feedback/`, beyond the
-  "Addressed in" header lines S-13 adds.
+- Goal: one page, `site/index.html`, that reproduces [docs/site/mockup.html](site/mockup.html) visually and copies its text exactly. The mockup is the approved design and the approved copy.
+- Goal: `site/marketplace.json` that lets `/plugin marketplace add https://kukulu.tech/marketplace.json` followed by `/plugin install kukulu@displacetech` install the plugin from GitHub.
+- Goal: a strict, self-contained page: no framework, no build step, no third-party requests, no tracking, one small script whose only job is copy-to-clipboard.
+- Goal: dependency-free checks (§7) that prove the rules in §3 mechanically, on every task and in CI.
+- Goal: dark by default, light when the visitor's system asks for it (`prefers-color-scheme: light`), with no theme toggle.
+- Non-goal: any change to the plugin's behavior, `mcp/`, `skills/`, `agents/`, `hooks/` or `.claude-plugin/`. The only files outside `site/` and the new scripts that change are `package.json` (scripts only), `scripts/lint.sh`, `.gitignore` (one line), a new CI workflow, `README.md`, `CONTRIBUTING.md` and `CHANGELOG.md` (§8), plus the flight's own Kūkulu artifacts (`docs/PLAN.md`, `docs/PROGRESS.md`, `docs/kukulu.json`, `docs/HANDOFF.md`, `docs/SUMMARY.md`, the CLAUDE.md flight notes).
+- Non-goal: new copy. No metrics, testimonials, logos, customer names, feature claims or links that are not in the mockup. The only text not in the mockup is the 404 page, whose copy is fixed in §6.
+- Non-goal: clean-room mode, its provenance log, guard or attestation bundle. The page describes them as coming in 0.7.0, exactly as the mockup words it.
+- Non-goal: analytics, cookies, a theme toggle, a newsletter form, a demo-video embed, or a link to a run recording (it returns when a URL exists; see §9).
+- Non-goal: regenerating or editing the seeded binary assets (fonts, icons, `og.png`). They are final.
 
 ## 3. Engineering principles
 
-Each of these is checkable with a grep or a test. The first three become
-`constraints` in `docs/foundry.json` (fixtures in section 5).
+Each rule is checked by `scripts/check-site.mjs` unless it says otherwise.
 
-1. **No `async`/`await` in `mcp/server.mjs`.** Every tool handler is
-   synchronous, and the JSON-RPC loop depends on that. A long operation
-   uses `spawnSync` through `mcp/run-command.mjs`, never a promise.
-2. **No runtime or dev dependencies.** `package.json` has no
-   `dependencies` or `devDependencies` key, and there is no lockfile.
-3. **No plugin agent defaults to `fable`.** No `agents/*.md` frontmatter
-   line reads `model: fable`.
-4. **Mechanics live in the server, judgment in the skills**
-   (`CONTRIBUTING.md`). A new mechanical step, such as validating ids,
-   writing an artifact, archiving or retrying a commit, is a server change
-   with a test. It is never a skill sentence telling the model to do it by
-   hand.
-5. **Every server behavior change has a test** in the suite that owns that
-   tool (see the table in `CONTRIBUTING.md`). Every new refusal has a test
-   that triggers it and asserts its message.
-6. **Tools validate, then mutate.** A tool that refuses must refuse before
-   it writes any file. A tool whose final commit fails must leave the tree
-   as it found it (S-02).
-7. **Config never silently defaults a bad value.** Every new
-   `docs/foundry.json` key is validated the way `validatePolicies`,
-   `validateParallel` and `validateConstraints` already are, with an
-   unknown-key refusal.
-8. **Documentation moves with the code.** A task that adds or changes a
-   tool updates `docs/mcp-tools.md` in the same commit. The tool count is
-   stated as "Twenty-one tools" wherever the docs currently say "Eighteen".
+1. **The file set is closed.** `site/` contains exactly the files listed in §4 and nothing else: no source maps, no README, no dotfiles. `_headers` is the only file whose name starts with `_`.
+2. **Seeded assets are byte-identical.** Every file under [docs/site/assets/](site/assets/) is copied into `site/` at the path in §4, and its SHA-256 equals the source's. `site/marketplace.json` is one of these.
+3. **No inline style.** No `style=` attribute anywhere in `site/*.html` (inline SVG included) and no `<style>` element. All styling lives in `site/styles.css`. Inline SVG uses presentation attributes (`fill`, `stroke`, `stroke-width`) or classes.
+4. **One script, loaded once.** `site/index.html` has exactly one `<script` tag: `<script src="/copy.js" defer></script>`. `site/404.html` has none. No attribute whose name starts with `on` appears in any HTML file (regex `/\son[a-z]+\s*=/i`, applied to tag source only, so `content=` does not match). `site/copy.js` is at most 2,048 bytes ⚠️ ASSUMPTION (config `budget.scriptBytes`).
+5. **No third-party requests.** No `src=`, `<link href=`, CSS `url(...)` or `@import` points at another origin. Every one is a root-relative path (`/fonts/...`), except `<link rel="canonical">`, which is exactly `https://kukulu.tech/`, and the `og:image` meta, which is exactly `https://kukulu.tech/og.png`. `<a href>` to other sites is allowed and is how the page cites sources.
+6. **Copy is the mockup's.** Every `h1`–`h4` text in `site/index.html` equals the mockup's, in the same order. Every `<th>` and `<td>` text in the proof table equals the mockup's. The sequence of number tokens in `site/index.html`'s visible text equals the mockup's. Visible text is the `<body>` content with `<script>`, `<style>`, `<template>`, comments and `aria-hidden="true"` subtrees removed, each remaining tag replaced by a space, entities decoded, and whitespace collapsed. Number tokens match `/\d[\d,.]*/g` with trailing `.` and `,` stripped. Visible text must also never contain `\bKukulu\b` (the ASCII spelling of the display name).
+7. **Install commands are identical everywhere.** The two hero commands are exactly `/plugin marketplace add https://kukulu.tech/marketplace.json` and `/plugin install kukulu@displacetech`, and the shell commands in Get started are exactly `claude plugin marketplace add https://kukulu.tech/marketplace.json` and `claude plugin install kukulu@displacetech`. The `@displacetech` suffix equals the `name` in `site/marketplace.json`.
+8. **The marketplace file stays in step with the repo's.** `site/marketplace.json` parses as JSON; its `name`, `owner.name`, and its single plugin entry's `name`, `description` and `license` equal `.claude-plugin/marketplace.json`'s; the entry's `source` is `{ "source": "url", "url": "https://github.com/DisplaceTech/kukulu.git" }`; no entry has a string (relative-path) `source` or a `version`. A URL-hosted marketplace cannot resolve relative paths, so this rule is what keeps the hero command working.
+9. **Contrast holds in both schemes.** `site/styles.css` declares its color tokens as custom properties in one `:root{…}` rule (dark) and overrides some of them in the single rule `@media (prefers-color-scheme: light){:root{…}}` (light), with the names and values in the mockup's `<style>` block. The light set is the dark set overridden by that rule's declarations; tokens it doesn't redeclare (such as `--on-accent` and the `--code-*` tokens) are inherited. `@media print` repeats the light rule in its own block. `check-site.mjs` parses both sets and fails if any pair in `docs/site/checks.json`'s `contrastPairs` falls below `contrastMin` (4.5 ⚠️ ASSUMPTION). The palette as given passes every pair; the rule exists so a later edit cannot quietly break it.
+10. **Accessible structure.** `<html lang="en">`; exactly one `h1`; heading levels never skip downward (h2 → h4 is an error); every `<img>` has `alt`; every inline `<svg>` has `aria-hidden="true"`, sits inside an `aria-hidden="true"` element, or has `role="img"` with `aria-label`; every `href="#x"` has a matching `id="x"`; the skip link is the first focusable element; every `<button>` has `type="button"` and an accessible name. The rule applies to `index.html` and `404.html`; `404.html` has the same skip link and a `<main id="main">`. Visible focus (2 px accent outline) and 44 px touch targets are checked by eye (§8).
+11. **The display name.** Prose writes Kūkulu with the precomposed `U+016B`; identifiers, paths and URLs use `kukulu`. `scripts/check-names.mjs` already enforces where the macron may appear in every file, `site/` included. It checks the ASCII spelling in prose only in Markdown, so rule 6 covers it for the page.
+12. **Headers are present.** `site/_headers` contains the rules in §6 verbatim, every line is at most 2,000 characters, and there are at most 100 rules (Cloudflare's limits).
+13. **Size budget.** `index.html + styles.css + copy.js + 404.html` total at most 64 KiB ⚠️ ASSUMPTION (`budget.textBytes`); `site/fonts/*.woff2` total at most 180 KiB ⚠️ ASSUMPTION (`budget.fontBytes`).
+14. **No dependencies.** The repo's existing `no-dependencies` constraint holds: `package.json` gains `scripts` entries only, and every new script uses Node built-ins only (Node ≥ 22).
+15. **Layout holds at every width.** At 360, 768 and 1440 px (`docs/site/checks.json` `viewports`), in both color schemes, after `Emulation.setDeviceMetricsOverride({width, height: 900, deviceScaleFactor: 1, mobile: false})`, `document.documentElement.scrollWidth <= document.documentElement.clientWidth` (headless Chrome draws a classic scrollbar, so `innerWidth` is the wrong comparison); the page loads with no console error, no uncaught exception and no CSP violation; every `[data-copy-for]` button has `hidden === false` and a non-zero bounding box (the script ran); and `document.fonts.check('16px "Hanken Grotesk"', '\u016b')` is true (the latin-ext subset that carries the kahakō loaded). Checked by `scripts/check-site-browser.mjs` (§7).
 
 ## 4. Architecture
 
-| Path | Responsibility | Touched by |
-|---|---|---|
-| `mcp/server.mjs` | Every deterministic operation and the JSON-RPC transport | S-01–S-11, S-14 |
-| `mcp/run-command.mjs` | One bounded command in its own process group | unchanged |
-| `scripts/implement-guard.mjs` | Stop/SubagentStop hook | unchanged |
-| `agents/*.md` | Default model, effort, and tool list per role | S-06, S-07, S-10, S-14 |
-| `skills/*/SKILL.md` | Stage prose | S-12 |
-| `templates/` | SPEC skeleton, routing example, constraint examples | S-03, S-04, S-10 |
-| `test/*.mjs` | Harness plus eleven suites | every S-item |
-| `docs/*.md`, `README.md`, `CHANGELOG.md`, `CONTRIBUTING.md` | User and maintainer documentation | S-13 |
+```text
+site/                              the Cloudflare Pages build output directory, deployed as-is
+├── index.html                     the landing page (from docs/site/mockup.html)
+├── 404.html                       not-found page (§6); its presence also stops Pages' SPA fallback
+├── styles.css                     every style rule; tokens on :root and the light media query
+├── copy.js                        copy-to-clipboard, nothing else
+├── _headers                       Cloudflare Pages response headers (§6)
+├── robots.txt                     "User-agent: *" / "Allow: /"
+├── marketplace.json               seeded from docs/site/assets/
+├── favicon.svg                    seeded
+├── favicon.ico                    seeded (16, 32, 48)
+├── apple-touch-icon.png           seeded (180 × 180)
+├── og.png                         seeded (1200 × 630 social card)
+└── fonts/                         seeded: six .woff2 subsets and two OFL licence texts
+scripts/
+├── check-site.mjs                 static checks for §3 rules 1–14; --self-test mode
+├── check-site-browser.mjs         §3 rule 15 through Chrome's DevTools protocol
+└── serve-site.mjs                 local server for site/ that applies site/_headers
+docs/site/                         inputs for this flight; never deployed
+├── mockup.html                    approved design and copy (inline styles on purpose)
+├── social-card.html               the source og.png was rendered from
+├── screens/                       the mockup rendered at 1440 (dark, light), 768 (light), 360 (dark)
+├── assets/                        the seeded files, copied byte for byte into site/
+├── checks.json                    budgets, viewports, contrast pairs
+└── DEPLOY.md                      Cloudflare Pages setup and the launch checklist
+```
 
-`mcp/server.mjs` is one file, so every server requirement touches the same
-path, and the plan cannot carve parallel streams out of the server work. Skill
-and documentation tasks depend on the server tasks whose tool shapes they
-describe. The planner may run independent skill and doc tasks in a wave if
-it can prove disjoint paths, but a serial plan is the expected and
-acceptable shape.
+Boundaries the reviewer enforces:
 
-**The agent tool lists** (`agents/*.md` `tools:`) are the contract for what
-each role may call. They change as follows:
-
-- `foundry_plan_commit` goes to the planner (S-06).
-- `foundry_flight_archive` goes to the summarizer (S-07).
-- `foundry_pr_finalize` goes to the summarizer (S-14).
-
-`test/plugin.mjs` already asserts that these lists name real tools, and
-`test/routing.mjs` asserts that generated agents copy them, so both must
-keep passing.
+- `site/` is self-contained. Nothing in it references `docs/`, `scripts/` or anything outside `site/`.
+- `scripts/check-site.mjs` and `scripts/serve-site.mjs` never write into `site/`. `check-site-browser.mjs` writes screenshots only to `.site-shots/` (gitignored) and only when `--shots` is passed.
+- The production page is not the mockup with its styles moved. Class names are semantic (`.stage`, `.install`, `.step`), and repeated inline declarations in the mockup become shared rules. The visual result is what has to match, not the markup.
+- Components separate cleanly for parallel work: `site/` (page, styles, script, static files) and `scripts/` (the three checkers) touch disjoint files. `package.json`, `scripts/lint.sh` and the CI workflow are the shared wiring and stay serial.
 
 ## 5. Data and configuration
 
-### New and changed `docs/foundry.json` keys
+`docs/site/checks.json` holds every tunable the checkers read. The checkers fail with a clear message on an unknown key or a wrong type, as the plugin's own config validators do.
 
-| Key | Type | Default | Validated by | Requirement |
-|---|---|---|---|---|
-| `flight` | string, `^[a-z0-9][a-z0-9-]{0,39}$` | absent | `cfg()` | S-07 |
-| `constraints[].from` | task id string | absent (always active) | `validateConstraints` | S-03 |
-| `extraVerify[prefix][]` object form `.from` | task id string | absent | `normalizeCommand` | S-03 |
-| `mutation.targeted` | object: name → `{ cmd, timeoutMs? }`, `cmd` contains `{filter}` exactly once | `{}` | new `validateMutation` | S-04 |
-| `policies.archive` | boolean | `false` ⚠️ ASSUMPTION | `validatePolicies` | S-07 |
-| `policies.finalize` | `"auto"` \| `"ready"` \| `"draft"` | `"auto"` | `validatePolicies` | S-14 |
-| `policies.mergeMethod` | `"merge"` \| `"squash"` \| `"rebase"` | `"merge"` (this repository's convention) | `validatePolicies` | S-14 |
-
-`from` is also accepted on `verify` entries for symmetry. It is rarely
-useful there, since a verify command that cannot run yet should not be in
-`verify`.
-
-### Routing defaults (S-10)
-
-| Role | 0.4.0 | 0.5.0 |
+| Key | Default | Notes |
 |---|---|---|
-| planner | fable · high | **opus** · high |
-| implementer | sonnet · medium | sonnet · medium |
-| reviewer | fable · high | **opus** · high |
-| summarizer | fable · medium | **opus** · medium |
+| `budget.textBytes` | 65536 | ⚠️ ASSUMPTION. index + styles + script + 404 |
+| `budget.fontBytes` | 184320 | ⚠️ ASSUMPTION. The seeded fonts total 165,872 bytes (162 KiB) |
+| `budget.scriptBytes` | 2048 | ⚠️ ASSUMPTION |
+| `viewports` | `[360, 768, 1440]` | Widths for the browser check |
+| `contrastMin` | 4.5 | ⚠️ ASSUMPTION. WCAG AA for body text |
+| `contrastPairs` | see file | Token pairs, foreground first |
+| `copyFeedbackMs` | 2400 | ⚠️ ASSUMPTION. How long a button reads "Copied" |
+| `servePort` | 8788 | ⚠️ ASSUMPTION. `SITE_PORT` overrides it |
 
-`fable` stays a legal alias everywhere it is accepted today. Only the
-defaults change.
+`copy.js` cannot read `checks.json` at runtime (it is not deployed), so the task that writes `copy.js` copies `copyFeedbackMs` into the line `const COPY_FEEDBACK_MS = 2400;` at the top of the file, and `check-site.mjs` asserts that number equals the config value.
 
-### Tunables introduced by this release
-
-- Review-round mutation scope after round 1 (S-11): files changed since the
-  previous review commit. Not a config key. This is a rule in the review
-  skill, backed by `lastReviewCommit` in `foundry_status`.
-- Module sweep size on a survivor (S-11): at least three ⚠️ ASSUMPTION
-  further mutations in the same file. This is skill prose, not a config
-  key, because the reviewer applies judgment to what "the same mechanic"
-  is.
-- Planner `CLAUDE.md` budget in an existing file (S-12): at most 60 ⚠️
-  ASSUMPTION new lines in the flight's own section. Skill prose.
-
-### Constraints for this flight's own `docs/foundry.json`
-
-```json
-[
-  {
-    "id": "server-synchronous",
-    "description": "No async/await in mcp/server.mjs: every tool handler is synchronous.",
-    "paths": ["mcp/server.mjs"],
-    "pattern": "\\b(async|await)\\b",
-    "shouldMatch": ["async function f() {}", "  const r = await run();", "const g = async () => 1;"],
-    "shouldNotMatch": ["function f() {}", "// handlers stay synchronous", "const asynchronous = false;"]
-  },
-  {
-    "id": "no-dependencies",
-    "description": "package.json declares no dependencies or devDependencies.",
-    "paths": ["package.json"],
-    "pattern": "\"(dependencies|devDependencies)\"\\s*:",
-    "shouldMatch": ["  \"dependencies\": {", "\"devDependencies\":{}"],
-    "shouldNotMatch": ["  \"engines\": {", "  \"description\": \"no dependencies\","]
-  },
-  {
-    "id": "no-fable-default",
-    "description": "No plugin agent defaults to fable (S-10).",
-    "paths": ["agents/"],
-    "pattern": "^model:\\s*fable\\b",
-    "shouldMatch": ["model: fable", "model:fable"],
-    "shouldNotMatch": ["model: opus", "  model: fable is no longer the default"]
-  }
-]
-```
-
-The running 0.4.0 server does not know `from` (S-03) and refuses unknown
-constraint keys, so this flight's own config cannot use it. Instead, the
-S-10 task is the first task of the plan, which means `no-fable-default`
-holds from that task's own verify onward.
+Environment variables: `SITE_PORT` (serve and browser check), `CHROME_PATH` (browser check; see §7).
 
 ## 6. Interfaces
 
-Each requirement states the observable contract. Tests assert these shapes.
+### The page
 
-### S-01 — `foundry_summary_commit` writes the summary itself
+- **Sections, in order**, with the ids the mockup uses: header with nav and hero (`#top`), problem, How it works (`#how`), Why it holds up, Get started (`#start`), Proof (`#proof`), Where it's going, Built by, footer. `<main id="main">` wraps everything between the header and the footer.
+- **Head.** The mockup's `<head>` is the reference: title, description, canonical, `color-scheme`, both `theme-color` metas, icons, Open Graph and Twitter tags. In production, icon and font paths are root-relative (`/favicon.svg`, `/fonts/...`) and `og:image` is `https://kukulu.tech/og.png`. Add `<link rel="preload" as="font" type="font/woff2" crossorigin href="/fonts/hanken-grotesk-latin-wght-normal.woff2">` and the same for `hanken-grotesk-latin-ext-wght-normal.woff2`.
+- **Fonts.** Six `@font-face` rules in `styles.css`, copied from the mockup's (family names, `font-weight` ranges, `unicode-range` values and `font-display: swap`), pointing at `/fonts/`. No Google Fonts request: self-hosting the same pairing satisfies both "one Google Fonts pairing" and "no tracking".
+- **Theme.** Dark tokens on `:root`. Light tokens under `@media (prefers-color-scheme: light)`. `@media print` uses the light tokens. The mockup's `data-theme` attribute is a preview aid only and does not ship.
+- **Line numbers** in the hero code block are drawn with a CSS counter (as in the mockup's `pre.lines`), so they are not in the text a visitor selects or the script copies.
+- **Responsive behavior** follows the mockup's two breakpoints exactly: at 860 px and below the pipeline and evidence rows stack, the return arrow becomes the inline "Misses go back to Implement for fixes" note, and the input-to-room connector switches to the single centered arrow. At 640 px and below the gutter is 16 px, section spacing is 80 px, Get started steps stack their label above the content, and copy buttons sit under their code. Code blocks never wrap; they scroll inside their own box.
+- **Motion.** Smooth scrolling for in-page anchors, turned off under `prefers-reduced-motion: reduce`. Nothing else animates.
 
-- New optional argument `content` (string). When it is given, the tool
-  validates it (non-empty, under 1 MiB) and that the verdict is
-  `APPROVED`, then writes `docs/SUMMARY.md` itself and commits it as
-  today. When it is absent, the tool behaves as in 0.4.0 and reads the
-  file from disk.
-- The summarize skill passes `content` and never calls `Write` or a
-  heredoc for `SUMMARY.md`. The heredoc paragraph is removed from that
-  skill. It stays in plan-build and implement, which never logged a
-  refusal.
-- Why an MCP argument rather than a better fallback: the refusal ("Subagents
-  should return findings as text") comes from the harness, and there is no
-  documented opt-out (no frontmatter field or permission mode). It hit every
-  summarize run on both 0.3.2 and 0.4.0. A tool argument is not a `Write`
-  call, so it removes the round-trip entirely.
+### Copy-to-clipboard (`copy.js`)
 
-### S-02 — signing failures never hang or half-apply a Foundry commit
+- Each copyable block is a `<code id="...">` with a `<button type="button" class="copy" data-copy-for="<that id>" hidden>` whose word sits in `<span class="copy-label">Copy</span>`, and a status element `<p class="copy-status" id="<that id>-status" role="status" aria-live="polite">` that starts empty. There are four, with the ids the mockup uses: `install-session` (hero), `install-shell`, `spec-template` and `flight-cmd` (Get started steps 1–3).
+- `styles.css` contains `[hidden]{display:none !important}`; without it, `.copy{display:inline-flex}` would show the buttons even when the script never ran.
+- On load, if `navigator.clipboard?.writeText` exists, the script removes `hidden` from every `[data-copy-for]` button. Without the API, or without JavaScript, the buttons stay hidden and the text is still selectable.
+- On click: copy the target's `textContent` exactly (no trimming beyond a trailing newline), set the button's `.copy-label` text to "Copied" (the icon and `aria-label` stay unchanged) and its block's status to "Copied to the clipboard." On failure the status reads "Copy failed. Select the text and copy it manually." After `COPY_FEEDBACK_MS`, restore the label to "Copy" and clear the status.
+- No globals, no inline handlers, no other behavior. An IIFE or a module-free script under `defer`.
 
-- One commit helper, which replaces the bare commit inside
-  `gitCommitIfChanged`, runs every commit the server makes with
-  `GIT_TERMINAL_PROMPT=0` and a bounded timeout (the probe's 30 s). It
-  behaves like this:
-  - On a signing failure under `policies.signing: "auto"`, it retries the
-    same commit once unsigned. It records `state.signing = "off (commit
-    signing failed: <first line>)"`, sets local `commit.gpgsign=false`
-    (as the probe already does), and appends one `signing` feedback entry.
-  - Under `"required"`, it throws, and the calling tool rolls back
-    (below).
-- `foundry_review_submit` becomes all-or-nothing. It snapshots every path
-  it will write (`REVIEW.md` staging, `PLAN.md`, `PROGRESS.md`,
-  `state.json`, `feedback.jsonl`) before writing any of them. If its commit
-  throws, it restores every snapshot and unstages, so a second call does not
-  append the fix tasks twice. The rollback has a test.
-- Any other tool that writes and then commits (`task_done`,
-  `task_block`, `task_reopen`, `run_start`, `run_finish`,
-  `flight_options`, `run_halt`, `summary_commit`, the new tools) gets the
-  same snapshot and restore. Implement this once, as a helper, and do not
-  copy it into each tool.
-- An unsigned fallback also flips signing off for the rest of the run,
-  so the implementer's own commits inherit local `commit.gpgsign=false`
-  exactly as they do after a failed run-start probe. A pinentry that failed
-  once will fail again, and an unattended agent cannot answer it.
-  Whenever Foundry sets that local override because signing *failed*
-  (this fallback, or the probe under `auto`), and not because the policy
-  is `off`, it records `state.signingOverride: true` so that S-14 can
-  undo it.
-- The planner's own commit goes through `foundry_plan_commit` (S-06), so
-  it gets the same behavior. The planner never runs `git commit` itself.
+### 404 page
 
-### S-03 — `from`: a rule that becomes active at a task
+`site/404.html` uses `styles.css`, the skip link, the header wordmark linking to `/`, a `<main id="main">`, and this copy exactly: title `Page not found — Kūkulu`, `h1` "Page not found.", paragraph "There is nothing at this address.", and a link "Go to the home page" to `/`. No script.
 
-- `constraints[].from` and the object form of an
-  `extraVerify`/`verify` entry accept `from: "<task id>"`. The id must
-  match `TASK_ID` and must exist in `PLAN.md` when `PLAN.md` exists. A
-  dangling id is refused with a message naming it.
-- The rule is **active** when the `from` task is `[~]` (in progress) or
-  `[x]` (done) in `PROGRESS.md`, or when no open task remains. It is
-  inactive when the task is `[ ]`, `[!]` or `[-]`. The in-progress case is
-  what makes the task that introduces the rule satisfy it.
-- `foundry_verify`, `foundry_run_finish`'s scan and `foundry_mutate` skip
-  inactive rules, but still run every constraint's fixture self-test.
-  Results report inactive rules as `{ id, ok: true, inactive: "until
-  <id>" }` for constraints and `{ cmd, skipped: "inactive until <id>" }`
-  for commands. They do not count as failures.
-- Stream-scoped calls read task state from the stream's own view, as the
-  other stream-scoped tools already do.
-- The plan-build skill and `docs/writing-specs.md` replace the
-  `test ! -f X || bash X` guard idiom with `from`.
+### `site/_headers`
 
-### S-04 — targeted mutation commands
+Exactly these rules, in this order:
 
-- `docs/foundry.json` `mutation.targeted` maps a name to
-  `{ cmd, timeoutMs? }`. For example:
-  `{ "php": { "cmd": "php artisan test --filter={filter}" } }`.
-  `validateMutation` checks that `{filter}` appears in `cmd` exactly once,
-  and refuses unknown keys under `mutation`.
-- `foundry_mutate` gains the arguments `targeted` (a name) and `filter`
-  (a string matching `^[A-Za-z0-9_.:\\/-]{1,200}$`). Both are given or
-  neither is, and they are mutually exclusive with `commands`. The server
-  substitutes `filter` as one single-quoted shell word. Passing a filter
-  that fails the regex, or an unknown name, is refused, and the message
-  lists the legal names.
-- The targeted command runs instead of the file's verify commands. The
-  constraint self-test and scan semantics are unchanged.
-- The planner fills `mutation.targeted` when SPEC section 7 names a
-  filterable test command. The templates' `SPEC.md` section 7 and
-  `docs/writing-specs.md` say how to name one.
+```text
+/*
+  Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; connect-src 'none'; manifest-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; upgrade-insecure-requests
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: no-referrer
+  Permissions-Policy: camera=(), microphone=(), geolocation=()
+  Cross-Origin-Opener-Policy: same-origin
+  Strict-Transport-Security: max-age=31536000
 
-### S-05 — a kill that is not a kill
+/marketplace.json
+  Content-Type: application/json; charset=utf-8
+  Access-Control-Allow-Origin: *
 
-- `foundry_mutate` always returns `failedCommands`: the `cmd` of every
-  command that failed.
-- With the new argument `confirmKill: true`, a kill triggers this check:
-  after the restore, each failed command is re-run once on the unmutated
-  tree, and the results come back as `confirm`.
-  - If every one passes, the kill stands.
-  - If any one fails again, the result is
-    `killed: false, inconclusive: true`, with the verdict
-    `inconclusive: <cmd> also fails without the mutation`.
-- The review skill says to pass `confirmKill` whenever a kill's failure
-  tail does not name the test the reviewer expected to catch it. With a
-  targeted command the re-run is cheap, so the reviewer may pass it always.
+https://:project.pages.dev/*
+  X-Robots-Tag: noindex
 
-### S-06 — `foundry_plan_commit`
+https://:version.:project.pages.dev/*
+  X-Robots-Tag: noindex
+```
 
-- New tool. Arguments: `{ renumber?: boolean }`. It validates
-  `docs/PLAN.md`, `docs/PROGRESS.md` and `docs/foundry.json` together, and
-  refuses with **every** problem listed, not only the first. The checks:
-  - Task headings must be exactly `### <ID>: <title>`.
-  - Ids must be unique and sequential within each phase
-    (`P<phase>-<nn>`, `nn` from `01`).
-  - Every `Depends on` id must exist and come earlier in the plan.
-  - There must be no dependency cycle.
-  - `PLAN.md` and `PROGRESS.md` must hold the same id set, in the same
-    order.
-  - Stream tags must be well formed and the waves valid, by reusing
-    `computeWaves`.
-  - `foundry.json` must pass `cfg()`, and every `from` must name an id
-    that exists (S-03).
-  - `CLAUDE.md` must exist.
-- With `renumber: true`, ids that break the sequence, including a
-  temporary split suffix such as `P1-02a` (accepted only in this mode),
-  are rewritten sequentially in document order. The rewrite covers every
-  whole-word reference in `PLAN.md`, `PROGRESS.md`, and `foundry.json`
-  `from` values. The tool returns the `{ old: new }` map. Renumbering is
-  refused once a run has started (`PROGRESS.md` has a `Started` stamp, or
-  any task is not `[ ]`).
-- On success, it commits `PLAN.md`, `PROGRESS.md`, `foundry.json` and
-  `CLAUDE.md` as `plan: derive build plan from SPEC` through the S-02
-  helper. It returns `{ commit, tasks, phases, waves, renumbered }`.
-- It is added to the planner's tool list. The plan-build skill replaces
-  its manual commit step with this tool.
+The last two rules keep the `pages.dev` copies of the site, including branch previews, out of search results; only `kukulu.tech` is indexed. Do not add `Cache-Control`: Cloudflare Pages already sends `max-age=0, must-revalidate` with ETags, and its documentation advises against custom caching.
 
-### S-07 — `foundry_flight_archive`
+### `scripts/serve-site.mjs`
 
-- New tool. Arguments: `{ slug?: string }`. The slug defaults to
-  `foundry.json`'s `flight` key. If neither is set, the tool refuses and
-  asks for one. The slug must match `^[a-z0-9][a-z0-9-]{0,39}$`.
-- It refuses in each of these cases:
-  - the flight is not summarized (`state.summarized` is not true);
-  - the lock is present;
-  - the tree is dirty, excluding `preexistingUntracked`;
-  - `docs/flights/<slug>/` already exists.
-- Otherwise it does the following:
-  1. `git mv` these files into `docs/flights/<slug>/`, each where it
-     exists: `docs/PLAN.md`, `PROGRESS.md`, `HANDOFF.md`, `REVIEW.md`,
-     `SUMMARY.md`, `foundry.json`, and `.foundry/state.json` and
-     `.foundry/feedback.jsonl`. Untracked files are moved with plain
-     `mv`.
-  2. **Copy** `docs/SPEC.md` there. The live spec stays, so the operator
-     can edit it for the next flight.
-  3. Reset state to `DEFAULT_STATE`, and commit everything as
-     `chore: archive flight <slug>` through the S-02 helper.
-  4. Push per policy.
-- It returns `{ slug, dir, moved, copied, commit, push }`. After an
-  archive, `foundry_next` returns `plan`, because SPEC is present and PLAN
-  is absent.
-- `policies.archive: true` makes the summarize skill call the tool
-  right after `foundry_summary_commit`. The archive commit lands on the
-  build branch, so the PR carries it. It is added to the summarizer's tool
-  list.
-- The pull-feedback skill reads `.foundry/feedback.jsonl` **and** every
-  `docs/flights/*/feedback.jsonl`. The existing dedupe by `at` makes this
-  safe (project-d had four entries only in an archived
-  log).
+`node scripts/serve-site.mjs [--port N]` serves `site/` on `127.0.0.1`, applies the path rules from `site/_headers` (the absolute-URL rules do not apply locally) except that it drops the CSP's `upgrade-insecure-requests` directive and the `Strict-Transport-Security` header, which would break plain-HTTP localhost, sends `Content-Type` by extension (`text/html`, `text/css`, `text/javascript`, `application/json`, `image/svg+xml`, `image/png`, `image/x-icon`, `font/woff2`, `text/plain`, with `; charset=utf-8` on the text types), serves `404.html` with status 404 for anything missing, refuses paths that escape `site/`, and prints the URL. It exports a `start({ port }) → { url, close }` function that the browser check imports, so both use the same server.
 
-### S-08 — `foundry_status` reports where planner artifacts came from
+### `scripts/check-site-browser.mjs`
 
-- New field `artifacts`, an object mapping each of `SPEC.md`, `PLAN.md`,
-  `PROGRESS.md`, `HANDOFF.md`, `REVIEW.md`, `SUMMARY.md` and
-  `foundry.json` to `"tracked"`, `"untracked"`, `"modified"` or
-  `"absent"`.
-- New field `strayArtifacts`, the list of those files that are untracked
-  while `PLAN.md` is absent. These are the leftovers of an interrupted
-  plan run.
-- The plan-build skill says to regenerate every stray artifact from SPEC,
-  never trust it, and name it in the plan report.
-- New field `lastReviewCommit`: the sha of the most recent `review:` commit
-  on the branch, or `null`. S-11 uses it.
-
-### S-09 — recovering from a round-cap halt
-
-- `foundry_flight_options` gains `resume: true`. It clears `state.halted`
-  only when the halt is a round-cap halt (`maxRounds` or `maxRoundsHard`)
-  and the bounds passed in the same call lift the cap that fired. In every
-  other case it refuses with the reason, so a stream-merge or operator halt
-  is never cleared this way.
-- The round-cap halt message names this call (for example,
-  ``call foundry_flight_options({ maxRounds: 4, resume: true })``) instead
-  of "edit .foundry/state.json". It uses a correct ordinal ("3rd", not
-  "3th").
-- The go-flight skill maps an operator's "continue, allow N rounds" to that
-  call.
-
-### S-10 — routing defaults
-
-- `agents/planner.md`, `agents/reviewer.md` and `agents/summarizer.md`
-  change to `model: opus`, with efforts unchanged.
-- `templates/foundry.config.example.json` changes to match, and so do
-  the README, `docs/architecture.md` (the role table and diagram) and
-  `docs/routing.md`.
-- `test/routing.mjs` assertions about defaults change to match.
-- `docs/architecture.md` explains why: Opus has outperformed Fable on
-  the plan, review and summary roles in the operator's own flights, and the
-  role table's "why" column still holds.
-
-### S-11 — the review loop converges
-
-The review-build skill prose changes in four places, and `lastReviewCommit`
-(S-08) supplies the facts:
-
-- **Round 1** (`reviewRound` 1): sample as today. When a mutant survives,
-  sweep the same file with at least three further mutations of
-  neighbouring mechanics. Then queue **one** R-task per file, listing
-  every survivor found there, instead of one task per survivor.
-- **Round 2 and later**: mutate only files changed in
-  `git diff <lastReviewCommit>..HEAD`. A survivor outside that diff goes
-  under `## Notes` in `REVIEW.md` as advisory, not an R-task, and the
-  summarizer carries it into SUMMARY's notes.
-- Prefer a `mutation.targeted` command whenever one is configured.
-- When a mutation-only round queues tasks, cite this rule. The narrow
-  fix loop from 0.4 is kept.
-
-### S-14 — signing decides how a flight's PR ends
-
-This is the operator's policy (2026-10-07). If every commit is signed, the
-PR is marked ready and, unless the change is breaking, auto-merges once CI
-is green. If signing failed for any reason, the PR stays draft, and nothing
-past the flight happens until a human has unlocked signing and re-signed
-the branch. Only then is the PR marked ready and, where it makes sense,
-merged.
-
-- During the flight nothing changes: `foundry_run_finish` opens the PR
-  as a draft, as it does today.
-- New tool `foundry_pr_finalize({ breaking?, resign? })`. It is the
-  flight's last call, made by the summarizer after
-  `foundry_summary_commit` (and after `foundry_flight_archive` when
-  `policies.archive` is true). It refuses before the summary is committed.
-  `breaking` is required on the first call and recorded in state, so later
-  calls default to the recorded value.
-- **Signed check:** `git log --format='%H %G?' <merge-base>..HEAD`
-  against `baseBranch`. A commit counts as signed when `%G?` is anything
-  other than `N` (no signature) or `B` (bad signature). `E` counts as
-  signed, because a signature is present and only the local key is
-  missing. The check is the commits themselves, not `state.signing`.
-- **All signed** (the PR policy is `draft` and a PR exists), handled by
-  `policies.finalize`:
-  - `"auto"`: run `gh pr ready`. Then, if `breaking` is false, run
-    `gh pr merge --auto --<mergeMethod>`. If GitHub refuses auto-merge (the
-    repository setting is off, say), report
-    `merge: "unavailable: <gh's first line>"` and leave the PR ready.
-  - `"ready"`: run `gh pr ready` and never merge.
-  - `"draft"`: change nothing. This is the 0.4.0 behavior.
-  - When `breaking` is true, the result is `merge: "skipped: breaking"`.
-- **Any unsigned:** the PR stays draft, and the tool records
-  `state.awaitingSigning: { unsigned: <count>, first: <sha>, since: <iso> }`,
-  appends one `signing` feedback entry, commits state through the S-02
-  helper, and returns
-  `{ awaitingSigning, next: "<the human's steps, below>" }`. While
-  `awaitingSigning` is set, `foundry_next` returns `done` with the reason
-  `awaiting signing: …`, so a re-run of go-flight does nothing past the
-  flight.
-- **`resign: true`** (human-initiated only; every skill forbids an agent
-  from passing it on its own):
-  1. Run `probeSigning("required")`, and refuse if it fails.
-  2. Refuse on a dirty tree or on `baseBranch`.
-  3. Run `git rebase -f --rebase-merges --gpg-sign <merge-base>`. The
-     `--rebase-merges` flag keeps the `--no-ff` stream merges. On a
-     failure, run `git rebase --abort` and refuse with git's message.
-  4. Clear the local `commit.gpgsign` override if `state.signingOverride`
-     is set.
-  5. Re-run the signed check, and refuse if anything is still unsigned.
-  6. Run `git push --force-with-lease`, subject to the push policy.
-  7. Clear `awaitingSigning`, set `state.signing = "on"`, and continue
-     into the all-signed path above.
-- The tool returns
-  `{ signed, unsigned, ready, merge, breaking, awaitingSigning, resigned, push, pr }`.
-- **The breaking call is the summarizer's judgment.** `breaking` is true
-  when SPEC or `CHANGELOG.md` lists breaking changes for this work, or when
-  the flight changed a public interface, a config default, or behavior an
-  existing user relies on. When unsure, it is true. SUMMARY states the call
-  and the reason in one line.
-- **The human's steps, returned verbatim in `next` and in SUMMARY:**
-  unlock the signing agent, then tell the controller to finalize with
-  re-signing. That is `foundry_pr_finalize({ resign: true })`, or a manual
-  `git rebase -f --rebase-merges --gpg-sign <merge-base>`, a
-  force-push, then `foundry_pr_finalize({})`.
-- go-flight maps "signing is unlocked, finish it" to
-  `foundry_pr_finalize({ resign: true })` and to nothing else.
-
-### S-12 — skill prose fixes
-
-- **plan-build:**
-  - The report quotes `docs/foundry.json` from disk, except for the
-    `constraints` bodies, which it lists by id with a fixture count
-    (project-c F-01).
-  - The 150-line `CLAUDE.md` cap applies only when the planner creates
-    the file. In an existing `CLAUDE.md`, the planner adds or replaces
-    exactly one `## Flight <slug> notes` section of at most 60 lines.
-    It merges only flight-agnostic facts into shared sections
-    (Constraints, Commands, Task protocols), and leaves other flights'
-    sections untouched (project-c F-20).
-  - It calls `foundry_plan_commit` instead of committing, and uses
-    `renumber` when it splits a task (S-06).
-  - It uses `from` (S-03).
-  - It handles stray artifacts (S-08).
-  - It sets `flight` from the SPEC title or the operator's argument.
-- **implement:** a lesson about the *project*, such as a framework
-  footgun, goes in the task's log entry and under a `## Codebase notes`
-  heading in `HANDOFF.md`, never in `foundry_feedback_log`. That log is
-  for Foundry's own friction (project-c F-08, F-09). The summarizer
-  lifts `Codebase notes` into SUMMARY as suggested `CLAUDE.md`
-  additions.
-- **review-build:** S-04, S-05, S-11.
-- The summarizer's agent `tools:` gains `foundry_pr_finalize` (S-14).
-- **summarize:** S-01's `content`, S-07's `policies.archive`, the
-  `Codebase notes` section, and S-14: the breaking call, then
-  `foundry_pr_finalize` as the last call. The final message reports
-  `READY`, `AUTO-MERGE ON`, or `AWAITING SIGNING` with the human's steps.
-- **go-flight:** S-09's resume, S-14's "signing is unlocked" mapping, and a
-  `flight=<slug>` argument mapped into the planner prompt.
-- **pull-feedback:** S-07's archived logs.
-
-### S-13 — release documentation
-
-- `docs/mcp-tools.md` covers all three new tools and every new argument
-  and return field, and says "Twenty-one tools".
-- `docs/operations.md` gains a "Running flight after flight" section
-  (archive, `CLAUDE.md` per-flight sections, `resume`) and a signing
-  section reflecting S-02.
-- `docs/writing-specs.md` covers `from`, `mutation.targeted` and
-  provenance logging, and closes the deferred cleanflate F-01 with the
-  commit-msg hook pattern that flight used.
-- `CONTRIBUTING.md`'s suite table is updated if a suite's coverage
-  changes.
-- `README.md` covers the defaults and the tool count.
-- `CHANGELOG.md` gets `## [0.5.0] — <date>`, with Added, Changed, Fixed
-  and **Breaking changes** sections. The breaking changes are the routing
-  defaults, the summarize skill no longer writing the file itself, and
-  `policies.finalize: "auto"`, under which a signed, non-breaking flight's
-  PR now auto-merges once CI is green. Each
-  entry cites its feedback item as `project-c F-nn` or
-  `project-d F-nn`.
-- The version reads `0.5.0` in `package.json`,
-  `.claude-plugin/plugin.json` and `mcp/server.mjs` `VERSION`.
-- Both feedback files get an "Addressed in" header line pointing at this
-  spec, in the shape `docs/feedback/README.md` documents.
+- Finds Chrome or Chromium from `CHROME_PATH`; otherwise from `google-chrome`, `chromium`, `chromium-browser` on `PATH`; otherwise from `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`. If it finds none, it exits non-zero and says to set `CHROME_PATH`. It never skips silently.
+- Launches it headless with `--remote-debugging-port=0` and a temporary profile, reads the browser's DevTools WebSocket URL from stderr, and drives it with Node's built-in `WebSocket` (Node ≥ 22). It does not use Playwright or Puppeteer. That URL is the browser target, so it creates a page with `Target.createTarget`, attaches with `Target.attachToTarget({ flatten: true })`, and sends every page command with the returned `sessionId`. It enables `Runtime`, `Log` and `Page`.
+- For each viewport and each of `dark`/`light` (via `Emulation.setEmulatedMedia` with `prefers-color-scheme`), loads the page from `serve-site.mjs`, waits for the `load` event and then `document.fonts.ready`, and asserts rule 15. Any `Log.entryAdded` at level `error` (CSP violations arrive this way), any `Runtime.consoleAPICalled` of type `error`, and any `Runtime.exceptionThrown` fail the check, naming the viewport and scheme.
+- With `--shots`, writes full-page PNGs to `.site-shots/<width>-<scheme>.png` for the human comparison in §8.
 
 ## 7. Commands
 
-Run from the repository root. Each exits non-zero on failure, and all three
-run today on a clean checkout of `main`.
+- lint: `npm run lint` — the existing syntax, manifest and name checks. From P1 task 4, `scripts/lint.sh` also runs `node scripts/check-site.mjs`.
+- site checks: `npm run check:site` — runs `node scripts/check-site.mjs --self-test && node scripts/check-site.mjs`. True from P1 task 4 (`from:` that task); earlier tasks run the rules they have written directly. The self-test copies `site/` and `docs/site/checks.json` into a temp directory, injects one violation per rule in §3 (1–14), and fails unless each is caught with a message naming its rule.
+- browser checks: `npm run check:site:browser` — `node scripts/check-site-browser.mjs`. Needs Chrome or Chromium. Run it as `extraVerify` on `site/`, `scripts/check-site-browser.mjs` and `scripts/serve-site.mjs`, true from P2 task 1 (`from:`). It binds a port, so mark it `exclusive`. It never skips silently, so every machine that runs this flight needs Chrome or Chromium installed.
+- plugin tests: `npm test` — the existing eleven suites. Run it as `extraVerify` whenever a task touches `README.md`, `CONTRIBUTING.md`, `CHANGELOG.md`, `docs/`, `package.json` or `scripts/lint.sh`, because `test/plugin.mjs` checks documentation links and the README. It must stay green; this flight adds no suite.
+- local preview: `npm run site:serve` — `node scripts/serve-site.mjs`. For humans; not a verify command.
 
-- lint: `npm run lint` (under 2 s)
-- hygiene: `pre-commit run --all-files` (about 4 s with the hook
-  environments already installed; it also runs markdownlint, shellcheck,
-  yamllint and gitleaks)
-- test: `npm test` (about 90 s; give it `timeoutMs: 600000`)
-
-There is no `extraVerify`. The whole suite is the verify, because every
-task touches the server, a skill whose text `test/plugin.mjs` asserts, or
-docs whose links it checks.
-
-There is no `mutation.targeted` for this flight, because the 0.4.0 server
-running it does not know the key. Every `foundry_mutate` call runs the full
-suite, about 90 s, so the reviewer keeps each round's sample to about ten
-mutants and leans on S-11's round-2 scoping.
+`package.json` gains exactly these `scripts`: `check:site`, `check:site:browser`, `site:serve`. No `dependencies` or `devDependencies`.
 
 ## 8. Phases
 
-### Phase 1 — server mechanics
+### Phase 1 — The page and its static checks
 
-S-10 first, so the `no-fable-default` constraint holds from then on. Then,
-in this order: S-02 (the commit helper everything else uses), S-01, S-03,
-S-04, S-05, S-08, S-09, S-06, S-07, S-14. Each requirement is one or more tasks,
-with tests in the owning suite. A task that adds a tool also adds it to the
-`EXPECTED_TOOLS` list in `test/protocol.mjs`, and to the agent tool lists
-and the count in `test/plugin.mjs`.
+1. Copy the seeded files from `docs/site/assets/` into `site/` (§4 paths) and add `site/robots.txt`. Write `docs/site/checks.json` validation into `check-site.mjs` first, then rules 1, 2 and 8, with the self-test for each.
+2. Write `site/styles.css` (tokens, fonts, base, components) and `site/index.html`, section by section in page order, from the mockup.
+3. Write `site/copy.js`, `site/404.html` and `site/_headers`.
+4. Complete `check-site.mjs` (rules 3–7 and 9–14) and its self-test; add `check:site` to `package.json` and the `check-site.mjs` line to `scripts/lint.sh`.
+5. Write `scripts/serve-site.mjs` and `site:serve`.
+6. End of phase: push. **Manual check (human):** run `npm run site:serve`, open it in a desktop browser and a phone (or device emulation at 360 px), in both color schemes, and compare against `docs/site/screens/`. Tab through the page: the skip link appears first and every link and button shows a visible focus ring. Press each copy button and paste the result.
 
-**Manual check:** none beyond the suite. Write
-`Manual check: NOT VERIFIED (human)` for "run one real flight on a
-throwaway spec with the working-tree plugin
-(`claude --plugin-dir .`) and confirm the summarizer passes `content`
-and no `Write` refusal appears".
+### Phase 2 — Browser checks, CI and docs
 
-### Phase 2 — skills and agents
-
-S-11, S-12, and the agent `tools:` changes (if Phase 1 did not already make
-them). `test/plugin.mjs` asserts presence or absence of each changed skill
-sentence: the summarize skill no longer contains the heredoc fallback, and
-plan-build names `foundry_plan_commit` and `from`.
-
-**Manual check:** read each changed `SKILL.md` top to bottom for
-contradictions with the tool reference. Record it as
-`NOT VERIFIED (human)`.
-
-### Phase 3 — documentation and release
-
-S-13. The last task pushes the branch. `foundry_run_finish` opens the draft
-PR against `main`, and the PR body states that it is **not to be merged**
-until a human has run one 0.5.0 flight from the working tree. Do not merge,
-tag or release. (This flight runs on 0.4.0, which has no
-`foundry_pr_finalize`, so the PR stays draft regardless.)
-
-**Manual check:** CI is green on the PR.
+1. Write `scripts/check-site-browser.mjs` and `check:site:browser`; add `.site-shots/` to `.gitignore`.
+2. Add `.github/workflows/site.yml`: on push to `main`, pull requests and `workflow_dispatch`, on `ubuntu-latest` with Node 24, run `npm run check:site` and `npm run check:site:browser` (the runner image ships Google Chrome; set `CHROME_PATH` from `command -v google-chrome`). Pin actions the way `ci.yml` does.
+3. Update `README.md`: a `site/` line in "Repo layout", a "Website" line in "Documentation map" linking `docs/site/DEPLOY.md` (the README sits at the repo root, so the link target is `docs/site/DEPLOY.md`), and, under Quickstart step 1, the hosted alternative (`claude plugin marketplace add https://kukulu.tech/marketplace.json`). Update `CONTRIBUTING.md`'s layout table with the three scripts and `site/`, and add an Unreleased entry to `CHANGELOG.md`.
+4. End of phase: push. **Manual check (human):** follow [docs/site/DEPLOY.md](site/DEPLOY.md) to deploy the build branch as a Cloudflare Pages preview and run its launch checklist against the preview URL, including installing the plugin from the preview's `marketplace.json`.
 
 ## 9. Open questions
 
-None remain open. The operator settled these on 2026-10-07. Record each
-under `## Decisions` as given; do not reopen them.
+None block the build. Decided already, so the planner does not need to:
 
-1. **What happens after signing fails.** Flip signing off for the rest of
-   the run (S-02), keep the PR draft, and do nothing past the flight until
-   a human unlocks signing and finalizes with a re-sign (S-14).
-2. **S-07 on `baseBranch`.** Allowed. An operator who archives on `main`
-   after merging meant to, and the commit is just as reviewable there.
-3. **S-06 refusal format.** Both: an array of `{ check, id?, message }` in
-   the error's structured data where the transport allows it, and one
-   joined, numbered string in the `ToolError` message, so a model reading
-   only the error still sees every problem.
+- **Theme.** No toggle (the brief allows no script beyond copy). Dark is the default; light follows the visitor's system setting.
+- **Fonts.** Self-hosted, not loaded from Google Fonts, so the CSP can be `'self'` only and no visitor request leaves the site.
+- **Marketplace name.** `displacetech`, matching `.claude-plugin/marketplace.json`, so `kukulu@displacetech` is the one install id everywhere.
+- **Recording link.** Left out until there is a URL. Adding it later is a one-line change plus a mockup edit.
 
-## Appendix A: feedback item map
+For the human, outside this flight (listed in DEPLOY.md's launch checklist): make `DisplaceTech/kukulu`, `ericmann/cleanflate` and `ericmann/cleanflate-bench` public before announcing the site, since the install command and the proof links depend on them.
 
-Every item in both feedback files, mapped to what closes it.
+## Appendix: mockups and fixtures
 
-### `2026-10-07-project-c.md`
-
-| Item | Disposition |
+| File | What it is |
 |---|---|
-| F-01 plan report swamped by constraints | S-12 (plan-build) |
-| F-02 flaky unrelated test counted as a kill | S-05 |
-| F-03, F-05, F-06, F-10, F-11, F-14, F-15, F-19, F-23 `SUMMARY.md` `Write` refused | S-01 |
-| F-04 untracked `foundry.json` from an interrupted plan | S-08 + S-12 |
-| F-07 renumbering ids after a split | S-06 |
-| F-08, F-09 project footguns logged as Foundry feedback | S-12 (implement and summarize: `Codebase notes`). The footguns themselves are the project's, not Foundry's. |
-| F-12, F-17, F-22 every mutant runs the full suite | S-04 |
-| F-13, F-18 round-cap halts | Working as designed. S-11 removes the cause, and S-09 the hand edit. |
-| F-16 fresh mutation samples never converge | S-11 |
-| F-20 `CLAUDE.md` cap in a multi-flight repo | S-12 (plan-build), S-07 |
-| F-21 `extraVerify` before its inputs exist | S-03 |
-
-### `2026-10-07-project-d.md`
-
-| Item | Disposition |
-|---|---|
-| F-01 constraints and `extraVerify` fixed for the whole flight | S-03 |
-| F-02, F-06 `SUMMARY.md` `Write` refused | S-01 |
-| F-03 the planner's commit hung on pinentry | S-02 + S-06 |
-| F-04 `review_submit` half-applied on a commit failure | S-02 |
-| F-05 `auto` fallback fired mid-flight | Working as designed. S-02 extends the same fallback to every commit, not only the run-start probe. |
-
-### Operator request (2026-10-07)
-
-| Item | Disposition |
-|---|---|
-| Opus as default planner, reviewer and summarizer; Sonnet implementer | S-10 |
-| A signed flight's PR is ready and auto-merges unless breaking; a failed signing keeps it draft until a human re-signs | S-02, S-14 |
-
-### Carried from the 0.4 plan's "Later" table
-
-| Item | Disposition |
-|---|---|
-| cleanflate F-12, F-27 multi-phase projects | S-07, S-08, S-12. The flight-id prefix is declined (section 2). |
-| cleanflate F-13, F-28 background jobs | Still deferred (section 2) |
-| cleanflate F-01 provenance logging | S-13 (`writing-specs.md`) |
-| cleanflate F-23 `Write` refused | S-01. Reproduced on non-first flights on 0.4.0, which was the condition for re-checking it. |
-
-## Appendix B: files the planner should read
-
-- `docs/feedback/2026-10-07-project-c.md` and
-  `docs/feedback/2026-10-07-project-d.md`: the friction this
-  release closes, with each agent's own words.
-- `docs/plans/v0.4.md`: the house style for decisions, and the
-  "Later" table this release partly pays down.
-- `CONTRIBUTING.md`: the architectural rule, and the suite table.
-- `docs/mcp-tools.md`: the contract every tool change must keep in step
-  with.
-- `mcp/server.mjs`: in particular `cfg()`, `validateConstraints`,
-  `normalizeCommand`, `checkConstraints`, `verifyCommands`, `mutate`,
-  `probeSigning`, `gitCommitIfChanged`, `reviewSubmit`, `summaryCommit`,
-  `flightOptions` and `status`.
+| [docs/site/mockup.html](site/mockup.html) | The approved page: layout, components, copy, tokens, breakpoints. Opens from disk; add `data-theme="light"` to `<html>` to force the light scheme |
+| [docs/site/screens/desktop-dark.jpg](site/screens/desktop-dark.jpg) | Mockup at 1440 px, dark (rendered at half scale) |
+| [docs/site/screens/desktop-light.jpg](site/screens/desktop-light.jpg) | Mockup at 1440 px, light (half scale) |
+| [docs/site/screens/tablet-light.jpg](site/screens/tablet-light.jpg) | Mockup at 768 px, light (half scale) |
+| [docs/site/screens/mobile-dark.jpg](site/screens/mobile-dark.jpg) | Mockup at 360 px, dark (three-quarter scale) |
+| [docs/site/social-card.html](site/social-card.html) | Source of `og.png`; reference only |
+| [docs/site/assets/](site/assets/) | Seeded files: `marketplace.json`, `favicon.svg`, `favicon.ico`, `apple-touch-icon.png`, `og.png`, `fonts/` (Hanken Grotesk and JetBrains Mono variable subsets, latin and latin-ext, from Fontsource 5.3.0, with their SIL OFL 1.1 texts) |
+| [docs/site/checks.json](site/checks.json) | Checker configuration (§5) |
+| [docs/site/DEPLOY.md](site/DEPLOY.md) | Cloudflare Pages setup, DNS, and the launch checklist |

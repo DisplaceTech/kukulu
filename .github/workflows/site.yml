@@ -1,0 +1,40 @@
+# site.yml — the kukulu.tech landing page: the static rules of SPEC section 3
+# (with their self-test) and the layout check in headless Chrome. The checks use
+# only Node built-ins, so there is nothing to install: check out, pick a Node,
+# run. The ubuntu runner image ships Google Chrome.
+name: site
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: site-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  site:
+    name: site checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Static site checks
+        run: npm run check:site
+
+      - name: Browser layout checks
+        run: |
+          CHROME_PATH="$(command -v google-chrome)"
+          export CHROME_PATH
+          node scripts/check-site-browser.mjs --self-test
+          npm run check:site:browser
