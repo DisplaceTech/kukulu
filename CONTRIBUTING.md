@@ -32,7 +32,7 @@ Every behaviour change to the server therefore needs a test, because the thing u
 | `test/` | Harness plus eleven suites |
 | `docs/` | Architecture, tool reference, routing guide, spec guide, runbook |
 | `docs/plans/` | The task-by-task plan behind each release |
-| `docs/feedback/` | Stumbling blocks a real flight hit, feeding the next release plan |
+| `docs/feedback/` | Stumbling blocks a real flight hit, feeding the next release plan; gitignored, local to the maintainer |
 
 ## Setup
 

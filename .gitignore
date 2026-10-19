@@ -6,3 +6,7 @@ node_modules/
 .claude/settings.local.json
 .kukulu/implement.lock
 .site-shots/
+
+# Pulled flight feedback stays on the maintainer's machine; only the directory is tracked
+docs/feedback/*
+!docs/feedback/.gitkeep

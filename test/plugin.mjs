@@ -141,9 +141,6 @@ for (const name of ["plan-build", "implement"]) {
   like(ws, /commit-msg/, "writing-specs.md shows a commit-msg hook for provenance logging");
   like(read("templates/SPEC.md"), /\{filter\}/, "templates/SPEC.md names the {filter} placeholder");
 }
-for (const f of ["2026-10-07-project-c", "2026-10-07-project-d"]) {
-  like(read(`docs/feedback/${f}.md`), /addressed in\s+\[`docs\/SPEC\.md`\]\(\.\.\/SPEC\.md\) \(Foundry 0\.5\.0\)/, `the 2026-10-07 feedback files name the spec that addressed them: ${f}`);
-}
 like(read("docs/operations.md"), /^## Running flight after flight$/m, "operations.md explains running flight after flight");
 like(read("docs/operations.md"), /^## Signing$/m, "operations.md has a signing section");
 like(read("skills/pull-feedback/SKILL.md"), /docs\/flights\/\*\/feedback\.jsonl/, "pull-feedback reads archived flight logs too");
@@ -523,11 +520,11 @@ eq(orphan, null, "every document in docs/ is linked from the README");
 
 // The compound-engineering loop (V3-15): a flight's SUMMARY.md friction
 // feeds docs/feedback/, and a release plan under docs/plans/ works through
-// it. Both directories are real (not just directory entries a moment
-// after `mkdir`) and linked from the README.
-ok(exists("docs/feedback/README.md"), "docs/feedback/ exists and explains its own convention");
+// it. Pulled feedback names other projects, so it stays on the
+// maintainer's machine: only docs/feedback/.gitkeep is tracked.
+ok(exists("docs/feedback/.gitkeep"), "docs/feedback/ is kept as a tracked, empty directory");
+ok(/^docs\/feedback\/\*$/m.test(read(".gitignore")) && /^!docs\/feedback\/\.gitkeep$/m.test(read(".gitignore")), ".gitignore keeps pulled feedback out of the repo");
 ok(exists("docs/plans"), "docs/plans/ exists");
-ok(readme.includes("docs/feedback/"), "docs/feedback/ is linked from the README");
 ok(readme.includes("docs/plans/"), "docs/plans/ is linked from the README");
 // V3.1-03: the old "write a heading and hope the summarizer reads it"
 // convention is retired in favor of calling kukulu_feedback_log the
@@ -539,8 +536,6 @@ like(read("skills/review-build/SKILL.md"), /kukulu_feedback_log/, "the review-bu
 like(read("skills/plan-build/SKILL.md"), /kukulu_feedback_log/, "the plan-build skill calls kukulu_feedback_log directly");
 like(read("skills/summarize/SKILL.md"), /feedbackCount/, "the summarize skill reads feedbackCount rather than scanning headings");
 like(read("skills/summarize/SKILL.md"), /\.kukulu\/feedback\.jsonl/, "...and reads the feedback log itself for the entries");
-like(read("docs/feedback/README.md"), /foundry_feedback_log/, "docs/feedback/README.md documents the tool that produces the source log");
-like(read("docs/feedback/README.md"), /\/foundry:pull-feedback/, "...and the skill that pulls it back here");
 
 // R2-02: the fake-signer fixture is allowlisted narrowly, defaults kept.
 const gitleaks = read(".gitleaks.toml");

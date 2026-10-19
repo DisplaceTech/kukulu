@@ -265,7 +265,6 @@ Everything is on disk and committed, so `/kukulu:go-flight` can be re-run from a
 - [**docs/writing-specs.md**](./docs/writing-specs.md): how to write a `SPEC.md` the planner can turn into a usable plan
 - [**docs/operations.md**](./docs/operations.md): running, resuming, halting, and what to do when a stage misbehaves
 - [**docs/plans/**](./docs/plans/): the task-by-task plan behind each release
-- [**docs/feedback/**](./docs/feedback/): problems real flights hit, which feed the next release plan
 - [**Website**](docs/site/DEPLOY.md): deploying kukulu.tech to Cloudflare Pages, and the launch checklist
 - [**CONTRIBUTING.md**](./CONTRIBUTING.md): layout, tests, and the rules about where behavior is allowed to live
 - [**CHANGELOG.md**](./CHANGELOG.md): what shipped, and when
@@ -291,7 +290,7 @@ Eleven suites, about 2,200 assertions. They cover the plugin manifests and docum
 
 The rules are written down: CI must pass on every PR, and `pre-commit install` runs the same checks locally that CI runs remotely. See [CONTRIBUTING.md](./CONTRIBUTING.md).
 
-**Feeding back.** Every stage calls `kukulu_feedback_log` the moment Kūkulu itself costs it time (a refused tool, an ambiguous prompt, a stall), and the MCP logs its own halts and fallbacks the same way. Each entry lands in `.kukulu/feedback.jsonl` and is committed immediately, so it survives even a flight that never reaches summarize. Run `/kukulu:pull-feedback` against a project's checkout to turn its log into a new, numbered file under [docs/feedback/](./docs/feedback/), and a later release plan works through it item by item. The first one is `docs/feedback/2026-09-21-project-a.md`, and every item in it maps to a task in [`docs/plans/v0.3.md`](./docs/plans/v0.3.md).
+**Feeding back.** Every stage calls `kukulu_feedback_log` the moment Kūkulu itself costs it time (a refused tool, an ambiguous prompt, a stall), and the MCP logs its own halts and fallbacks the same way. Each entry lands in `.kukulu/feedback.jsonl` and is committed immediately, so it survives even a flight that never reaches summarize. Run `/kukulu:pull-feedback` against a project's checkout to turn its log into a new, numbered file under `docs/feedback/`, and a later release plan works through it item by item. Pulled feedback names the projects it came from, so `docs/feedback/` is gitignored and stays on the maintainer's machine.
 
 ## License
 
