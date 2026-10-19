@@ -47,7 +47,7 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] P3-16 The gate: checks 1 to 6
 - [x] P3-17 Gate liveness
 - [x] P3-18 Human entries and kukulu_cleanroom_record
-- [ ] P3-19 Clean-room status, prompts, skills and docs/cleanroom.md
+- [x] P3-19 Clean-room status, prompts, skills and docs/cleanroom.md
 - [ ] P3-20 An end-to-end clean-room flight in the drive suite
 - [ ] P3-21 Phase 3 end: push and record the manual check
 - [ ] P4-01 cleanroom.similarity configuration
@@ -203,3 +203,6 @@ Check 7 liveness added (checks:7). Harness logCall(repo). In test/cleanroom.mjs 
 
 ### P3-18 — 247df17
 New tool kukulu_cleanroom_record (23 tools; after flight_options; go-flight allowed-tools both spellings, mapping for record:/record intervention:/record verdict:, no agent). Logger now logs UserPromptSubmit as human/operator (target truncated). humanEntry() helper appends the operator entry in flight_options, run_resume and the resign path (committed before the rebase in its own commit). Interpretation: record is not behind the gate; refused before genesis. Review test for resign added to test/review.mjs using resignRepo with a seeded genesis. Docs/README/CHANGELOG updated.
+
+### P3-19 — fa172c9
+cleanroomStatus(st) in status(); CLEANROOM_SENTENCE appended to the run-policies sentence in next() when a policy file exists (implement, stream, review, summarize prompts end with it). Implement and review-build skills, docs/cleanroom.md (new, linked from README and operations/mcp-tools), README Clean-room mode section ("patent pending"). Note: a new doc must be git-added before kukulu_verify or the link check cannot see it.
