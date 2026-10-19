@@ -1307,4 +1307,43 @@ eq(LANGUAGES.join(","), "rust,c,cpp,go,python,javascript,typescript,java,php", "
   eq(tokenize("int alpha_long;", "c").identifiers.join(","), "alpha_long", "tokenize also returns the raw identifiers");
 }
 
+// ---------------------------------------------------------------- calibration fixtures
+
+{
+  const base = path.join(ROOT, "test", "fixtures", "similarity");
+  const languages = { ".rs": "rust", ".c": "c", ".h": "c" };
+  /** The mapped files under a fixture directory, and how many were skipped for an unmapped extension. */
+  const side = (dir) => {
+    const files = [];
+    let skipped = 0;
+    for (const name of fs.readdirSync(path.join(base, dir)).sort()) {
+      const language = languages[path.extname(name)];
+      if (!language) skipped++;
+      else files.push({ path: name, text: fs.readFileSync(path.join(base, dir, name), "utf8"), language });
+    }
+    return { files, skipped };
+  };
+  const opts = { ngram: [5, 10], minIdentLen: 6, commentNgram: 5, exclusions: new Set() };
+  const near = { near: 0.25, separationMargin: 0 };
+  const neg = scorePair(side("a").files, side("b").files, opts);
+  const pos = scorePair(side("b").files, side("b-derived").files, opts);
+  const derived = scorePair(side("a").files, side("b-derived").files, opts);
+  const metrics = Object.keys(neg);
+
+  eq(metrics.length, 7, "(there are seven metrics for the default ngram sizes)");
+  eq(metrics.filter((m) => !(pos[m] > neg[m])).join(","), "", "b and b-derived score above a and b on every metric");
+  for (const m of ["ident_jaccard", "comment_jaccard"]) {
+    const where = position(derived[m], neg[m], pos[m], near);
+    ok(where.band === "below negative" || where.band === "at or near negative", `a against b-derived is at or near negative or below on ${m} (${where.band}, c = ${where.c.toFixed(3)})`);
+  }
+  eq(metrics.map((m) => position(derived[m], pos[m], neg[m], near).band).filter((b) => b !== "not separated").join(","), "", "swapping the controls gives not separated on every metric");
+  const a = side("a");
+  eq(a.files.length + "|" + a.skipped, "2|1", "the unmapped NOTES.txt is skipped and counted");
+  const without = scorePair(side("a").files, side("b").files, { ...opts, exclusions: new Set(["CHECKSUM_SEED"]) });
+  ok(without.ident_jaccard < neg.ident_jaccard && neg.ident_jaccard > 0, "the exclusion list removes the planted identifier (ident_jaccard falls from " + neg.ident_jaccard.toFixed(3) + " to " + without.ident_jaccard.toFixed(3) + ")");
+  const cross = scorePair(side("c").files, side("b").files, opts);
+  eq(Object.keys(cross).join(",") + "|" + Object.values(cross).every((v) => typeof v === "number" && v >= 0 && v <= 1), metrics.join(",") + "|true", "the c pair produces a row for every metric");
+  ok(cross["ngram_jaccard@5"] < pos["ngram_jaccard@5"], "(and the cross-language pair scores below the derived pair on n-grams)");
+}
+
 finish();
