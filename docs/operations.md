@@ -230,9 +230,7 @@ Environment variables:
 | `KUKULU_CONFIG` | `~/.config/kukulu/config.json` (or `$XDG_CONFIG_HOME/kukulu/config.json`) | Path to the global routing config |
 | `KUKULU_PROFILE` | the global file's own `"profile"` key, if any | Which profile in the global file to apply; wins over the file's own choice |
 
-Before 0.6.0 these were `FOUNDRY_PROJECT_DIR`, `FOUNDRY_GUARD_CAP`, `FOUNDRY_CONFIG` and `FOUNDRY_PROFILE`, and the global file lived in `foundry/` instead of `kukulu/`. Until 0.7.0 the old names are still read when the new one is unset or empty, and the old global file is read when no `kukulu/config.json` exists. Each of these server-side fallbacks adds a line to the `deprecations` array that `kukulu_status` and `kukulu_next` return; `/kukulu:go-flight` prints it. The guard hook runs in its own process and reports nothing: it reads `KUKULU_GUARD_CAP` then `FOUNDRY_GUARD_CAP`, and still recognizes the old agent names and `foundry_run_start`. A new name always wins over an old one.
-
-The project layout follows the same rule. A project that has `.foundry/` or `docs/foundry.json` and none of `.kukulu/` or `docs/kukulu.json` keeps working in place under the old names, with one more `deprecations` line; its refusals name the old files. A project that has both is refused by every tool, because reading either would hide the other: keep the one you use and remove the other with git. These project-layout fallbacks, like the `FOUNDRY_*` ones, end in 0.7.0. Flights archived before 0.6.0 are different: they keep `foundry.json` in their archive directory, finalizing one still reads it, and that is permanent, because an archive is a record and is never rewritten. An old-layout project whose plan stage is next halts with an instruction to migrate first, since planning would write `docs/kukulu.json` beside `.foundry/`.
+Flights archived before 0.6.0 keep `foundry.json` in their archive directory, and finalizing one still reads it; an archive is a record and is never rewritten.
 
 ## Calibrating
 

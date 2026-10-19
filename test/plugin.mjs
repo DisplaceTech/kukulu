@@ -356,6 +356,11 @@ const FLIGHT_ARTIFACTS = ["docs/SPEC.md", "docs/PLAN.md", "docs/PROGRESS.md", "d
 // Retired tools stay in the history of CHANGELOG.md and README.md and nowhere else.
 const RETIRED_TOOLS = ["kukulu_migrate"];
 const RETIRED_ALLOWED = ["CHANGELOG.md", "README.md"];
+for (const name of skillNames) {
+  ok(!/\.foundry\//.test(read(`skills/${name}/SKILL.md`)), `no skill mentions the .foundry/ layout (${name})`);
+}
+ok(!/FOUNDRY_/.test(read("docs/operations.md")), "operations.md no longer documents the FOUNDRY_* fallbacks");
+
 let unknownTool = null;
 let retiredMention = null;
 let unknownSkill = null;
