@@ -12,7 +12,7 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] P0-05 Skills and docs drop the foundry compatibility
 - [x] P0-06 Archives stay readable without pinned hashes
 - [x] P0-07 Phase 0 end: push and record the manual check
-- [ ] P1-01 plan_commit checks the branch; run_start names both fixes
+- [x] P1-01 plan_commit checks the branch; run_start names both fixes
 - [ ] P1-02 kukulu_run_resume
 - [ ] P1-03 Halts name kukulu_run_resume; go-flight maps resume
 - [ ] P1-04 The link check reads git ls-files
@@ -98,3 +98,6 @@ State test computes SHA-256 of the nine v0-5-0 files at start; no hash literals.
 
 ### P0-07 — 665c2eb
 Push: pushed build/2026-10-19 to origin. Manual check: NOT VERIFIED (human): run the installed 0.6.1 plugin's kukulu_migrate on a throwaway .foundry/ project, then run one task of a flight on it with the working-tree plugin (claude --plugin-dir .)
+
+### P1-01 — 48ba10b
+validatePlanTexts takes a branch param (null skips); planCommit reads it via git directly (not gitFacts, which calls cfg()). New check 'branch' with exact message. startRun refusal extended. Docs/skill/CHANGELOG (### Fixed) updated; tests in state and implement.
