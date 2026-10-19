@@ -7,7 +7,7 @@ Started: 2026-10-19T20:19:40.028Z
 
 - [x] P0-01 Keep pre-commit from rewriting the approved-copy file
 - [x] P0-02 Remove the FOUNDRY_* fallbacks and the deprecations field
-- [ ] P0-03 Refuse the pre-0.6.0 layout and remove kukulu_migrate
+- [x] P0-03 Refuse the pre-0.6.0 layout and remove kukulu_migrate
 - [ ] P0-04 The guard and hooks accept only the kukulu names
 - [ ] P0-05 Skills and docs drop the foundry compatibility
 - [ ] P0-06 Archives stay readable without pinned hashes
@@ -83,3 +83,6 @@ Added exclude for docs/site/copy-changes.json to end-of-file-fixer. pre-commit p
 
 ### P0-02 — 853ca09
 envVar now KUKULU_ only; deprecate()/DEPRECATIONS removed; global config path unmemoized, no foundry/ fallback; deprecations field removed from status/next, docs, go-flight, CHANGELOG. Tests as in task. Interpretation: removed deprecations assertions in test/review.mjs too (outside Files touched, would throw). resolveLayout's both-layouts refusal left for P0-03.
+
+### P0-03 — 766bc80
+Layout is now a const P; checkLayout() runs per tools/call and refuses old-layout (exact A-01 message) and both-layouts. LEGACY = "foun"+"dry" constant builds all legacy names; server.mjs has zero case-insensitive "foundry" hits. kukulu_migrate, decision 4a, inLayoutNames, LEGACY_AGENT_MARKER removed. 21 tools; docs/README/CHANGELOG/go-flight updated; RETIRED_TOOLS rule in plugin test. Guard and hooks still name foundry (P0-04), docs (P0-05), pinned hashes (P0-06) untouched.
