@@ -296,6 +296,11 @@ const CASES = [
     inject: (dir) => replaceIn(dir, "index.html", '<script src="/copy.js" defer></script>', ""),
   },
   {
+    name: "zero-size copy buttons are caught",
+    expect: "is not shown",
+    inject: (dir) => fs.appendFileSync(path.join(dir, "styles.css"), "\n[data-copy-for]{display:none !important}\n"),
+  },
+  {
     name: "a missing latin-ext font is caught",
     expect: "latin-ext subset did not load",
     inject: (dir) => replaceIn(dir, "styles.css", "/fonts/hanken-grotesk-latin-ext-wght-normal.woff2", "/fonts/missing.woff2"),
@@ -304,6 +309,13 @@ const CASES = [
     name: "a console.error is caught",
     expect: "console.error:",
     inject: (dir) => fs.appendFileSync(path.join(dir, "copy.js"), '\nconsole.error("self-test");\n'),
+  },
+  {
+    name: "a console error after load is caught",
+    expect: "console.error: late",
+    // Fires inside the settle window, so only a wait of SETTLE_MS after the probe sees it.
+    inject: (dir) =>
+      fs.appendFileSync(path.join(dir, "copy.js"), `\naddEventListener("load", () => setTimeout(() => console.error("late"), ${Math.floor(SETTLE_MS / 3)}));\n`),
   },
   {
     name: "an uncaught exception is caught",
@@ -357,6 +369,9 @@ async function selfTest() {
         const found = await probe(dir);
         report(c.name, found.some((f) => f.includes(c.expect)), `expected a failure containing ${JSON.stringify(c.expect)}, got ${found.length ? found.join("; ") : "none"}`);
       }
+      // Events from the failing cases above must not leak into the next visit.
+      const after = await probe(copyOfSite());
+      report("a clean page after failing cases passes", after.length === 0, after.join("; "));
     });
     let alive = true;
     try {
