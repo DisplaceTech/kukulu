@@ -181,6 +181,24 @@ async function portChecks(check) {
       message = e.message;
     }
     check("a bad SITE_PORT is refused naming SITE_PORT", message.includes("SITE_PORT"));
+    // choosePort directly: a rejected value must never reach listen(), and an accepted one
+    // (the fallthrough) must not bind the real servePort here.
+    process.env.SITE_PORT = String(0xffff + 1); // one past the largest TCP port
+    let high = "";
+    try {
+      choosePort(undefined);
+    } catch (e) {
+      high = e.message;
+    }
+    check("a SITE_PORT above 65535 is refused naming SITE_PORT", high.includes("SITE_PORT"));
+    process.env.SITE_PORT = "";
+    let fallthrough = null;
+    try {
+      fallthrough = choosePort(undefined);
+    } catch {
+      // fallthrough stays null and the check below fails
+    }
+    check("an empty SITE_PORT falls through to servePort", fallthrough === loadConfig(CONFIG_PATH).servePort);
   } finally {
     if (saved === undefined) delete process.env.SITE_PORT;
     else process.env.SITE_PORT = saved;
@@ -236,6 +254,13 @@ async function selfTest() {
         check("start({ siteDir }) serves that directory", r.body === "alt home\n" && r.headers["x-alt"] === "yes");
       } finally {
         await other.close();
+      }
+      const otherMissing = await start({ port: 0, siteDir: alt });
+      try {
+        const r = await request(otherMissing.url, "GET", "/no-such-page");
+        check("start({ siteDir }) serves that directory's 404.html", r.status === 404 && r.body === "alt 404\n");
+      } finally {
+        await otherMissing.close();
       }
     } finally {
       fs.rmSync(alt, { recursive: true, force: true });
