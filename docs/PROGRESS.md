@@ -52,7 +52,7 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] P3-21 Phase 3 end: push and record the manual check
 - [x] P4-01 cleanroom.similarity configuration
 - [x] P4-02 The lexer core, Rust and the C family
-- [ ] P4-03 Lexers for Go, Python, JavaScript, TypeScript, Java and PHP
+- [x] P4-03 Lexers for Go, Python, JavaScript, TypeScript, Java and PHP
 - [ ] P4-04 Metrics, positioning and the verdict
 - [ ] P4-05 Calibration fixtures
 - [ ] P4-06 Tune similarity.separationMargin
@@ -218,3 +218,6 @@ validateSimilarity + normalizeSimilarity (defaults: ngram [5,10], minIdentLen 6,
 
 ### P4-02 — 3777b0d
 tokenize/LANGUAGES in mcp/cleanroom.mjs: one scanner driven by SPECS per language (lineComments, blockComments, nestedBlocks, stringQuotes, charQuotes, rustStrings, lifetimes, preprocessor, wideLiterals, cxxRawStrings, types, keywords). Rust lifetimes lex as ID. Other six languages: in LANGUAGES, no spec yet (tokenize says "not available in this build") until P4-03; add specs to SPECS and extend the scanner flags (python triple quotes and # comments, go raw strings, js template literals, php $ identifiers). IMPORTANT: mcp/cleanroom.mjs must not contain the words async or await (server-synchronous is a line pattern); ASYNC_AWAIT builds them from pieces for the JS/TS/Rust keyword lists. Three original sample files in test/fixtures/similarity/lexers/.
+
+### P4-03 — e8177fd
+Six more SPECS (go, python, javascript, typescript, java, php) plus scanner flags: tripleQuotes, docstrings, stringPrefixes, backtickStrings (raw/template), dollarIdent, phpTags; ":=" operator. Samples for each language in test/fixtures/similarity/lexers/. Known approximations: JS regex literals and template-literal substitutions are not parsed; Python soft keywords (match) stay IDs; PHP keywords are case-sensitive here.
