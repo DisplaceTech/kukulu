@@ -277,3 +277,99 @@ export function verifyChain(lines) {
   }
   return { ok: true, entries, tip, firstBad: null };
 }
+
+// ---------------------------------------------------------------- entry fields from a hook payload
+
+/** What a tool call acted on, as the log records it (SPEC D-05); always cut to TARGET_MAX. */
+export function targetOf(toolName, toolInput) {
+  const input = typeof toolInput === "object" && toolInput !== null && !Array.isArray(toolInput) ? toolInput : {};
+  const parts = (pairs) => pairs.filter(([, v]) => v !== undefined && v !== null && v !== "").map(([k, v]) => `${k}=${v}`).join(" ");
+  let target;
+  switch (toolName) {
+    case "Read":
+    case "Write":
+    case "Edit":
+    case "MultiEdit":
+      target = String(input.file_path ?? "");
+      break;
+    case "NotebookEdit":
+      target = String(input.notebook_path ?? "");
+      break;
+    case "Grep":
+      target = parts([["path", input.path], ["glob", input.glob], ["pattern", input.pattern]]);
+      break;
+    case "Glob":
+      target = parts([["path", input.path], ["pattern", input.pattern]]);
+      break;
+    case "WebFetch":
+      target = String(input.url ?? "");
+      break;
+    case "WebSearch":
+      target = String(input.query ?? "");
+      break;
+    case "Bash":
+      target = String(input.command ?? "");
+      break;
+    case "Agent":
+    case "Task":
+      target = `${input.subagent_type ?? ""}: ${input.description ?? ""}`;
+      break;
+    default: {
+      let compact;
+      try {
+        compact = JSON.stringify(input);
+      } catch {
+        compact = String(input);
+      }
+      target = `${toolName} ${compact}`;
+    }
+  }
+  return truncateTarget(target);
+}
+
+/** The project files an entry's stage and task come from. Reads only; each is null when absent or unreadable. */
+export function projectContext(root) {
+  const text = (rel) => {
+    try {
+      return fs.readFileSync(path.join(root, rel), "utf8");
+    } catch {
+      return null;
+    }
+  };
+  const json = (rel) => {
+    try {
+      const v = JSON.parse(text(rel));
+      return v && typeof v === "object" ? v : null;
+    } catch {
+      return null;
+    }
+  };
+  return { progress: text("docs/PROGRESS.md"), lock: json(".kukulu/implement.lock"), state: json(".kukulu/state.json") };
+}
+
+const STAGE_OF_AGENT = { planner: "plan", implementer: "implement", reviewer: "review", summarizer: "summarize" };
+
+/** The descriptive fields of an entry for a hook payload and the project's context. */
+export function entryFields(hookInput, context = {}) {
+  const input = hookInput && typeof hookInput === "object" ? hookInput : {};
+  const agent = typeof input.agent_type === "string" && input.agent_type ? input.agent_type : null;
+  const round = [context.lock?.round, context.state?.round].find((r) => Number.isInteger(r)) ?? 0;
+  const implementStage = round >= 1 ? "fix" : "implement";
+  let stage = null;
+  if (agent) {
+    const role = /(?:^|[-:])(planner|implementer|reviewer|summarizer)$/.exec(agent)?.[1];
+    stage = role === "implementer" ? implementStage : role ? STAGE_OF_AGENT[role] : null;
+  } else if (context.lock) {
+    stage = implementStage;
+  }
+  const task = typeof context.progress === "string" ? /^- \[~\] (\S+)/m.exec(context.progress)?.[1] ?? null : null;
+  return {
+    stage,
+    task,
+    role: agent ?? "session",
+    model: typeof input.model === "string" && input.model ? input.model : null,
+    session: typeof input.session_id === "string" && input.session_id ? input.session_id : null,
+    tool: typeof input.tool_name === "string" && input.tool_name ? input.tool_name : null,
+    target: targetOf(input.tool_name, input.tool_input),
+  };
+}

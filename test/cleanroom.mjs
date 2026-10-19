@@ -10,7 +10,7 @@ import { finish, ok, eq, like, isError, ROOT, plannedRepo, withServer, runHook, 
 import { spawn, spawnSync } from "node:child_process";
 import {
   CleanroomError, loadPolicy, policyHash,
-  ENTRY_KEYS, KINDS, ZERO_HASH, TARGET_MAX, truncateTarget, canonical, entryHash, appendEntry, readEntries, verifyChain, logPathFor,
+  ENTRY_KEYS, KINDS, ZERO_HASH, TARGET_MAX, truncateTarget, canonical, entryHash, appendEntry, readEntries, verifyChain, logPathFor, targetOf, projectContext, entryFields,
 } from "../mcp/cleanroom.mjs";
 
 const EXAMPLE = fs.readFileSync(path.join(ROOT, "templates", "cleanroom.example.json"), "utf8");
@@ -277,6 +277,56 @@ const call = (n) => ({ kind: "allowed", stage: "implement", task: "P0-01", role:
   eq(truncateTarget("short"), "short", "...and a short one is untouched");
   const log = tmpLog();
   eq(appendEntry(log, { kind: "allowed", target: "y".repeat(TARGET_MAX * 2) }).target.length, TARGET_MAX, "appendEntry truncates the logged target");
+}
+
+// ---------------------------------------------------------------- entry fields from a payload
+
+eq(targetOf("Read", { file_path: "/a/b.rs" }), "/a/b.rs", "targetOf: Read is the file path");
+eq(targetOf("MultiEdit", { file_path: "/a/c.rs" }), "/a/c.rs", "...as is MultiEdit");
+eq(targetOf("NotebookEdit", { notebook_path: "/a/n.ipynb" }), "/a/n.ipynb", "...NotebookEdit is its notebook path");
+eq(targetOf("Grep", { path: "/src", glob: "*.rs", pattern: "fn main" }), "path=/src glob=*.rs pattern=fn main", "...Grep is path, glob and pattern");
+eq(targetOf("Grep", { pattern: "x" }), "pattern=x", "...with missing parts omitted");
+eq(targetOf("Glob", { path: "/src", pattern: "**/*.rs" }), "path=/src pattern=**/*.rs", "...Glob is path and pattern");
+eq(targetOf("WebFetch", { url: "https://example.invalid/x" }), "https://example.invalid/x", "...WebFetch is the URL");
+eq(targetOf("WebSearch", { query: "deflate" }), "deflate", "...WebSearch is the query");
+eq(targetOf("Bash", { command: "ls -la" }), "ls -la", "...Bash is the command");
+eq(targetOf("Bash", { command: "x".repeat(TARGET_MAX + 5) }).length, TARGET_MAX, "...truncated to TARGET_MAX");
+eq(targetOf("Agent", { subagent_type: "kukulu-implementer", description: "build it" }), "kukulu-implementer: build it", "...Agent is subagent_type: description");
+eq(targetOf("Task", { subagent_type: "x", description: "y" }), "x: y", "...and Task");
+eq(targetOf("mcp__plugin_kukulu_kukulu__kukulu_status", { a: 1 }), 'mcp__plugin_kukulu_kukulu__kukulu_status {"a":1}', "...an MCP tool is its name and arguments");
+eq(targetOf("Read", null), "", "...and a missing input is empty");
+
+{
+  const progress = "# p\n\n## Tasks\n\n- [x] P0-01 a\n- [~] P0-02 b\n- [ ] P0-03 c\n";
+  const ctx = (round, extra = {}) => ({ progress, lock: null, state: { round }, ...extra });
+  eq(entryFields({ agent_type: "kukulu-implementer" }, ctx(0)).stage, "implement", "entryFields: an implementer in round 0 is implement");
+  eq(entryFields({ agent_type: "kukulu:implementer" }, ctx(1)).stage, "fix", "...in round 1 is fix");
+  eq(entryFields({ agent_type: "kukulu-reviewer" }, ctx(0)).stage, "review", "...a reviewer is review");
+  eq(entryFields({ agent_type: "kukulu-planner" }, ctx(0)).stage, "plan", "...a planner is plan");
+  eq(entryFields({ agent_type: "kukulu-summarizer" }, ctx(0)).stage, "summarize", "...a summarizer is summarize");
+  eq(entryFields({ agent_type: "Explore" }, ctx(0)).stage, null, "...an unrelated agent has no stage");
+  const main = entryFields({ tool_name: "Read", tool_input: { file_path: "/x" } }, ctx(0));
+  eq(main.role + "|" + main.stage, "session|null", "...the main session has role session, and no stage without a lock");
+  eq(entryFields({}, ctx(0, { lock: { round: 0 } })).stage, "implement", "...a lock without an agent_type means implement");
+  eq(entryFields({}, ctx(0, { lock: { round: 2 } })).stage, "fix", "...or fix by the lock's round");
+  eq(entryFields({ agent_type: "kukulu-implementer" }, ctx(0)).role, "kukulu-implementer", "...the role is agent_type verbatim");
+  eq(entryFields({}, ctx(0)).task, "P0-02", "...the task is the first in-progress task");
+  eq(entryFields({}, { progress: "## Tasks\n- [x] P0-01 a\n" }).task, null, "...null when none is in progress");
+  eq(entryFields({}, {}).task, null, "...and null with no PROGRESS.md");
+  const f = entryFields({ model: "claude-x", session_id: "s-1", tool_name: "Bash", tool_input: { command: "ls" } }, ctx(0));
+  eq(f.model + "|" + f.session + "|" + f.tool + "|" + f.target, "claude-x|s-1|Bash|ls", "...model, session, tool and target come from the payload");
+  const bare = entryFields({}, ctx(0));
+  eq(bare.model + "|" + bare.session + "|" + bare.tool, "null|null|null", "...and are null when the payload lacks them");
+}
+
+{
+  const repo = mkDir("kukulu-ctx-");
+  eq(JSON.stringify(projectContext(repo)), '{"progress":null,"lock":null,"state":null}', "projectContext is all null for a bare directory");
+  writeFile(repo, "docs/PROGRESS.md", "## Tasks\n- [~] P0-09 x\n");
+  writeFile(repo, ".kukulu/implement.lock", '{"count":0,"round":1}');
+  writeFile(repo, ".kukulu/state.json", "{ not json");
+  const c = projectContext(repo);
+  eq(c.lock.round + "|" + c.state + "|" + /P0-09/.test(c.progress), "1|null|true", "...and reads PROGRESS.md and the lock, with an unreadable state as null");
 }
 
 finish();
