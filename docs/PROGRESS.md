@@ -27,7 +27,7 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] P1-13 pull-feedback never commits; Flight feedback moves to CONTRIBUTING
 - [x] P1-14 Phase 1 end: push and record the manual check
 - [x] P2-01 Private-project labels in pull-feedback and CONTRIBUTING
-- [ ] P2-02 check-names reads the private-name denylist
+- [x] P2-02 check-names reads the private-name denylist
 - [ ] P2-03 Phase 2 end: push and record the manual check
 - [ ] P3-01 mcp/cleanroom.mjs: the policy loader, the template and the cleanroom suite
 - [ ] P3-02 validateCleanroom in docs/kukulu.json
@@ -143,3 +143,6 @@ Push: pushed build/2026-10-19. Manual check: NOT VERIFIED (human): halt a throwa
 
 ### P2-01 — d69df6e
 Label procedure in pull-feedback step 3 and CONTRIBUTING Flight feedback; four plugin assertions. The mechanical check is P2-02.
+
+### P2-02 — 4b75ece
+check-names: denylist parsing (label first word, name rest, # comments, entry without a name skipped), per-entry index n is the 1-based index among the non-comment lines. Exempt docs/feedback/ and test/fixtures/. Tests use invented names in a temp root. Beware: String.replace treats $& in a replacement string specially when scripting edits.
