@@ -10,7 +10,12 @@ import {
   finish, ok, eq, like, isError,
   specRepo, plannedRepo, withServer, writeFile, readFile, hasFile, subject,
   planDoc, progressDoc, commitTask, runGuard, git, sh, mkFailingGhBin, mkBareRemote,
+  cleanroomRepo, addPlan, runHook, testKeyFor, ROOT,
 } from "./harness.mjs";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { readEntries, verifyChain, verifyCheckpoint, loadKey } from "../mcp/cleanroom.mjs";
 
 const TASKS = [
   { id: "P0-01", title: "Create hello", goal: "write hello.txt", files: "hello.txt", tests: "test.sh", verification: "./test.sh" },
@@ -436,6 +441,87 @@ const ALL_IDS = PARALLEL_PLAN.map((t) => t.id);
     for (const id of [...ALL_IDS, "R1-01"]) like(prog, new RegExp(`^- \\[x\\] ${id} `, "m"), `${id} ends done`);
     eq(git(repo, ["worktree", "list"]).split("\n").length, 1, "no worktree is left behind");
   });
+}
+
+// ---------------------------------------------------------------- a clean-room flight
+
+{
+  // The hooks run as Claude Code runs them: a PreToolUse payload to the guard (exit 2 means the call is not made),
+  // then a PostToolUse payload to the logger, with CLAUDE_PROJECT_DIR and CLAUDE_PLUGIN_ROOT in the environment.
+  const policy = JSON.parse(fs.readFileSync(path.join(ROOT, "templates", "cleanroom.example.json"), "utf8"));
+  policy.lockdown.after = "P0-01";
+  const repo = cleanroomRepo({ policy: JSON.stringify(policy, null, 2) });
+  const env = { CLAUDE_PROJECT_DIR: repo, CLAUDE_PLUGIN_ROOT: ROOT };
+  const GUARD = path.join(ROOT, "scripts", "cleanroom-guard.mjs");
+  const LOGGER = path.join(ROOT, "scripts", "cleanroom-log.mjs");
+  const session = { session_id: "drive-1", model: "claude-test" };
+  const sim = (tool_name, tool_input, run = () => null) => {
+    const pre = runHook(GUARD, { hook_event_name: "PreToolUse", tool_name, tool_input, cwd: repo, ...session }, env);
+    if (pre.status === 2) return { denied: true, stderr: pre.stderr };
+    const value = run();
+    runHook(LOGGER, { hook_event_name: "PostToolUse", tool_name, tool_input, cwd: repo, ...session }, env);
+    return { denied: false, value };
+  };
+  const mcp = async (call, name, args = {}) => {
+    const tool = `mcp__plugin_kukulu_kukulu__${name}`;
+    const out = sim(tool, args, () => null);
+    if (out.denied) throw new Error(`the guard denied ${tool}: ${out.stderr}`);
+    return call(name, args);
+  };
+  const prompt = (text) => runHook(LOGGER, { hook_event_name: "UserPromptSubmit", prompt: text, cwd: repo, ...session }, env);
+  const tasks = [
+    { id: "P0-01", title: "Create hello", goal: "write hello.txt", files: "hello.txt" },
+    { id: "P0-02", title: "Create world", goal: "write world.txt", files: "world.txt", depends: ["P0-01"] },
+  ];
+
+  await withServer(repo, async ({ call }) => {
+    const first = await mcp(call, "kukulu_next");
+    eq(first.stage + "|" + first.gate.ok, "plan|true", "the first kukulu_next in a clean-room project writes genesis and passes the gate");
+    prompt("Build it, and do not look anything up.");
+    addPlan(repo, { tasks, config: { flight: "w1" } });
+    const next = await mcp(call, "kukulu_next");
+    eq(next.stage + "|" + next.gate.ok, "implement|true", "the plan stage gives way to implement");
+    await mcp(call, "kukulu_run_start");
+    for (const t of tasks) {
+      await mcp(call, "kukulu_task_next");
+      const file = t.files;
+      sim("Write", { file_path: path.join(repo, file), content: "x\n" }, () => fs.writeFileSync(path.join(repo, file), "x\n"));
+      sim("Bash", { command: `cat ${file}` });
+      if (t.id === "P0-01") {
+        const denied = sim("Read", { file_path: path.join(os.homedir(), ".cargo", "registry", "src", "index", "x.rs") });
+        ok(denied.denied && /deny\.paths/.test(denied.stderr), "a Read under deny.paths is denied by the guard in the flight");
+      }
+      commitTask(repo, t.id, t.title, { [file]: "x\n" });
+      const done = await mcp(call, "kukulu_task_done", { id: t.id, log: `wrote ${file}` });
+      eq(done.counts.done >= 1, true, `${t.id} is done`);
+    }
+    sim("Write", { file_path: path.join(repo, "docs", "HANDOFF.md"), content: "# Handoff\n" }, () => fs.writeFileSync(path.join(repo, "docs", "HANDOFF.md"), "# Handoff\n"));
+    await mcp(call, "kukulu_run_finish");
+    sim("Write", { file_path: path.join(repo, "docs", "REVIEW.md"), content: "r" }, () => fs.writeFileSync(path.join(repo, "docs", "REVIEW.md"), "# Review\nRound: 1\n**Verdict**: APPROVED\n"));
+    await mcp(call, "kukulu_review_submit", { verdict: "APPROVED" });
+    await mcp(call, "kukulu_summary_commit", { content: "# Summary\nDone.\n" });
+    const end = await mcp(call, "kukulu_next");
+    eq(end.stage, "done", "the clean-room flight runs to done");
+    ok(end.gate.ok, "...passing the gate at the end");
+  });
+
+  const logPath = path.join(repo, ".kukulu", "cleanroom", "log.jsonl");
+  const lines = fs.readFileSync(logPath, "utf8").split("\n").filter(Boolean);
+  const chain = verifyChain(lines);
+  eq(chain.ok, true, "a clean-room flight's chain verifies end to end");
+  const kinds = new Set(chain.entries.map((e) => e.kind));
+  eq(["genesis", "gate", "allowed", "denied", "checkpoint", "human"].every((k) => kinds.has(k)), true, "...holds genesis, gate, allowed, denied, checkpoint and human entries");
+  eq(chain.entries[0].kind, "genesis", "...starting with the genesis entry");
+  const publicKey = loadKey(testKeyFor(repo)).publicKey;
+  const cps = chain.entries.filter((e) => e.kind === "checkpoint");
+  eq(cps.length >= 6 && cps.every((e) => verifyCheckpoint(e, publicKey)), true, `...every checkpoint verifies (${cps.length})`);
+  const serverSubjects = /^(chore|progress|review):/;
+  const commits = git(repo, ["log", "--reverse", "--format=%H%x09%s"]).split("\n").map((l) => l.split("\t")).filter(([, subj]) => serverSubjects.test(subj) && subj !== "chore: clean-room policy");
+  const trailer = (sha, key) => git(repo, ["log", "-1", `--format=%(trailers:key=${key},valueonly)`, sha]).trim();
+  const bare = commits.filter(([sha]) => !trailer(sha, "Kukulu-Stage") || !trailer(sha, "Kukulu-Task"));
+  eq(bare.map(([, subj]) => subj).join(" | "), "", `...every server commit carries the trailers (${commits.length} commits)`);
+  eq(chain.entries.filter((e) => e.kind === "human")[0].target, "Build it, and do not look anything up.", "...and the prompt is in the chain");
+  eq(readEntries(logPath).length, chain.entries.length, "...as is every entry the hooks wrote");
 }
 
 finish();
