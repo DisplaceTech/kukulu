@@ -401,6 +401,11 @@ like(goFlight, /"resume: <reason>".*kukulu_run_resume\(\{ reason \}\)/, "go-flig
 like(read("skills/review-build/SKILL.md"), /Capping mutation-only rounds[\s\S]*review\.mutationFixRounds/, "review-build caps mutation-only rounds at mutationFixRounds");
 like(read("skills/review-build/SKILL.md"), /Round 2 and later\*\*: read `prChecks`/, "review-build reads prChecks from round 2");
 
+{
+  const planSkill = read("skills/plan-build/SKILL.md");
+  ok(/kukulu\.tech — Specification" gives `kukulu-tech`/.test(planSkill) && /K\u016bkulu 0\.7\.0 — Specification" gives `kukulu-0-7-0`/.test(planSkill), "plan-build states the slug rule with both examples");
+}
+
 let unknownTool = null;
 let retiredMention = null;
 let unknownSkill = null;

@@ -105,7 +105,7 @@ The checks, by the name each problem carries in `check`:
 | `branch` | The current branch is neither the config's `baseBranch` nor a `branchPrefix*` branch: `on '<branch>', but docs/kukulu.json baseBranch is '<base>'; set baseBranch to '<branch>' (the branch the plan is committed on) or switch to it`. Skipped outside a git repository; a detached HEAD counts as `HEAD` |
 | `claude` | `CLAUDE.md` does not exist at the repository root |
 
-**Returns:** `{ commit, tasks, phases: [{ phase, tasks }], waves: [{ index, streams, valid }], renumbered }`. `commit` is `null` when everything is already committed; `renumbered` is the `{ old: new }` map of ids `renumber: true` changed, `{}` otherwise.
+**Returns:** `{ commit, notes, tasks, phases: [{ phase, tasks }], waves: [{ index, streams, valid }], renumbered }`. `notes` is a list of advice that never blocks the commit: today, one entry when the config's `flight` slug ends in `-spec` or `-specification`, naming the slug without the suffix. `commit` is `null` when everything is already committed; `renumbered` is the `{ old: new }` map of ids `renumber: true` changed, `{}` otherwise.
 
 **Refuses when:** any check fails. Every problem is listed in one reply: the message's first line counts them, then each gets one numbered line (`1. [heading] …`). The same list rides on the error reply as `structuredContent.problems`, `[{ check, id?, message }]`. Nothing is committed.
 

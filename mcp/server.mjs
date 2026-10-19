@@ -3421,8 +3421,15 @@ function planCommit({ renumber } = {}) {
     const m = t.id.match(/^P(\d+)-/);
     if (m) phases.set(Number(m[1]), (phases.get(Number(m[1])) || 0) + 1);
   }
+  // A slug ending in a spec suffix means the title's dash was not honoured; say so, but never refuse.
+  const notes = [];
+  const slug = configRaw?.flight;
+  if (typeof slug === "string" && /-spec(ification)?$/.test(slug)) {
+    notes.push(`flight '${slug}' ends in a spec suffix; derive it from the text before the title's dash (plan-build), e.g. '${slug.replace(/-spec(ification)?$/, "")}'`);
+  }
   return {
     commit,
+    notes,
     tasks: pr.tasks.length,
     phases: [...phases].map(([phase, tasks]) => ({ phase, tasks })),
     waves: computeWaves(pr, cfg()).map((w) => ({ index: w.index, streams: Object.keys(w.streams), valid: w.valid })),

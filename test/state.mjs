@@ -567,6 +567,27 @@ for (const [config, re, label] of [
   }, ghEnv(dir));
 }
 
+// ---------------------------------------------------------------- plan_commit slug note
+
+for (const [slug, expectNote, label] of [
+  ["kukulu-tech-specification", "kukulu-tech", "plan_commit notes a flight slug ending in -specification"],
+  ["kukulu-tech-spec", "kukulu-tech", "plan_commit notes a flight slug ending in -spec"],
+  ["v0-7-0", null, "plan_commit has no notes for v0-7-0"],
+]) {
+  const repo = specRepo();
+  const plan = plannedRepo({ config: { flight: slug } });
+  writeFile(repo, "docs/PLAN.md", readFile(plan, "docs/PLAN.md"));
+  writeFile(repo, "docs/PROGRESS.md", readFile(plan, "docs/PROGRESS.md"));
+  writeFile(repo, "docs/kukulu.json", readFile(plan, "docs/kukulu.json"));
+  writeFile(repo, "CLAUDE.md", "# rules\n");
+  await withServer(repo, async ({ call }) => {
+    const r = await call("kukulu_plan_commit");
+    if (expectNote) like(r.notes.join("\n"), new RegExp(`flight '${slug}' ends in a spec suffix; derive it from the text before the title's dash \\(plan-build\\), e\\.g\\. '${expectNote}'`), label);
+    else eq(r.notes.length, 0, label);
+    ok(Boolean(r.commit), "...and still commits");
+  });
+}
+
 // ---------------------------------------------------------------- plan_commit (S-06)
 
 {
