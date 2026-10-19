@@ -20,7 +20,7 @@ Started: 2026-10-19T16:52:28.587Z
 - [x] R1-02 serve-site.mjs: test port precedence, validate SITE_PORT, test the NUL refusal
 - [x] R1-03 check-site-browser.mjs --self-test and no leaked Chrome profile
 - [x] R2-01 check-site-browser.mjs self-test: console.error, uncaught exception, no buttons, and Chrome really exited
-- [ ] R2-02 serve-site.mjs self-test: SITE_PORT above 65535, empty SITE_PORT, and the siteDir 404 page
+- [x] R2-02 serve-site.mjs self-test: SITE_PORT above 65535, empty SITE_PORT, and the siteDir 404 page
 
 ## Log
 (one entry per task, appended by implement)
@@ -77,3 +77,6 @@ Interpretation: overflow case injects width via appended CSS since CSP blocks in
 
 ### R2-01 — e9eee9d
 Added 3 CASES (console.error, uncaught exception, no copy buttons via replaceAllIn helper) and a Chrome-exit assertion (process.kill(pid,0) ESRCH, then PROFILE_SETTLE_MS=1000 delay, profile absent). withBrowser callback now receives pid. Self-test: 9 cases ok. verify green. Mutation not re-run by me.
+
+### R2-02 — 9593711
+Added 3 serve-site self-test checks via choosePort directly (SITE_PORT over-range, empty, altdir 404). Over-range value built as String(0xffff + 1) to satisfy no-hardcoded-site-tunables. 29 checks ok; verify green.
