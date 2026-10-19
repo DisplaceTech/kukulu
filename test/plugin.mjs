@@ -98,8 +98,8 @@ eq(server.env.FOUNDRY_PROFILE, undefined, "...or FOUNDRY_PROFILE");
 
 eq(plugin.hooks, "./hooks/hooks.json", "the plugin points at hooks/hooks.json");
 const hooks = json("hooks/hooks.json");
-eq(Object.keys(hooks.hooks).sort().join(","), "Stop,SubagentStop", "the guard is wired to Stop and SubagentStop");
-for (const [event, entries] of Object.entries(hooks.hooks)) {
+eq(Object.keys(hooks.hooks).sort().join(","), "PostToolUse,PreToolUse,Stop,SubagentStop,UserPromptSubmit", "hooks.json wires Stop, SubagentStop, PreToolUse, PostToolUse and UserPromptSubmit");
+for (const [event, entries] of Object.entries(hooks.hooks).filter(([e]) => e === "Stop" || e === "SubagentStop")) {
   const cmd = entries[0].hooks[0];
   eq(cmd.type, "command", `${event} runs a command hook`);
   like(cmd.command, /^"\$\{CLAUDE_PLUGIN_ROOT\}"\//, `${event}'s command quotes the plugin root, so a path with spaces still works`);
@@ -113,6 +113,18 @@ for (const [event, entries] of Object.entries(hooks.hooks)) {
 // (F-07): the harness never even runs the guard for any other subagent.
 like(hooks.hooks.SubagentStop[0].matcher, /kukulu.implementer/, "SubagentStop's matcher names the implementer");
 eq(hooks.hooks.SubagentStop[0].matcher, "^(kukulu:implementer|kukulu-implementer)$", "SubagentStop's matcher names only the kukulu implementer");
+{
+  const wired = (event) => hooks.hooks[event].flatMap((e) => e.hooks.map((h) => h.command));
+  const CR = (script) => `"${"$"}{CLAUDE_PLUGIN_ROOT}"/scripts/${script}`;
+  eq(JSON.stringify(wired("PreToolUse")), JSON.stringify([CR("cleanroom-guard.mjs")]), "PreToolUse runs the clean-room guard");
+  ok(hooks.hooks.PreToolUse.every((e) => !e.matcher), "...with no matcher, so every tool is checked");
+  eq(JSON.stringify(wired("PostToolUse")), JSON.stringify([CR("cleanroom-log.mjs")]), "PostToolUse runs the clean-room logger");
+  eq(JSON.stringify(wired("UserPromptSubmit")), JSON.stringify([CR("cleanroom-log.mjs")]), "UserPromptSubmit runs the clean-room logger");
+  for (const script of ["scripts/cleanroom-guard.mjs", "scripts/cleanroom-log.mjs"]) {
+    ok(exists(script) && fs.statSync(path.join(ROOT, script)).mode & 0o111 && /^#!\/usr\/bin\/env node\n/.test(read(script)), `${script} is executable with a shebang`);
+  }
+  ok(spawnSync("git", ["ls-files", "-s", "scripts/cleanroom-guard.mjs", "scripts/cleanroom-log.mjs"], { cwd: ROOT, encoding: "utf8" }).stdout.split("\n").filter(Boolean).every((l) => l.startsWith("100755")), "both clean-room hook scripts are mode 755 in git");
+}
 ok(!hooks.hooks.Stop[0].matcher, "Stop carries no matcher — a Stop event has no agent to match against");
 
 // ---------------------------------------------------------------- agents and skills

@@ -3,7 +3,7 @@
 // this, asserts, and calls finish(); test/run.mjs runs them all as children so
 // one suite's crash can't take the rest down.
 
-import { spawn, execFileSync } from "node:child_process";
+import { spawn, spawnSync, execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -329,6 +329,22 @@ export function useLegacyLayout(repo) {
   gitIn(repo, ["add", "-A"]);
   if (gitIn(repo, ["status", "--porcelain"])) gitIn(repo, ["commit", "-qm", "chore: pre-0.6.0 layout"]);
   return repo;
+}
+
+/**
+ * Run a hook script the way Claude Code does: `node <script>` with the payload as
+ * JSON on stdin. Returns `{ status, stdout, stderr, ms }`. The environment is
+ * the caller's, plus PATH and HOME, so a stray CLAUDE_* variable of the
+ * developer's session cannot leak in.
+ */
+export function runHook(script, payload, env = {}) {
+  const started = process.hrtime.bigint();
+  const r = spawnSync(process.execPath, [script], {
+    input: typeof payload === "string" ? payload : JSON.stringify(payload ?? {}),
+    encoding: "utf8",
+    env: { PATH: process.env.PATH, HOME: process.env.HOME, ...env },
+  });
+  return { status: r.status, stdout: r.stdout, stderr: r.stderr, ms: Number(process.hrtime.bigint() - started) / 1e6 };
 }
 
 /** Force `.kukulu/state.json` into a given shape, bypassing the tools. */

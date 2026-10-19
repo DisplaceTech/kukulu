@@ -6,7 +6,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
-import { finish, ok, eq, like, isError, ROOT, plannedRepo, withServer } from "./harness.mjs";
+import { finish, ok, eq, like, isError, ROOT, plannedRepo, withServer, runHook, mkDir, writeFile } from "./harness.mjs";
+import { spawnSync } from "node:child_process";
 import { CleanroomError, loadPolicy, policyHash } from "../mcp/cleanroom.mjs";
 
 const EXAMPLE = fs.readFileSync(path.join(ROOT, "templates", "cleanroom.example.json"), "utf8");
@@ -98,6 +99,74 @@ for (const [block, re, label] of [
     const st = await call("kukulu_status");
     ok(!st.error, "a valid cleanroom block is accepted");
   });
+}
+
+// ---------------------------------------------------------------- hook fast path (no policy)
+
+const GUARD = path.join(ROOT, "scripts", "cleanroom-guard.mjs");
+const LOGGER = path.join(ROOT, "scripts", "cleanroom-log.mjs");
+
+{
+  const repo = plannedRepo();
+  const env = { CLAUDE_PROJECT_DIR: repo };
+  const payload = { hook_event_name: "PreToolUse", tool_name: "Read", tool_input: { file_path: "/etc/passwd" }, cwd: repo };
+  const g = runHook(GUARD, payload, env);
+  eq(g.status + "|" + g.stdout + "|" + g.stderr, "0||", "with no policy the guard exits 0 with no output");
+  const l = runHook(LOGGER, { ...payload, hook_event_name: "PostToolUse" }, env);
+  eq(l.status + "|" + l.stdout + "|" + l.stderr, "0||", "...the logger exits 0 with no output");
+  ok(!fs.existsSync(path.join(repo, ".kukulu", "cleanroom")), "...and neither creates .kukulu/cleanroom/");
+  eq(runHook(GUARD, "not json at all", env).status, 0, "empty or invalid input is tolerated on the fast path");
+  eq(runHook(GUARD, "", {}).status, 0, "...even with no CLAUDE_PROJECT_DIR (the working directory has no policy)");
+  const viaCwd = runHook(GUARD, { cwd: repo }, {});
+  eq(viaCwd.status, 0, "the project can come from the input's cwd");
+}
+
+{
+  // The fast path must not even load mcp/cleanroom.mjs: a temp plugin copy whose module throws on import.
+  const plugin = mkDir("kukulu-plugin-");
+  fs.mkdirSync(path.join(plugin, "scripts"));
+  fs.mkdirSync(path.join(plugin, "mcp"));
+  for (const f of ["cleanroom-guard.mjs", "cleanroom-log.mjs"]) fs.copyFileSync(path.join(ROOT, "scripts", f), path.join(plugin, "scripts", f));
+  fs.writeFileSync(path.join(plugin, "mcp", "cleanroom.mjs"), 'throw new Error("mcp/cleanroom.mjs was loaded");\n');
+  const repo = plannedRepo();
+  for (const script of ["cleanroom-guard.mjs", "cleanroom-log.mjs"]) {
+    const r = runHook(path.join(plugin, "scripts", script), { cwd: repo }, { CLAUDE_PROJECT_DIR: repo });
+    eq(r.status + "|" + r.stderr, "0|", `the fast path does not load mcp/cleanroom.mjs (${script})`);
+  }
+}
+
+{
+  // The 50 ms budget is a test bound, not a config key (SPEC 5.3, an ASSUMPTION): the median
+  // hook run minus the median bare Node start, over ten runs each.
+  const repo = plannedRepo();
+  const median = (xs) => xs.slice().sort((a, b) => a - b)[Math.floor(xs.length / 2)];
+  const time = (fn) => median(Array.from({ length: 10 }, () => {
+    const t = process.hrtime.bigint();
+    fn();
+    return Number(process.hrtime.bigint() - t) / 1e6;
+  }));
+  const bare = time(() => spawnSync(process.execPath, ["-e", "0"]));
+  for (const [name, script] of [["guard", GUARD], ["logger", LOGGER]]) {
+    const hook = time(() => runHook(script, { cwd: repo }, { CLAUDE_PROJECT_DIR: repo }));
+    ok(hook - bare < 50, `the ${name}'s fast path costs under 50 ms beyond Node's own startup (${(hook - bare).toFixed(1)} ms)`);
+  }
+}
+
+{
+  // With a policy present and no implementation yet, the guard fails closed; the logger never blocks.
+  const repo = plannedRepo();
+  writeFile(repo, "docs/cleanroom.json", EXAMPLE);
+  const env = { CLAUDE_PROJECT_DIR: repo };
+  const g = runHook(GUARD, { hook_event_name: "PreToolUse", tool_name: "Read", tool_input: {}, cwd: repo }, env);
+  eq(g.status, 2, "with a policy present the guard denies until it is implemented");
+  like(g.stderr, /^kukulu clean-room guard: guard internal error: the guard is not implemented yet/, "...saying why");
+  eq(runHook(LOGGER, { hook_event_name: "PostToolUse", cwd: repo }, env).status, 0, "the logger exits 0 with a policy present");
+  writeFile(repo, "docs/kukulu.json", JSON.stringify({ cleanroom: { policy: "policy/cr.json" } }));
+  eq(runHook(GUARD, { cwd: repo }, env).status, 0, "a policy named in docs/kukulu.json is the one looked for (the default file no longer counts)");
+  writeFile(repo, "policy/cr.json", EXAMPLE);
+  eq(runHook(GUARD, { cwd: repo }, env).status, 2, "...and its presence turns the mode on");
+  writeFile(repo, "docs/kukulu.json", "{ not json");
+  eq(runHook(GUARD, { cwd: repo }, env).status, 2, "an unparseable docs/kukulu.json means the default policy path");
 }
 
 finish();

@@ -35,7 +35,7 @@ check node scripts/check-names.mjs
 check node scripts/check-site.mjs
 
 # Scripts the hook system executes directly must stay executable.
-for f in scripts/*.sh scripts/implement-guard.mjs; do
+for f in scripts/*.sh scripts/implement-guard.mjs scripts/cleanroom-guard.mjs scripts/cleanroom-log.mjs; do
   if [ ! -x "$f" ]; then
     printf 'lint: %s is not executable\n' "$f" >&2
     fail=1
