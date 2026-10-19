@@ -21,7 +21,7 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] P1-07 kukulu_mutate runs the constraint scan
 - [x] P1-08 kukulu_status reports prChecks; the review reads CI
 - [x] P1-09 Review tasks carry a source; mutation-only rounds are capped
-- [ ] P1-10 Tune review.mutationFixRounds from the archived trails
+- [x] P1-10 Tune review.mutationFixRounds from the archived trails
 - [ ] P1-11 The flight slug rule and the -spec note
 - [ ] P1-12 Auto-merge unavailable names policies.finalize
 - [ ] P1-13 pull-feedback never commits; Flight feedback moves to CONTRIBUTING
@@ -125,3 +125,6 @@ prChecks() computed only in the kukulu_status TOOLS fn wrapper (status() unchang
 
 ### P1-09 — c5dd958
 Config key review.mutationFixRounds (default 2, ASSUMPTION, only in cfgFrom's review line; validateReview with unknown-key and positive-integer refusals). review_submit: source required (review|mutation|blocked), cap refusal before any write using the SPEC text, state.rounds[].sources. Skills (review-build new paragraph kept free of a standalone 2 near the key, summarize) and docs (operations row, mcp-tools, CHANGELOG) updated. Also updated test/protocol.mjs and test/drive.mjs for the required source.
+
+### P1-10 — bf751ac
+Measurement: review.mutationFixRounds before 2, after 2 (unchanged, not tuned). Evidence in docs/spikes/P1-10.md: v0-5-0 round-3 task was a CI-found real defect (source review, not capped); kukulu-tech's rounds 3-4 were all mutation survivors in self-tests (cap would have approved at round 3 instead of 5). mcp/server.mjs unchanged.
