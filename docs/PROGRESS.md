@@ -17,7 +17,7 @@ Started: 2026-10-19T16:52:28.587Z
 - [x] P2-03 README, CONTRIBUTING and CHANGELOG for the site
 - [x] P2-04 Phase 2 end: push and record the manual check
 - [x] R1-01 check-site.mjs self-test cases for the uncovered rule branches
-- [ ] R1-02 serve-site.mjs: test port precedence, validate SITE_PORT, test the NUL refusal
+- [x] R1-02 serve-site.mjs: test port precedence, validate SITE_PORT, test the NUL refusal
 - [ ] R1-03 check-site-browser.mjs --self-test and no leaked Chrome profile
 
 ## Log
@@ -65,3 +65,6 @@ Push: origin build/landing pushed. Manual check: NOT VERIFIED (human): follow do
 
 ### R1-01 — 820d03c
 Added 17 self-test cases (69 total) for rules 4, 5, 8, 9, 10, 12, 14 and config contrastMin. No rule changed. Sizes derived from HEADERS_MAX_* constants.
+
+### R1-02 — 19f861a
+Added choosePort() (arg, SITE_PORT, servePort; bad SITE_PORT rejects naming it; empty falls through) and 4 self-test checks (25 total). Self-test never binds servePort. Interpretation: empty SITE_PORT counts as unset.
