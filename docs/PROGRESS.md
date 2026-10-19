@@ -22,7 +22,7 @@ Started: 2026-10-19T16:52:28.587Z
 - [x] R2-01 check-site-browser.mjs self-test: console.error, uncaught exception, no buttons, and Chrome really exited
 - [x] R2-02 serve-site.mjs self-test: SITE_PORT above 65535, empty SITE_PORT, and the siteDir 404 page
 - [x] R3-01 check-site-browser.mjs self-test: zero-size copy buttons, a late console error, and a clean page after failing cases
-- [ ] R4-01 check-site-browser.mjs: fail when the page probe runs before the load event
+- [x] R4-01 check-site-browser.mjs: fail when the page probe runs before the load event
 
 ## Log
 (one entry per task, appended by implement)
@@ -85,3 +85,6 @@ Added 3 serve-site self-test checks via choosePort directly (SITE_PORT over-rang
 
 ### R3-01 — 12e055d
 Added 3 self-test checks (12 cases total). Manually mutated the three named lines (bounding-box check, events reset, SETTLE_MS wait); each made the self-test exit 1. Interpretation: late-error delay = Math.floor(SETTLE_MS / 3). verify green.
+
+### R4-01 — aa5149e
+PAGE_PROBE returns readyState (read before awaiting fonts.ready); visit fails with "<label>: the page probe ran before the load event (readyState X); wait for Page.loadEventFired before probing" when not complete. Self-test still 12 cases, run still 6 runs. Manual mutation (load wait deleted) killed by 'baseline passes'. Interpretation: readyState captured first so a late load can't mask it.
