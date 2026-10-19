@@ -19,6 +19,8 @@ Started: 2026-10-19T16:52:28.587Z
 - [x] R1-01 check-site.mjs self-test cases for the uncovered rule branches
 - [x] R1-02 serve-site.mjs: test port precedence, validate SITE_PORT, test the NUL refusal
 - [x] R1-03 check-site-browser.mjs --self-test and no leaked Chrome profile
+- [ ] R2-01 check-site-browser.mjs self-test: console.error, uncaught exception, no buttons, and Chrome really exited
+- [ ] R2-02 serve-site.mjs self-test: SITE_PORT above 65535, empty SITE_PORT, and the siteDir 404 page
 
 ## Log
 (one entry per task, appended by implement)

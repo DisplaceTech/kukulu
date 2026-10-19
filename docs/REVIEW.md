@@ -1,81 +1,49 @@
 # Review: kukulu.tech landing page (build/landing)
-Round: 1
+Round: 2
 
 ## Verdict
 
 CHANGES REQUESTED
 
-Categories 1 and 2 are clean: every constraint passes with no hits and no fixture failures, and nothing outside SPEC §2's allowed file set changed. The page reproduces the mockup: the visible text is identical to `docs/site/mockup.html`'s (7,856 characters compared in full, aria-hidden subtrees included), and every `href`, `id`, `role`, `aria-*`, `scope` and `data-copy-for` value matches the mockup's in order, apart from the root-relative asset paths. The 1440, 768 and 360 px screenshots match `docs/site/screens/` in structure. `kukulu_verify` is green: lint, pre-commit, the check-site self-test (52 cases), serve-site self-test (21 checks), browser check (6 runs) and `npm test` (2,210 assertions).
+Round 1's three fix tasks (R1-01 to R1-03) did what they were asked to do. Every round-1 survivor I re-ran with `kukulu_mutate` is now killed:
 
-Category 3 is not clean. Mutation sampling shows that many of the rules the checkers enforce can be switched off without any test noticing, including every assertion in the rule 15 browser check. The browser check also leaves a Chrome profile directory in the temp dir after every run, which P2-01 says must not happen. Under the round-1 rule, each file with a surviving mutant gets one fix task listing all of its survivors.
+- check-site.mjs: rule 4's empty-status branch and rule 14's `require` branch.
+- serve-site.mjs: the NUL refusal and port-argument precedence.
+- check-site-browser.mjs: the overflow, events-loop, font and copy-button assertions, and removal of the profile `rmSync`.
+
+Categories 1 and 2 are clean. `kukulu_verify` passed every constraint with no hits and no fixture failures. Lint, pre-commit, check:site (69 cases), the serve-site self-test (26 checks), the browser self-test (6 cases), check:site:browser (6 runs) and `npm test` (2,210 assertions) are all green. Nothing under `site/`, `docs/site/`, `mcp/`, `skills/`, `agents/`, `hooks/`, `.claude-plugin/` or `.gitignore` changed in this round. The `docs/kukulu.json` and `site.yml` edits are the ones R1-03 called for. Two full runs left the `/tmp/check-site-browser-*` count unchanged at 14, so the leak fix works.
+
+Category 3 is not clean. Mutating `scripts/check-site-browser.mjs` and `scripts/serve-site.mjs`, the two files this round's fixes touched most, still turns up survivors. The worst one brings back the round-1 profile leak while the new "the Chrome profile is removed" check still passes. Under the round-2 rule in the review-build skill, only files in `git diff --name-only a9f9960..HEAD` are mutated, and a survivor in one of those files becomes a fix task. Both tasks below are queued on mutation results alone, under that rule.
 
 ## Findings
 
-### 1. Category 3: `scripts/check-site-browser.mjs` has no test, so all of rule 15's assertions survive mutation (P2-01)
+### 1. Category 3: `scripts/check-site-browser.mjs`: the leak regression, two of rule 15's failure sources and the no-buttons guard survive mutation (R1-03)
 
-- `scripts/check-site-browser.mjs:189`: the overflow assertion `if (r.scrollWidth > r.clientWidth)` replaced with `if (false)` survived `npm run check:site:browser`.
-- `:197`: the console-error, CSP-violation and uncaught-exception reporting (`for (const e of events) failures.push(...)`) deleted: survived.
-- `:194`: the font assertion `if (!r.font)` replaced with `if (false)`: survived.
-- `:192`: the copy-button assertion (`b.hidden || b.w === 0 || b.h === 0`) replaced with `if (false)`: survived.
+- `:225`: deleting `if (child.exitCode === null && child.signalCode === null) await exited;` survived `node scripts/check-site-browser.mjs --self-test`. With that line gone, the profile is removed while Chrome is still running. Chrome then recreates it: the mutant run left `/tmp/check-site-browser-gHZzu1` holding `Local State`, `Variations` and `Default/`. This is exactly the round-1 finding 2 bug. The self-test's check at `:334` runs `fs.existsSync(profile)` the moment `withBrowser` returns, before Chrome has had time to write the directory back, so it cannot catch this.
+- `:169`: replacing the `Runtime.consoleAPICalled` branch condition with `false` survived. SPEC §6 says "any `Runtime.consoleAPICalled` of type `error` ... fail[s] the check".
+- `:171`: replacing the `Runtime.exceptionThrown` branch condition with `false` survived. SPEC §6 says "any `Runtime.exceptionThrown`" fails the check, and §3 rule 15 says "no uncaught exception". The only event case is the CSP violation, which arrives through `Log.entryAdded`.
+- `:195`: replacing the `r.buttons.length === 0` guard with `false` survived. Without it, a page with no `[data-copy-for]` button passes rule 15's button assertion without testing anything.
 
-A page-side mutant does kill: `.wrap{width:1300px}` in `site/styles.css` failed at 360 and 768, and deleting `button.hidden = false;` from `copy.js` failed every run. So the check works today. The problem is that if the checker breaks, CI goes green and stays green. P2-01's negative test was run once by hand and never committed.
+What breaks: a later edit can quietly drop console-error or exception reporting from rule 15, or bring the profile leak back, and CI stays green.
 
-What breaks: a later edit can quietly disable rule 15, the only automated layout, CSP and font gate, in CI as well.
+Minimal fix: add self-test cases that append `console.error("self-test");` to the copy's `copy.js` (expect `console.error:`) and that append a top-level `throw new Error("self-test")` after the IIFE (expect `uncaught exception:`), and a case that renames every `data-copy-for` attribute (expect `no [data-copy-for] buttons`). Make the profile check prove that Chrome has exited, not just that the directory is gone at one instant. `withBrowser` should hand the session the child's pid. After it returns, the self-test asserts that `process.kill(pid, 0)` throws `ESRCH`, waits briefly, and only then asserts that the profile is absent. The task is R2-01.
 
-Minimal fix: add a `--self-test` that runs the same probe against temp copies of `site/` with one violation injected per assertion, served through `serve-site.mjs`'s `start()` given an optional `siteDir`. Wire it into verify and CI. See R1-03.
+### 2. Category 3: `scripts/serve-site.mjs`: SITE_PORT edge cases and the siteDir 404 page are untested (R1-02, R1-03)
 
-### 2. Category 5: the browser check leaks its temp Chrome profile on every run (P2-01)
+- `:76`: dropping `|| n > 65535` survived. A `SITE_PORT=70000` would then reach `server.listen` and fail with Node's generic error, which R1-02's design constraint forbids.
+- `:74`: dropping `|| env === ""` survived. With that mutant, an empty `SITE_PORT` is refused instead of falling through to `servePort`, which is the opposite of R1-02's recorded interpretation.
+- `:125`: reading `404.html` from `SITE_DIR` instead of `root` survived both the serve-site self-test and the browser self-test. A `start({ siteDir })` server would then serve the repo's 404 page, not the one in the given directory. R1-03 says `siteDir` is used for the site's files.
 
-`scripts/check-site-browser.mjs:219-221` sends `child.kill("SIGKILL")` and calls `fs.rmSync(profile, …)` straight away, without waiting for Chrome to exit. Chrome's child processes are still writing, so they recreate `Default/Cache/...` after the delete. After this review's runs, `/tmp` held 13 `check-site-browser-*` directories, each containing `Default/Cache/Cache_Data/index-dir/the-real-index`. P2-01 requires that "Chrome is killed and the temp profile removed on every exit path, including failure."
+What breaks: the R1-02 validation contract and the `siteDir` behaviour can regress without any test noticing.
 
-Separately, the profile is created (`:142`) before `start({})` (`:143`) and outside the `try`. If the port is already bound, the profile leaks without Chrome ever starting.
+Minimal fix: the self-test calls the module's own `choosePort` directly, so it never binds `servePort`, and checks two cases. With `SITE_PORT="65536"` it must throw with a message naming `SITE_PORT`. With `SITE_PORT=""` it must return `loadConfig(CONFIG_PATH).servePort`. In both cases the environment is restored in a `finally`. The existing siteDir check also requests a missing path and asserts status 404 with the body `alt 404\n`. The task is R2-02.
 
-What breaks: every local run and every CI run leaves a directory behind, and they pile up on developer machines.
+## Interpretation choices (HANDOFF.md, round 1)
 
-Minimal fix: close the browser (`Browser.close` over CDP, then SIGKILL as a fallback after a timeout), await the child's `exit` event before removing the profile, and create the profile inside the `try` after the server starts. The self-test from finding 1 asserts that the profile directory no longer exists after a run. See R1-03.
-
-### 3. Category 3: `scripts/check-site.mjs` rules whose branches no self-test case covers (P1-01, P1-05, P1-06)
-
-Each of these mutants survived `node scripts/check-site.mjs --self-test && node scripts/check-site.mjs`. A control mutant, deleting the proof-table `diff`, was killed by "rule 6: a changed table number", so the harness itself works.
-
-- Rule 4, `:408`: the "status element is not empty" branch disabled.
-- Rule 4, `:402`: the `.copy-label` reading "Copy" check disabled.
-- Rule 4, `:404`: the "has no `<code>` target with that id" check disabled.
-- Rule 4, `:381`: the "line 2 is the `COPY_FEEDBACK_MS` declaration" check disabled.
-- Rule 5, `:433`: the og:image value check weakened to presence only.
-- Rule 5, `:427`: the non-canonical `<link href>` root-relative check disabled.
-- Rule 5, `:441`: the `@import` check disabled.
-- Rule 8, `:305`: the `owner.name` comparison deleted.
-- Rule 9, `:639`: the "print tokens differ from the light tokens" check disabled. The existing case removes the print block entirely, which takes a different path.
-- Rule 9, `:656`: the "token is missing or not `#rgb`/`#rrggbb`" check disabled.
-- Rule 10, `:700`: the `<img>` alt check disabled.
-- Rule 10, `:717`: the button accessible-name check disabled.
-- Rule 10, `:720`: the `<main id="main">` check disabled.
-- Rule 12, `:765` and `:768`: the 2,000-character line limit and the 100-rule limit disabled.
-- Rule 14, `:812`: the CommonJS `require` check disabled.
-- Config, `:71`: the `contrastMin` 1–21 range check disabled.
-
-What breaks: any of these rules can rot without notice. SPEC §7 says the self-test "fails unless each is caught". Today only one branch per rule is proven, and the rest are untested.
-
-Minimal fix: one self-test case per survivor. See R1-01.
-
-### 4. Category 3: `scripts/serve-site.mjs`: port precedence and the NUL refusal are untested (P1-08)
-
-- `:69`: replacing the precedence expression with `port ?? loadConfig(CONFIG_PATH).servePort`, which ignores `SITE_PORT`, survived the whole verify set, including the browser check.
-- `:97`: dropping `|| decoded.includes("\0")` survived. A request for `/%00` then gets a 404 instead of the 403 that P1-08 specifies.
-- `SITE_PORT` is not validated. `SITE_PORT=abc` reaches `server.listen(NaN)` and fails with Node's generic port error, not a message that names `SITE_PORT`.
-
-The `https://` rule filter at `:43` is an equivalent mutant: those patterns can never equal a request path. It is not a finding.
-
-Minimal fix: self-test checks for argument over `SITE_PORT` over `servePort`, a refusal of a bad `SITE_PORT`, and `/%00` returning 403. See R1-02.
-
-## Interpretation choices (HANDOFF.md)
-
-- P1-01, P1-05, P1-06, P1-07, P2-03: consistent with SPEC and PLAN.
-- P1-02 `.btn-outline:hover`: consistent. The mockup's own stylesheet rule is `background:var(--ink);color:var(--bg)`. Only the mockup's inline `color` overrode it.
-- P1-04, label stays "Copy" on failure: this is what PLAN P1-04 specifies. See Notes for one edge case.
-- P1-08, bad %-escape returns 403: PLAN P1-08 specifies this.
-- P1-08, a missing file gets "its own path's headers": PLAN P1-08 says "the `/*` headers". The two readings differ only when a path with its own `_headers` rule (`/marketplace.json`) is missing. Then the 404 HTML body would go out as `Content-Type: application/json`. This is not observable with the shipped file set, so it is recorded under Notes and is not a task.
+- R1-02, "an empty SITE_PORT counts as unset": this is consistent with SPEC §5 ("`SITE_PORT` overrides it") and with the pre-fix truthiness test. It is untested; see finding 2.
+- R1-03, the overflow width comes from a rule appended to the copied `styles.css`: correct. The page's CSP (`style-src 'self'`) blocks inline styles, and the copy is a temp directory, not `site/`.
+- R1-03, one Chrome for every case: acceptable. Each case gets its own server and site copy, and `events` is reset on every visit.
+- The round-0 interpretations were judged in round 1 and are unchanged.
 
 ## Blocked and skipped tasks
 
@@ -83,16 +51,17 @@ None.
 
 ## Spec issues
 
-1. SPEC §7 requires a self-test only for `check-site.mjs`. It gives the browser check none, so rule 15's assertions are proven only by a one-off manual negative check (P2-01). Finding 1 closes this gap with a test. The spec should say that the browser check proves its own assertions too.
-2. Rule 12's line-length and rule-count limits cannot fail on their own while `_headers` must equal SPEC §6's block verbatim. They are kept and tested (R1-01) because SPEC lists them.
+1. Carried from round 1: SPEC §7 requires a self-test only for `check-site.mjs`. The browser check now has one (R1-03), but SPEC still does not ask for it.
+2. Carried from round 1: rule 12's line-length and rule-count limits cannot fail on their own while `_headers` must equal SPEC §6 verbatim.
 
 ## Manual checks still owed
 
-- Phase 1: run `npm run site:serve` and compare with `docs/site/screens/` on desktop and at 360 px, in both color schemes. Tab through the page: the skip link comes first, and every link and button shows a 2 px focus ring. Check that touch targets are 44 px. Press all four copy buttons and paste the result. Judge the "Copied" duration (`copyFeedbackMs` 2400, ⚠️ ASSUMPTION). The reviewer compared headless screenshots at 1440 dark and light, 768 light and 360 dark (scrollbar-narrowed widths of 1425, 753 and 345 px), and they match in structure. A real browser, a phone and focus behaviour are still unverified.
-- Phase 2: deploy a Cloudflare Pages preview per `docs/site/DEPLOY.md` and run its launch checklist, including installing from the preview's `marketplace.json`. Confirm the PR's `site`, `ci` and `lint` checks are green. The new workflow has not run on GitHub.
+- Phase 1: run `npm run site:serve` and compare with `docs/site/screens/` on desktop and at 360 px, in both color schemes. Tab through the page: the skip link comes first, and every link and button shows a 2 px focus ring. Check that touch targets are 44 px. Press all four copy buttons and paste the result. Judge the "Copied" duration (`copyFeedbackMs` 2400, ⚠️ ASSUMPTION). The round-1 reviewer compared headless screenshots, but a real browser, a phone and focus behaviour are still unverified.
+- Phase 2: deploy a Cloudflare Pages preview per `docs/site/DEPLOY.md` and run its launch checklist, including installing from the preview's `marketplace.json`. Confirm the PR's `site`, `ci` and `lint` checks are green. The new workflow, now including the browser self-test step, has not run on GitHub.
 
 ## Notes
 
-- `site/copy.js`: click behaviour (label, status text, the timer) is covered only by the manual copy-button check SPEC §8 prescribes. A mutant that changes "Copied" to "Copy" survives every command. This is not a fix task, because SPEC assigns the behaviour to a human. One edge case: a successful copy followed within 2.4 s by a failed one leaves the label at "Copied" while the status reads "Copy failed…".
-- `scripts/serve-site.mjs`: `/marketplace.json/` (trailing slash) and `/index.html/` resolve to the files and are served with 200. Cloudflare would redirect them. This is harmless locally.
-- `check-site-browser.mjs` collects console events only until 150 ms after the probe resolves. A late asynchronous error would be missed. This is acceptable for a page whose only script runs on load.
+- `scripts/check-site-browser.mjs:200`: the `prefers-color-scheme emulation did not take effect` guard survives `if (false)`. No site injection can make Chrome ignore `Emulation.setEmulatedMedia`, so a self-test cannot kill this mutant. It is advisory, not a task.
+- `scripts/serve-site.mjs` self-test, "the port argument beats SITE_PORT": the test asserts that the ephemeral port differs from the `SITE_PORT` value it just freed. If the kernel ever hands back the same port, the check fails spuriously. The chance is small, so this is not a task.
+- Two of this review's mutants deliberately left Chrome profiles in `/tmp`: `check-site-browser-0CCk2o` (the `rmSync` deletion) and `check-site-browser-gHZzu1` (the `await exited` deletion). The real code does not leave them.
+- Carried from round 1: `copy.js` click behaviour is covered only by the manual check; trailing-slash paths in `serve-site.mjs` serve 200; console events are collected only until 150 ms after the probe.
