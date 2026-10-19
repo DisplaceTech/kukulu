@@ -4,6 +4,7 @@
 //
 // The macron letter is written as an escape in this file, as in scripts/check-names.mjs.
 
+import { spawnSync } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
@@ -13,7 +14,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 // Rules this file implements, for the "ok" line. Each task that adds a rule extends it.
-const IMPLEMENTED_RULES = [1, 2, 3, 4, 5, 6, 7, 8];
+const IMPLEMENTED_RULES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14];
 
 // Files the site is made of besides the seeded assets (SPEC section 4).
 const SITE_FILES = ["index.html", "404.html", "styles.css", "copy.js", "_headers", "robots.txt"];
@@ -248,6 +249,10 @@ export function visibleText(html) {
 
 function rule1(ctx) {
   const allowed = new Set([...SITE_FILES, ...ctx.assetFiles]);
+  const present = new Set(ctx.siteFiles);
+  for (const rel of allowed) {
+    if (!present.has(rel)) ctx.fail(1, `site/${rel}`, `${rel} is missing from the closed file set`, "add it; SPEC section 4 lists every file site/ must hold");
+  }
   for (const rel of ctx.siteFiles) {
     if (allowed.has(rel)) continue;
     const base = path.basename(rel);
@@ -512,6 +517,302 @@ function rule7(ctx) {
   }
 }
 
+// ---- rule 9: tokens and contrast
+
+function stripComments(css) {
+  return css.replace(/\/\*[\s\S]*?\*\//g, "");
+}
+
+// Top-level blocks of a stylesheet (or of a block body): [{ prelude, body }].
+function cssBlocks(css) {
+  const out = [];
+  let depth = 0;
+  let start = 0;
+  let open = -1;
+  for (let i = 0; i < css.length; i++) {
+    if (css[i] === "{") {
+      if (depth === 0) open = i;
+      depth++;
+    } else if (css[i] === "}") {
+      depth--;
+      if (depth === 0) {
+        out.push({ prelude: css.slice(start, open).trim(), body: css.slice(open + 1, i) });
+        start = i + 1;
+      }
+    }
+  }
+  return out;
+}
+
+function customProps(body) {
+  const props = {};
+  for (const m of body.matchAll(/(--[\w-]+)\s*:\s*([^;]+)/g)) props[m[1]] = m[2].trim().replace(/\s+/g, " ");
+  return props;
+}
+
+const squash = (t) => t.replace(/\s+/g, "");
+const LIGHT_QUERY = "@media(prefers-color-scheme:light)";
+
+// Returns { dark, light, print, problems }; light is only the overrides.
+function readTokens(css, label, { strictPrint }) {
+  const problems = [];
+  const blocks = cssBlocks(stripComments(css));
+  const roots = blocks.filter((b) => b.prelude === ":root");
+  if (roots.length !== 1) problems.push(`${label} has ${roots.length} top-level :root rules, not one`);
+  const lights = blocks.filter((b) => squash(b.prelude) === LIGHT_QUERY);
+  if (lights.length !== 1) problems.push(`${label} has ${lights.length} @media (prefers-color-scheme: light) blocks, not one`);
+  const innerRoot = (blk, what) => {
+    const inner = cssBlocks(blk.body);
+    if (inner.length !== 1 || (strictPrint && inner[0].prelude !== ":root")) {
+      problems.push(`${label}'s ${what} block must hold exactly one :root rule`);
+      return {};
+    }
+    return customProps(inner[0].body);
+  };
+  const dark = roots[0] ? customProps(roots[0].body) : {};
+  const light = lights[0] ? innerRoot(lights[0], "light") : {};
+  let print = null;
+  if (strictPrint) {
+    const prints = blocks.filter((b) => squash(b.prelude) === "@mediaprint");
+    if (prints.length !== 1) problems.push(`${label} has ${prints.length} @media print blocks, not one`);
+    else print = innerRoot(prints[0], "print");
+  }
+  return { dark, light, print, problems };
+}
+
+const sameProps = (a, b) => {
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+  return [...keys].filter((k) => (a[k] || "").toLowerCase() !== (b[k] || "").toLowerCase());
+};
+
+function hexRgb(v) {
+  const m = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(v || "");
+  if (!m) return null;
+  const h = m[1].length === 3 ? [...m[1]].map((c) => c + c).join("") : m[1];
+  return [0, 2, 4].map((k) => parseInt(h.slice(k, k + 2), 16));
+}
+
+function luminance(rgb) {
+  const [r, g, b] = rgb.map((c) => {
+    const x = c / 255;
+    return x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+export function contrastRatio(fg, bg) {
+  const [a, b] = [luminance(fg), luminance(bg)].sort((x, y) => y - x);
+  return (a + 0.05) / (b + 0.05);
+}
+
+function pairRatios(tokens, pairs) {
+  return pairs.map(([fg, bg]) => {
+    const fv = tokens[fg];
+    const bv = tokens[bg];
+    const f = hexRgb(fv);
+    const b = hexRgb(bv);
+    return { fg, bg, fgValue: fv, bgValue: bv, ratio: f && b ? contrastRatio(f, b) : null };
+  });
+}
+
+// Per scheme, every configured pair with its ratio. Throws when styles.css has no usable tokens.
+export function contrastReport(overrides = {}) {
+  const opts = { ...defaultOpts(), ...overrides };
+  const config = loadConfig(opts.configPath);
+  const t = readTokens(fs.readFileSync(path.join(opts.siteDir, "styles.css"), "utf8"), "site/styles.css", { strictPrint: true });
+  if (t.problems.length) throw new Error(`check-site: rule 9: site/styles.css: ${t.problems.join("; ")}; fix the token rules`);
+  return {
+    contrastMin: config.contrastMin,
+    dark: pairRatios(t.dark, config.contrastPairs),
+    light: pairRatios({ ...t.dark, ...t.light }, config.contrastPairs),
+  };
+}
+
+function rule9(ctx) {
+  const css = need(ctx, 9, "styles.css");
+  if (css === null) return;
+  const file = "site/styles.css";
+  const t = readTokens(css, file, { strictPrint: true });
+  for (const p of t.problems) ctx.fail(9, file, p, "keep one :root rule, one light media rule and one print media rule");
+  if (t.problems.length) return;
+  const bad = sameProps(t.light, t.print || {});
+  if (bad.length) ctx.fail(9, file, `the @media print tokens differ from the light tokens (${bad.join(", ")})`, "make the print rule repeat the light rule");
+  let mock;
+  try {
+    const tree = parseHtml(fs.readFileSync(ctx.opts.mockupPath, "utf8"));
+    mock = readTokens(byTag(tree, "style").map(textContent).join("\n"), "docs/site/mockup.html", { strictPrint: false });
+  } catch (e) {
+    ctx.fail(9, "docs/site/mockup.html", `cannot be read (${e.code || e.message})`, "restore it from git");
+    return;
+  }
+  const dd = sameProps(t.dark, mock.dark);
+  if (dd.length) ctx.fail(9, file, `dark tokens differ from the mockup's: ${dd.map((k) => `${k} is ${t.dark[k]} not ${mock.dark[k]}`).join(", ")}`, "use the mockup's names and values");
+  const ld = sameProps(t.light, mock.light);
+  if (ld.length) ctx.fail(9, file, `light tokens differ from the mockup's: ${ld.map((k) => `${k} is ${t.light[k]} not ${mock.light[k]}`).join(", ")}`, "use the mockup's names and values");
+  const schemes = { dark: t.dark, light: { ...t.dark, ...t.light } };
+  for (const [scheme, tokens] of Object.entries(schemes)) {
+    for (const r of pairRatios(tokens, ctx.config.contrastPairs)) {
+      const names = `${r.fg} ${r.fgValue} on ${r.bg} ${r.bgValue}`;
+      if (r.ratio === null) ctx.fail(9, file, `${scheme}: ${names} is missing or not a #rgb/#rrggbb colour`, "declare both tokens as hex colours");
+      else if (r.ratio < ctx.config.contrastMin) {
+        ctx.fail(9, file, `${scheme}: ${names} has contrast ${r.ratio.toFixed(2)}, below ${ctx.config.contrastMin}`, "change the colour; the pairs come from docs/site/checks.json");
+      }
+    }
+  }
+}
+
+// ---- rule 10: accessible structure
+
+const FOCUSABLE = (n) =>
+  (n.tag === "a" && "href" in n.attrs) ||
+  ["button", "input", "select", "textarea", "summary"].includes(n.tag) ||
+  (n.attrs.tabindex !== undefined && Number(n.attrs.tabindex) >= 0);
+
+function visibleOf(node) {
+  if (node.text !== undefined) return node.text;
+  if (node.attrs["aria-hidden"] === "true") return "";
+  return node.children.map(visibleOf).join("");
+}
+
+const hiddenAncestor = (n) => {
+  for (let a = n.parent; a; a = a.parent) if (a.attrs && a.attrs["aria-hidden"] === "true") return true;
+  return false;
+};
+
+function rule10(ctx) {
+  for (const rel of HTML_FILES) {
+    const src = need(ctx, 10, rel);
+    if (src === null) continue;
+    const file = `site/${rel}`;
+    const tree = parseHtml(src);
+    const bad = (el, what, fix) => ctx.fail(10, file, `line ${el.line}: ${what}`, fix);
+    const html = byTag(tree, "html")[0];
+    if (!html || html.attrs.lang !== "en") ctx.fail(10, file, '<html> lacks lang="en"', 'write <html lang="en">');
+    const heads = findAll(tree, (n) => /^h[1-6]$/.test(n.tag));
+    const h1s = heads.filter((h) => h.tag === "h1");
+    if (h1s.length !== 1) ctx.fail(10, file, `has ${h1s.length} h1 elements`, "keep exactly one h1");
+    let prev = 0;
+    for (const h of heads) {
+      const level = Number(h.tag[1]);
+      if (level > prev + 1) bad(h, `<${h.tag}> follows ${prev ? `an h${prev}` : "no heading"}, skipping a level`, "do not skip heading levels");
+      prev = level;
+    }
+    for (const img of byTag(tree, "img")) if (!("alt" in img.attrs)) bad(img, "<img> has no alt attribute", 'add alt="" for decoration or describe the image');
+    for (const svg of byTag(tree, "svg")) {
+      const ok = svg.attrs["aria-hidden"] === "true" || hiddenAncestor(svg) || (svg.attrs.role === "img" && (svg.attrs["aria-label"] || "").trim() !== "");
+      if (!ok) bad(svg, '<svg> is not aria-hidden="true" and has no role="img" with an aria-label', 'add aria-hidden="true"');
+    }
+    const ids = new Set(findAll(tree, (n) => "id" in n.attrs).map((n) => n.attrs.id));
+    for (const el of findAll(tree, (n) => (n.attrs.href || "").startsWith("#"))) {
+      const target = el.attrs.href.slice(1);
+      if (!target || !ids.has(target)) bad(el, `href="${el.attrs.href}" has no element with that id`, "point it at an existing id");
+    }
+    const body = byTag(tree, "body")[0];
+    const first = body ? findAll(body, FOCUSABLE)[0] : null;
+    if (!first || first.tag !== "a" || !hasClass(first, "skip") || first.attrs.href !== "#main") {
+      ctx.fail(10, file, `the first focusable element is ${first ? `<${first.tag}> on line ${first.line}` : "missing"}, not the skip link`, 'make <a class="skip" href="#main"> the first focusable element in <body>');
+    }
+    for (const b of byTag(tree, "button")) {
+      if (b.attrs.type !== "button") bad(b, '<button> lacks type="button"', 'add type="button"');
+      if ((b.attrs["aria-label"] || "").trim() === "" && collapse(visibleOf(b)) === "") bad(b, "<button> has no accessible name", "add an aria-label or visible text");
+    }
+    const main = byTag(tree, "main")[0];
+    if (!main || main.attrs.id !== "main") ctx.fail(10, file, 'has no <main id="main">', 'wrap the content in <main id="main">');
+  }
+}
+
+// ---- rule 11: display name
+
+function rule11(ctx) {
+  const r = spawnSync(process.execPath, [ctx.opts.checkNamesPath, ctx.opts.siteDir], { encoding: "utf8" });
+  if (r.status === 0) return;
+  const lines = (r.stderr || "").split("\n").map((l) => l.trim()).filter(Boolean);
+  if (lines.length === 0) lines.push(`check-names exited ${r.status} without a message`);
+  for (const l of lines) ctx.fail(11, "site/", l, "do: write the macron as U+016B and only in the standalone word");
+}
+
+// ---- rule 12: headers (SPEC section 6, verbatim)
+
+const HEADERS = `/*
+  Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; connect-src 'none'; manifest-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; upgrade-insecure-requests
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: no-referrer
+  Permissions-Policy: camera=(), microphone=(), geolocation=()
+  Cross-Origin-Opener-Policy: same-origin
+  Strict-Transport-Security: max-age=31536000
+
+/marketplace.json
+  Content-Type: application/json; charset=utf-8
+  Access-Control-Allow-Origin: *
+
+https://:project.pages.dev/*
+  X-Robots-Tag: noindex
+
+https://:version.:project.pages.dev/*
+  X-Robots-Tag: noindex
+`;
+
+// Cloudflare Pages limits, not tunables.
+const HEADERS_MAX_LINE = 2000;
+const HEADERS_MAX_RULES = 100;
+
+function rule12(ctx) {
+  const text = need(ctx, 12, "_headers");
+  if (text === null) return;
+  if (text !== HEADERS) ctx.fail(12, "site/_headers", "differs from the block in SPEC section 6", "restore it byte for byte, with one trailing newline");
+  const lines = text.split("\n");
+  lines.forEach((l, k) => {
+    if (l.length > HEADERS_MAX_LINE) ctx.fail(12, "site/_headers", `line ${k + 1} is ${l.length} characters, over ${HEADERS_MAX_LINE}`, "shorten it; Cloudflare ignores longer lines");
+  });
+  const rules = lines.filter((l) => l.trim() !== "" && !/^\s/.test(l)).length;
+  if (rules > HEADERS_MAX_RULES) ctx.fail(12, "site/_headers", `has ${rules} rules, over ${HEADERS_MAX_RULES}`, "remove rules; Cloudflare allows at most that many");
+}
+
+// ---- rule 13: size budget
+
+function rule13(ctx) {
+  const size = (rel) => {
+    const p = path.join(ctx.opts.siteDir, rel);
+    return fs.existsSync(p) ? fs.statSync(p).size : 0;
+  };
+  const text = ["index.html", "styles.css", "copy.js", "404.html"].reduce((n, f) => n + size(f), 0);
+  if (text > ctx.config.budget.textBytes) {
+    ctx.fail(13, "site/", `index.html + styles.css + copy.js + 404.html total ${text} bytes, over the budget of ${ctx.config.budget.textBytes}`, "trim the page or raise budget.textBytes in docs/site/checks.json deliberately");
+  }
+  const fonts = ctx.siteFiles.filter((f) => f.startsWith("fonts/") && f.endsWith(".woff2")).reduce((n, f) => n + size(f), 0);
+  if (fonts > ctx.config.budget.fontBytes) {
+    ctx.fail(13, "site/fonts/", `the .woff2 files total ${fonts} bytes, over the budget of ${ctx.config.budget.fontBytes}`, "drop a subset or raise budget.fontBytes in docs/site/checks.json deliberately");
+  }
+}
+
+// ---- rule 14: no dependencies
+
+const DEP_KEYS = ["dependencies", "devDependencies", "optionalDependencies", "peerDependencies"];
+
+function rule14(ctx) {
+  try {
+    const pkg = JSON.parse(fs.readFileSync(ctx.opts.packageJsonPath, "utf8"));
+    for (const k of DEP_KEYS) if (k in pkg) ctx.fail(14, "package.json", `has a ${k} key`, "remove it; the repo has no dependencies");
+  } catch (e) {
+    ctx.fail(14, "package.json", `cannot be read as JSON (${e.code || e.message})`, "restore it from git");
+  }
+  const specs = [
+    /\bimport\s+(?:[^"';]*?\sfrom\s+)?["']([^"']+)["']/g,
+    /\bimport\(\s*["']([^"']+)["']\s*\)/g,
+  ];
+  const requireCall = new RegExp("\\brequire\\s*\\(");
+  for (const p of ctx.opts.scriptPaths) {
+    const name = `scripts/${path.basename(p)}`;
+    const text = fs.readFileSync(p, "utf8");
+    for (const re of specs) {
+      for (const m of text.matchAll(re)) {
+        if (!m[1].startsWith("node:") && !m[1].startsWith("./")) ctx.fail(14, name, `imports "${m[1]}"`, 'import only "node:" built-ins or "./" files');
+      }
+    }
+    if (requireCall.test(text)) ctx.fail(14, name, "uses CommonJS require", 'use import with a "node:" specifier');
+  }
+}
+
 export function checkSite(overrides = {}) {
   const opts = { ...defaultOpts(), ...overrides };
   const failures = [];
@@ -532,6 +833,12 @@ export function checkSite(overrides = {}) {
   rule6(ctx);
   rule7(ctx);
   rule8(ctx);
+  rule9(ctx);
+  rule10(ctx);
+  rule11(ctx);
+  rule12(ctx);
+  rule13(ctx);
+  rule14(ctx);
   return failures;
 }
 
@@ -612,6 +919,55 @@ CASES.push(
   { rule: 6, name: "rule 6: the ASCII display name in prose", expect: "ASCII spelling", inject: (t) => sub(t, "index.html", "Kūkulu never merges", "Kukulu never merges") },
   { rule: 7, name: "rule 7: a changed hero install id", expect: "#install-session reads", inject: (t) => sub(t, "index.html", "/plugin install kukulu@displacetech", "/plugin install kukulu@example") },
   { rule: 7, name: "rule 7: the shell install line removed", expect: "#install-shell reads", inject: (t) => sub(t, "index.html", "\nclaude plugin install kukulu@displacetech", "") },
+);
+
+// Replace text only inside the part of a file that follows `after`.
+function subAfter(t, file, after, from, to) {
+  const p = path.join(t.site, file);
+  const text = fs.readFileSync(p, "utf8");
+  const at = text.indexOf(after);
+  if (at === -1 || !text.includes(from, at)) throw new Error(`self-test case cannot find ${JSON.stringify(from)} after ${JSON.stringify(after)} in site/${file}`);
+  const k = text.indexOf(from, at);
+  fs.writeFileSync(p, text.slice(0, k) + to + text.slice(k + from.length));
+}
+
+CASES.push(
+  { rule: 1, name: "rule 1: robots.txt deleted", expect: "robots.txt is missing", inject: (t) => fs.rmSync(path.join(t.site, "robots.txt")) },
+  { rule: 9, name: "rule 9: a darker dark --muted", expect: "--muted", inject: (t) => sub(t, "styles.css", "--muted:#A7B3BD", "--muted:#333333") },
+  { rule: 9, name: "rule 9: contrastMin 21", expect: "below 21", inject: (t) => editConfig(t, (c) => { c.contrastMin = 21; }) },
+  { rule: 9, name: "rule 9: the print block removed", expect: "@media print blocks", inject: (t) => {
+    const p = path.join(t.site, "styles.css");
+    fs.writeFileSync(p, fs.readFileSync(p, "utf8").replace(/@media print\{[^\n]*\n/, ""));
+  } },
+  { rule: 9, name: "rule 9: a changed light --accent-text", expect: "light tokens differ", inject: (t) => subAfter(t, "styles.css", "prefers-color-scheme: light", "--accent-text:#8E4C0B", "--accent-text:#8E4C0C") },
+  { rule: 10, name: "rule 10: lang removed", expect: 'lacks lang="en"', inject: (t) => sub(t, "index.html", '<html lang="en">', "<html>") },
+  { rule: 10, name: "rule 10: a second h1", expect: "2 h1 elements", inject: (t) => sub(t, "index.html", "</main>", "<h1>Again</h1></main>") },
+  { rule: 10, name: "rule 10: an h4 after the h1 in 404.html", expect: "skipping a level", inject: (t) => sub(t, "404.html", "Page not found.</h1>", "Page not found.</h1><h4>x</h4>") },
+  { rule: 10, name: "rule 10: an svg that is not aria-hidden", expect: "<svg> is not aria-hidden", inject: (t) => sub(t, "index.html", 'viewBox="0 0 32 32" aria-hidden="true"', 'viewBox="0 0 32 32"') },
+  { rule: 10, name: "rule 10: a dangling fragment link", expect: 'href="#nowhere"', inject: (t) => sub(t, "index.html", "</main>", '<a href="#nowhere">x</a></main>') },
+  { rule: 10, name: "rule 10: a link before the skip link", expect: "not the skip link", inject: (t) => sub(t, "index.html", '<a class="skip"', '<a href="/">x</a><a class="skip"') },
+  { rule: 10, name: "rule 10: a button without type", expect: 'lacks type="button"', inject: (t) => sub(t, "index.html", '<button type="button" class="copy"', '<button class="copy"') },
+  { rule: 11, name: "rule 11: a decomposed display name", expect: "do: write the macron", inject: (t) => sub(t, "index.html", "Hawaiian for", `K${"u" + "\u0304"}kulu is Hawaiian for`) },
+  { rule: 12, name: "rule 12: a changed Referrer-Policy", expect: "differs from the block in SPEC", inject: (t) => sub(t, "_headers", "Referrer-Policy: no-referrer", "Referrer-Policy: same-origin") },
+  { rule: 12, name: "rule 12: a Cache-Control line", expect: "differs from the block in SPEC", inject: (t) => sub(t, "_headers", "  X-Content-Type-Options", "  Cache-Control: max-age=60\n  X-Content-Type-Options") },
+  {
+    rule: 13,
+    name: "rule 13: text over budget",
+    expect: "over the budget",
+    inject: (t) => sub(t, "index.html", "</body>", `<!--${"x".repeat(readJson(t.config).budget.textBytes + 1)}--></body>`),
+  },
+  { rule: 13, name: "rule 13: fontBytes 1000", expect: "the .woff2 files total", inject: (t) => editConfig(t, (c) => { c.budget.fontBytes = 1000; }) },
+  {
+    rule: 14,
+    name: "rule 14: a devDependencies key",
+    expect: "devDependencies",
+    inject: (t) => {
+      const pkg = readJson(t.pkg);
+      pkg.devDependencies = { "left-pad": "1.3.0" };
+      writeJson(t.pkg, pkg);
+    },
+  },
+  { rule: 14, name: "rule 14: a third-party import", expect: 'imports "left-pad"', inject: (t) => fs.appendFileSync(path.join(t.scripts, "check-site.mjs"), ["", "import pad " + "from" + ' "left-pad";', ""].join("\n")) },
 );
 
 function makeTemp(opts) {
