@@ -7,7 +7,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import {
-  finish, ok, eq, like, isError, ROOT, plannedRepo, cleanroomRepo, withServer, runHook, mkDir, writeFile, readFile, hasFile, git, subject, testKeyFor,
+  finish, ok, eq, like, isError, ROOT, plannedRepo, cleanroomRepo, withServer, runHook, mkDir, writeFile, readFile, hasFile, git, subject, testKeyFor, addPlan, commitTask,
 } from "./harness.mjs";
 import { spawn, spawnSync } from "node:child_process";
 import { createHash as sha, generateKeyPairSync } from "node:crypto";
@@ -180,17 +180,17 @@ const LOGGER = path.join(ROOT, "scripts", "cleanroom-log.mjs");
 
 const tmpLog = () => path.join(mkDir("kukulu-chain-"), ".kukulu", "cleanroom", "log.jsonl");
 const linesOf = (log) => fs.readFileSync(log, "utf8").split("\n").filter(Boolean);
-const call = (n) => ({ kind: "allowed", stage: "implement", task: "P0-01", role: "session", tool: "Read", target: `/x/${n}`, decision: "allowed" });
+const sample = (n) => ({ kind: "allowed", stage: "implement", task: "P0-01", role: "session", tool: "Read", target: `/x/${n}`, decision: "allowed" });
 
 {
   const log = tmpLog();
-  const first = appendEntry(log, call(1));
+  const first = appendEntry(log, sample(1));
   eq(first.seq, 1, "appendEntry writes seq 1");
   eq(first.prev, ZERO_HASH, "...with a 64-zero prev");
   eq(ZERO_HASH.length, 64, "ZERO_HASH is 64 characters");
   like(first.at, /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/, "...a millisecond UTC timestamp");
   eq(first.model, null, "...and every field the caller left out is null");
-  const second = appendEntry(log, { ...call(2), data: { k: 1 } });
+  const second = appendEntry(log, { ...sample(2), data: { k: 1 } });
   eq(second.seq + "|" + second.prev, `2|${first.hash}`, "appendEntry links the second entry to the first");
   eq(Object.keys(second).join(","), [...ENTRY_KEYS, "data", "hash"].join(","), "a stored entry has the format's keys in order, data before hash");
   eq(entryHash(second.prev, (({ hash, ...r }) => r)(second)), second.hash, "the hash is SHA-256 of prev, a newline and the canonical entry");
@@ -202,9 +202,9 @@ const call = (n) => ({ kind: "allowed", stage: "implement", task: "P0-01", role:
   let refused = null;
   try { appendEntry(log, { kind: "bogus" }); } catch (e) { refused = e; }
   ok(refused instanceof CleanroomError && /kind must be one of/.test(refused.message), "appendEntry refuses an unknown kind");
-  try { appendEntry(log, { ...call(3), seq: 9 }); refused = null; } catch (e) { refused = e; }
+  try { appendEntry(log, { ...sample(3), seq: 9 }); refused = null; } catch (e) { refused = e; }
   like(refused?.message, /fills 'seq' itself/, "...and a caller-supplied seq");
-  try { appendEntry(log, { ...call(3), extra: 1 }); refused = null; } catch (e) { refused = e; }
+  try { appendEntry(log, { ...sample(3), extra: 1 }); refused = null; } catch (e) { refused = e; }
   like(refused?.message, /unknown field 'extra'/, "...and an unknown field");
   eq(readEntries(log).length, 2, "...and a refusal writes nothing");
 }
@@ -222,7 +222,7 @@ const call = (n) => ({ kind: "allowed", stage: "implement", task: "P0-01", role:
 
 {
   const log = tmpLog();
-  for (let i = 1; i <= 5; i++) appendEntry(log, call(i));
+  for (let i = 1; i <= 5; i++) appendEntry(log, sample(i));
   const lines = linesOf(log);
   const v = verifyChain(lines);
   eq(v.ok + "|" + v.entries.length + "|" + (v.tip === JSON.parse(lines[4]).hash) + "|" + v.firstBad, "true|5|true|null", "verifyChain accepts an intact chain");
@@ -267,13 +267,13 @@ const call = (n) => ({ kind: "allowed", stage: "implement", task: "P0-01", role:
   fs.mkdirSync(log + ".lock");
   const started = Date.now();
   let refused = null;
-  try { appendEntry(log, call(1)); } catch (e) { refused = e; }
+  try { appendEntry(log, sample(1)); } catch (e) { refused = e; }
   const waited = Date.now() - started;
   ok(refused instanceof CleanroomError && refused.message.includes(log + ".lock"), "appendEntry gives up on a lock held over two seconds, naming the lock");
   ok(waited >= 1900 && waited < 6000, `...after about two seconds (${waited} ms)`);
   ok(!fs.existsSync(log), "...and writes nothing");
   fs.rmdirSync(log + ".lock");
-  eq(appendEntry(log, call(1)).seq, 1, "...and works again once the lock is gone");
+  eq(appendEntry(log, sample(1)).seq, 1, "...and works again once the lock is gone");
 }
 
 {
@@ -476,6 +476,118 @@ const stateOf = (repo) => (hasFile(repo, ".kukulu/state.json") ? JSON.parse(read
   await withServer(repo, async ({ call }) => {
     isError(await call("kukulu_next"), /policy version must be 1/, "an invalid policy file is a refusal at genesis");
     ok(!hasFile(repo, ".kukulu/cleanroom/log.jsonl") && !hasFile(repo, ".kukulu/state.json"), "...and nothing is written");
+  });
+}
+
+// ---------------------------------------------------------------- checkpoints from the tools
+
+const LOG = (repo) => path.join(repo, ".kukulu", "cleanroom", "log.jsonl");
+const checkpoints = (repo, log = LOG(repo)) => readEntries(log).filter((e) => e.kind === "checkpoint");
+const touched = (repo, ref = "HEAD") => git(repo, ["show", "--name-only", "--format=", ref]).split("\n").filter(Boolean);
+
+/** A clean-room project taken past genesis, with its plan committed. */
+async function genesisRepo(planOpts = {}) {
+  const repo = cleanroomRepo();
+  await withServer(repo, async ({ call }) => { await call("kukulu_next"); });
+  addPlan(repo, planOpts);
+  return repo;
+}
+
+{
+  const repo = await genesisRepo({ config: { flight: "w1" } });
+  const publicKey = loadKey(testKeyFor(repo)).publicKey;
+  await withServer(repo, async ({ call }) => {
+    // The hooks append to the log after every tool call, so the log is routinely dirty between commits.
+    appendEntry(LOG(repo), sample(0));
+    await call("kukulu_run_start");
+    let cps = checkpoints(repo);
+    eq(cps.length + "|" + cps[0].data.event, "1|run-start", "kukulu_run_start appends a run-start checkpoint (with a dirty log)");
+    ok(touched(repo).includes(".kukulu/cleanroom/log.jsonl") && subject(repo) === "chore: start implementation run", "...and commits the log with its own files");
+    eq(git(repo, ["status", "--porcelain"]), "", "...leaving a clean tree");
+
+    await call("kukulu_task_next");
+    commitTask(repo, "P0-01", "Create hello", { "hello.txt": "hi\n" });
+    appendEntry(LOG(repo), sample(1));
+    await call("kukulu_task_done", { id: "P0-01", log: "done" });
+    cps = checkpoints(repo);
+    eq(cps[cps.length - 1].data.event, "kukulu_task_done", "kukulu_task_done appends a kukulu_task_done checkpoint (tolerating an uncommitted log append)");
+    ok(touched(repo).includes(".kukulu/cleanroom/log.jsonl") && touched(repo).includes("docs/PROGRESS.md"), "...committing the log with PROGRESS.md");
+
+    await call("kukulu_task_next");
+    writeFile(repo, "debris.txt", "half done\n");
+    appendEntry(LOG(repo), sample(2));
+    const lines = readEntries(LOG(repo)).length;
+    await call("kukulu_task_block", { id: "P0-02", reason: "cannot" });
+    cps = checkpoints(repo);
+    eq(cps[cps.length - 1].data.event, "kukulu_task_block", "kukulu_task_block appends a kukulu_task_block checkpoint");
+    ok(!hasFile(repo, "debris.txt") && readEntries(LOG(repo)).length === lines + 1, "...and its hard reset does not throw the hooks' log entries away");
+
+    await call("kukulu_task_next");
+    writeFile(repo, "docs/HANDOFF.md", "# Handoff\n");
+    appendEntry(LOG(repo), sample(3));
+    await call("kukulu_run_finish");
+    cps = checkpoints(repo);
+    eq(cps[cps.length - 1].data.event, "kukulu_run_finish", "kukulu_run_finish appends a kukulu_run_finish checkpoint (tolerating an uncommitted log append)");
+
+    writeFile(repo, "docs/REVIEW.md", "# Review\nRound: 1\n**Verdict**: APPROVED\n");
+    await call("kukulu_review_submit", { verdict: "APPROVED" });
+    cps = checkpoints(repo);
+    eq(cps[cps.length - 1].data.event, "kukulu_review_submit", "kukulu_review_submit appends a kukulu_review_submit checkpoint");
+    await call("kukulu_summary_commit", { content: "# Summary\n" });
+    cps = checkpoints(repo);
+    eq(cps[cps.length - 1].data.event, "kukulu_summary_commit", "kukulu_summary_commit appends a kukulu_summary_commit checkpoint");
+    ok(touched(repo).includes(".kukulu/cleanroom/log.jsonl"), "...committing the log with SUMMARY.md");
+
+    const before = checkpoints(repo).length;
+    const arch = await call("kukulu_flight_archive");
+    ok(!arch.error, "kukulu_flight_archive succeeds in clean-room mode");
+    ok(!hasFile(repo, ".kukulu/cleanroom/log.jsonl"), "the archive moves the log out of .kukulu/cleanroom/");
+    const archived = path.join(repo, "docs", "flights", "w1", "cleanroom", "log.jsonl");
+    ok(fs.existsSync(archived), "...into docs/flights/<slug>/cleanroom/");
+    const archivedLines = fs.readFileSync(archived, "utf8").split("\n").filter(Boolean);
+    ok(verifyChain(archivedLines).ok, "...a log that still verifies");
+    const all = checkpoints(repo, archived);
+    eq(all.length, before + 1, "...with the archive's own checkpoint last");
+    eq(all[all.length - 1].data.event, "kukulu_flight_archive", "...named kukulu_flight_archive");
+    eq(all.map((e) => e.data.event).join(","), "run-start,kukulu_task_done,kukulu_task_block,kukulu_run_finish,kukulu_review_submit,kukulu_summary_commit,kukulu_flight_archive", "the checkpoints appear in the order the tools ran");
+    eq(all.every((e) => verifyCheckpoint(e, publicKey)), true, "every checkpoint verifies with the public key");
+    eq(all[0].data.git.length, 40, "...each recording the full HEAD sha");
+    eq(all[0].data.keyFingerprint, loadKey(testKeyFor(repo)).fingerprint, "...and the key's fingerprint");
+    eq(git(repo, ["status", "--porcelain"]), "", "the archive leaves a clean tree");
+  });
+}
+
+{
+  // A failed progress commit restores the log byte for byte (the commit-failure protocol).
+  const repo = await genesisRepo();
+  await withServer(repo, async ({ call }) => {
+    await call("kukulu_run_start");
+    await call("kukulu_task_next");
+    commitTask(repo, "P0-01", "Create hello", { "hello.txt": "hi\n" });
+    const hook = path.join(repo, ".git", "hooks", "commit-msg");
+    fs.mkdirSync(path.dirname(hook), { recursive: true });
+    fs.writeFileSync(hook, `#!/bin/sh\nif head -n1 "$1" | grep -q '^progress:'; then echo rejected >&2; exit 1; fi\n`);
+    fs.chmodSync(hook, 0o755);
+    const files = ["docs/PROGRESS.md", ".kukulu/cleanroom/log.jsonl"];
+    const before = files.map((f) => readFile(repo, f));
+    const head = git(repo, ["rev-parse", "HEAD"]);
+    ok((await call("kukulu_task_done", { id: "P0-01", log: "x" })).error, "a failed progress commit is an error");
+    files.forEach((f, i) => eq(readFile(repo, f), before[i], `...${f} is byte-identical`));
+    eq(git(repo, ["diff", "--cached", "--name-only"]), "", "...nothing is staged");
+    eq(git(repo, ["rev-parse", "HEAD"]), head, "...HEAD did not move");
+  });
+}
+
+{
+  // General mode: no checkpoint, no log.
+  const repo = plannedRepo();
+  await withServer(repo, async ({ call }) => {
+    await call("kukulu_run_start");
+    await call("kukulu_task_next");
+    commitTask(repo, "P0-01", "Create hello", { "hello.txt": "hi\n" });
+    await call("kukulu_task_done", { id: "P0-01", log: "done" });
+    ok(!hasFile(repo, ".kukulu/cleanroom"), "general mode writes no checkpoint and no log");
+    ok(!touched(repo).some((f) => f.includes("cleanroom")), "...and commits nothing about one");
   });
 }
 

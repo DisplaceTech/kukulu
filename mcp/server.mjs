@@ -15,7 +15,7 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { CleanroomError, loadPolicy, policyHash, appendEntry, logPathFor, generateKey, loadKey } from "./cleanroom.mjs";
+import { CleanroomError, loadPolicy, policyHash, appendEntry, readEntries, logPathFor, generateKey, loadKey, signCheckpoint, ZERO_HASH } from "./cleanroom.mjs";
 
 /**
  * An environment variable by its Kūkulu name. An empty value counts as unset,
@@ -142,6 +142,41 @@ function cleanroomGenesis(cc, st) {
     gitCommitIfChanged(paths, "chore: clean-room genesis");
   });
 }
+
+/** The log, as a path list for withRollback and a commit, when this flight is in clean-room mode and the log lives in the repository. */
+function cleanroomPaths(st) {
+  const logPath = cleanroomLogPath();
+  return st.cleanroom?.genesis && !path.relative(ROOT, logPath).startsWith("..") ? [logPath] : [];
+}
+
+/**
+ * Append a signed checkpoint: the chain tip, the commit it was written at, the
+ * hashes of everything the gate pins as they are now, and the key's
+ * fingerprint. General mode, and a flight that has no genesis yet, write none.
+ * The caller commits the log with its own files.
+ */
+function checkpoint(event, stage, st) {
+  if (!st.cleanroom?.genesis) return;
+  const cc = cfg();
+  const key = loadKey(cc.cleanroom.signingKey);
+  const logPath = cleanroomLogPath();
+  const entries = readEntries(logPath);
+  const data = signCheckpoint(
+    {
+      chainTip: entries.length ? entries[entries.length - 1].hash : ZERO_HASH,
+      git: git(["rev-parse", "HEAD"]).out,
+      policyHash: policyHash(fs.readFileSync(cleanroomPolicyPath(cc))),
+      ...pluginHashes(),
+      keyFingerprint: key.fingerprint,
+      event,
+    },
+    key.privateKey,
+  );
+  appendEntry(logPath, { kind: "checkpoint", stage, role: "session", data });
+}
+
+/** The stage a bookkeeping tool's entries are filed under. */
+const implementStage = (st) => (st.round >= 1 ? "fix" : "implement");
 
 const TASK_ID = /\b[PR]\d+-\d+\b/g;
 const TASK_LINE = /^- \[( |~|x|!|-)\] ([PR]\d+-\d+)(?: (.*))?$/;
@@ -323,8 +358,21 @@ function porcelainExcludingPreexisting(ignore, cwd = ROOT) {
   return git(["status", "--porcelain", "--untracked-files=all"], { cwd })
     .out.split("\n")
     .filter(Boolean)
-    .filter((l) => !(l.startsWith("?? ") && set.has(l.slice(3))));
+    .filter((l) => !(l.startsWith("?? ") && set.has(l.slice(3))))
+    .filter((l) => !isCleanroomLogLine(l));
 }
+
+/**
+ * The clean-room log is appended to by hooks after every tool call, including the
+ * call that is checking the tree, so a dirty log is normal and never a finding.
+ * Only a checkpoint commits it.
+ */
+const cleanroomLogRel = () => rel(path.join(P.stateDir, "cleanroom", "log.jsonl"));
+// git() trims its output, which can eat the first line's leading space, so the path is matched from the end.
+const isCleanroomLogLine = (l) => l.endsWith(` ${cleanroomLogRel()}`);
+
+/** Uncommitted changes to tracked files, as porcelain lines, apart from the clean-room log. */
+const trackedDirtyLines = (cwd = ROOT) => git(["status", "--porcelain", "--untracked-files=no"], { cwd }).out.split("\n").filter(Boolean).filter((l) => !isCleanroomLogLine(l));
 
 function loadConfig() {
   if (!exists(P.config)) return null;
@@ -1862,7 +1910,7 @@ function startRun() {
     // regardless (F-09). Only uncommitted changes to *tracked* files are
     // grounds to refuse — those would otherwise ride along into a task's
     // first commit or be stranded on a branch nobody asked to switch to.
-    const trackedDirty = git(["status", "--porcelain", "--untracked-files=no"]).out !== "";
+    const trackedDirty = trackedDirtyLines().length > 0;
     if (trackedDirty) throw new ToolError(`working tree is dirty on ${c.baseBranch}; commit or stash before starting a run`);
     let name = `${c.branchPrefix}${today()}`;
     let n = 2;
@@ -1888,7 +1936,8 @@ function startRun() {
   if (cleanroomOn(c)) ensureKey(c);
 
   // .gitignore the lock, arm it, stamp PROGRESS, commit.
-  const sha = withRollback([P.gitignore, P.progress, P.state, P.feedback], () => {
+  const crPaths = cleanroomPaths(st);
+  const sha = withRollback([P.gitignore, P.progress, P.state, P.feedback, ...crPaths], () => {
   ensureLineInFile(P.gitignore, rel(P.lock));
   // Only a plan that declares streams ever creates worktrees, so only such a
   // plan gets the extra line (a plan without streams stays byte-identical).
@@ -1914,7 +1963,8 @@ function startRun() {
   if (c.policies.feedback && st.signing.startsWith("off (probe failed")) {
     appendFeedback("implement", `Signing disabled for this run: ${st.signing}`, "signing", "auto");
   }
-  return gitCommitIfChanged([P.gitignore, P.progress, P.state, P.feedback], st.round === 0 ? "chore: start implementation run" : `chore: start review-fix round ${st.round}`);
+  checkpoint("run-start", implementStage(st), st);
+  return gitCommitIfChanged([P.gitignore, P.progress, P.state, P.feedback, ...crPaths], st.round === 0 ? "chore: start implementation run" : `chore: start review-fix round ${st.round}`);
   });
   return { alreadyStarted: false, branch, commit: sha, counts: counts(pr.tasks), round: st.round, policies: st.policies, signing: st.signing, basePush };
 }
@@ -2013,7 +2063,7 @@ function streamFinish({ stream } = {}) {
   // Every stream call leaves PROGRESS.md/state.json changes for the next
   // commit; land them first so the merge starts from a clean tracked tree.
   gitCommitIfChanged([P.progress, P.state, P.feedback], `progress: sync before merging stream ${stream}`);
-  const stray = git(["status", "--porcelain", "--untracked-files=no"]).out;
+  const stray = trackedDirtyLines().join("\n");
   if (stray) throw new ToolError(`the main checkout has uncommitted tracked changes; commit or discard them before merging stream '${stream}':\n${stray}`);
 
   const before = git(["rev-parse", "HEAD"]).out;
@@ -2160,11 +2210,14 @@ function taskDone({ stream, id, log }) {
     );
   }
   const sha = git(["rev-parse", "--short", "HEAD"], { cwd }).out;
-  const psha = withRollback([P.progress], () => {
+  const stDone = loadState();
+  const crPaths = cleanroomPaths(stDone);
+  const psha = withRollback([P.progress, ...crPaths], () => {
     setTaskState(pr, id, "x");
     appendLog(pr, id, sha, log);
     writeProgress(pr);
-    return gitCommitIfChanged([P.progress], `progress: ${id} done`);
+    checkpoint("kukulu_task_done", implementStage(stDone), stDone);
+    return gitCommitIfChanged([P.progress, ...crPaths], `progress: ${id} done`);
   });
   resetLockCounter();
   return { id, taskCommit: sha, progressCommit: psha, counts: counts(pr.tasks), guardReset: true, ...(stream !== undefined ? { stream } : {}) };
@@ -2185,14 +2238,20 @@ function taskBlock({ stream, id, reason }) {
   // delete it outright, which is worse than merely being tempted to move it.
   // For a stream this happens in the stream's worktree only: the main
   // checkout holds every other stream's uncommitted bookkeeping.
+  // The clean-room log is tracked and the hooks append to it all the time; a hard reset would throw those entries away.
+  const stBlock = loadState();
+  const crPaths = cleanroomPaths(stBlock);
+  const logBytes = crPaths.length && exists(crPaths[0]) ? fs.readFileSync(crPaths[0]) : null;
   git(["reset", "-q", "--hard", "HEAD"], { cwd });
+  if (logBytes !== null && cwd === ROOT) fs.writeFileSync(crPaths[0], logBytes);
   git(["clean", "-qfd", ...(ignore || []).flatMap((p) => ["-e", gitCleanExcludePattern(p)])], { cwd });
   pr = parseProgress();
-  const psha = withRollback([P.progress], () => {
+  const psha = withRollback([P.progress, ...crPaths], () => {
     setTaskState(pr, id, "!");
     appendLog(pr, id, "blocked", `BLOCKED: ${reason}`);
     writeProgress(pr);
-    return gitCommitIfChanged([P.progress], `progress: ${id} blocked`);
+    checkpoint("kukulu_task_block", implementStage(stBlock), stBlock);
+    return gitCommitIfChanged([P.progress, ...crPaths], `progress: ${id} blocked`);
   });
   resetLockCounter();
   return { id, progressCommit: psha, counts: counts(pr.tasks), ...(stream !== undefined ? { stream } : {}) };
@@ -2677,9 +2736,11 @@ function runFinish() {
   }
 
   st.implemented = true; st.reviewed = false; st.verdict = null;
-  const stateCommit = withRollback([P.state], () => {
+  const crPaths = cleanroomPaths(st);
+  const stateCommit = withRollback([P.state, ...crPaths], () => {
     saveState(st);
-    return gitCommitIfChanged([P.state], `chore: round ${st.round} implemented`);
+    checkpoint("kukulu_run_finish", implementStage(st), st);
+    return gitCommitIfChanged([P.state, ...crPaths], `chore: round ${st.round} implemented`);
   });
 
   const push = pushBranch(g.branch, st.policies.push);
@@ -2884,9 +2945,11 @@ function reviewSubmit({ verdict, tasks = [], unblock = [] }) {
     if (tasks.length || unblock.length) throw new ToolError("an APPROVED verdict cannot carry fix tasks or unblocks");
     st.reviewed = true; st.verdict = "APPROVED";
     st.rounds = [...st.rounds, { round: N, fixTasks: 0, unblocked: 0, verdict: "APPROVED", sources: { review: 0, mutation: 0, blocked: 0 }, at: new Date().toISOString() }];
-    const sha = withRollback([P.review, P.state], () => {
+    const crPaths = cleanroomPaths(st);
+    const sha = withRollback([P.review, P.state, ...crPaths], () => {
       saveState(st);
-      return gitCommitIfChanged([P.review, P.state], `review: round ${N} approved`, { stage: "review" });
+      checkpoint("kukulu_review_submit", "review", st);
+      return gitCommitIfChanged([P.review, P.state, ...crPaths], `review: round ${N} approved`, { stage: "review" });
     });
     const push = pushBranch(gitFacts().branch, st.policies.push);
     // `round` is the number this review was stamped with, as for CHANGES
@@ -2917,7 +2980,8 @@ function reviewSubmit({ verdict, tasks = [], unblock = [] }) {
   }
   const unblocked = [];
   const reopened = [];
-  const sha = withRollback([P.review, P.plan, P.progress, P.state, P.feedback], () => {
+  const crPaths = cleanroomPaths(st);
+  const sha = withRollback([P.review, P.plan, P.progress, P.state, P.feedback, ...crPaths], () => {
     if (tasks.length) {
       const block = [``, `## Review fixes (round ${N})`, ``, ...tasks.map((t, i) => formatTask(ids[i], t) + "\n")].join("\n");
       write(P.plan, read(P.plan).replace(/\s*$/, "\n") + block);
@@ -2961,7 +3025,8 @@ function reviewSubmit({ verdict, tasks = [], unblock = [] }) {
     }
     if (st.halted && c.policies.feedback) appendFeedback("review", st.halted, "round-cap", "auto");
     saveState(st);
-    return gitCommitIfChanged([P.review, P.plan, P.progress, P.state, P.feedback], `review: round ${N}`, { stage: "review" });
+    checkpoint("kukulu_review_submit", "review", st);
+    return gitCommitIfChanged([P.review, P.plan, P.progress, P.state, P.feedback, ...crPaths], `review: round ${N}`, { stage: "review" });
   });
   const push = pushBranch(gitFacts().branch, st.policies.push);
   // Re-read rather than reuse `pr`: appendTaskLines edits pr.lines but not
@@ -3052,10 +3117,12 @@ function summaryCommit({ content } = {}) {
     }
   }
   st.summarized = true;
-  const sha = withRollback([P.summary, P.state, P.feedback], () => {
+  const crPaths = cleanroomPaths(st);
+  const sha = withRollback([P.summary, P.state, P.feedback, ...crPaths], () => {
     if (content !== undefined) write(P.summary, content.endsWith("\n") ? content : `${content}\n`);
     saveState(st);
-    return gitCommitIfChanged([P.summary, P.state, P.feedback], "chore: build summary", { stage: "summarize" });
+    checkpoint("kukulu_summary_commit", "summarize", st);
+    return gitCommitIfChanged([P.summary, P.state, P.feedback, ...crPaths], "chore: build summary", { stage: "summarize" });
   });
   const g = gitFacts();
   const push = pushBranch(g.branch, st.policies.push);
@@ -3234,6 +3301,12 @@ function prFinalize({ breaking, resign } = {}) {
   };
 }
 
+/** The clean-room files an archive moves: the log, and the similarity record when there is one. Empty outside clean-room mode. */
+function cleanroomMovables(st) {
+  if (!st.cleanroom?.genesis) return [];
+  return [cleanroomLogPath(), path.join(P.stateDir, "cleanroom", "similarity.json")].filter((abs) => !path.relative(ROOT, abs).startsWith("..") && exists(abs));
+}
+
 /** The files an archive moves, as [absolute path, repo-relative name]; a move keeps each file's name. */
 const archivedFiles = () => [P.plan, P.progress, P.handoff, P.review, P.summary, P.config, P.state, P.feedback].map((abs) => [abs, rel(abs)]);
 
@@ -3260,13 +3333,23 @@ function flightArchive({ slug } = {}) {
 
   const sources = archivedFiles().filter(([abs]) => exists(abs));
   const copyDest = path.join(dir, "SPEC.md");
-  const touched = [...sources.map(([abs]) => abs), ...sources.map(([abs]) => path.join(dir, path.basename(abs))), copyDest, P.state, P.feedback];
+  // The clean-room log (and the similarity record) go to docs/flights/<slug>/cleanroom/, so the next flight's genesis is entry 1.
+  const crDir = path.join(dir, "cleanroom");
+  const crSources = cleanroomMovables(old);
+  const touched = [...sources.map(([abs]) => abs), ...sources.map(([abs]) => path.join(dir, path.basename(abs))), copyDest, P.state, P.feedback, ...crSources, ...crSources.map((abs) => path.join(crDir, path.basename(abs)))];
   const all = [...new Set(touched)];
   const flightsDirExisted = exists(path.join(ROOT, "docs", "flights"));
   let commit;
   try {
     commit = withRollback(all, () => {
       fs.mkdirSync(dir, { recursive: true });
+      checkpoint("kukulu_flight_archive", "summarize", old);
+      for (const abs of crSources) {
+        const dest = path.join(crDir, path.basename(abs));
+        fs.mkdirSync(crDir, { recursive: true });
+        if (git(["ls-files", "--error-unmatch", "--", rel(abs)], { allowFail: true }).ok) git(["mv", rel(abs), rel(dest)]);
+        else fs.renameSync(abs, dest);
+      }
       for (const [abs] of sources) {
         const dest = path.join(dir, path.basename(abs));
         const tracked = git(["ls-files", "--error-unmatch", "--", rel(abs)], { allowFail: true }).ok;

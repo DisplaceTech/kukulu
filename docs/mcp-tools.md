@@ -147,6 +147,8 @@ If a setup command fails, the worktree (and a branch this call created) is remov
 
 Every other stream-scoped tool works the same way: `PROGRESS.md`, `PLAN.md` and `state.json` are read and written only in the main checkout, and the progress commits land on the build branch, never a stream branch. Stream implementers never edit `docs/PROGRESS.md`, `docs/HANDOFF.md` or anything under `.kukulu/`.
 
+**Clean-room mode.** After genesis, this tool appends a signed `checkpoint` entry (event `run-start`) to `.kukulu/cleanroom/log.jsonl` before its final commit and commits the log with its own files; a failed commit restores the log byte for byte. General mode writes none. Uncommitted appends to the log never count as a dirty tree, because the hooks write to it after every tool call.
+
 ---
 
 ## `kukulu_task_next`
@@ -191,6 +193,8 @@ Mark a task complete and write its log entry.
 
 **Refuses when:** the id is unknown; the task is not `[~]` (nobody selected it); HEAD's commit subject does not start with `<ID>:`; or anything other than `docs/PROGRESS.md` is uncommitted (a path already recorded as `preexistingUntracked` at `kukulu_run_start` never counts). The last two checks matter most: a task is done when there is a commit, not when a model says so.
 
+**Clean-room mode.** After genesis, this tool appends a signed `checkpoint` entry (event `kukulu_task_done`) to `.kukulu/cleanroom/log.jsonl` before its final commit and commits the log with its own files; a failed commit restores the log byte for byte. General mode writes none. Uncommitted appends to the log never count as a dirty tree, because the hooks write to it after every tool call.
+
 ---
 
 ## `kukulu_task_block`
@@ -204,6 +208,8 @@ Give up on a task without ending the run.
 **Returns:** `{ id, progressCommit, counts }`.
 
 **Refuses when:** the id is unknown, or either argument is missing.
+
+**Clean-room mode.** After genesis, this tool appends a signed `checkpoint` entry (event `kukulu_task_block`; its hard reset keeps the hooks' uncommitted log entries) to `.kukulu/cleanroom/log.jsonl` before its final commit and commits the log with its own files; a failed commit restores the log byte for byte. General mode writes none. Uncommitted appends to the log never count as a dirty tree, because the hooks write to it after every tool call.
 
 ---
 
@@ -307,6 +313,8 @@ End an implementation run and hand off to review.
 
 **Refuses when:** any task is still open; `HANDOFF.md` does not exist; or the tree is not clean after the handoff commit, again ignoring anything recorded as `preexistingUntracked`.
 
+**Clean-room mode.** After genesis, this tool appends a signed `checkpoint` entry (event `kukulu_run_finish`) to `.kukulu/cleanroom/log.jsonl` before its final commit and commits the log with its own files; a failed commit restores the log byte for byte. General mode writes none. Uncommitted appends to the log never count as a dirty tree, because the hooks write to it after every tool call.
+
 ---
 
 ## `kukulu_run_halt`
@@ -407,6 +415,8 @@ Record a verdict. Call it exactly once per review. It is all-or-nothing: if its 
 
 **Refuses when:** the verdict is neither legal value; `REVIEW.md` does not exist; no implementation handoff has been recorded for this round; `REVIEW.md`'s `Round:` line is missing or does not equal `reviewRound`; an approval carries fix tasks or unblocks; changes are requested with neither; a fix task is missing `title`, `goal`, `files` or `tests`, or its `source` is not `review`, `mutation` or `blocked`; the round is past `review.mutationFixRounds` and a fix task has `source: "mutation"` (a surviving mutant is a note in `REVIEW.md` by then); a fix task's `dependsOn` names something that is neither an existing task nor one of this submission's own ids; or an unblock names a task that does not exist or is not blocked or skipped.
 
+**Clean-room mode.** After genesis, this tool appends a signed `checkpoint` entry (event `kukulu_review_submit`) to `.kukulu/cleanroom/log.jsonl` before its final commit and commits the log with its own files; a failed commit restores the log byte for byte. General mode writes none. Uncommitted appends to the log never count as a dirty tree, because the hooks write to it after every tool call.
+
 ---
 
 ## `kukulu_summary_commit`
@@ -418,6 +428,8 @@ Record a verdict. Call it exactly once per review. It is all-or-nothing: if its 
 **Returns:** `{ commit, branch, base, head, reviews, fixRounds, push, pr, archive }`. `archive` is `policies.archive`, so the summarizer reads the policy from the result: when it is true, call [`kukulu_flight_archive`](#kukulu_flight_archive) next. `reviews` is how many reviews the flight took and `fixRounds` how many fix rounds came between them; after an approval, reviews = fixRounds + 1. `pr` is the branch's pull request from `gh pr view`, as `{ url, state, draft, base }`, with `expectedBase` added when it does not target `baseBranch`. Otherwise it is `"none"`, `"skipped: policy"` or `"unknown: <why>"` (`gh` missing or failing). This is never a refusal.
 
 **Refuses when:** the recorded verdict is not `APPROVED` (before anything is written); `content` is not a string, is empty after trimming, or is 1 MiB or more; or `content` is absent and `SUMMARY.md` does not exist.
+
+**Clean-room mode.** After genesis, this tool appends a signed `checkpoint` entry (event `kukulu_summary_commit`) to `.kukulu/cleanroom/log.jsonl` before its final commit and commits the log with its own files; a failed commit restores the log byte for byte. General mode writes none. Uncommitted appends to the log never count as a dirty tree, because the hooks write to it after every tool call.
 
 ---
 
@@ -434,6 +446,8 @@ After it, `kukulu_next` reports `done` until `docs/SPEC.md` is edited, then `pla
 **Returns:** `{ slug, dir, moved, copied, commit, push }`.
 
 **Refuses when** (in this order, before anything moves): there is no slug; the slug is malformed; the flight is not summarized; the implement lock is armed; the working tree is dirty (apart from files that were untracked before the run started); or `docs/flights/<slug>/` already exists.
+
+**Clean-room mode.** After genesis, this tool appends a signed `checkpoint` entry (event `kukulu_flight_archive`, written before the log (and `similarity.json`, when present) moves into `docs/flights/<slug>/cleanroom/`, so the next flight's genesis is entry 1) to `.kukulu/cleanroom/log.jsonl` before its final commit and commits the log with its own files; a failed commit restores the log byte for byte. General mode writes none. Uncommitted appends to the log never count as a dirty tree, because the hooks write to it after every tool call.
 
 ---
 
