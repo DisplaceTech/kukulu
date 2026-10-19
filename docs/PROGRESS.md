@@ -16,6 +16,9 @@ Started: 2026-10-19T16:52:28.587Z
 - [x] P2-02 The site CI workflow
 - [x] P2-03 README, CONTRIBUTING and CHANGELOG for the site
 - [x] P2-04 Phase 2 end: push and record the manual check
+- [ ] R1-01 check-site.mjs self-test cases for the uncovered rule branches
+- [ ] R1-02 serve-site.mjs: test port precedence, validate SITE_PORT, test the NUL refusal
+- [ ] R1-03 check-site-browser.mjs --self-test and no leaked Chrome profile
 
 ## Log
 (one entry per task, appended by implement)
