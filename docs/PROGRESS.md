@@ -1,6 +1,6 @@
 # kukulu.tech build progress
-Branch: (set by implement)
-Started: (set by implement)
+Branch: build/landing
+Started: 2026-10-19T16:52:28.587Z
 
 ## Tasks
 - [ ] P1-01 Seed site/ and start check-site.mjs with config validation and rules 1, 2 and 8
