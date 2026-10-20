@@ -676,6 +676,9 @@ export function evaluate(policy, hookInput, env) {
   const args = input.tool_input && typeof input.tool_input === "object" && !Array.isArray(input.tool_input) ? input.tool_input : {};
   const { root, home } = env;
   const cwd = typeof input.cwd === "string" && input.cwd ? input.cwd : root;
+  // Where a `cd` earlier in the command has moved the shell; only the protected-path rules use it, so the read rules judge as before.
+  let shellCwd = cwd;
+  const writeForms = (p) => canonicalPaths(p, { cwd: shellCwd, home });
   const lockdown = lockdownActive(policy, env.progressText);
   const prefixes = (list) => list.map((e) => resolvePrefix(e, root, home));
   // The signing key is read-denied like a deny.paths entry; its public half and every other protected file stay readable.
@@ -749,6 +752,12 @@ export function evaluate(policy, hookInput, env) {
       const tokens = shellWords(segment);
       const { word, args: rest } = commandWord(tokens);
       if (word === null) continue;
+      // A `cd` or `pushd` in an earlier segment moves every later relative operand (`cd docs && rm cleanroom.json`).
+      if ((word === "cd" || word === "pushd") && !/^[<>]/.test(rest.find((t) => !t.startsWith("-")) ?? "")) {
+        const dir = rest.find((t) => !t.startsWith("-"));
+        if (dir && dir !== "-") shellCwd = canonicalPaths(tokenPath(dir), { cwd: shellCwd, home })[0];
+        continue;
+      }
 
       // 6a. network commands
       if (policy.deny.network) {
@@ -779,16 +788,23 @@ export function evaluate(policy, hookInput, env) {
         }
       }
       // 6d. write-family commands and redirections on protected paths
-      const redirects = redirectTargets(tokens);
+      const redirects = redirectTargets(segment);
       if (WRITE_FAMILY.has(word)) {
         if (word === "git" && rest[0] === "config" && rest.some((t) => /core\.hookspath/i.test(t))) return denied("protected path: git config core.hooksPath");
-        for (const t of pathTokens) {
-          const f = forms(tokenPath(t)).find((x) => protectedList.some((p) => underPrefix(x, p)));
+        // Every non-option operand of a write-family command is a path, with or without a `/`.
+        const operands = rest.filter((t) => !t.startsWith("-") || isPathLike(t));
+        for (const t of operands) {
+          const f = writeForms(tokenPath(t)).find((x) => protectedList.some((p) => underPrefix(x, p)));
           if (f) return denied(`protected path: ${f}`);
+        }
+        // A destructive form also destroys everything under the operand, so a protected path below it counts.
+        for (const t of destructiveOperands(word, rest)) {
+          const f = writeForms(tokenPath(t)).find((x) => protectedList.some((p) => underPrefix(p, x)));
+          if (f) return denied(`protected path: ${f} (contains a protected path)`);
         }
       }
       for (const t of redirects) {
-        const f = forms(t).find((x) => protectedList.some((p) => underPrefix(x, p)));
+        const f = writeForms(t).find((x) => protectedList.some((p) => underPrefix(x, p)));
         if (f) return denied(`protected path: ${f}`);
       }
       // 6e. command patterns
@@ -802,15 +818,55 @@ export function evaluate(policy, hookInput, env) {
   return NO_ISSUES;
 }
 
-/** The targets of `>` and `>>` redirections in a segment's tokens, with their fd prefixes (`2>`, `&>`) removed. */
-function redirectTargets(tokens) {
+/**
+ * The operands a destructive write-family form removes, moves away or rewrites
+ * wholesale: rm, mv sources, recursive chmod/chown, and git rm/mv/checkout/
+ * restore/clean.
+ */
+function destructiveOperands(word, rest) {
+  const operands = (list) => list.filter((t) => !t.startsWith("-"));
+  if (word === "rm") return operands(rest);
+  if (word === "mv") return operands(rest).slice(0, -1);
+  if ((word === "chmod" || word === "chown") && rest.some((t) => /^-[A-Za-z]*R|^--recursive$/.test(t))) return operands(rest);
+  if (word === "git") {
+    const sub = rest.find((t) => !t.startsWith("-"));
+    if (["rm", "mv", "checkout", "restore", "clean"].includes(sub)) {
+      const list = operands(rest.slice(rest.indexOf(sub) + 1));
+      return sub === "mv" ? list.slice(0, -1) : list;
+    }
+  }
+  return [];
+}
+
+/**
+ * The targets of `>` and `>>` redirections in one segment, with their fd
+ * prefixes (`2>`, `&>`) removed. Scans the raw text, so a redirection glued to
+ * the word before it (`echo hi>file`) is seen, and a `>` inside quotes is not.
+ */
+function redirectTargets(segment) {
   const targets = [];
-  for (let i = 0; i < tokens.length; i++) {
-    const m = /^(?:\d+|&)?>>?(.*)$/.exec(tokens[i]);
-    if (!m) continue;
-    const inline = m[1].replace(/^&\d*$/, "");
-    if (inline) targets.push(inline);
-    else if (!/^&\d*$/.test(m[1]) && tokens[i + 1] !== undefined) targets.push(tokens[++i]);
+  let quote = null;
+  for (let i = 0; i < segment.length; i++) {
+    const c = segment[i];
+    if (quote) {
+      if (c === "\\" && quote === '"') i++;
+      else if (c === quote) quote = null;
+      continue;
+    }
+    if (c === "'" || c === '"') quote = c;
+    else if (c === "\\") i++;
+    else if (c === ">") {
+      let j = i + 1;
+      if (segment[j] === ">" || segment[j] === "|") j++;
+      if (segment[j] === "&" && /^&(\d+|-)(\s|$)/.test(segment.slice(j))) {
+        i = j;
+        continue;
+      }
+      if (segment[j] === "&") j++;
+      const word = shellWords(segment.slice(j).replace(/^\s+/, "").split(/[\s<>]/)[0] ?? "")[0];
+      if (word) targets.push(word);
+      i = j - 1;
+    }
   }
   return targets;
 }

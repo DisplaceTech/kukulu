@@ -2242,5 +2242,195 @@
    "cwd": "__ROOT__"
   },
   "expect": "allowed"
+ },
+ {
+  "name": "a redirection glued to the word before it is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "echo hi>.kukulu/state.json"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "a glued fd redirection onto the policy is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "printf x 2>docs/cleanroom.json"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "rm -rf of .kukulu is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "rm -rf .kukulu"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "rm -rf of docs is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "rm -rf docs"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "mv of docs is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "mv docs docs2"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "rm -rf of .git is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "rm -rf .git"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "cd docs then rm of the policy is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd docs && rm cleanroom.json"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "cd .kukulu then rm of the state is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd .kukulu && rm state.json"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "git add . stays allowed",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "git add ."
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "git add docs stays allowed",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "git add docs"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "cp into docs stays allowed",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cp a.txt docs/"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "rm -rf target stays allowed",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "rm -rf target"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "mv inside the project stays allowed",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "mv a b"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "git commit -F stays allowed",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "git commit -F f"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
  }
 ]
