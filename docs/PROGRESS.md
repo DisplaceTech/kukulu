@@ -55,7 +55,7 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] P4-03 Lexers for Go, Python, JavaScript, TypeScript, Java and PHP
 - [x] P4-04 Metrics, positioning and the verdict
 - [x] P4-05 Calibration fixtures
-- [ ] P4-06 Tune similarity.separationMargin
+- [x] P4-06 Tune similarity.separationMargin
 - [ ] P4-07 kukulu_similarity
 - [ ] P4-08 The summarize skill carries the contamination score
 - [ ] P4-09 Phase 4 end: push and record the calibration check
@@ -227,3 +227,6 @@ scorePair, position, verdictOf, BANDS, LIMITS added; tokenize now returns identi
 
 ### P4-05 — e37d3d5
 Fixtures a/ b/ b-derived/ c/ under test/fixtures/similarity (original RLE + additive checksum, ~120 lines per Rust side, C pair, NOTES.txt). Measured (default ngram 5,10): ngram_jaccard@5 neg 0.292 pos 0.972 derived-vs-a 0.285; ident_jaccard neg 0.133 pos 0.769 test 0.133; comment_jaccard neg 0.011 pos 0.597 test 0.011; the c-vs-b pair ngram@5 0.006. Test helper side(dir) in the test file reads and counts skipped files (P4-07 does the server-side reading).
+
+### P4-06 — ef658a3
+Measurement: separationMargin before 0.0, after 0.0 (unchanged). Fixture gaps s_pos - s_neg: 0.508 to 0.771, smallest 0.508 (ngram_containment@5) = headroom; no metric near zero. Fixtures cannot size a margin for real controls (cleanflate-bench's n-gram metrics did not separate its real controls); the first real run is the measurement that can move it. Evidence in docs/spikes/P4-06.md.
