@@ -98,7 +98,7 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] R5-03 Guard: a bare glob operand and a cd into a glob are judged by rule 6b's glob check
 - [x] R6-01 Guard: xargs options with an optional argument never take the next token, env -S's \_ separates words, and the missing sudo/env valued options are listed
 - [x] R6-02 Guard: cp -T and abbreviated --recursive/--archive are read, so a recursive copy onto a protected directory is judged at the directory
-- [ ] R7-01 Guard: cp long options are resolved against cp's own option list, and -T is read in a valued bundle
+- [x] R7-01 Guard: cp long options are resolved against cp's own option list, and -T is read in a valued bundle
 - [ ] R7-02 Guard: xargs --process-slot-var and BSD xargs -J/-R/-S are valued
 
 ## Log
@@ -397,3 +397,6 @@ Interpretation: shellWords now keeps a backslash in double quotes unless it prec
 ### R6-02 — 558c7fe
 destinationPaths reads -T (bundle) and --no-target-directory (unique prefix of CP_LONG); with -T the last operand is the destination and every source stands for it. --recursive/--archive read by unique prefix. 11 fixtures added (7 denied, cp -rt . evil/docs denied, 3 allowed).
 Interpretation: -T in a short bundle applies to mv/ln/install too; long-prefix reading is cp only.
+
+### R7-01 — 414e166
+cp long options now resolved via cpLong first (valued only --target-directory/--suffix); -T read from letters before the valued letter in a bundle. 9 fixtures added (6 denied, 3 allowed). docs/cleanroom.md rule 6 updated. Self-test 425 cases ok; npm test green.
