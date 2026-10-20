@@ -140,3 +140,13 @@ Review-fix round 2: seven R2 tasks, all done, none blocked or skipped. Branch `b
 - R2-05, R2-06, R2-07 are test-only and kill the mutants of REVIEW.md F5, F6, F7 (hand-checked by mutating the source and restoring it). The state suite grew to about 80 s because of the second 30 s hang test.
 
 Nothing to check by hand this round. Codebase note: `git -C dir` and a leading `(` each hide the real command word from a parser that takes the segment's first token; strip grammar before choosing the command.
+
+## Round 3
+
+Head after round 3: see `git log`. Three fix tasks, all done, none blocked: R3-01, R3-02, R3-03. Plan total 85 done.
+
+- R3-01: the Glob-climb fixture now climbs 40 levels, so it reaches `/` from any temp directory depth (macOS CI). New test `the guard self-test passes under a deep TMPDIR`. Interpretation: TMPDIR is the deep directory itself, not a symlink to it, because the guard resolves paths textually and a symlinked TMPDIR passed even with the old fixture.
+- R3-02: rule 6d expands braces for write-family operands and redirection targets, and denies an operand or target whose wildcard can name a protected path or one under it. `git stash -m msg` is a push; `git read-tree -u` with `--reset` or `-m` is a discard. 26 fixtures. Interpretation: a leading wildcard does not match a dotfile (shell rule).
+- R3-03: bare `cd`/`cd --` goes to HOME and `cd -` returns to the previous directory; sudo and env flag values are skipped; function headers, `case ... in`, arm patterns and `esac` are stripped. 16 fixtures (guard self-test now 310 cases). Interpretation: arm patterns are recognized only inside a case.
+- Manual check: NOT VERIFIED (human): `gh pr checks` shows `test (macos)` green after the push.
+- Codebase note: the guard resolves paths with `path.resolve` and never `realpath`, so the spelled depth of a path is what matters; a fixture that climbs a fixed number of `..` is depth-dependent.
