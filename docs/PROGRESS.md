@@ -87,7 +87,7 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] R2-05 Guard cases: allowed fixtures that pin grep's valued options, -e patterns and quoted >
 - [x] R2-06 Test that a hung gh --version makes prChecks null within the bound
 - [x] R2-07 Test that --legacy-log's default repository is the log's own repository, not an ancestor
-- [ ] R3-01 Make the Glob-climb guard fixture independent of the temp directory's depth (macOS CI)
+- [x] R3-01 Make the Glob-climb guard fixture independent of the temp directory's depth (macOS CI)
 - [ ] R3-02 Guard: wildcards and braces no longer hide a protected path from writes, redirections and destructive forms; git stash -m and read-tree -u discard the log
 - [ ] R3-03 Guard: a bare cd moves to HOME, wrapper option values are skipped, and case arms and function bodies are judged
 
@@ -348,3 +348,8 @@ Added hung-gh --version test (fake gh exec sleep 120); passes at HEAD in the sta
 
 ### R2-07 — c64d1ea
 Added a sibling-of-repo row to the --repo default test (candidates [2,3]); with repoRootOf returning path.dirname(dir) the assertion fails (checked by hand, script restored).
+
+### R3-01 — a3374f1
+Fixture climb now 40 '../'. Test 'the guard self-test passes under a deep TMPDIR' in test/cleanroom.mjs (fails with old fixture, verified).
+Interpretation: used the deep dir itself as TMPDIR rather than a symlink: guard resolves textually (no realpath), so symlinked TMPDIR passed even with the old fixture and proved nothing.
+Manual check: NOT VERIFIED (human): macOS CI job green after push.
