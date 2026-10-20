@@ -8,6 +8,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { createHash, sign } from "node:crypto";
+import * as CR from "../mcp/cleanroom.mjs";
 
 export const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const ROOT = path.resolve(HERE, "..");
@@ -370,6 +372,103 @@ export function runHook(script, payload, env = {}) {
  */
 export function logCall(repo, payload = {}) {
   return runHook(path.join(ROOT, "scripts", "cleanroom-log.mjs"), { hook_event_name: "PostToolUse", tool_name: "Read", tool_input: { file_path: path.join(repo, "docs", "SPEC.md") }, cwd: repo, ...payload }, { CLAUDE_PROJECT_DIR: repo });
+}
+
+const sha256Of = (bytes) => createHash("sha256").update(bytes).digest("hex");
+
+/**
+ * Write a small, valid attestation bundle into `dir` the way kukulu_attest lays one out:
+ * a chain (genesis, a gate, calls, a denial, a human entry, two checkpoints) built with
+ * mcp/cleanroom.mjs and a temp key, the files a manifest lists, `publisher.pub`, a
+ * `verify.mjs` copy, the manifest and its signature. `opts.key` is the publisher key,
+ * `opts.checkpointKey` signs the second checkpoint instead (to build a bad one),
+ * `opts.policyText` is the policy. Returns `{ dir, key, fingerprint, manifest, entries }`.
+ */
+export function buildBundle(dir, opts = {}) {
+  const keyDir = mkDir("kukulu-bundle-key-");
+  const key = opts.key ?? CR.generateKey(path.join(keyDir, "publisher.pem"));
+  const cpKey = opts.checkpointKey ?? key;
+  fs.mkdirSync(dir, { recursive: true });
+  const log = path.join(dir, "log.jsonl");
+  const policyText = opts.policyText ?? fs.readFileSync(path.join(ROOT, "templates", "cleanroom.example.json"), "utf8");
+  const policyHash = CR.policyHash(policyText);
+  const guardHash = sha256Of(fs.readFileSync(path.join(ROOT, "scripts", "cleanroom-guard.mjs")));
+  const loggerHash = sha256Of(fs.readFileSync(path.join(ROOT, "scripts", "cleanroom-log.mjs")));
+  const hooksHash = sha256Of(fs.readFileSync(path.join(ROOT, "hooks", "hooks.json")));
+  const base = { role: "session", model: "claude-test", session: "s-1" };
+  const checkpoint = (event, signer) => {
+    const entries = CR.readEntries(log);
+    const data = CR.signCheckpoint(
+      { chainTip: entries.at(-1).hash, git: "b".repeat(40), policyHash, guardHash, loggerHash, hooksHash, keyFingerprint: key.fingerprint, event },
+      signer.privateKey,
+    );
+    return CR.appendEntry(log, { kind: "checkpoint", stage: "implement", ...base, data });
+  };
+  CR.appendEntry(log, { kind: "genesis", stage: "controller", ...base, data: { mode: "clean-room", policyHash, guardHash, loggerHash, hooksHash, pluginVersion: "0.7.0", keyFingerprint: key.fingerprint, baseBranch: "main", head: "a".repeat(40) } });
+  CR.appendEntry(log, { kind: "gate", stage: "controller", ...base, data: { checks: 7, ok: true } });
+  CR.appendEntry(log, { kind: "allowed", stage: "implement", task: "P0-01", ...base, tool: "Read", target: "/p/a.rs", decision: "allowed" });
+  CR.appendEntry(log, { kind: "denied", stage: "implement", task: "P0-01", ...base, tool: "Read", target: "/usr/include/zlib.h", decision: "denied", reason: "denied path: /usr/include/zlib.h (deny.paths)" });
+  CR.appendEntry(log, { kind: "human", stage: "controller", role: "operator", target: "go on", data: { kind: "instruction", via: "kukulu_cleanroom_record" } });
+  checkpoint("run-start", key);
+  CR.appendEntry(log, { kind: "allowed", stage: "implement", task: "P0-02", ...base, tool: "Bash", target: "ls", decision: "allowed" });
+  checkpoint("kukulu_run_finish", cpKey);
+  const entries = CR.readEntries(log);
+
+  const sources = {
+    "policy.json": policyText,
+    "SUMMARY.md": "# Summary\n",
+    "REVIEW.md": "# Review\nRound: 1\n**Verdict**: APPROVED\n",
+    "PROGRESS.md": "# Progress\n",
+    "kukulu.json": "{}\n",
+    "state.json": "{}\n",
+    "commits.txt": `${"b".repeat(40)}\x1fN\x1fP0-01: first\x1fimplement\x1fP0-01\n`,
+  };
+  for (const [name, text] of Object.entries(sources)) fs.writeFileSync(path.join(dir, name), text);
+  fs.writeFileSync(path.join(dir, "publisher.pub"), key.publicKey.export({ type: "spki", format: "pem" }));
+  const verifierBytes = fs.readFileSync(path.join(ROOT, "scripts", "verify-attestation.mjs"));
+  fs.writeFileSync(path.join(dir, "verify.mjs"), verifierBytes);
+  const listed = ["log.jsonl", ...Object.keys(sources), "publisher.pub"];
+  const checkpoints = entries.filter((e) => e.kind === "checkpoint");
+  const manifest = {
+    version: 1,
+    flight: "bundle-test",
+    plugin: { version: "0.7.0", guardHash, loggerHash, hooksHash, verifierHash: sha256Of(verifierBytes) },
+    repo: { baseBranch: "main", base: "a".repeat(40), head: "b".repeat(40), branch: "build/test" },
+    mode: "clean-room",
+    genesis: entries[0],
+    policy: { path: "docs/cleanroom.json", hashes: [policyHash], current: policyHash },
+    chain: { entries: entries.length, first: entries[0].hash, tip: entries.at(-1).hash },
+    checkpoints: checkpoints.map((e) => ({ seq: e.seq, event: e.data.event, git: e.data.git, signature: e.data.signature, ok: true })),
+    denials: { total: 1, byReason: { "denied path: /usr/include/zlib.h (deny.paths)": 1 }, verdicts: { "prior-art attempt": 0, "false positive": 0, "offline test": 0, unclassified: 1 } },
+    calls: { total: 3, byTool: { Read: 2, Bash: 1 }, byStage: { implement: 3 }, readCapable: 3 },
+    human: { instructions: 1, interventions: 0, verdicts: 0 },
+    selfTest: { ok: true, cases: 164, at: "2026-01-01T00:00:00.000Z" },
+    coverage: { gaps: [], knownLimits: [] },
+    similarity: null,
+    files: listed.map((name) => {
+      const bytes = fs.readFileSync(path.join(dir, name));
+      return { path: name, sha256: sha256Of(bytes), bytes: bytes.length };
+    }),
+    signer: { fingerprint: key.fingerprint, publicKey: "publisher.pub" },
+    at: "2026-01-01T00:00:00.000Z",
+  };
+  fs.writeFileSync(path.join(dir, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
+  signBundleManifest(dir, key);
+  return { dir, key, fingerprint: key.fingerprint, manifest, entries };
+}
+
+/** Sign `dir/manifest.json` with `key`, writing `manifest.sig` (base64 Ed25519 over the manifest's bytes). */
+export function signBundleManifest(dir, key) {
+  fs.writeFileSync(path.join(dir, "manifest.sig"), `${sign(null, fs.readFileSync(path.join(dir, "manifest.json")), key.privateKey).toString("base64")}\n`);
+}
+
+/** Edit a bundle's manifest and sign it again, so the only thing wrong with the bundle is what `mutate` changed. */
+export function rewriteManifest(dir, key, mutate) {
+  const file = path.join(dir, "manifest.json");
+  const manifest = JSON.parse(fs.readFileSync(file, "utf8"));
+  mutate(manifest);
+  fs.writeFileSync(file, `${JSON.stringify(manifest, null, 2)}\n`);
+  signBundleManifest(dir, key);
 }
 
 /**

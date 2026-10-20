@@ -20,6 +20,7 @@ const SUITES = [
   ["streams", "parallel waves: stream tags, partition validation, worktrees, merge-back"],
   ["guard", "the Stop / SubagentStop guard hook"],
   ["cleanroom", "clean-room mode: policy, guard, chain, checkpoints, gate, scoring"],
+  ["attest", "the offline verifier, attestation bundles and pre-0.6.0 logs"],
   ["drive", "one whole flight, end to end"],
 ];
 
