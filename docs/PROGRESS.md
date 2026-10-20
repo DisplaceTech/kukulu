@@ -7,7 +7,7 @@ Started: 2026-10-20T19:18:49.092Z
 
 - [x] P0-01 One list of known limits in the code and the docs
 - [x] P0-02 Guard-finding triage in the review and summarize skills
-- [ ] P0-03 Bare and ./ read-family operands get the same decision
+- [x] P0-03 Bare and ./ read-family operands get the same decision
 - [ ] P0-04 git forms that write only the index are not write targets
 - [ ] P0-05 rsync and tar extraction into a protected path are denied
 - [ ] P0-06 install's BSD-only denial names its directory
@@ -35,3 +35,7 @@ Interpretation: docs/kukulu.json (planner-written) had literal macron letters fa
 ### P0-02 — 4f5352c
 
 Added Guard findings paragraph to review-build, Known-gap candidates sentence to summarize, two plugin tests, CHANGELOG Fixed line. No interpretation choices.
+
+### P0-03 — 6324e0e
+
+Word clause in rule 6c now covers every non-dash, non-pattern operand. 6 fixtures added (P0-03), no existing fixture changed. Docs and CHANGELOG updated. Helper for appending fixtures keeps the 1-space JSON indent of guard-cases.json.
