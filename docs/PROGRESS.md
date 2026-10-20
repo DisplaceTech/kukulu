@@ -100,7 +100,7 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] R6-02 Guard: cp -T and abbreviated --recursive/--archive are read, so a recursive copy onto a protected directory is judged at the directory
 - [x] R7-01 Guard: cp long options are resolved against cp's own option list, and -T is read in a valued bundle
 - [x] R7-02 Guard: xargs --process-slot-var and BSD xargs -J/-R/-S are valued
-- [ ] R8-01 Guard: cp, mv, ln and install each read their own valued options (cp --sparse/--no-preserve, install --strip-program, BSD install -S)
+- [x] R8-01 Guard: cp, mv, ln and install each read their own valued options (cp --sparse/--no-preserve, install --strip-program, BSD install -S)
 
 ## Log
 
@@ -404,3 +404,9 @@ cp long options now resolved via cpLong first (valued only --target-directory/--
 
 ### R7-02 — 59baf7a
 Added --process-slot-var and -J -R -S to xargs valued options; 8 fixtures (incl. -iE optShort bundle). docs/cleanroom.md rule 6 updated. Self-test 433 cases ok; npm test green.
+
+### R8-01 — 6137334
+Per-command valued option sets (COPY_SPECS) in mcp/cleanroom.mjs: cp -t -S --target-directory --suffix --sparse --no-preserve (via cpLong); mv/ln -t -S + long two; install -g -m -o -S -t + --strip-program.
+Interpretation: install -S judged under GNU (valued) and BSD (flag; -B valued) readings, deny if either writes a protected path.
+Tests: 12 R8-01 fixtures in guard-cases.json (8 denied, 4 allowed); guard self-test 445 ok; full npm test 165/165.
+docs/cleanroom.md rule 6 updated.
