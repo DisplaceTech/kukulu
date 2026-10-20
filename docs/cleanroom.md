@@ -95,7 +95,7 @@ A checkpoint is an entry of kind `checkpoint` whose `data` holds `chainTip`, `gi
 
 ## Genesis, sticky mode and the gate
 
-The first `kukulu_next` of a flight with a policy appends the genesis entry (mode, the hashes of the policy, the guard, the logger and `hooks.json`, the plugin version, the key fingerprint, the base branch and the head) and records the same hashes in `state.json`. A project without a policy records itself as a general flight and writes no log.
+The first `kukulu_next` of a flight with a policy appends the genesis entry (mode, the hashes of the policy, the guard, the logger, `hooks.json` and `mcp/cleanroom.mjs`, the plugin version, the key fingerprint, the base branch and the head) and records the same hashes in `state.json`. A project without a policy records itself as a general flight and writes no log.
 
 The mode is sticky. A policy that appears after the flight started in general mode, one first seen after the plan exists, or one removed after genesis makes `kukulu_next` halt with "clean-room coverage is broken"; `kukulu_run_resume` cannot clear it, so archive the flight and start another.
 
@@ -103,7 +103,7 @@ Before a stage starts, `kukulu_next` (always, once the flight has a genesis) and
 
 1. **mode**: the policy file exists and the flight was not recorded as general.
 2. **policy**: the file's SHA-256 is the one recorded at genesis.
-3. **guard**: the two hook scripts and `hooks.json` are byte-identical to the recorded ones, and `hooks.json` still registers them.
+3. **guard**: the two hook scripts, `hooks.json` and `mcp/cleanroom.mjs` (the module the guard decides with) are byte-identical to the recorded ones, and `hooks.json` still registers the scripts. A flight that began on 0.7.0 recorded no hash for `mcp/cleanroom.mjs`: that one comparison is skipped and the passing gate entry carries `unpinned: ["mcp/cleanroom.mjs"]`.
 4. **self-test**: `--self-test` on the policy passes.
 5. **lockdown**: once the lockdown task is done, a `WebFetch` of an allowed URL is denied.
 6. **chain**: every hash recomputes, the first entry is the genesis, and the newest checkpoint verifies with the signing key.
@@ -140,7 +140,7 @@ Every prompt typed into a session, and every `kukulu_flight_options`, `kukulu_ru
 The manifest's fields, in the order it writes them:
 
 - `version` (1), `flight`, `mode` (`clean-room`) and `at`.
-- `plugin`: the plugin `version` and the hashes of the guard, the logger, `hooks.json` and the verifier.
+- `plugin`: the plugin `version` and the hashes of the guard, the logger, `hooks.json`, `mcp/cleanroom.mjs` (`cleanroomHash`) and the verifier. The verifier compares `plugin.cleanroomHash` with the genesis entry's; a bundle from 0.7.0 has neither, and it verifies with the note `plugin.cleanroomHash absent (bundle from 0.7.0 or earlier)` (or `genesis has no cleanroomHash (flight started on 0.7.0 or earlier); plugin.cleanroomHash not compared`).
 - `repo`: `baseBranch`, `base`, `head` and `branch`.
 - `genesis`: the first log entry, repeated.
 - `policy`: its `path`, every distinct `hashes` value seen in the checkpoints in order, and the `current` one.

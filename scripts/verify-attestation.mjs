@@ -219,6 +219,11 @@ export function verifyBundle(dir, { key = null } = {}) {
         if (e.data[field] !== plugin[field]) fail("guard", `entry ${e.seq}: the checkpoint's ${field} differs from the manifest's plugin.${field}`);
       }
     }
+    // mcp/cleanroom.mjs is pinned in genesis from 0.7.1 on; older records stay readable.
+    const genesisHash = entries.find((e) => e.kind === "genesis")?.data?.cleanroomHash;
+    if (plugin.cleanroomHash === undefined) notes.push("plugin.cleanroomHash absent (bundle from 0.7.0 or earlier)");
+    else if (genesisHash === undefined) notes.push("genesis has no cleanroomHash (flight started on 0.7.0 or earlier); plugin.cleanroomHash not compared");
+    else if (plugin.cleanroomHash !== genesisHash) fail("guard", "the manifest's plugin.cleanroomHash differs from the genesis entry's cleanroomHash");
   }
 
   // 7. the mode: clean-room from the genesis on, and no gate ever failed on it

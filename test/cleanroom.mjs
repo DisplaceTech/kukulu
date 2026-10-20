@@ -416,13 +416,14 @@ const stateOf = (repo) => (hasFile(repo, ".kukulu/state.json") ? JSON.parse(read
     const log = logOf(repo);
     eq(log.length + "|" + log[0].kind + "|" + log[0].stage + "|" + log[1].kind, "2|genesis|controller|gate", "the first kukulu_next with a policy appends a genesis entry, then the gate's");
     const d = log[0].data;
-    eq(Object.keys(d).join(","), "mode,policyHash,guardHash,loggerHash,hooksHash,pluginVersion,keyFingerprint,baseBranch,head", "...whose data names mode, the four hashes, pluginVersion, keyFingerprint, baseBranch and head");
+    eq(Object.keys(d).join(","), "mode,policyHash,guardHash,loggerHash,hooksHash,cleanroomHash,pluginVersion,keyFingerprint,baseBranch,head", "...whose data names mode, the five hashes, pluginVersion, keyFingerprint, baseBranch and head");
     eq(d.mode + "|" + d.baseBranch, "clean-room|main", "...in clean-room mode on main");
     like(d.head, /^[0-9a-f]{40}$/, "...at the commit it was written on");
     eq(d.policyHash, policyHash(fs.readFileSync(path.join(repo, "docs", "cleanroom.json"))), "...the policy hash is the SHA-256 of the file");
     eq(d.guardHash, policyHash(fs.readFileSync(path.join(ROOT, "scripts", "cleanroom-guard.mjs"))), "...and the guard hash of the installed script");
     const st = stateOf(repo);
-    eq(JSON.stringify(st.cleanroom), JSON.stringify({ genesis: log[0].hash, policyHash: d.policyHash, guardHash: d.guardHash, loggerHash: d.loggerHash, hooksHash: d.hooksHash }), "...and records state.cleanroom");
+    eq(JSON.stringify(st.cleanroom), JSON.stringify({ genesis: log[0].hash, policyHash: d.policyHash, guardHash: d.guardHash, loggerHash: d.loggerHash, hooksHash: d.hooksHash, cleanroomHash: d.cleanroomHash }), "...and records state.cleanroom");
+    eq(d.cleanroomHash, policyHash(fs.readFileSync(path.join(ROOT, "mcp", "cleanroom.mjs"))), "the genesis records the hash of mcp/cleanroom.mjs");
     eq(subject(repo), "chore: clean-room genesis", "...commits chore: clean-room genesis");
     eq(git(repo, ["show", "--name-only", "--format=", "HEAD"]).split("\n").sort().join(","), ".kukulu/cleanroom/log.jsonl,.kukulu/state.json", "...with the log and state");
     ok(fs.existsSync(testKeyFor(repo)), "...generating the key at KUKULU_CLEANROOM_KEY");
@@ -999,7 +1000,7 @@ const gateCheck = (reason) => (reason.match(/^clean-room gate failed: ([\w-]+):/
 
 {
   // The guard, the hooks file, the self-test: each against a temp copy of the plugin.
-  const edited = async (label, expectCheck, mutate, { before = false } = {}) => {
+  const edited = async (label, expectCheck, mutate, { before = false, reason = null } = {}) => {
     const plugin = tempPlugin();
     if (before) mutate(plugin);
     const repo = cleanroomRepo();
@@ -1011,11 +1012,13 @@ const gateCheck = (reason) => (reason.match(/^clean-room gate failed: ([\w-]+):/
       }
       const n = await call("kukulu_next");
       eq(n.stage + "|" + gateCheck(n.reason), `halt|${expectCheck}`, label);
+      if (reason) like(n.reason, reason, `${label}: the reason names the file`);
       return n;
     }, withPlugin(plugin));
   };
   await edited("an edited guard under a temp PLUGIN_ROOT halts naming guard", "guard", (p) => fs.appendFileSync(path.join(p, "scripts", "cleanroom-guard.mjs"), "\n// tampered\n"));
   await edited("an edited logger halts naming guard", "guard", (p) => fs.appendFileSync(path.join(p, "scripts", "cleanroom-log.mjs"), "\n// tampered\n"));
+  await edited("an edited mcp/cleanroom.mjs under a temp PLUGIN_ROOT halts naming the file", "guard", (p) => fs.appendFileSync(path.join(p, "mcp", "cleanroom.mjs"), "\n// tampered\n"), { reason: /mcp\/cleanroom\.mjs changed since genesis/ });
   await edited("an edited hooks.json halts naming guard", "guard", (p) => fs.appendFileSync(path.join(p, "hooks", "hooks.json"), "\n"));
   await edited("hooks.json without the PreToolUse registration halts naming guard", "guard", (p) => {
     const file = path.join(p, "hooks", "hooks.json");
@@ -1028,6 +1031,22 @@ const gateCheck = (reason) => (reason.match(/^clean-room gate failed: ([\w-]+):/
     const cases = JSON.parse(fs.readFileSync(file, "utf8"));
     cases[0].expect = cases[0].expect === "denied" ? "allowed" : "denied";
     fs.writeFileSync(file, JSON.stringify(cases));
+  });
+}
+
+{
+  // A flight that began on 0.7.0 has no cleanroomHash in its state: the gate passes and says what it did not pin.
+  const repo = cleanroomRepo();
+  await live(repo, async ({ call }) => {
+    ok((await call("kukulu_next")).gate.ok, "(genesis, then the gate passes)");
+    const st = stateOf(repo);
+    delete st.cleanroom.cleanroomHash;
+    setState(repo, { cleanroom: st.cleanroom });
+    git(repo, ["commit", "-qam", "old flight"]);
+    const n = await call("kukulu_next");
+    ok(n.gate?.ok, "a genesis without cleanroomHash passes the gate and records unpinned");
+    const last = [...logOf(repo)].reverse().find((e) => e.kind === "gate");
+    eq(JSON.stringify(last.data.unpinned), JSON.stringify(["mcp/cleanroom.mjs"]), "...the passing gate entry names the file it did not pin");
   });
 }
 

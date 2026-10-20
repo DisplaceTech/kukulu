@@ -99,10 +99,10 @@ const cleanroomPolicyPath = (cc) => path.join(ROOT, cc.cleanroom.policy);
 const cleanroomOn = (cc) => exists(cleanroomPolicyPath(cc));
 const cleanroomLogPath = () => logPathFor(ROOT, process.env);
 
-/** SHA-256 of the files the gate pins: the two hook scripts and hooks.json, as installed under PLUGIN_ROOT. */
+/** SHA-256 of the files the gate pins: the two hook scripts, hooks.json and the module the guard decides with, as installed under PLUGIN_ROOT. */
 function pluginHashes() {
   const of = (rel2) => policyHash(fs.readFileSync(path.join(PLUGIN_ROOT, rel2)));
-  return { guardHash: of("scripts/cleanroom-guard.mjs"), loggerHash: of("scripts/cleanroom-log.mjs"), hooksHash: of("hooks/hooks.json") };
+  return { guardHash: of("scripts/cleanroom-guard.mjs"), loggerHash: of("scripts/cleanroom-log.mjs"), hooksHash: of("hooks/hooks.json"), cleanroomHash: of("mcp/cleanroom.mjs") };
 }
 
 /** The signing key, generated first when the file is absent. */
@@ -180,10 +180,13 @@ function runGate(stage, st = loadState()) {
   const policyBytes = fs.readFileSync(policyPath);
   if (policyHash(policyBytes) !== recorded.policyHash) return failed("policy", `${cc.cleanroom.policy} changed since genesis (its SHA-256 no longer matches the recorded one)`);
 
-  // 3. guard: the two hook scripts and hooks.json are the ones recorded, and hooks.json still registers them
+  // 3. guard: the two hook scripts, hooks.json and mcp/cleanroom.mjs are the ones recorded, and hooks.json still registers the scripts
   checked.push("guard");
   const now = pluginHashes();
-  for (const [key, label] of [["guardHash", "scripts/cleanroom-guard.mjs"], ["loggerHash", "scripts/cleanroom-log.mjs"], ["hooksHash", "hooks/hooks.json"]]) {
+  // A flight that began on 0.7.0 recorded no cleanroomHash, so that one comparison is skipped and the passing entry says so.
+  const unpinned = recorded.cleanroomHash ? [] : ["mcp/cleanroom.mjs"];
+  for (const [key, label] of [["guardHash", "scripts/cleanroom-guard.mjs"], ["loggerHash", "scripts/cleanroom-log.mjs"], ["hooksHash", "hooks/hooks.json"], ["cleanroomHash", "mcp/cleanroom.mjs"]]) {
+    if (key === "cleanroomHash" && !recorded.cleanroomHash) continue;
     if (now[key] !== recorded[key]) return failed("guard", `${label} changed since genesis`);
   }
   let hooks;
@@ -235,7 +238,7 @@ function runGate(stage, st = loadState()) {
     return failed("liveness", "no tool call has been logged since the last gate; the clean-room hooks are not running in this session. Start a new session.");
   }
 
-  appendEntry(logPath, { kind: "gate", stage, role: "session", data: { checks: checked.length, ok: true } });
+  appendEntry(logPath, { kind: "gate", stage, role: "session", data: { checks: checked.length, ok: true, ...(unpinned.length ? { unpinned } : {}) } });
   return { ok: true, checked };
 }
 
@@ -268,7 +271,7 @@ function checkpoint(event, stage, st) {
       chainTip: entries.length ? entries[entries.length - 1].hash : ZERO_HASH,
       git: git(["rev-parse", "HEAD"]).out,
       policyHash: policyHash(fs.readFileSync(cleanroomPolicyPath(cc))),
-      ...pluginHashes(),
+      ...(({ guardHash, loggerHash, hooksHash }) => ({ guardHash, loggerHash, hooksHash }))(pluginHashes()),
       keyFingerprint: key.fingerprint,
       event,
     },

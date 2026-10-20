@@ -13,6 +13,7 @@ All notable changes to this plugin. Format follows
 
 ### Fixed
 
+- Gate check 3 now pins `mcp/cleanroom.mjs`: genesis records its hash as `cleanroomHash`, the manifest carries `plugin.cleanroomHash`, and the verifier compares it with genesis. A flight started on 0.7.0 passes with `unpinned` in its gate entry (0.7.0 REVIEW spec issue "D-08 check 3 does not pin `mcp/cleanroom.mjs`").
 - The denial for `install -S` landing a source on a protected path under its BSD-only reading named `null` as its directory; it now names the directory it was given (0.7.0 REVIEW Notes).
 - The guard judges a bare read-family operand by the word clause like the same operand written `./x`: `cat zlib.txt` is now denied like `cat ./zlib.txt` (0.7.0 REVIEW spec issue).
 - The review-build skill now says when a guard finding becomes a fix task (a regression against the merge base, a protected-path write or denied read with a spelling already named, or a missing command word) and sends every other unmodelled spelling to `Known-gap candidates`; the summarize skill carries them into SUMMARY.md. This addresses the root cause of kukulu F-04 and F-05, the eleven review rounds of 0.7.0.
