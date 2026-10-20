@@ -1,0 +1,114 @@
+{
+  "round": 10,
+  "implemented": true,
+  "reviewed": true,
+  "verdict": "APPROVED",
+  "summarized": true,
+  "halted": null,
+  "preexistingUntracked": [],
+  "policies": {
+    "signing": "auto",
+    "push": true,
+    "pr": "draft",
+    "feedback": true,
+    "archive": false,
+    "finalize": "auto",
+    "mergeMethod": "merge"
+  },
+  "signing": "on",
+  "rounds": [
+    {
+      "round": 1,
+      "fixTasks": 7,
+      "unblocked": 0,
+      "verdict": "CHANGES REQUESTED",
+      "nonConverging": false,
+      "at": "2026-10-20T02:04:25.132Z"
+    },
+    {
+      "round": 2,
+      "fixTasks": 7,
+      "unblocked": 0,
+      "verdict": "CHANGES REQUESTED",
+      "nonConverging": true,
+      "at": "2026-10-20T03:18:37.830Z"
+    },
+    {
+      "round": 3,
+      "fixTasks": 3,
+      "unblocked": 0,
+      "verdict": "CHANGES REQUESTED",
+      "nonConverging": false,
+      "at": "2026-10-20T04:25:15.041Z"
+    },
+    {
+      "round": 4,
+      "fixTasks": 3,
+      "unblocked": 0,
+      "verdict": "CHANGES REQUESTED",
+      "nonConverging": true,
+      "at": "2026-10-20T05:06:51.835Z"
+    },
+    {
+      "round": 5,
+      "fixTasks": 3,
+      "unblocked": 0,
+      "verdict": "CHANGES REQUESTED",
+      "nonConverging": true,
+      "at": "2026-10-20T05:44:11.506Z"
+    },
+    {
+      "round": 6,
+      "fixTasks": 2,
+      "unblocked": 0,
+      "verdict": "CHANGES REQUESTED",
+      "nonConverging": false,
+      "at": "2026-10-20T14:59:34.037Z"
+    },
+    {
+      "round": 7,
+      "fixTasks": 2,
+      "unblocked": 0,
+      "verdict": "CHANGES REQUESTED",
+      "nonConverging": true,
+      "at": "2026-10-20T15:29:30.411Z"
+    },
+    {
+      "round": 8,
+      "fixTasks": 1,
+      "unblocked": 0,
+      "verdict": "CHANGES REQUESTED",
+      "nonConverging": false,
+      "at": "2026-10-20T16:17:07.185Z"
+    },
+    {
+      "round": 9,
+      "fixTasks": 1,
+      "unblocked": 0,
+      "verdict": "CHANGES REQUESTED",
+      "nonConverging": true,
+      "at": "2026-10-20T16:38:15.862Z"
+    },
+    {
+      "round": 10,
+      "fixTasks": 1,
+      "unblocked": 0,
+      "verdict": "CHANGES REQUESTED",
+      "nonConverging": true,
+      "at": "2026-10-20T17:01:42.661Z"
+    },
+    {
+      "round": 11,
+      "fixTasks": 0,
+      "unblocked": 0,
+      "verdict": "APPROVED",
+      "at": "2026-10-20T17:19:05.269Z"
+    }
+  ],
+  "archived": {
+    "slug": "kukulu-tech",
+    "dir": "docs/flights/kukulu-tech",
+    "at": "2026-10-19T19:03:35.359Z"
+  },
+  "breaking": true
+}
