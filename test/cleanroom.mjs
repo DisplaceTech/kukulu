@@ -702,6 +702,8 @@ async function genesisRepo(planOpts = {}) {
     planExists: Boolean(c.planExists),
   });
   eq(new Set(cases.map((c) => c.name)).size, cases.length, "every guard case has its own name");
+  const falsePositives = cases.filter((c) => /^cleanflate false positive \d/.test(c.name));
+  eq(falsePositives.length + "|" + falsePositives.every((c) => c.expect === "allowed"), "8|true", "all eight cleanflate false positives are expected allowed");
   for (const c of cases) {
     const policy = loadPolicy(c.policy === "template" ? EXAMPLE : JSON.stringify(c.policy));
     const r = evaluate(policy, sub(c.input), fixtureEnv(root, home, c));

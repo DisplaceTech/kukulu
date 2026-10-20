@@ -814,7 +814,7 @@
   "expect": "allowed"
  },
  {
-  "name": "cleanflate false positive 1 (sed -i expression with a word, 2026-09-30T14:40:33), still denied: a regex or sed expression with a slash is a path-like token",
+  "name": "cleanflate false positive 1 (sed -i expression with a word, 2026-09-30T14:40:33)",
   "policy": "template",
   "input": {
    "tool_name": "Bash",
@@ -823,8 +823,7 @@
    },
    "cwd": "__ROOT__"
   },
-  "expect": "denied",
-  "reason": "forbidden word in path argument"
+  "expect": "allowed"
  },
  {
   "name": "cleanflate false positive 2 (perf report on target/profile, 2026-09-30T16:11:51)",
@@ -875,7 +874,7 @@
   "expect": "allowed"
  },
  {
-  "name": "cleanflate false positive 6 (grep -v with escaped alternation, 2026-09-30T17:23:20), still denied: a regex or sed expression with a slash is a path-like token",
+  "name": "cleanflate false positive 6 (grep -v with escaped alternation, 2026-09-30T17:23:20)",
   "policy": "template",
   "input": {
    "tool_name": "Bash",
@@ -884,11 +883,10 @@
    },
    "cwd": "__ROOT__"
   },
-  "expect": "denied",
-  "reason": "forbidden word in path argument"
+  "expect": "allowed"
  },
  {
-  "name": "cleanflate false positive 7 (bench-compare table filter, 2026-09-30T18:13:45), still denied: a regex or sed expression with a slash is a path-like token",
+  "name": "cleanflate false positive 7 (bench-compare table filter, 2026-09-30T18:13:45)",
   "policy": "template",
   "input": {
    "tool_name": "Bash",
@@ -897,11 +895,10 @@
    },
    "cwd": "__ROOT__"
   },
-  "expect": "denied",
-  "reason": "forbidden word in path argument"
+  "expect": "allowed"
  },
  {
-  "name": "cleanflate false positive 8 (bench-quick comparison, 2026-09-30T20:53:01), still denied: a regex or sed expression with a slash is a path-like token",
+  "name": "cleanflate false positive 8 (bench-quick comparison, 2026-09-30T20:53:01)",
   "policy": "template",
   "input": {
    "tool_name": "Bash",
@@ -910,8 +907,7 @@
    },
    "cwd": "__ROOT__"
   },
-  "expect": "denied",
-  "reason": "forbidden word in path argument"
+  "expect": "allowed"
  },
  {
   "name": "cleanflate real prior-art attempt (find for libz-sys, 2026-09-29T14:54:47)",
@@ -2594,6 +2590,44 @@
    "tool_name": "Bash",
    "tool_input": {
     "command": "git commit -m 'fix $(curl) docs'"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "grep of a word with a path outside the repository is denied",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "grep -rn zlib /usr/include"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "forbidden word"
+ },
+ {
+  "name": "sed script over a deny.paths file is denied",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "sed -n 's/zlib/x/p' ~/.cargo/registry/a.rs"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "denied path"
+ },
+ {
+  "name": "grep of a word in a bare in-repo directory is allowed",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "grep -n zlib src"
    },
    "cwd": "__ROOT__"
   },

@@ -798,12 +798,17 @@ export function evaluate(policy, hookInput, env) {
       }
       // 6c. read-family commands and forbidden words
       if (READ_FAMILY.has(word)) {
-        for (const t of pathTokens) {
+        // A pattern, script or program operand is text, not a path: only the "outside the repository" clause judges it.
+        const patterns = patternOperands(word, rest);
+        const realPaths = rest.filter((t, i) => isPathLike(t) && !patterns.has(i));
+        for (const t of realPaths) {
           if (wordIn(t) && !exempt(tokenPath(t))) return denied(`forbidden word in path argument: ${t}`);
         }
-        const outside = pathTokens.length ? pathTokens.some((t) => !inRepo(tokenPath(t))) : !inRepo(cwd);
+        const outside = realPaths.length ? realPaths.some((t) => !inRepo(tokenPath(t))) : !inRepo(cwd);
         if (outside) {
-          for (const t of rest) {
+          for (let i = 0; i < rest.length; i++) {
+            const t = rest[i];
+            if (patterns.has(i) && isPathLike(t) && wordIn(t)) return denied(`forbidden word in path argument: ${t} (a pattern in a command outside the repository)`);
             if (!isPathLike(t) && wordIn(t)) return denied(`forbidden word in command outside the repository: ${t}`);
           }
         }
@@ -834,6 +839,46 @@ export function evaluate(policy, hookInput, env) {
     }
     return NO_ISSUES;
   }
+}
+
+/**
+ * The indexes of `rest` that are a pattern, script or program rather than a
+ * path: the pattern of grep/rg/ag/ack, the script of sed, the program of awk,
+ * and the value of find's -name/-path/-regex tests.
+ */
+function patternOperands(word, rest) {
+  const found = new Set();
+  const isOption = (t) => t.startsWith("-") && t.length > 1;
+  if (word === "find") {
+    rest.forEach((t, i) => {
+      if (/^-(?:name|iname|path|ipath|wholename|iwholename|regex|iregex)$/.test(t) && i + 1 < rest.length) found.add(i + 1);
+    });
+    return found;
+  }
+  const kind = /^(?:e?grep|fgrep|rg|ag|ack)$/.test(word) ? "grep" : word === "sed" ? "sed" : word === "awk" ? "awk" : null;
+  if (!kind) return found;
+  // Options whose next token is their value and not an operand.
+  const valued = kind === "grep" ? /^-[ABCmdDgtTjM]$/ : kind === "awk" ? /^-[Fv]$/ : /^-[lL]$/;
+  const explicit = kind === "grep" ? /^(?:-e|--regexp)$/ : /^(?:-e|--expression)$/;
+  let sawExplicit = false;
+  let firstOperand = -1;
+  for (let i = 0; i < rest.length; i++) {
+    const t = rest[i];
+    if (explicit.test(t) && i + 1 < rest.length) {
+      sawExplicit = true;
+      found.add(++i);
+    } else if (/^(?:-f|--file)$/.test(t) && kind !== "awk") {
+      sawExplicit = true;
+      i++;
+    } else if (t === "-f" && kind === "awk") {
+      sawExplicit = true;
+      i++;
+    } else if (isOption(t)) {
+      if (valued.test(t)) i++;
+    } else if (firstOperand === -1) firstOperand = i;
+  }
+  if (!sawExplicit && firstOperand !== -1) found.add(firstOperand);
+  return found;
 }
 
 /** The text of a command with each `$(...)`, backtick and `<(...)` / `>(...)` body cut out, and those bodies; single quotes hide a body. */
