@@ -1,6 +1,6 @@
 # Summary: Kūkulu 0.7.1 build
 
-**Merge line:** `build/2026-10-20`, base `870405426ff3` (main) → head `f0d0c81`, 44 commits, 2 reviews, final verdict **APPROVED** (round 2).
+**Merge line:** `build/2026-10-20`, base `870405426ff3` (main) → head `f0d0c81` (the approved review), 47 commits, plus this summary commit. 2 reviews, final verdict **APPROVED** (round 2).
 
 ## What was built
 
