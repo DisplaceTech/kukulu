@@ -248,6 +248,28 @@ const sample = (n) => ({ kind: "allowed", stage: "implement", task: "P0-01", rol
   const reKeyed = JSON.stringify({ hash: JSON.parse(lines[0]).hash, ...JSON.parse(lines[0]) });
   like(verifyChain([reKeyed]).firstBad.reason, /keys are not exactly/, "...and keys out of order");
   eq(verifyChain(lines.slice(1)).firstBad.line, 1, "...and a chain that does not start at seq 1");
+
+  // An editor who recomputes the edited entry's own hash is caught one line later, by the link.
+  const rehashed = lines.slice();
+  const target = JSON.parse(rehashed[2]);
+  target.target = "/x/evil";
+  const { hash: _old, ...bare } = target;
+  rehashed[2] = JSON.stringify({ ...bare, hash: entryHash(bare.prev, bare) });
+  const r = verifyChain(rehashed);
+  eq(r.ok + "|" + r.firstBad?.line, "false|4", "verifyChain names a rehashed edit by its broken link");
+  like(r.firstBad?.reason, /prev does not match/, "...with the prev reason");
+
+  // Every prev and hash is consistent; only the numbering skips 3.
+  const gapped = [];
+  let tip = ZERO_HASH;
+  for (const seq of [1, 2, 4]) {
+    const entry = { seq, prev: tip, at: "2026-01-01T00:00:00.000Z", kind: "allowed", stage: null, task: null, role: null, model: null, session: null, tool: null, target: `/x/${seq}`, decision: null, reason: null };
+    tip = entryHash(tip, entry);
+    gapped.push(JSON.stringify({ ...entry, hash: tip }));
+  }
+  const g = verifyChain(gapped);
+  eq(g.ok + "|" + g.firstBad?.line, "false|3", "verifyChain names a seq gap");
+  like(g.firstBad?.reason, /seq is 4 but this is entry 3/, "...with the seq reason");
 }
 
 {
