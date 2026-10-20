@@ -441,6 +441,12 @@ like(read("skills/plan-build/SKILL.md"), /Write the deliverables in the order 3,
 
 like(read("agents/summarizer.md"), /mcp__plugin_kukulu_kukulu__kukulu_similarity/, "agents/summarizer names kukulu_similarity");
 
+{
+  const summarize = read("skills/summarize/SKILL.md");
+  like(summarize, /When `docs\/kukulu\.json` configures `cleanroom\.similarity`, call `kukulu_similarity` once, after `kukulu_summary_commit`/, "summarize calls kukulu_similarity when cleanroom.similarity is configured");
+  like(summarize, /`## Contamination score` section[\s\S]*`kukulu_summary_commit\(\{ content \}\)` a second time/, "...under ## Contamination score, committed with a second summary_commit");
+}
+
 let unknownTool = null;
 let retiredMention = null;
 let unknownSkill = null;
