@@ -116,3 +116,15 @@ All are `NOT VERIFIED (human)`.
 - `scripts/verify-attestation.mjs`, which deliberately duplicates the chain and signature code of `mcp/cleanroom.mjs` so a bundle verifies without the plugin; `test/attest.mjs` proves the two agree.
 - The four known false positives of the template policy (P3-10), which are rules working as written and not a defect, and the lexical scorer's stated limits (`LIMITS`).
 - `site/` against the changed mockup, and the typo above.
+
+## Round 1
+
+Review-fix round 1: seven R1 tasks, all done, none blocked or skipped. Branch `build/2026-10-19`, base `98f576b`, head `da2c453`; 75 of 75 tasks done.
+
+- R1-01 (guard, write rules): `redirectTargets` now scans the raw segment, so `echo hi>.kukulu/state.json` and `2>docs/cleanroom.json` are seen. Every non-option operand of a write-family command is a path. Destructive forms (`rm`, `mv` sources, recursive `chmod`/`chown`, `git rm|mv|checkout|restore|clean`) are denied when a protected path lies under the operand (`rm -rf .kukulu`, `mv docs docs2`). `cd`/`pushd` moves a `shellCwd` used only by the protected-path rules. Interpretation: the read rules keep the original cwd so the recorded cleanflate cases keep their decisions. Side effect: `git checkout .` at the repo root is now denied.
+- R1-02 (guard, network and deny.paths): git global options (`-C`, `-c`, `--git-dir`, ...) are skipped before the subcommand match. Absolute and `~` Glob patterns are checked as paths. `$HOME`/`${HOME}` expand. `$(...)`, backticks, `<(...)`, `sh|bash|zsh -c` strings and `eval` are judged recursively (depth 4); a single-quoted `$(` is literal. Interpretation: a fifth KNOWN_LIMITS entry (other variables, run-time-built strings); counts updated in test/cleanroom.mjs and test/attest.mjs.
+- R1-03 (guard, false positives): `patternOperands` treats grep-family patterns, sed scripts, awk programs and find `-name/-path/-regex` values as text. cleanflate false positives 1, 6, 7 and 8 now pass: 1 via the sed script plus bare in-repo files, 6/7/8 via grep -E/awk patterns with in-repo operands. The prior-art `find / -path ...` stays denied.
+- R1-04, R1-05, R1-06 are test-only and kill the mutants named in REVIEW.md F4/F5 (hand-checked by mutating `mcp/server.mjs`, `scripts/verify-attestation.mjs`).
+- R1-07: `gh --version` and `gh pr view` in `prChecks` have the 30 s bound; `kukulu_status` returns `review.mutationFixRounds` and the skill reads it there. The hang test takes about 30 s of wall time.
+
+Guard self-test is 194 cases. Nothing to check by hand this round. Codebase note: a fake `gh` that hangs must `exec sleep`, or the sleep child keeps the pipe open past `spawnSync`'s timeout.
