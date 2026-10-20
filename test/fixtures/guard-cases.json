@@ -5018,5 +5018,119 @@
    "cwd": "__ROOT__"
   },
   "expect": "allowed"
+ },
+ {
+  "name": "shell: cd ~/.cargo && cd r* && cat x (R5-03)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd ~/.cargo && cd r* && cat x"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "deny.paths"
+ },
+ {
+  "name": "shell: cd ~/.cargo && cd ?egistry && cat x (R5-03)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd ~/.cargo && cd ?egistry && cat x"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "deny.paths"
+ },
+ {
+  "name": "shell: cd ~/.cargo && ls regis* (R5-03)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd ~/.cargo && ls regis*"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "deny.paths"
+ },
+ {
+  "name": "shell: cd ~/.cargo && head -n 5 r* (R5-03)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd ~/.cargo && head -n 5 r*"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "deny.paths"
+ },
+ {
+  "name": "shell: cd ~/.cargo && grep foo r* (R5-03)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd ~/.cargo && grep foo r*"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "deny.paths"
+ },
+ {
+  "name": "shell: cd ~/.carg? && cd registry && cat x (R5-03)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd ~/.carg? && cd registry && cat x"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "deny.paths"
+ },
+ {
+  "name": "shell: cd src && ls *.rs (R5-03)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd src && ls *.rs"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "shell: cd crates && cat */Cargo.toml (R5-03)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd crates && cat */Cargo.toml"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "shell: ls *.md (R5-03)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "ls *.md"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
  }
 ]

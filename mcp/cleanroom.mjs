@@ -922,8 +922,11 @@ export function evaluate(policy, hookInput, env) {
       }
       // A glob token, and the operands of a recursive form, reach more than the path they name.
       const textual = patternOperands(word, rest);
+      // A bare operand (`cat r*`, `cd r*`) is a path too, and so is any operand under a directory a `cd` moved to by glob.
+      const bareWord = word === "cd" || word === "pushd" || READ_FAMILY.has(word);
       for (let i = 0; i < rest.length; i++) {
-        if (isPathLike(rest[i]) && !textual.has(i) && /[*?[{]/.test(tokenPath(rest[i]))) {
+        const reaching = isPathLike(rest[i]) || (bareWord && !rest[i].startsWith("-"));
+        if (reaching && !textual.has(i) && (/[*?[{]/.test(tokenPath(rest[i])) || (bareWord && /[*?[{]/.test(shellCwd)))) {
           const v = reachVerdict(rest[i], shellCwd, false);
           if (v) return v;
         }
