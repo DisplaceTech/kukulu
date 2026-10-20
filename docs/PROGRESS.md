@@ -22,6 +22,8 @@ Started: 2026-10-20T19:18:49.092Z
 - [x] P2-01 README calls the guard a tripwire
 - [x] P2-02 CHANGELOG 0.7.1, the version and the feedback header
 - [x] P2-03 Phase 2 end: push and record the release check
+- [ ] R1-01 Test the base sync's failed commit, signing fallback and parallel-plan paths
+- [ ] R1-02 Guard fixtures for tar append/update, --get, rsync -e and the rsync/tar wildcard checks
 
 ## Log
 
