@@ -10,7 +10,7 @@ Started: 2026-10-20T19:18:49.092Z
 - [x] P0-03 Bare and ./ read-family operands get the same decision
 - [x] P0-04 git forms that write only the index are not write targets
 - [x] P0-05 rsync and tar extraction into a protected path are denied
-- [ ] P0-06 install's BSD-only denial names its directory
+- [x] P0-06 install's BSD-only denial names its directory
 - [ ] P0-07 The gate, the genesis and the manifest pin mcp/cleanroom.mjs
 - [ ] P0-08 Phase 0 end: push and record the manual check
 - [ ] P1-01 renumber rewrites ids in the flight's CLAUDE.md notes
@@ -47,3 +47,7 @@ INDEX_ONLY_GIT set + gitOutputValues in cleanroom.mjs; nine fixtures; docs and C
 ### P0-05 — 5581206
 
 rsyncParts/tarParts helpers + own rule block before 6d; rsync remote operand denied under deny.network. 14 fixtures, 2 exact-message tests. Interpretation: tar A/--delete count as archive-writing; extraction into a dir under a protected path also denied; rsync/tar not added to WRITE_FAMILY (exported set unchanged).
+
+### P0-06 — 4b3bf80
+
+Probe: BSD-only form was denied with "install writes it into null". Targets now carry their reading's dir. 3 fixtures, 3 message assertions. Docs and CHANGELOG updated.
