@@ -1023,10 +1023,19 @@ export function evaluate(policy, hookInput, env) {
   }
 }
 
-// Valued options of cp, mv, ln and install, for scanOption.
-const COPY_SPEC = {
-  short: new Set("tSmog"),
-  long: new Set(["--target-directory", "--suffix", "--mode", "--owner", "--group"]),
+// Valued options of cp, mv, ln and install, each from its own --help, for scanOption. GNU and BSD install disagree on -S (GNU: a suffix; BSD: a flag), so install has two readings.
+const COPY_SPECS = {
+  cp: { short: new Set("tS"), long: new Set(["--target-directory", "--suffix", "--sparse", "--no-preserve"]) },
+  mv: { short: new Set("tS"), long: new Set(["--target-directory", "--suffix"]) },
+  ln: { short: new Set("tS"), long: new Set(["--target-directory", "--suffix"]) },
+  install: {
+    short: new Set("gmoSt"),
+    long: new Set(["--group", "--mode", "--owner", "--suffix", "--target-directory", "--strip-program"]),
+  },
+  installBsd: {
+    short: new Set("gmotB"),
+    long: new Set(["--group", "--mode", "--owner", "--suffix", "--target-directory", "--strip-program"]),
+  },
 };
 
 // Every long option of GNU cp, so a prefix is read only when it names exactly one (`--rec` is --recursive, `--r` is nothing).
@@ -1049,8 +1058,16 @@ const cpLong = (t) => {
  * stands for the directory itself. `recursive` is a cp -r/-R/-a.
  */
 function destinationPaths(word, rest) {
+  if (word !== "install") return destinationPathsFor(word, rest, COPY_SPECS[word]);
+  const gnu = destinationPathsFor(word, rest, COPY_SPECS.install);
+  const bsd = destinationPathsFor(word, rest, COPY_SPECS.installBsd);
+  // Either reading may be the one the installed command follows, so both are judged.
+  return { dir: gnu.dir, recursive: gnu.recursive || bsd.recursive, targets: [...gnu.targets, ...bsd.targets] };
+}
+
+function destinationPathsFor(word, rest, spec) {
   const none = { dir: null, recursive: false, targets: [] };
-  if (!["cp", "mv", "ln", "install"].includes(word)) return none;
+  if (!spec) return none;
   let dir = null;
   const operands = [];
   let recursive = false;
@@ -1065,17 +1082,17 @@ function destinationPaths(word, rest) {
     if (word === "cp" && t.startsWith("--")) {
       // cp resolves its own long options: `--o` is --one-file-system there, not install's --owner.
       const full = cpLong(t);
-      if (full === "--target-directory" || full === "--suffix") {
+      if (full && spec.long.has(full)) {
         const eq = t.indexOf("=");
         opt = { name: full, value: eq === -1 ? null : t.slice(eq + 1) };
       }
-    } else if (t.startsWith("-")) opt = scanOption(t, COPY_SPEC);
+    } else if (t.startsWith("-")) opt = scanOption(t, spec);
     if (opt) {
       const value = opt.value ?? rest[++i];
       if (opt.name === "t" || opt.name === "--target-directory") dir = value ?? dir;
       // A bundle's letters before the valued one still count (`cp -rt docs`).
       if (word === "cp" && !t.startsWith("--")) {
-        const before = t.slice(1, t.search(/[tSmog]/));
+        const before = t.slice(1, t.search(/[tS]/));
         if (/[rRa]/.test(before)) recursive = true;
         if (before.includes("T")) noTargetDir = true;
       }
