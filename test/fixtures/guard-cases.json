@@ -5819,5 +5819,159 @@
    "cwd": "__ROOT__"
   },
   "expect": "allowed"
+ },
+ {
+  "name": "shell: install --strip-program=true --strip evil/cleanroom.json docs (R9-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "install --strip-program=true --strip evil/cleanroom.json docs"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "shell: install --strip-program true --strip evil/cleanroom.json docs (R9-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "install --strip-program true --strip evil/cleanroom.json docs"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "shell: install --strip-program=true --strip -t docs evil/cleanroom.json (R9-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "install --strip-program=true --strip -t docs evil/cleanroom.json"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "shell: install --strip evil/cleanroom.json docs (R9-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "install --strip evil/cleanroom.json docs"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "shell: install -v --strip evil/cleanroom.json docs (R9-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "install -v --strip evil/cleanroom.json docs"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "shell: install --strip evil/state.json .kukulu (R9-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "install --strip evil/state.json .kukulu"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "shell: mv --st evil/cleanroom.json docs (R9-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "mv --st evil/cleanroom.json docs"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "shell: mv --strip-trailing-slashes evil/cleanroom.json docs (R9-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "mv --strip-trailing-slashes evil/cleanroom.json docs"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "shell: install --stri evil/cleanroom.json docs (R9-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "install --stri evil/cleanroom.json docs"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "shell: install --strip-p strip evil/cleanroom.json docs (R9-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "install --strip-p strip evil/cleanroom.json docs"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "shell: install --strip a.txt build/ (R9-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "install --strip a.txt build/"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "shell: install --strip-program=true --strip a.txt build/ (R9-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "install --strip-program=true --strip a.txt build/"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
  }
 ]

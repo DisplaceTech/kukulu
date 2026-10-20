@@ -1044,11 +1044,27 @@ const CP_LONG = (
   "--no-preserve --no-target-directory --one-file-system --parents --preserve --recursive --reflink --remove-destination --sparse " +
   "--strip-trailing-slashes --symbolic-link --target-directory --suffix --update --verbose --context --help --version"
 ).split(" ");
-const cpLong = (t) => {
+const resolveLong = (list, t) => {
   const given = t.split("=")[0];
-  if (CP_LONG.includes(given)) return given;
-  const hits = CP_LONG.filter((n) => n.startsWith(given));
+  if (list.includes(given)) return given;
+  const hits = list.filter((n) => n.startsWith(given));
   return hits.length === 1 ? hits[0] : null;
+};
+const cpLong = (t) => resolveLong(CP_LONG, t);
+// Full long lists of GNU coreutils 9.4 mv, ln and install: scanOption would read install's own --strip as an abbreviation of --strip-program.
+const OTHER_LONG = {
+  install: (
+    "--backup --compare --context --debug --directory --group --help --mode --no-target-directory --owner --preserve-context " +
+    "--preserve-timestamps --strip --strip-program --suffix --target-directory --verbose --version"
+  ).split(" "),
+  mv: (
+    "--backup --context --debug --exchange --force --help --interactive --no-clobber --no-copy --no-target-directory " +
+    "--strip-trailing-slashes --suffix --target-directory --update --verbose --version"
+  ).split(" "),
+  ln: (
+    "--backup --directory --force --help --interactive --logical --no-dereference --no-target-directory --physical --relative " +
+    "--suffix --symbolic --target-directory --verbose --version"
+  ).split(" "),
 };
 
 /**
@@ -1082,6 +1098,12 @@ function destinationPathsFor(word, rest, spec) {
     if (word === "cp" && t.startsWith("--")) {
       // cp resolves its own long options: `--o` is --one-file-system there, not install's --owner.
       const full = cpLong(t);
+      if (full && spec.long.has(full)) {
+        const eq = t.indexOf("=");
+        opt = { name: full, value: eq === -1 ? null : t.slice(eq + 1) };
+      }
+    } else if (t.startsWith("--") && OTHER_LONG[word]) {
+      const full = resolveLong(OTHER_LONG[word], t);
       if (full && spec.long.has(full)) {
         const eq = t.indexOf("=");
         opt = { name: full, value: eq === -1 ? null : t.slice(eq + 1) };
