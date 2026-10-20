@@ -33,7 +33,7 @@ const logLines = (dir) => fs.readFileSync(path.join(dir, "log.jsonl"), "utf8").s
   const j = run(b.dir, "--json");
   const parsed = JSON.parse(j.stdout);
   eq(j.stdout.trim().split("\n").length + "|" + parsed.ok + "|" + Object.keys(parsed).sort().join(","), "1|true|checks,notes,ok,reasons", "--json prints one object");
-  eq(Object.keys(parsed.checks).join(","), "manifest,signature,chain,checkpoints", "...with a result for each check that ran");
+  eq(Object.keys(parsed.checks).join(","), "manifest,signature,chain,checkpoints,policy,guard,mode,denials,coverage,similarity", "...with a result for each of the ten checks");
   eq(run(b.dir, "--json").status, 0, "...and exits 0 on a pass");
   const bad = JSON.parse(run(b.dir, "--json", "--key", "sha256:" + "1".repeat(64)).stdout);
   eq(bad.ok + "|" + bad.reasons[0].check, "false|signature", "--json carries the reasons too");
@@ -164,6 +164,168 @@ const logLines = (dir) => fs.readFileSync(path.join(dir, "log.jsonl"), "utf8").s
   }
   fs.copyFileSync(pubOnly, path.join(notFirst.dir, "log.jsonl"));
   ok(reasons(notFirst.dir).some((x) => x === "checkpoints: the log has no genesis entry"), "a log with no genesis entry fails check 4");
+}
+
+// ---------------------------------------------------------------- check 5: the policy
+
+{
+  const other = "9".repeat(64);
+  const b = fresh();
+  rewriteManifest(b.dir, b.key, (m) => { m.policy.hashes = [other]; });
+  const r = reasons(b.dir);
+  ok(r.length === 2 && r.every((x) => /^policy: entry (6|8): the checkpoint's policyHash [0-9a-f]{64} is not in the manifest's policy\.hashes$/.test(x)), "a checkpoint policyHash missing from policy.hashes fails check 5");
+
+  // A policy change between checkpoints: a third checkpoint under another policy hash, then back.
+  const key = CR.generateKey(path.join(mkDir("kukulu-policy-key-"), "k.pem"));
+  const changed = fresh({
+    key,
+    extra: (log) => {
+      const entries = CR.readEntries(log);
+      const first = entries.find((e) => e.kind === "checkpoint").data;
+      const data = CR.signCheckpoint({ chainTip: entries.at(-1).hash, git: first.git, policyHash: other, guardHash: first.guardHash, loggerHash: first.loggerHash, hooksHash: first.hooksHash, keyFingerprint: key.fingerprint, event: "policy-edit" }, key.privateKey);
+      CR.appendEntry(log, { kind: "checkpoint", stage: "implement", role: "session", model: "claude-test", session: "s-1", data });
+    },
+  });
+  const was = changed.manifest.policy.current;
+  rewriteManifest(changed.dir, key, (m) => { m.policy.hashes = [was, other]; });
+  const res = V.verifyBundle(changed.dir);
+  ok(res.ok && res.notes.includes("policy changed at seq 7") && res.notes.includes("policy changed at seq 9"), "a policy change between checkpoints is reported, not failed");
+  const cli = run(changed.dir);
+  like(cli.stdout, /verify-attestation: note: policy changed at seq 7\n/, "...as a note on the command line");
+  rewriteManifest(changed.dir, key, (m) => { m.policy.hashes = [other, was]; });
+  ok(reasons(changed.dir).some((x) => /^policy: policy\.hashes is not the checkpoints' distinct policy hashes in the order they first appear$/.test(x)), "policy.hashes in another order fails check 5");
+
+  const current = fresh();
+  rewriteManifest(current.dir, current.key, (m) => { m.policy.current = other; });
+  const c = reasons(current.dir);
+  ok(c.includes("policy: policy.json does not hash to the manifest's policy.current") && c.some((x) => /last checkpoint's policyHash is not the manifest's policy\.current/.test(x)), "a policy.json that is not policy.current fails check 5");
+  const noPolicy = fresh();
+  fs.unlinkSync(path.join(noPolicy.dir, "policy.json"));
+  ok(reasons(noPolicy.dir).includes("policy: policy.json is missing"), "a missing policy.json fails check 5");
+}
+
+// ---------------------------------------------------------------- check 6: the guard
+
+{
+  const b = fresh();
+  rewriteManifest(b.dir, b.key, (m) => { m.plugin.guardHash = "0".repeat(64); });
+  const r = reasons(b.dir);
+  ok(r.length === 2 && r.every((x) => /^guard: entry (6|8): the checkpoint's guardHash differs from the manifest's plugin\.guardHash$/.test(x)), "a differing guardHash fails check 6");
+  for (const field of ["loggerHash", "hooksHash"]) {
+    const c = fresh();
+    rewriteManifest(c.dir, c.key, (m) => { m.plugin[field] = "1".repeat(64); });
+    ok(reasons(c.dir).every((x) => x.includes(field)) && reasons(c.dir).length === 2, "a differing " + field + " fails check 6");
+  }
+}
+
+// ---------------------------------------------------------------- check 7: the mode
+
+{
+  const b = fresh({ extra: (log) => CR.appendEntry(log, { kind: "gate", stage: "controller", role: "session", data: { failed: "mode", reason: "the flight was recorded in general mode" } }) });
+  eq(JSON.stringify(reasons(b.dir)), JSON.stringify(["mode: entry 7: a gate failed the mode check: the flight was recorded in general mode"]), "a gate entry recording a mode failure fails check 7");
+  const other = fresh({ extra: (log) => CR.appendEntry(log, { kind: "gate", stage: "controller", role: "session", data: { failed: "chain", reason: "x" } }) });
+  ok(V.verifyBundle(other.dir).ok, "a gate that failed on another check does not fail check 7");
+  const general = fresh({ mode: "general" });
+  eq(JSON.stringify(reasons(general.dir)), JSON.stringify(['mode: the genesis records mode "general", not "clean-room"']), "a genesis that is not clean-room fails check 7");
+}
+
+// ---------------------------------------------------------------- check 8: the denials
+
+{
+  const b = fresh();
+  rewriteManifest(b.dir, b.key, (m) => { m.denials.total = 2; });
+  eq(JSON.stringify(reasons(b.dir)), JSON.stringify(["denials: the manifest says 2 denials, the log has 1"]), "a wrong denial count fails check 8");
+  const reason = fresh();
+  rewriteManifest(reason.dir, reason.key, (m) => { m.denials.byReason = { "denied path: /elsewhere": 1 }; });
+  ok(reasons(reason.dir)[0].startsWith("denials: the manifest's denials.byReason differs"), "a wrong denial reason fails check 8");
+
+  // A verdict on the denial (seq 4), and one on an entry that is not a denial (seq 3), which counts for nothing.
+  const v = fresh({
+    extra: (log) => {
+      CR.appendEntry(log, { kind: "human", stage: "controller", role: "operator", target: "#4: false positive — a header named in a comment", data: { kind: "verdict", via: "kukulu_cleanroom_record" } });
+      CR.appendEntry(log, { kind: "human", stage: "controller", role: "operator", target: "#3: offline test — not a denial", data: { kind: "verdict", via: "kukulu_cleanroom_record" } });
+    },
+  });
+  eq(JSON.stringify(v.manifest.denials.verdicts), JSON.stringify({ "prior-art attempt": 0, "false positive": 1, "offline test": 0, unclassified: 0 }), "the harness counts the verdict (test setup)");
+  ok(V.verifyBundle(v.dir).ok, "verdicts recounted from the log match an honest manifest");
+  rewriteManifest(v.dir, v.key, (m) => { m.denials.verdicts = { "prior-art attempt": 0, "false positive": 0, "offline test": 1, unclassified: 0 }; });
+  ok(reasons(v.dir)[0].startsWith("denials: the manifest's denials.verdicts differs"), "a wrong verdict count fails check 8");
+  rewriteManifest(v.dir, v.key, (m) => { m.denials.verdicts = { "prior-art attempt": 0, "false positive": 0, "offline test": 0, unclassified: 1 }; });
+  ok(reasons(v.dir)[0].startsWith("denials: the manifest's denials.verdicts differs"), "...including a verdict hidden as unclassified");
+
+  const tampered = fresh();
+  const lines = logLines(tampered.dir);
+  lines[2] = lines[2].replace('"target":"/p/a.rs"', '"target":"/p/x.rs"');
+  fs.writeFileSync(path.join(tampered.dir, "log.jsonl"), lines.join("\n") + "\n");
+  ok(reasons(tampered.dir).includes("denials: not checked: the chain does not verify"), "checks 5 to 9 say so when the chain does not verify");
+}
+
+// ---------------------------------------------------------------- check 9: the coverage gaps
+
+{
+  const sha = (c) => c.repeat(40);
+  const commits = [
+    `${sha("b")}\x1fG\x1fP0-01: fine\x1fimplement\x1fP0-01`,
+    `${sha("c")}\x1fG\x1fa commit with no trailer\x1f\x1f`,
+    `${sha("d")}\x1fN\x1fP0-02: unsigned\x1fimplement\x1fP0-02`,
+    `${sha("e")}\x1fB\x1fP0-03: bad signature\x1fimplement\x1fP0-03`,
+  ].join("\n") + "\n";
+  let now = Date.parse("2026-01-01T00:00:00.000Z");
+  const hold = { clock: () => now, commits };
+  const extra = (log) => {
+    const e = { stage: "controller", role: "operator" };
+    CR.appendEntry(log, { kind: "gate", ...e, data: { checks: 7, ok: true } });
+    CR.appendEntry(log, { kind: "gate", ...e, data: { checks: 7, ok: true } });
+    CR.appendEntry(log, { kind: "human", ...e, target: "installed a tool by hand", data: { kind: "intervention", via: "kukulu_cleanroom_record" } });
+    now += 5 * 3600 * 1000;
+    CR.appendEntry(log, { kind: "human", ...e, target: "carry on", data: { kind: "instruction", via: "kukulu_cleanroom_record" } });
+  };
+  const expected = [
+    { kind: "silent-gates", from: 7, to: 8 },
+    { kind: "untrailed-commit", sha: sha("c"), subject: "a commit with no trailer" },
+    { kind: "intervention", seq: 9 },
+    { kind: "idle", from: 9, to: 10, hours: 5 },
+    { kind: "unsigned-commit", sha: sha("d") },
+    { kind: "unsigned-commit", sha: sha("e") },
+  ];
+  const b = fresh({ ...hold, extra });
+  const r = reasons(b.dir);
+  ok(r.length === expected.length && expected.every((g) => r.includes("coverage: the log shows a gap the manifest omits: " + JSON.stringify(g))), "a missing coverage gap fails check 9");
+  for (const kind of ["silent-gates", "untrailed-commit", "intervention", "idle", "unsigned-commit"]) {
+    ok(r.some((x) => x.includes(JSON.stringify(kind))), "each gap kind is recomputed: " + kind);
+  }
+  const honest = fresh({ ...hold, extra, gaps: expected });
+  const out = run(honest.dir);
+  eq(out.status, 0, "a manifest that lists every gap passes check 9");
+  for (const g of expected) ok(out.stdout.includes("verify-attestation: note: coverage gap: " + JSON.stringify(g) + "\n"), "...and every gap is printed: " + g.kind);
+  const swapped = fresh({ ...hold, extra, gaps: [expected[1], expected[0], ...expected.slice(2)] });
+  eq(JSON.stringify(reasons(swapped.dir)), JSON.stringify(["coverage: the manifest lists the gaps in a different order than the log gives them"]), "gaps listed in another order fail check 9");
+  const invented = fresh({ ...hold, extra, gaps: [...expected, { kind: "intervention", seq: 2 }] });
+  ok(reasons(invented.dir)[0].startsWith("coverage: the manifest lists a gap the log and commits.txt do not show:"), "a gap the log does not show fails check 9");
+  now = Date.parse("2026-01-01T00:00:00.000Z");
+  const tight = fresh({ ...hold, extra, gaps: expected, idleGapHours: 6 });
+  ok(reasons(tight.dir).length === 1 && /omits|do not show/.test(reasons(tight.dir)[0]), "idleGapHours is the manifest's own: a longer one drops the idle gap");
+  const noHours = fresh();
+  rewriteManifest(noHours.dir, noHours.key, (m) => { delete m.coverage.idleGapHours; });
+  ok(reasons(noHours.dir).includes("coverage: the manifest's coverage.idleGapHours is not a positive number"), "a manifest with no idleGapHours fails check 9");
+  const noCommits = fresh();
+  fs.unlinkSync(path.join(noCommits.dir, "commits.txt"));
+  ok(reasons(noCommits.dir).some((x) => x.startsWith("coverage: commits.txt is missing")), "a missing commits.txt fails check 9");
+  ok(V.verifyBundle(fresh().dir).notes.every((n) => !n.startsWith("coverage gap")), "an intact bundle has no gaps to print");
+}
+
+// ---------------------------------------------------------------- check 10: the similarity report
+
+{
+  const text = JSON.stringify({ verdict: "clear", score: 0.01 }) + "\n";
+  const b = fresh({ similarity: text });
+  ok(V.verifyBundle(b.dir).ok, "a bundle with a similarity.json that matches the manifest passes");
+  fs.writeFileSync(path.join(b.dir, "similarity.json"), JSON.stringify({ verdict: "clear", score: 0 }) + "\n");
+  const r = reasons(b.dir);
+  ok(r.includes("similarity: similarity.json does not hash to the manifest's similarity.sha256"), "a changed similarity.json fails check 10");
+  fs.unlinkSync(path.join(b.dir, "similarity.json"));
+  ok(reasons(b.dir).includes("similarity: similarity.json is missing but the manifest records its hash"), "a missing similarity.json fails check 10");
+  ok(V.verifyBundle(fresh().dir).checks.similarity === true, "a bundle with no similarity report passes check 10");
 }
 
 // ---------------------------------------------------------------- the verifier and the module agree

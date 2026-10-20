@@ -174,6 +174,123 @@ export function verifyBundle(dir, { key = null } = {}) {
   } else if (!chain) fail("checkpoints", "not checked: the log is missing");
   else fail("checkpoints", "not checked: there is no usable publisher.pub");
 
+  // Checks 5 to 10 read the log and the manifest together, so they need both to be sound.
+  const sound = chain?.ok && manifest;
+  const unsound = !chain ? "the log is missing" : !chain.ok ? "the chain does not verify" : !manifest ? "there is no readable manifest" : null;
+  const notChecked = (check) => {
+    start(check);
+    if (!sound) fail(check, "not checked: " + unsound);
+    return sound;
+  };
+  const entries = sound ? chain.entries : [];
+  const checkpointEntries = entries.filter((e) => e.kind === "checkpoint" && e.data);
+
+  // 5. the policy: every checkpoint's hash is one the manifest lists, and the policy file is the current one
+  if (notChecked("policy")) {
+    const listed = manifest.policy?.hashes;
+    const seen = [];
+    for (const e of checkpointEntries) if (!seen.includes(e.data.policyHash)) seen.push(e.data.policyHash);
+    if (!Array.isArray(listed)) fail("policy", "the manifest has no policy.hashes list");
+    else {
+      for (const e of checkpointEntries) {
+        if (!listed.includes(e.data.policyHash)) fail("policy", `entry ${e.seq}: the checkpoint's policyHash ${e.data.policyHash} is not in the manifest's policy.hashes`);
+      }
+      if (JSON.stringify(listed) !== JSON.stringify(seen) && checks.policy) fail("policy", "policy.hashes is not the checkpoints' distinct policy hashes in the order they first appear");
+    }
+    let before = null;
+    for (const e of checkpointEntries) {
+      if (before !== null && e.data.policyHash !== before) notes.push(`policy changed at seq ${e.seq}`);
+      before = e.data.policyHash;
+    }
+    const policyBytes = readIfExists(path.join(dir, "policy.json"));
+    if (!policyBytes) fail("policy", "policy.json is missing");
+    else if (sha256(policyBytes) !== manifest.policy?.current) fail("policy", "policy.json does not hash to the manifest's policy.current");
+    const lastPolicy = checkpointEntries.at(-1)?.data.policyHash;
+    if (lastPolicy && manifest.policy?.current && lastPolicy !== manifest.policy.current) fail("policy", "the last checkpoint's policyHash is not the manifest's policy.current");
+  }
+
+  // 6. the guard: the scripts and hooks every checkpoint saw are the ones the manifest names
+  if (notChecked("guard")) {
+    const plugin = manifest.plugin ?? {};
+    for (const e of checkpointEntries) {
+      for (const field of ["guardHash", "loggerHash", "hooksHash"]) {
+        if (e.data[field] !== plugin[field]) fail("guard", `entry ${e.seq}: the checkpoint's ${field} differs from the manifest's plugin.${field}`);
+      }
+    }
+  }
+
+  // 7. the mode: clean-room from the genesis on, and no gate ever failed on it
+  if (notChecked("mode")) {
+    const genesis = entries.find((e) => e.kind === "genesis");
+    if (genesis?.data?.mode !== "clean-room") fail("mode", `the genesis records mode ${JSON.stringify(genesis?.data?.mode ?? null)}, not "clean-room"`);
+    for (const e of entries) {
+      if (e.kind === "gate" && e.data?.failed === "mode") fail("mode", `entry ${e.seq}: a gate failed the mode check${e.data.reason ? `: ${e.data.reason}` : ""}`);
+    }
+  }
+
+  // 8. the denials, recounted from the log with the human verdicts
+  if (notChecked("denials")) {
+    const classes = ["prior-art attempt", "false positive", "offline test"];
+    const denied = entries.filter((e) => e.kind === "denied");
+    const byReason = {};
+    for (const e of denied) byReason[e.reason ?? "(no reason)"] = (byReason[e.reason ?? "(no reason)"] ?? 0) + 1;
+    const verdictOf = new Map();
+    for (const e of entries) {
+      const m = e.kind === "human" && e.data?.kind === "verdict" ? /^#(\d+): (prior-art attempt|false positive|offline test)\b/.exec(e.target ?? "") : null;
+      if (m && denied.some((d) => d.seq === Number(m[1]))) verdictOf.set(Number(m[1]), m[2]);
+    }
+    const verdicts = Object.fromEntries(classes.map((c) => [c, 0]));
+    for (const c of verdictOf.values()) verdicts[c] += 1;
+    verdicts.unclassified = denied.filter((d) => !verdictOf.has(d.seq)).length;
+    const sorted = (o) => JSON.stringify(Object.fromEntries(Object.entries(o ?? {}).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))));
+    const m = manifest.denials ?? {};
+    if (m.total !== denied.length) fail("denials", `the manifest says ${m.total} denials, the log has ${denied.length}`);
+    if (sorted(m.byReason) !== sorted(byReason)) fail("denials", `the manifest's denials.byReason differs from the log's: ${sorted(byReason)}`);
+    if (sorted(m.verdicts) !== sorted(verdicts)) fail("denials", `the manifest's denials.verdicts differs from the log's: ${sorted(verdicts)}`);
+  }
+
+  // 9. the coverage gaps, recomputed from the log and commits.txt
+  if (notChecked("coverage")) {
+    const idleGapHours = manifest.coverage?.idleGapHours;
+    const commitBytes = readIfExists(path.join(dir, "commits.txt"));
+    if (typeof idleGapHours !== "number" || !(idleGapHours > 0)) fail("coverage", "the manifest's coverage.idleGapHours is not a positive number");
+    else if (!commitBytes) fail("coverage", "commits.txt is missing, so untrailed and unsigned commits cannot be recomputed");
+    else {
+      const commits = commitBytes.toString("utf8").split("\n").filter(Boolean).map((l) => {
+        const [sha, sig, subject, stage] = l.split("\x1f");
+        return { sha, sig, subject, stage: stage ?? "" };
+      });
+      const gaps = [];
+      for (let i = 1; i < entries.length; i++) {
+        if (entries[i].kind === "gate" && entries[i - 1].kind === "gate") gaps.push({ kind: "silent-gates", from: entries[i - 1].seq, to: entries[i].seq });
+      }
+      for (const c of commits) if (c.stage === "") gaps.push({ kind: "untrailed-commit", sha: c.sha, subject: c.subject });
+      for (const e of entries) if (e.kind === "human" && e.data?.kind === "intervention") gaps.push({ kind: "intervention", seq: e.seq });
+      for (let i = 1; i < entries.length; i++) {
+        const a = entries[i - 1];
+        const b = entries[i];
+        if (a.stage === null || a.stage !== b.stage) continue;
+        const hours = (Date.parse(b.at) - Date.parse(a.at)) / 3600000;
+        if (hours > idleGapHours) gaps.push({ kind: "idle", from: a.seq, to: b.seq, hours: Math.round(hours * 100) / 100 });
+      }
+      for (const c of commits) if (c.sig === "N" || c.sig === "B") gaps.push({ kind: "unsigned-commit", sha: c.sha });
+      const want = gaps.map((g) => JSON.stringify(g));
+      const have = (manifest.coverage?.gaps ?? []).map((g) => JSON.stringify(g));
+      for (const g of want) if (!have.includes(g)) fail("coverage", `the log shows a gap the manifest omits: ${g}`);
+      for (const g of have) if (!want.includes(g)) fail("coverage", `the manifest lists a gap the log and commits.txt do not show: ${g}`);
+      if (checks.coverage && JSON.stringify(want) !== JSON.stringify(have)) fail("coverage", "the manifest lists the gaps in a different order than the log gives them");
+      for (const g of want) notes.push(`coverage gap: ${g}`);
+    }
+  }
+
+  // 10. the similarity report, when the manifest carries one
+  start("similarity");
+  if (manifest?.similarity) {
+    const bytes = readIfExists(path.join(dir, "similarity.json"));
+    if (!bytes) fail("similarity", "similarity.json is missing but the manifest records its hash");
+    else if (sha256(bytes) !== manifest.similarity.sha256) fail("similarity", "similarity.json does not hash to the manifest's similarity.sha256");
+  }
+
   return { ok: reasons.length === 0, reasons, notes, checks };
 }
 

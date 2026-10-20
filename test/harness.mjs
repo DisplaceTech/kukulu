@@ -382,7 +382,10 @@ const sha256Of = (bytes) => createHash("sha256").update(bytes).digest("hex");
  * mcp/cleanroom.mjs and a temp key, the files a manifest lists, `publisher.pub`, a
  * `verify.mjs` copy, the manifest and its signature. `opts.key` is the publisher key,
  * `opts.checkpointKey` signs the second checkpoint instead (to build a bad one),
- * `opts.policyText` is the policy. Returns `{ dir, key, fingerprint, manifest, entries }`.
+ * `opts.policyText` is the policy. `opts.clock()` replaces the time entries are stamped with,
+ * `opts.extra(log)` appends more entries (after the first checkpoint), `opts.commits` is commits.txt,
+ * `opts.gaps` and `opts.idleGapHours` are the manifest's coverage, `opts.similarity` is a similarity.json's text.
+ * The manifest's denials are counted from the entries here, independently of the verifier. Returns `{ dir, key, fingerprint, manifest, entries }`.
  */
 export function buildBundle(dir, opts = {}) {
   const keyDir = mkDir("kukulu-bundle-key-");
@@ -396,6 +399,13 @@ export function buildBundle(dir, opts = {}) {
   const loggerHash = sha256Of(fs.readFileSync(path.join(ROOT, "scripts", "cleanroom-log.mjs")));
   const hooksHash = sha256Of(fs.readFileSync(path.join(ROOT, "hooks", "hooks.json")));
   const base = { role: "session", model: "claude-test", session: "s-1" };
+  const RealDate = Date;
+  if (opts.clock) {
+    globalThis.Date = class extends RealDate {
+      constructor(...a) { if (a.length) super(...a); else super(opts.clock()); }
+      static now() { return opts.clock(); }
+    };
+  }
   const checkpoint = (event, signer) => {
     const entries = CR.readEntries(log);
     const data = CR.signCheckpoint(
@@ -404,15 +414,27 @@ export function buildBundle(dir, opts = {}) {
     );
     return CR.appendEntry(log, { kind: "checkpoint", stage: "implement", ...base, data });
   };
-  CR.appendEntry(log, { kind: "genesis", stage: "controller", ...base, data: { mode: "clean-room", policyHash, guardHash, loggerHash, hooksHash, pluginVersion: "0.7.0", keyFingerprint: key.fingerprint, baseBranch: "main", head: "a".repeat(40) } });
+  CR.appendEntry(log, { kind: "genesis", stage: "controller", ...base, data: { mode: opts.mode ?? "clean-room", policyHash, guardHash, loggerHash, hooksHash, pluginVersion: "0.7.0", keyFingerprint: key.fingerprint, baseBranch: "main", head: "a".repeat(40) } });
   CR.appendEntry(log, { kind: "gate", stage: "controller", ...base, data: { checks: 7, ok: true } });
   CR.appendEntry(log, { kind: "allowed", stage: "implement", task: "P0-01", ...base, tool: "Read", target: "/p/a.rs", decision: "allowed" });
   CR.appendEntry(log, { kind: "denied", stage: "implement", task: "P0-01", ...base, tool: "Read", target: "/usr/include/zlib.h", decision: "denied", reason: "denied path: /usr/include/zlib.h (deny.paths)" });
   CR.appendEntry(log, { kind: "human", stage: "controller", role: "operator", target: "go on", data: { kind: "instruction", via: "kukulu_cleanroom_record" } });
   checkpoint("run-start", key);
+  if (opts.extra) opts.extra(log);
   CR.appendEntry(log, { kind: "allowed", stage: "implement", task: "P0-02", ...base, tool: "Bash", target: "ls", decision: "allowed" });
   checkpoint("kukulu_run_finish", cpKey);
+  globalThis.Date = RealDate;
   const entries = CR.readEntries(log);
+  const denied = entries.filter((e) => e.kind === "denied");
+  const byReason = {};
+  for (const e of denied) byReason[e.reason] = (byReason[e.reason] ?? 0) + 1;
+  const verdicts = { "prior-art attempt": 0, "false positive": 0, "offline test": 0, unclassified: 0 };
+  const classified = new Map();
+  for (const e of entries) {
+    const m = e.kind === "human" && e.data?.kind === "verdict" && /^#(\d+): (prior-art attempt|false positive|offline test)/.exec(e.target);
+    if (m) classified.set(Number(m[1]), m[2]);
+  }
+  for (const d of denied) verdicts[classified.get(d.seq) ?? "unclassified"] += 1;
 
   const sources = {
     "policy.json": policyText,
@@ -421,7 +443,8 @@ export function buildBundle(dir, opts = {}) {
     "PROGRESS.md": "# Progress\n",
     "kukulu.json": "{}\n",
     "state.json": "{}\n",
-    "commits.txt": `${"b".repeat(40)}\x1fN\x1fP0-01: first\x1fimplement\x1fP0-01\n`,
+    "commits.txt": opts.commits ?? `${"b".repeat(40)}\x1fG\x1fP0-01: first\x1fimplement\x1fP0-01\n`,
+    ...(opts.similarity === undefined ? {} : { "similarity.json": opts.similarity }),
   };
   for (const [name, text] of Object.entries(sources)) fs.writeFileSync(path.join(dir, name), text);
   fs.writeFileSync(path.join(dir, "publisher.pub"), key.publicKey.export({ type: "spki", format: "pem" }));
@@ -439,12 +462,12 @@ export function buildBundle(dir, opts = {}) {
     policy: { path: "docs/cleanroom.json", hashes: [policyHash], current: policyHash },
     chain: { entries: entries.length, first: entries[0].hash, tip: entries.at(-1).hash },
     checkpoints: checkpoints.map((e) => ({ seq: e.seq, event: e.data.event, git: e.data.git, signature: e.data.signature, ok: true })),
-    denials: { total: 1, byReason: { "denied path: /usr/include/zlib.h (deny.paths)": 1 }, verdicts: { "prior-art attempt": 0, "false positive": 0, "offline test": 0, unclassified: 1 } },
+    denials: { total: denied.length, byReason, verdicts },
     calls: { total: 3, byTool: { Read: 2, Bash: 1 }, byStage: { implement: 3 }, readCapable: 3 },
     human: { instructions: 1, interventions: 0, verdicts: 0 },
     selfTest: { ok: true, cases: 164, at: "2026-01-01T00:00:00.000Z" },
-    coverage: { gaps: [], knownLimits: [] },
-    similarity: null,
+    coverage: { gaps: opts.gaps ?? [], knownLimits: [], idleGapHours: opts.idleGapHours ?? 4 },
+    similarity: opts.similarity === undefined ? null : { sha256: sha256Of(opts.similarity) },
     files: listed.map((name) => {
       const bytes = fs.readFileSync(path.join(dir, name));
       return { path: name, sha256: sha256Of(bytes), bytes: bytes.length };
