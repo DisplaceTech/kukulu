@@ -65,7 +65,7 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] P5-04 Coverage gaps and cleanroom.idleGapHours
 - [x] P5-05 Tune cleanroom.idleGapHours
 - [x] P5-06 kukulu_attest
-- [~] P5-07 Tamper tests over a real bundle; the archive moves it
+- [x] P5-07 Tamper tests over a real bundle; the archive moves it
 - [ ] P5-08 Attestation docs and the summarize step
 - [ ] P5-09 Phase 5 end: push and record the manual check
 - [ ] P6-01 Operations, architecture and writing-specs for 0.7.0
@@ -257,3 +257,6 @@ docs/spikes/P5-05.md. Measurement: cleanroom.idleGapHours before 3 h (ASSUMPTION
 
 ### P5-06 — 9d41f96
 kukulu_attest (TOOLS after kukulu_similarity; 25 tools; summarizer tools line; mcp-tools.md section + first line; README row + count; CHANGELOG). attest({evidence}): refusals in order mode, summary, evidence shape/files, dirty tree, required docs, merge base, gate (all before any write but the gate entry). Writes docs/attestation/ (F-01 files, commits.txt via git log with comma-separated trailers, manifest signed by signBytes, verify.mjs byte copy), runs node verify.mjs <dir> --key <fp> --json inside withRollback, then appends attest entry + checkpoint(kukulu_attest) and commits chore: attestation bundle; push per policy. mcp/cleanroom.mjs gained summarizeEntries and signBytes. Test flight helper summarizedFlight() in test/attest.mjs (copyOf + KUKULU_CLEANROOM_KEY override). attest suite 180 assertions.
+
+### P5-07 — a97b423
+test/attest.mjs: tamper matrix over a real kukulu_attest bundle (file, manifest, signature, log line, checkpoint with rehashed chain, policy, public key swap and forger re-sign, commit trailer; each both as-is and with a refreshed manifest where the owning check would otherwise be hidden), untampered pass with/without --key, verify.mjs alone with the repo deleted. flightArchive moves docs/attestation/ to docs/flights/<slug>/attestation/ (layout kept; moved gains docs/attestation); mcp-tools.md and the tool description updated. attest suite 207 assertions.
