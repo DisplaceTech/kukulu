@@ -56,7 +56,7 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] P4-04 Metrics, positioning and the verdict
 - [x] P4-05 Calibration fixtures
 - [x] P4-06 Tune similarity.separationMargin
-- [ ] P4-07 kukulu_similarity
+- [x] P4-07 kukulu_similarity
 - [ ] P4-08 The summarize skill carries the contamination score
 - [ ] P4-09 Phase 4 end: push and record the calibration check
 - [ ] P5-01 The verifier: manifest, signature, chain and checkpoints
@@ -230,3 +230,6 @@ Fixtures a/ b/ b-derived/ c/ under test/fixtures/similarity (original RLE + addi
 
 ### P4-06 — ef658a3
 Measurement: separationMargin before 0.0, after 0.0 (unchanged). Fixture gaps s_pos - s_neg: 0.508 to 0.771, smallest 0.508 (ngram_containment@5) = headroom; no metric near zero. Fixtures cannot size a margin for real controls (cleanflate-bench's n-gram metrics did not separate its real controls); the first real run is the measurement that can move it. Evidence in docs/spikes/P4-06.md.
+
+### P4-07 — 4afd826
+New tool kukulu_similarity (24 tools; after summary_commit; summarizer tools line). Reads corpora inside the server only; refusals in spec order; writes .kukulu/cleanroom/similarity.json + docs/SIMILARITY.md (deterministic, no timestamp); clean-room: score entry {reads, sha256} + checkpoint kukulu_similarity, committed with the log. P.similarityDoc added to the archived files; cleanroomMovables now moves similarity.json in general mode as well. Interpretation: a side whose files all lack a mapped extension is refused (like empty); `files`/reads = distinct files read, skipped = distinct unmapped/binary files. operations.md now names kukulu_similarity. Docs/README/CHANGELOG updated.
