@@ -80,6 +80,13 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] R1-05 Test the verifier's prev linkage and add the rehashed edit to the both-copies-agree fixtures
 - [x] R1-06 Test the gate's liveness kind, genesis match and the trailer's default task
 - [x] R1-07 Bound every gh call in prChecks; report mutationFixRounds where the reviewer can read it
+- [ ] R2-01 Guard: judge cd segments again and let the effective cwd reach the read rules
+- [ ] R2-02 Guard: grouping, reserved words, >|, git -C and more wrappers no longer hide the command or the target
+- [ ] R2-03 Guard: deny git forms that discard the log's uncommitted entries, glob operands of destructive forms, and chmod/chown of a protected ancestor
+- [ ] R2-04 Guard: a recursive read, a search root or a glob that reaches into deny.paths is denied
+- [ ] R2-05 Guard cases: allowed fixtures that pin grep's valued options, -e patterns and quoted >
+- [ ] R2-06 Test that a hung gh --version makes prChecks null within the bound
+- [ ] R2-07 Test that --legacy-log's default repository is the log's own repository, not an ancestor
 
 ## Log
 

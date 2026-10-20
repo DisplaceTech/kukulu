@@ -1,109 +1,161 @@
 # Review: Kūkulu 0.7.0 build (build/2026-10-19)
 
-Round: 1
+Round: 2
 
 ## Verdict
 
 CHANGES REQUESTED
 
-The branch is in good shape overall: all 68 tasks are done, none are blocked, every `docs/kukulu.json` constraint passes (each rule's fixture self-test included), `npm run lint`, `pre-commit run --all-files` and all 13 suites pass (3,231 assertions; I ran `kukulu_verify` myself), and no forbidden path changed (`docs/SPEC.md`, `docs/plans/`, `docs/flights/`, `docs/site/copy-changes.json`, `checks.json`, `assets/` and `screens/` have no commits on the branch). Of 28 mutants, 22 were killed. The findings below are in the clean-room guard's Bash and path handling, where agents can get around the self-protection SPEC D-10 promises and the network rule. SPEC D-03 says four of cleanflate's false positives must be allowed, and they are still denied. Six mutants survived and show untested chain and gate mechanics. Two smaller things are wrong in status and the review skill.
+What I checked:
+
+- All 75 tasks are done; none are blocked or skipped.
+- `kukulu_verify` passes. Every one of the 27 `docs/kukulu.json` constraints is clean, and its fixture self-test passes. So do `npm run lint`, `pre-commit run --all-files` and the 13 suites (3,288 assertions).
+- `npm run check:site` passes (76 self-test cases, rules 1–14 and 16), and so does the guard self-test (194 cases).
+- No commit between the merge base `ef3860c` and HEAD touches `docs/SPEC.md`, `docs/plans/`, `docs/flights/`, `docs/site/copy-changes.json`, `checks.json`, `assets/`, `screens/`, `.gitignore` or CI config. `fromas` no longer occurs in the page or the mockup.
+- CI on PR #1 at `e7ef4d4`: every check passes except `test (macos)`, which was still pending when I looked. That is not a finding. The installed 0.6.1 `kukulu_status` has no `prChecks`, so I read the checks with `gh pr checks`.
+
+Round 1's fixes hold:
+
+- All six round-1 survivors are now killed: `verifyChain`'s prev check and seq check in both copies, liveness, the genesis match, and the trailer's default task.
+- R1-07 bounds `gh pr view` and reports `review.mutationFixRounds`.
+- I probed the bypass forms R1-01/R1-02 named, and each is now denied.
+
+Probing `evaluate()` past those forms turned up four things:
+
+- **A regression.** R1-01 stopped checking `cd` segments against `deny.paths`.
+- **Shell grammar.** Grouping and reserved words still hide the command word, which defeats the network rule and every Bash rule.
+- **Discarded log entries.** Git forms that discard uncommitted work can erase the log's unsigned tail without the gate noticing. A non-recursive `chmod` on an ancestor can switch the guard off.
+- **Recursive reads.** A recursive read of an ancestor of a `deny.paths` entry reads the denied tree.
 
 ## Findings
 
-Most severe first.
+Most severe first. Every probe below ran `evaluate()` with `templates/cleanroom.example.json`, root `/tmp/proj`, home `/home/u`, the plan present, and D-10's protected set. "Allowed" means `decision: "allowed"`.
 
-### F1: Self-protection bypasses in the guard's Bash rules (category 5, SPEC D-10, D-03 rule 6d, principle 11), task R1-01
+### F1: Regression: a `cd` segment is no longer checked against `deny.paths`, and the cwd it sets never reaches the read rules (category 5, SPEC §5.2 `deny.paths`, D-03 rule 6b/6c), task R2-01
 
-`mcp/cleanroom.mjs:783-793` (`WRITE_FAMILY` branch), `:806` (`redirectTargets`), `:567` (`isPathLike`). I probed these directly with `evaluate()` and the template policy, with root `/tmp/proj`, the plan existing and the D-10 protected set. Every call below came back `allowed`:
+`mcp/cleanroom.mjs:777-781`. R1-01 handles `cd`/`pushd` by updating `shellCwd` and then running `continue`, which skips every rule for that segment, 6b included. At `1e8aea6` these were all denied (`denied path: /home/u/.cargo/registry (deny.paths)`); at HEAD they are allowed:
 
-- `echo hi>.kukulu/state.json`: when a redirection is glued to the word before it, `redirectTargets` never sees it, because the token is `hi>.kukulu/state.json`. With a space (`echo hi > …` or `echo hi >…`) the call is denied.
-- `rm -rf .kukulu`, `rm -rf docs`, `mv docs docs2` and `rm -rf .git` remove a protected path by naming its ancestor. `underPrefix` only asks whether the token is *under* a protected path. Also, `docs` is not even path-like, so write-family operands without a `/` or a leading `.` are never examined.
-- `cd docs && rm cleanroom.json` and `cd .kukulu && rm state.json`: a `cd` in an earlier segment is not tracked, so later relative operands resolve against the hook's `cwd`.
+- `cd ~/.cargo/registry`
+- `cd ~/.cargo/registry && cat x`
+- `cd ~/.cargo/git`
+- `pushd ~/.cargo/registry`
 
-What breaks: an implementer can delete or replace the policy, the state or the log in one Bash call. Once the policy file is gone, `scripts/cleanroom-guard.mjs` takes its no-policy fast path and allows every later call. The gate halts only at the next `kukulu_next`, after the whole stage ran unguarded.
+On top of that, `shellCwd` is used only by the protected-path rules (HANDOFF's R1-01 interpretation). Relative tokens and the "outside the repository" clause still resolve against the hook's `cwd`. So these are allowed, though each reads under a denied root or names a denied word outside the repository:
 
-Minimal fix:
+- `cd ~/.cargo && cat registry/x`
+- `cd /usr/include && cat zlib.h`
+- `cd / && grep -r zlib .`
 
-- Recognise redirections glued to the word before them.
-- Treat every non-option operand of a write-family command as a path.
-- For destructive forms, deny a target that equals or contains a protected path: `rm`, `mv` sources, recursive `chmod`/`chown`, and `git rm`/`mv`/`checkout`/`restore`/`clean`. Ordinary forms such as `git add .`, `git add docs` and `cp a docs/` stay allowed.
-- Carry the effective cwd across `cd`/`pushd` segments.
+That interpretation is not consistent with SPEC. `deny.paths` applies to "a target", and the target of `cat registry/x` after `cd ~/.cargo` is `~/.cargo/registry/x`. No guard case covers a `cd` into a denied root, which is why no test caught the regression.
 
-### F2: Network rule and deny.paths reach (category 5, SPEC §5.2 deny.network and deny.paths "a target under one is denied for every tool", D-03 rules 5 and 6a), task R1-02
-
-All of these came back `allowed` under the template policy:
-
-- `git -C /x clone https://a`. At `mcp/cleanroom.mjs:755` the two-word match takes the first non-flag token (`/x`, the value of `-C`) as git's subcommand.
-- `Glob { pattern: "/home/u/.cargo/registry/**/*.rs" }` (also with `~/`). At `:723` only `args.path || cwd` is checked against `deny.paths`, so an absolute Glob pattern enumerates a denied tree.
-- `cat $HOME/.cargo/registry/x`: `$HOME`/`${HOME}` is not expanded the way `~` is.
-- `echo $(curl https://evil)`, ``echo `curl https://evil` `` and `bash -c 'curl https://evil'`: command substitutions and `sh`/`bash -c` bodies are never split into segments, and `KNOWN_LIMITS` (`:821`) and `docs/cleanroom.md` do not list them as gaps.
-
-What breaks: an agent can bypass the network ban and the prior-art path denials with ordinary shell syntax, which the attestation's "known limits" then misstate.
+What breaks: the shipped template no longer stops the most ordinary way of reading the Cargo registry.
 
 Minimal fix:
 
-- Skip git's global options, including value-taking `-C`/`-c`/`--git-dir`/`--work-tree`, before matching the subcommand.
-- Check an absolute or `~` Glob pattern's literal directory prefix against `deny.paths`/`pathPatterns`.
-- Expand `$HOME`/`${HOME}` like `~`.
-- Evaluate the contents of `$(…)`, backticks, `<(…)` and `sh|bash|zsh -c` / `eval` arguments as further commands.
-- List anything still unparsed in `KNOWN_LIMITS` and `docs/cleanroom.md`.
+- Judge a `cd`/`pushd` segment with every rule, so its directory operand is a token under 6b.
+- Resolve every relative token and the 6c outside-the-repository clause against the effective cwd.
+- The eight cleanflate false positives stay allowed (FP1 runs after a `cd` inside the repository).
 
-### F3: Four of cleanflate's eight false positives are still denied (category 5, SPEC D-03 rule 6 read-family, D-12), task R1-03
+### F2: Grouping, reserved words, `>|` and `git -C` hide the command word or the target from every Bash rule (category 5, SPEC D-03 canonicalization and rules 6a/6d, D-10), task R2-02
 
-`test/fixtures/guard-cases.json` records false positives 1, 6, 7 and 8 with `expect: "denied"` ("still denied: a regex or sed expression with a slash is a path-like token"). SPEC D-03 says these eight are `shouldNotMatch` fixtures, and that the `allow.paths` carve-out and the "inside the repository" clause are what keep them allowed. HANDOFF's P3-10 interpretation follows PLAN's "kept with its actual decision", but SPEC wins over PLAN.
+`commandWord` (`mcp/cleanroom.mjs:541`) takes the first token of a segment, so a leading `(`, `{`, `!` or a reserved word becomes the "command". These are all allowed, both at `1e8aea6` and at HEAD:
 
-The cause is `isPathLike` (`mcp/cleanroom.mjs:567`). It classes every token that contains `/` as a path, so a `sed` script (`s/c_zlib_mib_s_min/…/g`) or a `grep` pattern (`^crates/cleanflate/src/\(inflate\|zlib\|…`) is judged as a path that names a word. Inside the project these are exactly the non-path tokens that SPEC's "outside the repository" clause should judge. False positive 1 also depends on F1's missing `cd` tracking: its `sed` runs after `cd crates/oracle/src`, under `allow.paths`.
+- `(curl https://evil)`, `( curl https://evil )`, `{ curl https://evil; }`
+- `if true; then curl https://evil; fi`, `while true; do curl https://evil; done`, `! curl https://evil`
+- `(rm -rf .kukulu)`, `{ rm -rf .kukulu; }`, `(echo hi > .kukulu/state.json)`
+- `(cd docs && rm cleanroom.json)`, because `(cd` is not `cd`
 
-What breaks: the shipped template blocks routine in-project refactoring and search commands, which is the friction SPEC set out to remove.
+Three related forms are also allowed:
 
-Minimal fix: in read-family commands, classify the pattern or script operand as a non-path token. That covers grep/egrep/fgrep/rg/ag/ack's first operand and `-e` values, sed's script and `-e` values, awk's program, and find's `-name`/`-path`/`-regex` values. Then flip the four fixtures to `allowed`. The real attempt `find / -path '*/libz-sys-*/src/lib.rs'` must stay denied, because `/` lies outside the repository.
+- `echo x >| .kukulu/state.json` and `echo x 2>|.kukulu/state.json`. `splitSegments` splits the clobber operator `>|` as a pipe, so the target becomes a segment's command word.
+- `git -C docs rm cleanroom.json` and `git -C .kukulu clean -fdx`. R1-02's `gitSubcommand` is used only by the network rule. `destructiveOperands` (`:949`) takes `docs` as git's subcommand, and the operands resolve against the hook's cwd instead of `-C`'s directory.
+- `timeout 5 curl https://evil`, `nohup curl …` and `exec curl …`. These wrappers are not in `WRAPPERS` (`:533`).
 
-### F4: The chain's prev linkage and seq density are untested in both copies (category 3, SPEC D-05 `verifyChain`, D-12, F-03 check 3), tasks R1-04 and R1-05
-
-These mutants survived (the full `npm test` unless a narrower suite is named):
-
-- Deleting `if (entry.prev !== tip) return bad(…)` at `mcp/cleanroom.mjs:272` (all 13 suites).
-- Deleting `if (entry.prev !== tip) return fail(…)` at `scripts/verify-attestation.mjs:46` (survived `node test/attest.mjs`, the suite that owns it).
-- Weakening `entry.seq !== i + 1` to `entry.seq < 0` at `mcp/cleanroom.mjs:271` (survived `test/cleanroom.mjs`).
-
-Without the prev check, an entry that is edited and given a recomputed `hash` passes verification. The prev check is the property that makes the log tamper-evident. The existing "tampered", "reordered" and "dropped" fixtures are each caught by some other check, so no fixture isolates linkage. The "both copies agree" test in `test/attest.mjs` lacks such a fixture too.
-
-Minimal fix: add a fixture whose middle entry is edited and rehashed, with `prev` and `hash` consistent for that line only, and assert `firstBad.reason` says prev does not match. Add a fixture with a seq gap whose `prev`/`hash` are otherwise consistent, and assert the seq reason. Feed both to both copies.
-
-### F5: Gate mechanics untested in `mcp/server.mjs` (category 3, SPEC D-08 check 6, D-08a, D-07), task R1-06
-
-These mutants survived (the full `npm test` unless a narrower suite is named):
-
-- Liveness (`mcp/server.mjs:234`): `e.kind === "allowed"` changed to `e.kind !== "gate"` survives. A gate followed only by server-written entries (a checkpoint, a human record) therefore passes liveness, although SPEC D-08a requires an `allowed` entry, which only the hooks write.
-- Genesis match (`:219`): deleting `if (chain.entries[0]?.hash !== recorded.genesis) return failed("chain", …)` survives. A log replaced wholesale by a fresh, self-consistent chain would pass the gate.
-- Trailer default task (`:394`): deleting the line that falls back to the first `[~]` task survives `test/cleanroom.mjs` and `test/drive.mjs`. Nothing asserts that a server commit made while a task is in progress, without an explicit `task`, carries `Kukulu-Task: <that id>`.
-
-Minimal fix: one test per mechanic, in `test/cleanroom.mjs`:
-
-- A gate, then a checkpoint, then a gate: liveness halts.
-- A log replaced by a new valid chain with a different genesis: the gate halts naming chain.
-- A server commit made while a task is `[~]`: its trailer names that task.
-
-### F6: `prChecks` is not bounded, and the review skill names a tool the reviewer cannot call (category 5, SPEC B-08, B-03), task R1-07
-
-- `mcp/server.mjs:3669-3670`: `prChecks` runs `gh --version` and `gh pr view --json url` with no `timeout`. Only `gh pr checks` has the 30-second bound SPEC B-08 requires. `kukulu_status` is synchronous, so a slow or hung `gh pr view` hangs the whole MCP server.
-- `skills/review-build/SKILL.md:36` tells the reviewer to read `review.mutationFixRounds` "from `kukulu_status`'s config via `kukulu_config_show`". `agents/reviewer.md` has no `kukulu_config_show`, and `kukulu_status` does not report the value. So the reviewer cannot learn the cap the skill tells it to respect, except by guessing.
+What breaks: one pair of parentheses defeats the network ban and every self-protection rule.
 
 Minimal fix:
 
-- Bound every `gh` call in `prChecks` with the 30 s constant, and map a timeout to `unknown: …`.
-- Have `kukulu_status` report the resolved `review.mutationFixRounds` (the default stays only in `cfgFrom`).
-- Make the skill read it from there.
+- Before taking the command word, drop leading `(`, `{`, `!` and the reserved words (`if then elif else while until do`), and split `(`/`)` glued to a word.
+- Judge a relative operand against every cwd the shell could be in at that point: the cwd before a subshell's `cd` and the one after. Deny if any form is protected.
+- Do not split on `|` directly after `>`.
+- In write-family git forms, skip global options with `gitSubcommand` and resolve operands against `-C`'s directory.
+- Add `exec`, `nohup`, `timeout` (with its duration), `stdbuf` and `setsid` to the wrappers.
+- Commands that run a command from their arguments (`find -exec`, `watch`, `parallel`, `busybox`) and programs outside the fixed network and write lists (`unlink`, `shred`, `perl -i`, `cargo fetch`, `rsync`) stay unrecognised. Name them in `KNOWN_LIMITS` and `docs/cleanroom.md`.
+
+### F3: Erasing the log's uncommitted tail, and hiding the policy behind a permission change (category 5, SPEC D-10, D-05 tamper evidence, D-02), task R2-03
+
+These are allowed:
+
+- `git stash`, `git stash -u`, `git stash push`
+- `git reset --hard`, `git reset --hard HEAD~1`
+- `git checkout -f main`, `git switch --discard-changes main`
+
+The hooks append to `.kukulu/cleanroom/log.jsonl` on every call, so between two checkpoint commits the log always has uncommitted entries. Each form above restores the log to the last committed checkpoint. The `denied` entries since then disappear. The next `appendEntry` continues from the restored tip, so `verifyChain` passes and the newest checkpoint still verifies. The gate (`mcp/server.mjs:214-236`) has nothing to compare against. R1-01's ancestor rule covers `git rm|mv|checkout|restore|clean` only when an operand names a protected path. These forms name none.
+
+The same class:
+
+- `rm -rf docs/*` and `rm -rf *`: a glob operand of a destructive form removes the policy, though no literal operand contains it.
+- `chmod 000 docs`, `chmod a-rwx .kukulu` and `chown nobody docs`: the ancestor rule applies to `chmod`/`chown` only with `-R` (`:946`). But one non-recursive permission change on an ancestor makes `fs.existsSync(docs/cleanroom.json)` false; I checked that on this machine. `scripts/cleanroom-guard.mjs:146` and the logger then take the no-policy fast path, so every later call is allowed and unlogged until the agent restores the mode. Because the logger is silent too, a gate run after the restore sees allowed entries around the window and passes. (The round-2 mutant that made every `chmod`/`chown` destructive survived for this reason: its stricter behaviour is the correct one.)
+
+What breaks: an agent can delete the record of its own denials, or switch the guard off for a stretch, without breaking the chain.
+
+Minimal fix:
+
+- Deny `git stash` (except `list`/`show`), `git reset --hard|--merge|--keep`, `git checkout -f`/`--force` and `git switch -f|--discard-changes` when they have no pathspec, or when a pathspec equals or contains a protected path.
+- Deny a destructive-form glob operand whose pattern matches the next component of a protected path below the glob's literal directory.
+- Treat `chmod`/`chown` of any operand that equals or contains a protected path as destructive, recursive or not.
+
+### F4: A recursive read of an ancestor of a `deny.paths` entry reads the denied tree (category 5, SPEC §5.2 `deny.paths` "a target under one is denied for every tool", D-03 rules 5 and 6b), task R2-04
+
+These are all allowed, both at `1e8aea6` and at HEAD:
+
+- `Grep { pattern: "inflate", path: "/home/u/.cargo" }` and `Glob { pattern: "**/*.rs", path: "/home/u/.cargo" }`
+- `Glob { pattern: "~/.cargo/regist*/**/*.rs" }`, `Glob { pattern: "/home/u/.cargo/*/src/**" }` and `Glob { pattern: "../../home/u/.cargo/registry/**" }`. R1-02's check (`:738`) treats an absolute pattern as a literal path, so a wildcard before the denied component, or a relative pattern that climbs out, is never compared.
+- `grep -r inflate ~/.cargo`, `rg inflate ~/.cargo`, `find ~/.cargo -name '*.rs'`, `ls -R ~/.cargo`
+- `cp -r ~/.cargo /tmp/proj/vendor`, which copies the whole registry into the project
+- `cat ~/.cargo/*/index/x`
+
+A recursive operation's targets are everything under its operand, so each call above reads targets under `~/.cargo/registry/`.
+
+What breaks: the prior-art roots the template denies can be read or copied in one call.
+
+Minimal fix:
+
+- For Grep, Glob and the recursive Bash forms (`grep -r|-R`, `rg`, `ag`, `ack`, `find`, `ls -R`, `tree`, `cp -r|-R|-a`, `tar`, `rsync`), deny an operand or search root that equals or contains a `deny.paths` entry or the key path.
+- Match a glob token or Glob pattern, resolved against `path`/cwd, component by component against each `deny.paths` entry.
+- `pathPatterns` regexes stay matched on named targets only; say so in `KNOWN_LIMITS`.
+
+### F5: Survivors in `mcp/cleanroom.mjs`'s R1-02/R1-03 mechanics (category 3; mutation only), task R2-05
+
+All three ran against `node test/cleanroom.mjs` (guard cases included), and all three survived. Each makes the guard stricter than intended, and no allowed fixture covers it:
+
+- Deleting `if (valued.test(t)) i++;` (`:861` ff.). `grep -A 3 PATTERN path` then takes `3` as the pattern.
+- Replacing `found.add(++i)` with `i++`. A `-e` value is then judged as a path.
+- Deleting the quote tracking in `redirectTargets` (`:973`). `echo "a > .kukulu/state.json"` is then read as a redirection.
+
+This task is queued on mutation results alone, which round 2 permits: the review-build rule mutates only the files changed since `lastReviewCommit`, and round 2 is not past `review.mutationFixRounds` (2).
+
+### F6: `prChecks`' bounded `gh --version` is untested (category 3; mutation only), task R2-06
+
+`mcp/server.mjs:3671`. Removing `timeout: CHECKS_TIMEOUT_MS` from `gh --version` survives `node test/state.mjs`. R1-07 named that bound, and docs/mcp-tools.md promises it ("a `gh --version` that times out reads as no `gh`"). The same mutation-only rule applies.
+
+### F7: `repoRootOf`'s choice of root is untested (category 3; mutation only), task R2-07
+
+`scripts/verify-attestation.mjs:335`, from the owner's commit `e7ef4d4`. Returning `path.dirname(dir)` instead of `dir` survives `node test/attest.mjs`. The test's in-repository word and its `/elsewhere` word are classified the same under either root, so an over-broad repository root would let a word outside the repository pass as inside. The same mutation-only rule applies.
 
 ## Spec issues
 
-- **D-08 check 3 does not pin `mcp/cleanroom.mjs`.** The gate hashes `scripts/cleanroom-guard.mjs`, `scripts/cleanroom-log.mjs` and `hooks/hooks.json`, as SPEC says. But the guard's whole decision (`evaluate`), the chain writer (`appendEntry`) and the lockdown logic live in `mcp/cleanroom.mjs`, which the hooks import. A change there is caught only insofar as the self-test (check 4) happens to notice. SPEC should add a `moduleHash` for `mcp/cleanroom.mjs` to genesis, `state.cleanroom`, `CHECKPOINT_KEYS`, the manifest's `plugin` section and verifier check 6.
-- **D-03's known gaps are incomplete.** They name interpreter escapes, `make` subprocesses, MCP internals and hook load timing. Shell expansion (command substitution, `sh -c`, variables other than `~`) is a separate class. If R1-02 cannot cover every form, SPEC's list and `coverage.knownLimits` should say so explicitly.
-- **SPEC §1 asks for the draft PR against `main`,** but `baseBranch` is `cleanroom` (PLAN's spec issue). It still holds: the owner retargets the PR.
+- **F-04's defaults are superseded.** SPEC F-04 says `--roots` and `--words` default to cleanflate's. The owner's `e7ef4d4` removes every default: `--roots` and `--words` are now required, and `--repo` defaults to the log's own repository. That is the owner's decision. SPEC F-04 should say so in the next revision. I do not treat it as drift.
+- **D-03's fixed lists are incomplete.** The write family (`cp mv rm tee sed truncate chmod chown ln install dd git`), the network list and the wrapper list are constants in SPEC. They miss `unlink`, `rmdir`, `shred`, `find -delete`, `rsync --delete` and `perl -i` (writes). They also miss `cargo fetch|install|add`, `pip3`, `rsync`, `socat`, `telnet` and `aria2c` (network), and `timeout`, `nohup`, `exec` and `watch` (wrappers). R2-02 adds the wrappers and states the rest in `KNOWN_LIMITS`. SPEC should either extend the lists or name the class as a known gap.
+- **The log's uncommitted tail is unsigned.** Even with R2-03, an interpreter escape (a known gap) can truncate `log.jsonl` back to the last checkpoint without breaking the chain. A high-water mark (the newest seq and hash) kept outside the worktree, for example beside the signing key, and compared by gate check 6 would detect it. That would be NEW MATTER for the owner's list.
+- Carried from round 1, still open:
+  - D-08 check 3 does not pin `mcp/cleanroom.mjs`.
+  - D-03's known gaps omit shell expansion. R1-02 added it to `KNOWN_LIMITS`, but SPEC still lists four gaps.
+  - SPEC §1 asks for the PR against `main` while `baseBranch` is `cleanroom`.
 
 ## Manual checks still owed
 
-All `NOT VERIFIED (human)`, copied from HANDOFF.md:
+All `NOT VERIFIED (human)`, copied from HANDOFF.md. Round 1 added none.
 
 - Phase 0 (P0-07): run the installed 0.6.1 plugin's `kukulu_migrate` on a throwaway `.foundry/` project, then run one task on it with the working-tree plugin.
 - Phase 1 (P1-14): halt a throwaway flight with `kukulu_run_halt`, fix nothing, call `kukulu_run_resume` and confirm the refusal names the dirty tree; clean it and confirm the resume commit.
@@ -120,24 +172,17 @@ All `NOT VERIFIED (human)`, copied from HANDOFF.md:
   - Deploy the build branch as a Cloudflare Pages preview.
   - Read every clean-room line against what the suite proves.
   - Compare the page with the changed mockup at 360, 768 and 1440 px in both schemes.
-  - Confirm the site, ci and lint checks are green on the PR.
+  - Confirm the site, ci and lint checks are green on the PR. `test (macos)` was pending at this review.
 - From HANDOFF's first line: the owner runs one clean-room flight from the working tree before merging.
-- After the review fixes, re-run the Phase 3 manual check's denial step with the R1-01 and R1-02 bypass forms, in a live session.
+- After the review fixes, re-run the Phase 3 denial step in a live session with the R1-01, R1-02 and R2-01 to R2-04 bypass forms. Include `cd ~/.cargo/registry && cat x` and `(curl https://example.com)`.
 
 ## Notes
 
-- **The approved-copy typo.** `cleanroom` moved on after the branch was cut (`ef3860c` fixes `fromas of 0.7.0` in `docs/site/copy-changes.json` and adds its final newline). The branch applied the file as it read at the merge base, which was correct, but check-site rule 16 will fail on the merged result until `fromas of 0.7.0` becomes `as of 0.7.0` in `docs/site/mockup.html` and `site/index.html`. HANDOFF already flags this. P0-01's end-of-file exclusion then becomes harmless.
-- **A machine-specific default in the verifier.** `scripts/verify-attestation.mjs:309` hard-codes `LEGACY_REPO = "/media/ericmann/Data/Projects/cleanflate"` as the `--legacy-log` repo default. It is the root the cleanflate log was recorded under, so it is correct for that fixture, but it is a machine-specific path in a shipped script. A comment saying so would help.
-- **One guard path can exit 1.** `scripts/cleanroom-guard.mjs` computes `policyFile(root)` before its `try`. With no `CLAUDE_PROJECT_DIR` and a non-string `cwd` in the payload, `path.resolve` throws and the hook exits 1, which is non-blocking, rather than 2. Claude Code always sets `CLAUDE_PROJECT_DIR`, so this does not happen in practice.
-- **A record commit survives a failed re-sign.** In clean-room mode, `kukulu_pr_finalize({ resign: true })` commits its `human` record before the rebase. If the rebase then fails, that commit stays. That is defensible, since the instruction was given, but the general-mode test "HEAD is unchanged" does not cover it.
-- **A possible liveness race in parallel waves.** Two stream implementers calling `kukulu_run_start` back to back, before either call's PostToolUse entry lands, could trip liveness on the second. No test runs a parallel wave in clean-room mode.
-- **A stale sentence in `docs/mcp-tools.md`.** Line 5 still lists `kukulu_next` among the "read-only" tools. Its own section correctly says it writes genesis and gate entries in clean-room mode.
-- **An older unbounded call.** `prState`'s `gh pr view` (`mcp/server.mjs:3639`) is unbounded too. It predates this branch.
-- **Mutants killed (22):**
-  - Gate checks: lockdown, hooks registration and the newest checkpoint's signature.
-  - The B-03 cap, the stream-merge resume refusal, B-07's constraint kill and B-09's heading spacing.
-  - In `mcp/cleanroom.mjs`: the splitter's redirection `&`, `core.hooksPath`, lockdown's no-open-task rule, the read-family outside-repo clause, the key-order check and `canonical`'s unknown-field refusal.
-  - The guard's fail-closed catch and the logger's prompt target.
-  - The verifier's checks 2, 4, 6 and 8.
-  - The check-names `docs/feedback/` exemption, check-site rule 16's `old` check and the implement guard's agent set.
-- **Surviving mutants (6):** server `:219`, `:234` and `:394`; `mcp/cleanroom.mjs` `:271` and `:272`; `scripts/verify-attestation.mjs` `:46`. All are queued above.
+- **Mutants killed this round (13):**
+  - Round 1's six survivors. The cleanroom suite names `verifyChain names a rehashed edit by its broken link` and `verifyChain names a seq gap`. The attest suite names `the verifier and mcp/cleanroom.mjs agree on a rehashed edit`. The cleanroom suite names the liveness, genesis and trailer tests.
+  - R1-02's git global-option skip and `$HOME` expansion, the backtick substitution, the `cd` cwd update and the substitution depth cap. Each is killed through the gate's self-test halt and the guard cases.
+  - R1-07's `gh pr view` bound (an RPC timeout in `test/state.mjs`).
+- **Advisory survivor.** Disabling the `>&N` fd-duplication branch of `redirectTargets` survives. It is nearly equivalent: `2` and `-` resolve to unprotected paths.
+- **`$HOME` inside single quotes.** `echo '$HOME/.cargo/registry'` is denied, because `$HOME` is expanded in every token, quoted or not. It is a harmless false positive. R2-01 or R2-02 may tighten it, but it is not required.
+- **`prState`'s `gh` calls** (`mcp/server.mjs:3639`) are still unbounded. They predate the branch, and R1-07 marked them out of scope.
+- **Machine path in the legacy test.** `test/attest.mjs` now passes `--repo /media/ericmann/Data/Projects/cleanflate` as fixture data for the excerpt. That is correct: it is the root that build ran in, and the verifier itself no longer carries it.
