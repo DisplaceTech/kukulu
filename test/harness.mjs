@@ -3,11 +3,13 @@
 // this, asserts, and calls finish(); test/run.mjs runs them all as children so
 // one suite's crash can't take the rest down.
 
-import { spawn, execFileSync } from "node:child_process";
+import { spawn, spawnSync, execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { createHash, sign } from "node:crypto";
+import * as CR from "../mcp/cleanroom.mjs";
 
 export const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const ROOT = path.resolve(HERE, "..");
@@ -150,6 +152,11 @@ if [ "$1 $2" = "pr create" ]; then
   echo https://github.invalid/pull/1
   exit 0
 fi
+if [ "$1 $2" = "pr checks" ]; then
+  if [ -f "$dir/checks.json" ]; then cat "$dir/checks.json"; else echo "[]"; fi
+  if [ -f "$dir/checks-exit" ]; then exit "$(cat "$dir/checks-exit")"; fi
+  exit 0
+fi
 if [ "$1 $2" = "pr ready" ]; then
   if [ -f "$dir/pr.json" ]; then sed 's/"isDraft":true/"isDraft":false/' "$dir/pr.json" > "$dir/pr.json.tmp" && mv "$dir/pr.json.tmp" "$dir/pr.json"; fi
   exit 0
@@ -225,9 +232,10 @@ export const subject = (dir) => gitIn(dir, ["log", "-1", "--format=%s"]);
 // ---------------------------------------------------------------- fixtures
 
 /** One PLAN.md task block in the exact shape the server's parser expects. */
-export function planTask(t) {
+export function planTask(t, { legacy = false } = {}) {
   return [
     `### ${t.id}: ${t.title}`,
+    ...(legacy ? [] : [""]),
     `**Goal:** ${t.goal || t.title}`,
     `**Files touched:** ${t.files || "src/x"}`,
     `**Design constraints:** ${t.constraints || "none"}`,
@@ -247,27 +255,31 @@ export const DEFAULT_TASKS = [
   { id: "P0-03", title: "Depends on the impossible one", goal: "skip me", files: "x", depends: ["P0-02"] },
 ];
 
-export function planDoc(tasks) {
+export function planDoc(tasks, { legacy = false } = {}) {
   return [
     "# Test build plan",
+    ...(legacy ? [] : [""]),
     "Derived from docs/SPEC.md v0.1.",
     "",
     "## Decisions",
+    ...(legacy ? [] : [""]),
     "- none",
     "",
     "## Phase 0 — Scaffold",
     "",
-    ...tasks.map(planTask),
+    ...tasks.map((t) => planTask(t, { legacy })),
   ].join("\n");
 }
 
-export function progressDoc(tasks) {
+export function progressDoc(tasks, { legacy = false } = {}) {
   return [
     "# Test build progress",
+    ...(legacy ? [] : [""]),
     "Branch: (set by implement)",
     "Started: (set by implement)",
     "",
     "## Tasks",
+    ...(legacy ? [] : [""]),
     // `progressStream` overrides `stream` for PROGRESS.md only (`null` drops the tag).
     ...tasks.map((t) => {
       const tag = t.progressStream !== undefined ? t.progressStream : t.stream;
@@ -275,6 +287,7 @@ export function progressDoc(tasks) {
     }),
     "",
     "## Log",
+    ...(legacy ? [] : [""]),
     "(one entry per task, appended by implement)",
     "",
   ].join("\n");
@@ -289,9 +302,8 @@ export function specRepo(spec = "# Spec\n") {
   return repo;
 }
 
-/** A repo with the planner's four deliverables committed on `main`. */
-export function plannedRepo({ tasks = DEFAULT_TASKS, config = {}, claude = "# rules\n" } = {}) {
-  const repo = specRepo();
+/** Write and commit the planner's four deliverables into an existing repo. */
+export function addPlan(repo, { tasks = DEFAULT_TASKS, config = {}, claude = "# rules\n" } = {}) {
   writeFile(repo, "docs/PLAN.md", planDoc(tasks));
   writeFile(repo, "docs/PROGRESS.md", progressDoc(tasks));
   writeFile(repo, "docs/kukulu.json", JSON.stringify({ verify: ["true"], maxRounds: 3, ...config }, null, 2) + "\n");
@@ -299,6 +311,24 @@ export function plannedRepo({ tasks = DEFAULT_TASKS, config = {}, claude = "# ru
   gitIn(repo, ["add", "-A"]);
   gitIn(repo, ["commit", "-qm", "plan: derive build plan from SPEC"]);
   return repo;
+}
+
+/** A repo with the planner's four deliverables committed on `main`. */
+export function plannedRepo(opts = {}) {
+  return addPlan(specRepo(), opts);
+}
+
+/**
+ * A repo in clean-room mode: `docs/cleanroom.json` is the shipped example,
+ * committed on `main`. By default only the spec exists (the state a flight is
+ * in at its first kukulu_next); `planned: true` adds the plan as well.
+ */
+export function cleanroomRepo({ planned = false, policy = null, ...planOpts } = {}) {
+  const repo = specRepo();
+  writeFile(repo, "docs/cleanroom.json", policy ?? fs.readFileSync(path.join(ROOT, "templates", "cleanroom.example.json"), "utf8"));
+  gitIn(repo, ["add", "-A"]);
+  gitIn(repo, ["commit", "-qm", "clean-room policy"]);
+  return planned ? addPlan(repo, planOpts) : repo;
 }
 
 /**
@@ -318,6 +348,164 @@ export function useLegacyLayout(repo) {
   gitIn(repo, ["add", "-A"]);
   if (gitIn(repo, ["status", "--porcelain"])) gitIn(repo, ["commit", "-qm", "chore: pre-0.6.0 layout"]);
   return repo;
+}
+
+/**
+ * Run a hook script the way Claude Code does: `node <script>` with the payload as
+ * JSON on stdin. Returns `{ status, stdout, stderr, ms }`. The environment is
+ * the caller's, plus PATH and HOME, so a stray CLAUDE_* variable of the
+ * developer's session cannot leak in.
+ */
+export function runHook(script, payload, env = {}) {
+  const started = process.hrtime.bigint();
+  const r = spawnSync(process.execPath, [script], {
+    input: typeof payload === "string" ? payload : JSON.stringify(payload ?? {}),
+    encoding: "utf8",
+    env: { PATH: process.env.PATH, HOME: process.env.HOME, ...env },
+  });
+  return { status: r.status, stdout: r.stdout, stderr: r.stderr, ms: Number(process.hrtime.bigint() - started) / 1e6 };
+}
+
+/**
+ * Log one tool call the way a live session's PostToolUse hook does, by running the logger hook once.
+ * The gate's liveness check wants an `allowed` entry between two gates, and a test has no session.
+ */
+export function logCall(repo, payload = {}) {
+  return runHook(path.join(ROOT, "scripts", "cleanroom-log.mjs"), { hook_event_name: "PostToolUse", tool_name: "Read", tool_input: { file_path: path.join(repo, "docs", "SPEC.md") }, cwd: repo, ...payload }, { CLAUDE_PROJECT_DIR: repo });
+}
+
+const sha256Of = (bytes) => createHash("sha256").update(bytes).digest("hex");
+
+/**
+ * Write a small, valid attestation bundle into `dir` the way kukulu_attest lays one out:
+ * a chain (genesis, a gate, calls, a denial, a human entry, two checkpoints) built with
+ * mcp/cleanroom.mjs and a temp key, the files a manifest lists, `publisher.pub`, a
+ * `verify.mjs` copy, the manifest and its signature. `opts.key` is the publisher key,
+ * `opts.checkpointKey` signs the second checkpoint instead (to build a bad one),
+ * `opts.policyText` is the policy. `opts.clock()` replaces the time entries are stamped with,
+ * `opts.extra(log)` appends more entries (after the first checkpoint), `opts.commits` is commits.txt,
+ * `opts.gaps` and `opts.idleGapHours` are the manifest's coverage, `opts.similarity` is a similarity.json's text.
+ * The manifest's denials are counted from the entries here, independently of the verifier. Returns `{ dir, key, fingerprint, manifest, entries }`.
+ */
+export function buildBundle(dir, opts = {}) {
+  const keyDir = mkDir("kukulu-bundle-key-");
+  const key = opts.key ?? CR.generateKey(path.join(keyDir, "publisher.pem"));
+  const cpKey = opts.checkpointKey ?? key;
+  fs.mkdirSync(dir, { recursive: true });
+  const log = path.join(dir, "log.jsonl");
+  const policyText = opts.policyText ?? fs.readFileSync(path.join(ROOT, "templates", "cleanroom.example.json"), "utf8");
+  const policyHash = CR.policyHash(policyText);
+  const guardHash = sha256Of(fs.readFileSync(path.join(ROOT, "scripts", "cleanroom-guard.mjs")));
+  const loggerHash = sha256Of(fs.readFileSync(path.join(ROOT, "scripts", "cleanroom-log.mjs")));
+  const hooksHash = sha256Of(fs.readFileSync(path.join(ROOT, "hooks", "hooks.json")));
+  const base = { role: "session", model: "claude-test", session: "s-1" };
+  const RealDate = Date;
+  if (opts.clock) {
+    globalThis.Date = class extends RealDate {
+      constructor(...a) { if (a.length) super(...a); else super(opts.clock()); }
+      static now() { return opts.clock(); }
+    };
+  }
+  const checkpoint = (event, signer) => {
+    const entries = CR.readEntries(log);
+    const data = CR.signCheckpoint(
+      { chainTip: entries.at(-1).hash, git: "b".repeat(40), policyHash, guardHash, loggerHash, hooksHash, keyFingerprint: key.fingerprint, event },
+      signer.privateKey,
+    );
+    return CR.appendEntry(log, { kind: "checkpoint", stage: "implement", ...base, data });
+  };
+  CR.appendEntry(log, { kind: "genesis", stage: "controller", ...base, data: { mode: opts.mode ?? "clean-room", policyHash, guardHash, loggerHash, hooksHash, pluginVersion: "0.7.0", keyFingerprint: key.fingerprint, baseBranch: "main", head: "a".repeat(40) } });
+  CR.appendEntry(log, { kind: "gate", stage: "controller", ...base, data: { checks: 7, ok: true } });
+  CR.appendEntry(log, { kind: "allowed", stage: "implement", task: "P0-01", ...base, tool: "Read", target: "/p/a.rs", decision: "allowed" });
+  CR.appendEntry(log, { kind: "denied", stage: "implement", task: "P0-01", ...base, tool: "Read", target: "/usr/include/zlib.h", decision: "denied", reason: "denied path: /usr/include/zlib.h (deny.paths)" });
+  CR.appendEntry(log, { kind: "human", stage: "controller", role: "operator", target: "go on", data: { kind: "instruction", via: "kukulu_cleanroom_record" } });
+  checkpoint("run-start", key);
+  if (opts.extra) opts.extra(log);
+  CR.appendEntry(log, { kind: "allowed", stage: "implement", task: "P0-02", ...base, tool: "Bash", target: "ls", decision: "allowed" });
+  checkpoint("kukulu_run_finish", cpKey);
+  globalThis.Date = RealDate;
+  const entries = CR.readEntries(log);
+  const denied = entries.filter((e) => e.kind === "denied");
+  const byReason = {};
+  for (const e of denied) byReason[e.reason] = (byReason[e.reason] ?? 0) + 1;
+  const verdicts = { "prior-art attempt": 0, "false positive": 0, "offline test": 0, unclassified: 0 };
+  const classified = new Map();
+  for (const e of entries) {
+    const m = e.kind === "human" && e.data?.kind === "verdict" && /^#(\d+): (prior-art attempt|false positive|offline test)/.exec(e.target);
+    if (m) classified.set(Number(m[1]), m[2]);
+  }
+  for (const d of denied) verdicts[classified.get(d.seq) ?? "unclassified"] += 1;
+
+  const sources = {
+    "policy.json": policyText,
+    "SUMMARY.md": "# Summary\n",
+    "REVIEW.md": "# Review\nRound: 1\n**Verdict**: APPROVED\n",
+    "PROGRESS.md": "# Progress\n",
+    "kukulu.json": "{}\n",
+    "state.json": "{}\n",
+    "commits.txt": opts.commits ?? `${"b".repeat(40)}\x1fG\x1fP0-01: first\x1fimplement\x1fP0-01\n`,
+    ...(opts.similarity === undefined ? {} : { "similarity.json": opts.similarity }),
+  };
+  for (const [name, text] of Object.entries(sources)) fs.writeFileSync(path.join(dir, name), text);
+  fs.writeFileSync(path.join(dir, "publisher.pub"), key.publicKey.export({ type: "spki", format: "pem" }));
+  const verifierBytes = fs.readFileSync(path.join(ROOT, "scripts", "verify-attestation.mjs"));
+  fs.writeFileSync(path.join(dir, "verify.mjs"), verifierBytes);
+  const listed = ["log.jsonl", ...Object.keys(sources), "publisher.pub"];
+  const checkpoints = entries.filter((e) => e.kind === "checkpoint");
+  const manifest = {
+    version: 1,
+    flight: "bundle-test",
+    plugin: { version: "0.7.0", guardHash, loggerHash, hooksHash, verifierHash: sha256Of(verifierBytes) },
+    repo: { baseBranch: "main", base: "a".repeat(40), head: "b".repeat(40), branch: "build/test" },
+    mode: "clean-room",
+    genesis: entries[0],
+    policy: { path: "docs/cleanroom.json", hashes: [policyHash], current: policyHash },
+    chain: { entries: entries.length, first: entries[0].hash, tip: entries.at(-1).hash },
+    checkpoints: checkpoints.map((e) => ({ seq: e.seq, event: e.data.event, git: e.data.git, signature: e.data.signature, ok: true })),
+    denials: { total: denied.length, byReason, verdicts },
+    calls: { total: 3, byTool: { Read: 2, Bash: 1 }, byStage: { implement: 3 }, readCapable: 3 },
+    human: { instructions: 1, interventions: 0, verdicts: 0 },
+    selfTest: { ok: true, cases: 164, at: "2026-01-01T00:00:00.000Z" },
+    coverage: { gaps: opts.gaps ?? [], knownLimits: [], idleGapHours: opts.idleGapHours ?? 4 },
+    similarity: opts.similarity === undefined ? null : { sha256: sha256Of(opts.similarity) },
+    files: listed.map((name) => {
+      const bytes = fs.readFileSync(path.join(dir, name));
+      return { path: name, sha256: sha256Of(bytes), bytes: bytes.length };
+    }),
+    signer: { fingerprint: key.fingerprint, publicKey: "publisher.pub" },
+    at: "2026-01-01T00:00:00.000Z",
+  };
+  fs.writeFileSync(path.join(dir, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
+  signBundleManifest(dir, key);
+  return { dir, key, fingerprint: key.fingerprint, manifest, entries };
+}
+
+/** Sign `dir/manifest.json` with `key`, writing `manifest.sig` (base64 Ed25519 over the manifest's bytes). */
+export function signBundleManifest(dir, key) {
+  fs.writeFileSync(path.join(dir, "manifest.sig"), `${sign(null, fs.readFileSync(path.join(dir, "manifest.json")), key.privateKey).toString("base64")}\n`);
+}
+
+/** Edit a bundle's manifest and sign it again, so the only thing wrong with the bundle is what `mutate` changed. */
+export function rewriteManifest(dir, key, mutate) {
+  const file = path.join(dir, "manifest.json");
+  const manifest = JSON.parse(fs.readFileSync(file, "utf8"));
+  mutate(manifest);
+  fs.writeFileSync(file, `${JSON.stringify(manifest, null, 2)}\n`);
+  signBundleManifest(dir, key);
+}
+
+/**
+ * A throwaway copy of the plugin (server, scripts, hooks, templates, agents, skills and the guard
+ * fixtures), so a test can edit "the installed plugin" without touching this checkout. Start a
+ * server from it with `startServer(repo, { server: <dir>/mcp/server.mjs })`.
+ */
+export function tempPlugin() {
+  const dir = mkDir("kukulu-plugin-");
+  for (const d of ["mcp", "scripts", "hooks", "templates", "agents", "skills", "test/fixtures"]) {
+    fs.cpSync(path.join(ROOT, d), path.join(dir, d), { recursive: true });
+  }
+  fs.copyFileSync(path.join(ROOT, "package.json"), path.join(dir, "package.json"));
+  return dir;
 }
 
 /** Force `.kukulu/state.json` into a given shape, bypassing the tools. */
@@ -356,6 +544,13 @@ export function commitTask(repo, id, title, files = {}) {
  * `messages` records every frame the server emits, so suites can assert that
  * notifications produce no reply.
  */
+const testKeys = new Map();
+/** The signing-key path a server for `repo` uses in tests: stable per repo, in a temp directory that is removed on exit. */
+export function testKeyFor(repo) {
+  if (!testKeys.has(repo)) testKeys.set(repo, path.join(mkDir("kukulu-key-"), "ed25519.pem"));
+  return testKeys.get(repo);
+}
+
 export function startServer(repo, { env = {}, server = SERVER } = {}) {
   // Isolate every suite from the developer's own machine: point KUKULU_CONFIG
   // at a path that does not exist and force KUKULU_PROFILE unset, so a real
@@ -365,6 +560,8 @@ export function startServer(repo, { env = {}, server = SERVER } = {}) {
   // the global file passes its own KUKULU_CONFIG/KUKULU_PROFILE via `env`.
   const isolation = {
     KUKULU_CONFIG: path.join(repo, ".kukulu-test-no-global.json"),
+    // One throwaway signing key per repo, outside it, so a test never touches the developer's own key.
+    KUKULU_CLEANROOM_KEY: testKeyFor(repo),
     KUKULU_PROFILE: "",
     FOUNDRY_CONFIG: "",
     FOUNDRY_PROFILE: "",
@@ -520,4 +717,22 @@ export function runGuard(repo, input = {}, env = {}) {
     encoding: "utf8",
     env: { ...process.env, CLAUDE_PROJECT_DIR: repo, ...env },
   }).trim();
+}
+
+/**
+ * Every `#` heading in a Markdown text that is not followed by a blank line,
+ * or not preceded by one (except on line 1), as `line <n>: <heading> …`
+ * (markdownlint MD022). Fenced code blocks are skipped.
+ */
+export function headingSpacingProblems(text) {
+  const lines = text.split("\n");
+  const problems = [];
+  let fenced = false;
+  lines.forEach((l, i) => {
+    if (/^```/.test(l)) fenced = !fenced;
+    if (fenced || !/^#{1,6} /.test(l)) return;
+    if (i > 0 && lines[i - 1].trim() !== "") problems.push(`line ${i + 1}: ${l} is not preceded by a blank line`);
+    if (i < lines.length - 1 && lines[i + 1].trim() !== "") problems.push(`line ${i + 1}: ${l} is not followed by a blank line`);
+  });
+  return problems;
 }

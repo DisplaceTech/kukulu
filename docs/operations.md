@@ -96,7 +96,7 @@ To continue anyway, make the call the halt message names: `kukulu_flight_options
 
 **An operator-level problem.** `kukulu_run_halt` records a reason when the implementer hits something no task-level retry fixes: a signing agent that died, a full disk, a `verify` command that cannot even run, a vanished base branch. Nothing is reset or cleaned up, so you can read the branch exactly as the run left it.
 
-To continue once the problem is fixed: set `"halted": null` in `.kukulu/state.json`, commit it, and re-run the flight.
+To continue once the problem is fixed, call `kukulu_run_resume({ reason: "<what you fixed>" })` (or tell `/kukulu:go-flight` `resume: <what you fixed>`). It clears the halt and commits `chore: run resumed`; it refuses while the tree is dirty or a stream worktree exists. A stream-merge halt is cleared the same way, after you merge or delete the stream's branch.
 
 **A stream merge conflict.** When a parallel stream's branch conflicts on merge, `kukulu_stream_finish` aborts the merge, keeps the stream's branch and worktree, and halts with the conflicting paths in the reason. Kūkulu cannot guess a merge. See [Parallel streams](#parallel-streams) for the recovery.
 
@@ -104,7 +104,7 @@ To continue once the problem is fixed: set `"halted": null` in `.kukulu/state.js
 
 | Symptom | What it means | What to do |
 |---|---|---|
-| Controller stops immediately with `halt` | Read the `reason`: missing spec, or `halted` in state | Fix the named cause, re-run |
+| Controller stops immediately with `halt` | Read the `reason`: missing spec, or `halted` in state | Fix the named cause; for a halt other than a round cap, call `kukulu_run_resume`, then re-run |
 | The controller session itself gets blocked from stopping | Should not happen after 0.3.0: the guard only considers a stop it can attribute to the implementer | Check that `hooks/hooks.json`'s `SubagentStop` matcher is intact and that no project override replaced it; otherwise, file a bug |
 | Implementer stops with tasks open mid-task | The guard blocked and the agent still stopped, or the per-task stall cap tripped | Check `kukulu_status`'s `lockCounter` against the effective cap (`guardCap`, else `KUKULU_GUARD_CAP`, else 60); at the cap, something is wedged on one task: read its log and block it by hand |
 | Every task blocks with the same error | The plan assumes something that is not there | Stop the flight. Fix `SPEC.md` and re-plan; do not let it grind through 40 blocked tasks |
@@ -117,7 +117,7 @@ To continue once the problem is fixed: set `"halted": null` in `.kukulu/state.js
 | `Agent` call fails with `Agent type 'kukulu-<role>' not found` | Same cause as above, hit mid-flight instead of at the start | Same fix: relaunch and re-run |
 | Flight stops immediately with a routing config error | The global file, a profile, or `docs/kukulu.json`'s `roles`/`permissionMode` is malformed | Run `kukulu_config_show` to see what is wrong and where; fix it and re-run |
 | `kukulu_run_start` refuses with a signing message | `policies.signing` is `"required"` and either signing is not configured or a real signed commit failed | Fix the signing agent, or set `policies.signing` to `"off"` in `docs/kukulu.json` |
-| Flight halts with a reason naming a dead tool or agent | `kukulu_run_halt` was called | Read the reason, fix the problem, clear `halted` in `.kukulu/state.json`, re-run |
+| Flight halts with a reason naming a dead tool or agent | `kukulu_run_halt` was called | Read the reason, fix the problem, call `kukulu_run_resume({ reason })`, re-run |
 | Flight halts with "non-converging" or "hard cap" in the reason | Review findings stopped shrinking for `maxRounds` rounds, or the round count reached `maxRoundsHard` | Read `kukulu_status`'s `state.rounds` for the trail of counts; if the reviewer is still converging, raise `maxRounds`/`maxRoundsHard`; otherwise a human needs to look at why findings keep recurring |
 | `kukulu_review_submit` refuses over the `Round:` line | `docs/REVIEW.md`'s `Round:` line is missing or does not equal `reviewRound` | The error names the expected value; `kukulu_status`'s `reviewRound` always has it too |
 | `kukulu_next` keeps handing out the same stream | A stream's implementer stops before `kukulu_stream_finish` (the guard cap, a crash, a refused call) | Expected: `kukulu_run_start({ stream })` resumes its worktree. If it never makes progress, read that stream's task log; see [Parallel streams](#parallel-streams) to abandon it |
@@ -155,7 +155,7 @@ A repository usually runs more than one flight. Three things make the second one
 
 **Name the flight.** Set `"flight"` in `docs/kukulu.json` to a slug (`^[a-z0-9][a-z0-9-]{0,39}$`), or pass `flight=<slug>` to `/kukulu:go-flight` and the planner writes it for you. The slug names the flight's archive directory.
 
-**Archive it.** `kukulu_flight_archive` moves a summarized flight into `docs/flights/<slug>/`: `PLAN.md`, `PROGRESS.md`, `HANDOFF.md`, `REVIEW.md`, `SUMMARY.md`, `kukulu.json`, `.kukulu/state.json` and `.kukulu/feedback.jsonl`, each one that exists. It copies `docs/SPEC.md` there but leaves the live spec where it is, writes a fresh `.kukulu/state.json` recording the archive, and commits everything as `chore: archive flight <slug>`. It refuses unless the flight is summarized, no run is armed, the working tree is clean and the destination is free. If its commit fails, it puts every file back. By default the summarizer does not call it. Set `policies.archive` to `true` (a ⚠️ ASSUMPTION, default `false`, until it has been proven in real flights) and the summarizer calls it after `kukulu_summary_commit`, or call it yourself.
+**Archive it.** `kukulu_flight_archive` moves a summarized flight into `docs/flights/<slug>/`: `PLAN.md`, `PROGRESS.md`, `HANDOFF.md`, `REVIEW.md`, `SUMMARY.md`, `kukulu.json`, `.kukulu/state.json` and `.kukulu/feedback.jsonl`, each one that exists. It copies `docs/SPEC.md` there but leaves the live spec where it is, writes a fresh `.kukulu/state.json` recording the archive, and commits everything as `chore: archive flight <slug>`. It refuses unless the flight is summarized, no run is armed, the working tree is clean and the destination is free. If its commit fails, it puts every file back. By default the summarizer does not call it. Set `policies.archive` to `true` (a ⚠️ ASSUMPTION, default `false`, until it has been proven in real flights) and the summarizer calls it after `kukulu_summary_commit`, or call it yourself. In clean-room mode it also moves `.kukulu/cleanroom/log.jsonl` (and `similarity.json`, when present) into `docs/flights/<slug>/cleanroom/`, so the next flight's genesis starts at entry 1.
 
 **Edit the spec.** After an archive, `kukulu_next` reports `done` ("flight `<slug>` is archived in `docs/flights/<slug>`") for as long as `docs/SPEC.md` is byte-identical to the archived copy. Edit it for the next flight and `kukulu_next` returns `plan` again.
 
@@ -219,6 +219,12 @@ The controller calls `kukulu_pr_finalize({ resign: true })` only when you tell g
 | `parallel.maxStreams` | `3` | The most streams of one wave handed to implementers at once; `1` runs every wave serially, silently |
 | `parallel.setup` | `[]` | Commands (same entries as `verify`) run once in each newly created stream worktree, before its implementer starts, such as the dependency install a fresh checkout needs (`npm ci`, `composer install`) |
 | `mutation.targeted` | `{}` | Name → `{ cmd, timeoutMs }`: a test command with exactly one `{filter}` slot that `kukulu_mutate` can run instead of the whole verify set, e.g. `{ "php": { "cmd": "vendor/bin/phpunit --filter {filter}" } }`. The reviewer passes `targeted` and `filter`; the filter is limited to letters, digits and `_ . : / -` and is substituted as one single-quoted word. `timeoutMs` defaults to `commandTimeoutMs` |
+| `review.mutationFixRounds` | `2` | ⚠️ ASSUMPTION. The number of fix rounds that a surviving mutant alone may open. A fix task is submitted with a `source` of `review`, `mutation` or `blocked`; once the review's round is past this value, `kukulu_review_submit` refuses a `mutation` task, and the survivor is a note in REVIEW.md instead. A positive integer |
+| `cleanroom` | absent | An object that configures clean-room mode (see [cleanroom.md](./cleanroom.md)): `policy`, `signingKey`, `similarity` and `idleGapHours`. Any other key is refused. The mode is on when the policy file exists; there is no flag |
+| `cleanroom.policy` | `docs/cleanroom.json` | Repo-relative path of the policy file; absolute paths, `~` and `..` are refused |
+| `cleanroom.signingKey` | `~/.config/kukulu/cleanroom/ed25519.pem` | Path of the Ed25519 private key that signs checkpoints; a leading `~` is the home directory. `KUKULU_CLEANROOM_KEY` wins over it |
+| `cleanroom.idleGapHours` | `3` | ⚠️ ASSUMPTION. Hours between two consecutive log entries of one stage before the span is listed as an `idle` coverage gap in an attestation bundle (`coverage.gaps`). A positive number |
+| `cleanroom.similarity` | absent | The controls and test pairs a contamination score is measured against (`kukulu_similarity`). Keys: `subject` (directories being measured), `pairs` (`{ id, role, left, right }` with exactly one `negative`, exactly one `positive` and at least one `test`; `left` and `right` are directories, or `subject`), `languages` (extension to one of `rust`, `c`, `cpp`, `go`, `python`, `javascript`, `typescript`, `java`, `php`; the common extensions by default), `ngram` (`[5, 10]`), `minIdentLen` (`6`), `commentNgram` (`5`), `identExclusions` (a file of identifiers to ignore), `near` (`0.25`, a number above 0 and below 0.5) and `separationMargin` (`0`, ⚠️ ASSUMPTION: controls count as separated when the positive score exceeds the negative by more than this). Any other key is refused |
 | `constraints` | `[]` | `CLAUDE.md` rules expressed as data and checked by `kukulu_verify`; see [Constraints](#constraints) below |
 
 Environment variables:
@@ -228,11 +234,11 @@ Environment variables:
 | `KUKULU_PROJECT_DIR` | `cwd` | Project root the server operates on; set by `.mcp.json` |
 | `KUKULU_GUARD_CAP` | `60` | Re-blocks since the last task state change before the guard gives up; `docs/kukulu.json`'s `guardCap` wins over this when set |
 | `KUKULU_CONFIG` | `~/.config/kukulu/config.json` (or `$XDG_CONFIG_HOME/kukulu/config.json`) | Path to the global routing config |
+| `KUKULU_CLEANROOM_KEY` | `cleanroom.signingKey` | Path of the checkpoint-signing key; wins over the config key |
+| `KUKULU_CLEANROOM_LOG` | `.kukulu/cleanroom/log.jsonl` | Where the clean-room hash chain is written; for tests and the guard's self-test only |
 | `KUKULU_PROFILE` | the global file's own `"profile"` key, if any | Which profile in the global file to apply; wins over the file's own choice |
 
-Before 0.6.0 these were `FOUNDRY_PROJECT_DIR`, `FOUNDRY_GUARD_CAP`, `FOUNDRY_CONFIG` and `FOUNDRY_PROFILE`, and the global file lived in `foundry/` instead of `kukulu/`. Until 0.7.0 the old names are still read when the new one is unset or empty, and the old global file is read when no `kukulu/config.json` exists. Each of these server-side fallbacks adds a line to the `deprecations` array that `kukulu_status` and `kukulu_next` return; `/kukulu:go-flight` prints it. The guard hook runs in its own process and reports nothing: it reads `KUKULU_GUARD_CAP` then `FOUNDRY_GUARD_CAP`, and still recognizes the old agent names and `foundry_run_start`. A new name always wins over an old one.
-
-The project layout follows the same rule. A project that has `.foundry/` or `docs/foundry.json` and none of `.kukulu/` or `docs/kukulu.json` keeps working in place under the old names, with one more `deprecations` line; its refusals name the old files. A project that has both is refused by every tool, because reading either would hide the other: keep the one you use and remove the other with git. These project-layout fallbacks, like the `FOUNDRY_*` ones, end in 0.7.0. Flights archived before 0.6.0 are different: they keep `foundry.json` in their archive directory, finalizing one still reads it, and that is permanent, because an archive is a record and is never rewritten. An old-layout project whose plan stage is next halts with an instruction to migrate first, since planning would write `docs/kukulu.json` beside `.foundry/`.
+Flights archived before 0.6.0 keep their configuration file under its old name, and finalizing one still reads it; an archive is a record and is never rewritten.
 
 ## Calibrating
 
@@ -332,8 +338,7 @@ ls .kukulu/worktrees/
 git merge --no-ff <build-branch>--<stream>     # resolve the conflicts, then commit
 git worktree remove --force .kukulu/worktrees/<stream>
 git branch -d <build-branch>--<stream>
-$EDITOR .kukulu/state.json                    # set "halted": null
-git commit -am "chore: stream <stream> merged by hand"
+# then call kukulu_run_resume({ reason: "merged stream <stream> by hand" }), which commits chore: run resumed
 ```
 
 Then re-run the flight; the stream's tasks are already done, so it goes on to the next wave or the handoff.

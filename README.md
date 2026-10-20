@@ -6,7 +6,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/License-Apache%202.0-blue" alt="Apache License 2.0" />
-  <img src="https://img.shields.io/badge/version-0.6.1-informational" alt="Version 0.6.1" />
+  <img src="https://img.shields.io/badge/version-0.7.0-informational" alt="Version 0.7.0" />
   <img src="https://img.shields.io/badge/Node-%E2%89%A5%2022-339933?logo=nodedotjs&logoColor=white" alt="Node 22 or later" />
   <img src="https://img.shields.io/badge/Claude%20Code-plugin-D97757" alt="Claude Code plugin" />
   <img src="https://img.shields.io/badge/dependencies-none-brightgreen" alt="No dependencies" />
@@ -68,6 +68,7 @@ You need Node ≥ 22, git, and Claude Code. Nothing to `npm install`.
 - **Per-role model routing**, from a global config file, optional profiles and a project override, lets you point any role at a cheaper model, local or hosted through a router, without changing how the pipeline runs. See [docs/routing.md](./docs/routing.md).
 - **A flight controller**, `/kukulu:go-flight`, that makes no engineering decisions. It asks the MCP what runs next, spawns that agent, and repeats until the pipeline reports `done` or `halt`.
 - **A deterministic MCP server** (`mcp/server.mjs`, no dependencies, Node ≥ 22) that owns stage selection, task selection, dependency skipping, checkbox edits, log entries, verification runs and every bookkeeping commit. The skills direct judgment and never describe mechanics.
+- **Clean-room mode**, opt-in with a policy file: a guard that checks every tool call, a hash-chained log with signed checkpoints, a gate before every stage, a lexical contamination score, and a signed attestation bundle that anyone with Node can verify offline. See [docs/cleanroom.md](./docs/cleanroom.md).
 - **A Stop-hook guard** that refuses to let the implementer stop while tasks are open, and gives up after a configurable cap so a stuck run ends instead of looping.
 - **Blocked-task handling** that keeps an unattended run moving: a task that cannot be done is reset, logged and left for the reviewer; its dependents are skipped rather than attempted.
 - **Everything on disk.** The plan, progress, handoff, review and summary are all committed, so a flight can be resumed from any point by re-running one command.
@@ -145,6 +146,10 @@ claude --plugin-dir /path/to/kukulu
 
 Plugin skills are namespaced, so the entry point is `/kukulu:go-flight`; the bare `/go-flight` form does not resolve for plugin skills.
 
+## Upgrading to 0.7.0
+
+0.7.0 no longer reads the pre-0.6.0 layout. A project that still has `.foundry/` or `docs/foundry.json` is refused by every tool with a message that names the move, which is by hand: `.foundry/state.json` and `.foundry/feedback.jsonl` go to `.kukulu/`, `docs/foundry.json` goes to `docs/kukulu.json`, the `.foundry/` lines of `.gitignore` become `.kukulu/`, and the result is committed (0.6.x's `kukulu_migrate` did this, and 0.7.0 does not). The `FOUNDRY_*` environment variables are no longer read either; use the `KUKULU_*` names. A project on the 0.6 layout needs nothing else, and clean-room mode stays off until it has a `docs/cleanroom.json`. Flights archived under `docs/flights/` keep their old file names and are never rewritten.
+
 ## Per-project use
 
 ```bash
@@ -195,7 +200,7 @@ Checkbox states in `PROGRESS.md`: `[ ]` todo · `[~]` in progress · `[x]` done 
 
 ## MCP tools
 
-The server exposes twenty-two tools.
+The server exposes twenty-five tools.
 
 | Tool | Does |
 |---|---|
@@ -211,18 +216,25 @@ The server exposes twenty-two tools.
 | `kukulu_stream_finish` | Finish one stream of a parallel wave: require no open tasks and a clean worktree, merge its branch into the build branch, remove the worktree and branch. A merge conflict aborts, keeps the stream, and halts |
 | `kukulu_run_finish` | Requires zero open tasks and `HANDOFF.md`; commit, push, draft a PR against `baseBranch` (unless policies say otherwise), disarm the lock, report a whole-tree constraint scan |
 | `kukulu_run_halt` | Record an operator-level reason the run cannot continue; disarm the lock; commit state; never resets or cleans the tree |
+| `kukulu_run_resume` | Clear a halt other than a round-cap halt once its cause is fixed, and commit `chore: run resumed` |
 | `kukulu_flight_options` | Apply go-flight's options (`maxRounds`, `maxRoundsHard`) to `docs/kukulu.json` and commit; with `resume: true`, also lift a round-cap halt |
+| `kukulu_cleanroom_record` | Clean-room mode: record an instruction, an intervention or a verdict on a denial in the hash chain and commit it |
 | `kukulu_feedback_log` | Append one pipeline-friction entry to `.kukulu/feedback.jsonl` and commit it immediately, so it survives a flight that never reaches summarize |
 | `kukulu_mutate` | Mutation-test one file for the reviewer: apply one exact find/replace, run the verify commands that file triggers (or a `targeted` command with a `filter`; optionally with a shorter `timeoutMs`), always restore it and undo any residue the commands left, commit nothing; reports whether the tests noticed and lists `failedCommands`, and with `confirmKill` re-runs a kill on the unmutated tree |
 | `kukulu_review_submit` | `APPROVED` → commit. `CHANGES REQUESTED` → assign `R<N>-<nn>`, append to PLAN and PROGRESS, unblock (with skipped dependents), commit `review: round N` |
 | `kukulu_summary_commit` | Write `SUMMARY.md` from `content`, commit it, mark the flight complete, report reviews, fix rounds, the branch's PR and whether to archive |
+| `kukulu_similarity` | Score contamination against the configured control pairs inside the server and write `docs/SIMILARITY.md`; the summarizer calls it after the summary |
+| `kukulu_attest` | Write the signed attestation bundle for a clean-room flight into `docs/attestation/`, run the bundle's own verifier on it, and commit it only when it passes; the summarizer calls it after the summary |
 | `kukulu_flight_archive` | Move a summarized flight's artifacts into `docs/flights/<slug>/` (the spec stays), write a fresh state, commit and push |
-| `kukulu_migrate` | Move a project from the pre-0.6.0 Foundry layout (`.foundry/`, `docs/foundry.json`) to `.kukulu/` and `docs/kukulu.json`, fix the ignore lines and generated agents, and commit the move |
 | `kukulu_pr_finalize` | End a flight: if every commit is signed, mark the draft PR ready and, unless `breaking`, enable auto-merge; otherwise keep it a draft and record `awaitingSigning`. `resign: true` is for a human |
 | `kukulu_agents_sync` | Write `.claude/agents/kukulu-<role>.md` from the merged routing config; only changed files are written |
 | `kukulu_config_show` | The merged routing config with the source of every value. Read-only |
 
 Full arguments, return shapes and failure modes: [docs/mcp-tools.md](./docs/mcp-tools.md).
+
+## Clean-room mode
+
+A project with a `docs/cleanroom.json` policy runs in clean-room mode: a guard checks every tool call against the policy before it runs, a logger writes every allowed call and every prompt to a hash-chained log with signed checkpoints, and a gate refuses to start a stage if any of that machinery has changed since the flight began. At the end of the flight `kukulu_attest` writes `docs/attestation/`, a signed bundle whose own `verify.mjs` checks the manifest, the signature, the chain, the checkpoints, the policy, the guard, the mode, the denials, the coverage gaps and the similarity report with nothing but Node (see [Verifying offline](./docs/cleanroom.md#verifying-offline)). Without the policy file nothing changes and nothing is paid for. The method is patent pending (U.S. Provisional Application No. 64/178,095, Displace Technologies LLC). [docs/cleanroom.md](./docs/cleanroom.md) has the policy reference, the log format, the gate and the known gaps.
 
 ## The guard hook
 
@@ -230,7 +242,7 @@ Full arguments, return shapes and failure modes: [docs/mcp-tools.md](./docs/mcp-
 
 ## Resuming and halting
 
-Everything is on disk and committed, so `/kukulu:go-flight` can be re-run from any point: `kukulu_next` reads the state and continues. Four things stop a flight on purpose, and each writes an explicit `halted` value to `.kukulu/state.json`: a review round reaching `maxRoundsHard`, however well it's going; review findings that stop shrinking for `maxRounds` rounds running (a flight whose findings go 15 → 3 → 2 → 1 is never penalized for taking rounds, only one that stops improving); `kukulu_run_halt`, which an implementer calls for an operator-level problem it can't resolve itself; and a parallel stream whose merge conflicts (`kukulu_stream_finish` aborts the merge and keeps the stream). All four need a human. Raise `maxRounds` or `maxRoundsHard` in `docs/kukulu.json` if appropriate, clear `halted`, and run `/kukulu:go-flight` again. [docs/operations.md](./docs/operations.md) has the rest of the runbook: how each failure looks, how to unstick it, and how to reopen a task once its blocker is fixed (`kukulu_task_reopen`).
+Everything is on disk and committed, so `/kukulu:go-flight` can be re-run from any point: `kukulu_next` reads the state and continues. Four things stop a flight on purpose, and each writes an explicit `halted` value to `.kukulu/state.json`: a review round reaching `maxRoundsHard`, however well it's going; review findings that stop shrinking for `maxRounds` rounds running (a flight whose findings go 15 → 3 → 2 → 1 is never penalized for taking rounds, only one that stops improving); `kukulu_run_halt`, which an implementer calls for an operator-level problem it can't resolve itself; and a parallel stream whose merge conflicts (`kukulu_stream_finish` aborts the merge and keeps the stream). All four need a human. For a round-cap halt, call `kukulu_flight_options` with `resume: true` (or raise `maxRounds` or `maxRoundsHard`); for the other three, fix the cause and call `kukulu_run_resume`. Then run `/kukulu:go-flight` again. [docs/operations.md](./docs/operations.md) has the rest of the runbook: how each failure looks, how to unstick it, and how to reopen a task once its blocker is fixed (`kukulu_task_reopen`).
 
 ## Repo layout
 
@@ -254,7 +266,7 @@ Everything is on disk and committed, so `/kukulu:go-flight` can be re-run from a
 │   ├── kukulu.config.example.json   the global routing config, explained in docs/routing.md
 │   └── ccr/                     claude-code-router provider manifests
 ├── docs/                        architecture · MCP reference · routing · spec guide · runbook
-└── test/                        harness + eleven suites, run by test/run.mjs
+└── test/                        harness + thirteen suites, run by test/run.mjs
 ```
 
 ## Documentation map
@@ -263,6 +275,7 @@ Everything is on disk and committed, so `/kukulu:go-flight` can be re-run from a
 - [**docs/mcp-tools.md**](./docs/mcp-tools.md): every tool, argument, return field and refusal
 - [**docs/routing.md**](./docs/routing.md): per-role model routing, covering the global config file, profiles, and running stages through a router like claude-code-router
 - [**docs/writing-specs.md**](./docs/writing-specs.md): how to write a `SPEC.md` the planner can turn into a usable plan
+- [**docs/cleanroom.md**](./docs/cleanroom.md): clean-room mode, covering the policy, the guard, the log and checkpoints, the gate, and recording what you did
 - [**docs/operations.md**](./docs/operations.md): running, resuming, halting, and what to do when a stage misbehaves
 - [**docs/plans/**](./docs/plans/): the task-by-task plan behind each release
 - [**Website**](docs/site/DEPLOY.md): deploying kukulu.tech to Cloudflare Pages, and the launch checklist
@@ -284,7 +297,7 @@ npm test -- guard protocol     # one or more suites by name
 KEEP_REPO=1 npm test -- drive  # keep the temp repos to poke at afterwards
 ```
 
-Eleven suites, about 2,200 assertions. They cover the plugin manifests and documentation links, the JSON-RPC transport, the `kukulu_next` decision table, the implement-stage tools, the review and summary tools, per-role routing (config merge, `kukulu_agents_sync`, `kukulu_config_show`), `docs/kukulu.json` constraints and their fixture self-tests, `kukulu_feedback_log` and the feedback policy, parallel streams (waves, partition validation, worktrees, merge-back), the guard hook, and serial and parallel end-to-end flights driven over real stdio against a real git repo. CI runs all of it on Node 22, 24 and 26, again on macOS, and again on a machine with no GitHub CLI installed.
+Thirteen suites, about 3,000 assertions. They cover the plugin manifests and documentation links, the JSON-RPC transport, the `kukulu_next` decision table, the implement-stage tools, the review and summary tools, per-role routing (config merge, `kukulu_agents_sync`, `kukulu_config_show`), `docs/kukulu.json` constraints and their fixture self-tests, `kukulu_feedback_log` and the feedback policy, parallel streams (waves, partition validation, worktrees, merge-back), the guard hook, and serial and parallel end-to-end flights driven over real stdio against a real git repo. CI runs all of it on Node 22, 24 and 26, again on macOS, and again on a machine with no GitHub CLI installed.
 
 ## Contributing
 

@@ -8,7 +8,8 @@ import { spawnSync } from "node:child_process";
 import {
   finish, ok, eq, like, isError,
   mkDir, plannedRepo, withServer, readFile, writeFile, subject, hasFile,
-  markTasks, setState, git, mkBareRemote, mkFakeGhBin, mkFakeGpg, useFakeSigner, useLegacyLayout,
+  markTasks, setState, git, mkBareRemote, mkFakeGhBin, mkFakeGpg, useFakeSigner,
+  headingSpacingProblems, planDoc, progressDoc, DEFAULT_TASKS,
 } from "./harness.mjs";
 
 const TODAY = new Date().toISOString().slice(0, 10);
@@ -39,6 +40,7 @@ const FIX = {
   outOfScope: "the rest of phase 0",
   verification: "npm test",
   dependsOn: [],
+  source: "review",
 };
 
 // ---------------------------------------------------------------- refusals
@@ -132,6 +134,71 @@ const FIX = {
   });
 }
 
+// ---------------------------------------------------------------- fix-task source and the mutation-round cap
+
+{
+  const repo = reviewableRepo();
+  await withServer(repo, async ({ call }) => {
+    const { source: _omitted, ...noSource } = FIX;
+    isError(await call("kukulu_review_submit", { verdict: "CHANGES REQUESTED", tasks: [noSource] }), /fix task 'Fix hello' needs a source: "review", "mutation" or "blocked"/, "a fix task without source is refused naming the legal values");
+    isError(await call("kukulu_review_submit", { verdict: "CHANGES REQUESTED", tasks: [{ ...FIX, source: "hunch" }] }), /needs a source: "review", "mutation" or "blocked"/, "...with another source is refused");
+  });
+}
+
+{
+  const repo = reviewableRepo({ round: 2 });
+  const files = ["docs/REVIEW.md", "docs/PLAN.md", "docs/PROGRESS.md", ".kukulu/state.json"];
+  const before = files.map((f) => readFile(repo, f));
+  const head = git(repo, ["rev-parse", "HEAD"]);
+  await withServer(repo, async ({ call }) => {
+    isError(
+      await call("kukulu_review_submit", { verdict: "CHANGES REQUESTED", tasks: [{ ...FIX, source: "mutation" }] }),
+      /round 3 is past review\.mutationFixRounds=2: a surviving mutant is advisory now\. Put it under `## Notes` in REVIEW\.md/,
+      "a mutation task past mutationFixRounds is refused",
+    );
+    files.forEach((f, i) => eq(readFile(repo, f), before[i], `...${f} is byte-identical`));
+    eq(git(repo, ["rev-parse", "HEAD"]), head, "...and HEAD did not move");
+    const r = await call("kukulu_review_submit", { verdict: "CHANGES REQUESTED", tasks: [FIX] });
+    eq(r.fixTasks.join(","), "R3-01", "a review task past mutationFixRounds is accepted");
+  });
+}
+
+{
+  const repo = reviewableRepo({ config: { review: { mutationFixRounds: 1 } }, round: 1 });
+  await withServer(repo, async ({ call }) => {
+    isError(await call("kukulu_review_submit", { verdict: "CHANGES REQUESTED", tasks: [{ ...FIX, source: "mutation" }] }), /round 2 is past review\.mutationFixRounds=1/, "the cap is the configured value, not a constant");
+  });
+}
+
+{
+  const repo = reviewableRepo();
+  await withServer(repo, async ({ call }) => {
+    await call("kukulu_review_submit", { verdict: "CHANGES REQUESTED", tasks: [FIX, { ...FIX, title: "b", source: "mutation" }, { ...FIX, title: "c", source: "mutation" }, { ...FIX, title: "d", source: "blocked" }] });
+    const rounds = JSON.parse(readFile(repo, ".kukulu/state.json")).rounds;
+    eq(JSON.stringify(rounds[0].sources), JSON.stringify({ review: 1, mutation: 2, blocked: 1 }), "state.rounds records sources counts");
+  });
+}
+
+{
+  const repo = reviewableRepo({ verdict: "APPROVED" });
+  await withServer(repo, async ({ call }) => {
+    await call("kukulu_review_submit", { verdict: "APPROVED" });
+    eq(JSON.stringify(JSON.parse(readFile(repo, ".kukulu/state.json")).rounds[0].sources), JSON.stringify({ review: 0, mutation: 0, blocked: 0 }), "an APPROVED round records zero sources");
+  });
+}
+
+for (const [bad, re, label] of [
+  [{ mutationFixRounds: 0 }, /review\.mutationFixRounds must be a positive integer/, "review.mutationFixRounds must be a positive integer"],
+  [{ mutationFixRounds: 1.5 }, /must be a positive integer/, "...a fraction is refused"],
+  [{ other: 1 }, /review has an unknown key 'other'/, "review has an unknown key"],
+  [[], /'review' must be an object/, "review must be an object"],
+]) {
+  const repo = reviewableRepo({ config: { review: bad } });
+  await withServer(repo, async ({ call }) => {
+    isError(await call("kukulu_review_submit", { verdict: "CHANGES REQUESTED", tasks: [FIX] }), re, label);
+  });
+}
+
 // ---------------------------------------------------------------- changes requested
 
 // F-03: the returned counts come from PROGRESS.md as the call left it.
@@ -147,6 +214,26 @@ const FIX = {
     eq(r.counts.total, 6, "...and a total that includes them");
     const s = await call("kukulu_status");
     eq(JSON.stringify(s.counts), JSON.stringify(r.counts), "the submit's counts match what kukulu_status reads straight afterwards");
+  });
+}
+
+// A PLAN.md and PROGRESS.md in the 0.6 spacing (no blank line after a heading) still parse and take a review round.
+{
+  const repo = reviewableRepo();
+  const plan = planDoc(DEFAULT_TASKS, { legacy: true });
+  const progress = progressDoc(DEFAULT_TASKS.map((t) => ({ ...t, state: "x" })), { legacy: true });
+  writeFile(repo, "docs/PLAN.md", plan);
+  writeFile(repo, "docs/PROGRESS.md", progress);
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-qm", "chore: 0.6 spacing"]);
+  await withServer(repo, async ({ call }) => {
+    const r = await call("kukulu_review_submit", { verdict: "CHANGES REQUESTED", tasks: [FIX] });
+    eq(r.fixTasks.join(","), "R1-01", "a PLAN.md in the 0.6 spacing still parses: the review round is accepted");
+    like(readFile(repo, "docs/PLAN.md"), /### R1-01: Fix hello\n\n\*\*Goal:\*\*/, "...and the fix task is appended in the new spacing");
+    await call("kukulu_run_start");
+    const n = await call("kukulu_task_next");
+    eq(n.id, "R1-01", "...and the fix task is selected next");
+    like(n.text, /\*\*Goal:\*\*/, "...with its block found");
   });
 }
 
@@ -183,8 +270,9 @@ const FIX = {
 
     const prog = readFile(repo, "docs/PROGRESS.md");
     like(prog, /- \[ \] P0-02 Impossible task\n- \[ \] P0-03[^\n]*\n- \[ \] R1-01 Fix hello\n- \[ \] R1-02 Second fix\n\n## Log/, "fix tasks are appended to Tasks, above the Log");
-    like(prog, /### P0-02 — unblocked \(round 1\)\nthe API does exist; see SPEC §6/, "the unblock reason is logged");
-    like(prog, /### P0-03 — unblocked \(round 1\)\nreopened: it was skipped because of P0-02, which is open again/, "the dependent's reopening is logged with its cause");
+    like(prog, /### P0-02 — unblocked \(round 1\)\n\nthe API does exist; see SPEC §6/, "the unblock reason is logged");
+    like(prog, /### P0-03 — unblocked \(round 1\)\n\nreopened: it was skipped because of P0-02, which is open again/, "the dependent's reopening is logged with its cause");
+    eq(headingSpacingProblems(plan).concat(headingSpacingProblems(prog)).join("; "), "", "PLAN.md and PROGRESS.md are MD022-clean after a CHANGES REQUESTED submit");
 
     const s = await call("kukulu_status");
     eq(s.counts.open, 4, "the unblocked task, its dependent and both fixes are open");
@@ -214,7 +302,7 @@ const FIX = {
     const r = await call("kukulu_review_submit", { verdict: "CHANGES REQUESTED", unblock: ["P0-03"] });
     eq(r.fixTasks.length, 0, "a round can be an unblock with no new tasks");
     eq(r.unblocked.join(","), "P0-03", "a bare string id is accepted");
-    like(readFile(repo, "docs/PROGRESS.md"), /### P0-03 — unblocked \(round 1\)\nunblocked by reviewer/, "a bare id gets a default reason");
+    like(readFile(repo, "docs/PROGRESS.md"), /### P0-03 — unblocked \(round 1\)\n\nunblocked by reviewer/, "a bare id gets a default reason");
     ok(!/## Review fixes/.test(readFile(repo, "docs/PLAN.md")), "no empty review section is added to PLAN.md");
   });
 }
@@ -469,6 +557,27 @@ const untouched = (repo, head) => {
 
     const v = await call("kukulu_verify");
     eq(v.ok, true, "and the real tree still verifies clean afterwards");
+  });
+}
+
+// Constraints are part of the check: a mutant only a rule catches is a kill.
+{
+  const NO_SUB = { id: "no-subtraction", pattern: "a - b", paths: ["src/"], shouldMatch: ["a - b"], shouldNotMatch: ["a + b"] };
+  const repo = mutationRepo({ config: { verify: ["true"], constraints: [NO_SUB] } });
+  const head = git(repo, ["rev-parse", "HEAD"]);
+  await withServer(repo, async ({ call }) => {
+    const r = await call("kukulu_mutate", { file: "src/add.mjs", find: "a + b", replace: "a - b", confirmKill: true });
+    eq(r.killed, true, "a mutant only a constraint catches is killed by that rule");
+    like(r.verdict, /killed: constraint no-subtraction caught the mutation/, "...with a verdict naming the rule");
+    eq(r.constraints.ok, false, "...and constraints.ok is false");
+    eq(r.constraints.results[0].hits[0].file, "src/add.mjs", "...with the hit");
+    eq(r.confirm, undefined, "confirmKill does not re-run anything for a constraint-only kill");
+    eq(readFile(repo, "src/add.mjs"), ADD_SRC, "the mutated file is restored after a constraint kill");
+    untouched(repo, head);
+    const s = await call("kukulu_mutate", { file: "src/add.mjs", find: "() => 1", replace: "() => 2" });
+    eq(s.killed, false, "a mutant nothing catches survives");
+    eq(s.constraints.ok, true, "...with constraints.ok true");
+    untouched(repo, head);
   });
 }
 
@@ -924,7 +1033,7 @@ for (const [label, args, policies, expect, mergeFails] of [
   ["breaking", { breaking: true }, {}, { calls: ["pr ready"], merge: "skipped: breaking", ready: true }],
   ["finalize ready", { breaking: false }, { finalize: "ready" }, { calls: ["pr ready"], merge: "skipped: policy", ready: true }],
   ["finalize draft", { breaking: false }, { finalize: "draft" }, { calls: [], merge: "skipped: policy", ready: false }],
-  ["merge unavailable", { breaking: false }, {}, { calls: ["pr ready", "pr merge --auto --merge"], merge: "unavailable: auto-merge is not allowed", ready: true }, "auto-merge is not allowed\nsecond line\n"],
+  ["merge unavailable", { breaking: false }, {}, { calls: ["pr ready", "pr merge --auto --merge"], merge: 'unavailable: auto-merge is not allowed; set policies.finalize to "ready" to stop asking', ready: true }, "auto-merge is not allowed\nsecond line\n"],
 ]) {
   const { repo, ghDir, opts } = finalizeRepo({ signed: true, policies });
   if (mergeFails) writeFile(ghDir, "merge-fails", mergeFails);
@@ -932,6 +1041,7 @@ for (const [label, args, policies, expect, mergeFails] of [
     const r = await call("kukulu_pr_finalize", args);
     eq(r.unsigned, 0, `all signed, ${label}: no unsigned commits`);
     eq(r.merge, expect.merge, `...merge is ${expect.merge}`);
+    if (mergeFails) like(r.merge, /^unavailable: .*; set policies\.finalize to "ready" to stop asking$/, "an unavailable auto-merge says to set policies.finalize to ready");
     eq(r.ready, expect.ready, `...ready is ${expect.ready}`);
     const calls = ghCalls(ghDir).filter((c) => c.startsWith("pr ready") || c.startsWith("pr merge"));
     eq(calls.join("|"), expect.calls.join("|"), "...and the gh calls are exactly those");
@@ -993,6 +1103,21 @@ function resignRepo({ extraState = {} } = {}) {
   git(repo, ["commit", "-qm", "chore: awaiting signing"]);
   git(repo, ["push", "-q", "-u", "origin", "build/x"]);
   return f;
+}
+
+{
+  // In clean-room mode a re-sign leaves the operator's instruction in the chain, in a commit the rebase then signs.
+  const { repo, opts } = resignRepo({ extraState: { cleanroom: { genesis: "g" } } });
+  const gpg = mkFakeGpg();
+  const globalCfg = fakeSignerGlobal(gpg);
+  await withServer(repo, async ({ call }) => {
+    const r = await call("kukulu_pr_finalize", { breaking: false, resign: true });
+    eq(r.resigned, true, "(the clean-room re-sign succeeds)");
+    const entries = readFile(repo, ".kukulu/cleanroom/log.jsonl").trim().split("\n").map((l) => JSON.parse(l));
+    const human = entries.find((e) => e.kind === "human");
+    eq(human.data.via + "|" + human.role + "|" + human.target, 'kukulu_pr_finalize|operator|{"breaking":false,"resign":true}', "kukulu_pr_finalize({ resign: true }) appends a human entry");
+    eq(git(repo, ["log", "--format=%s", "-n", "20"]).split("\n").includes("chore: clean-room record"), true, "...in its own commit");
+  }, { env: { ...opts.env, GIT_CONFIG_GLOBAL: globalCfg } });
 }
 
 {
@@ -1091,140 +1216,17 @@ function resignRepo({ extraState = {} } = {}) {
   git(repo, ["mv", "docs/flights/w1-share/kukulu.json", "docs/flights/w1-share/foundry.json"]);
   git(repo, ["commit", "-qm", "chore: pre-0.6.0 archive"]);
   await withServer(repo, async ({ call }) => {
-    isError(await call("kukulu_pr_finalize", { breaking: false }), /merge base with baseBranch 'no-such-base'/, "finalize reads the config of a flight archived as foundry.json");
+    isError(await call("kukulu_pr_finalize", { breaking: false }), /merge base with baseBranch 'no-such-base'/, "kukulu_pr_finalize reads an archive's foundry.json when it has no kukulu.json");
   });
-}
-
-{
-  // Archiving a project still on the old layout moves each file under its own name.
-  const repo = summarizedRepo();
-  useLegacyLayout(repo);
-  await withServer(repo, async ({ call }) => {
-    const r = await call("kukulu_flight_archive");
-    ok(r.moved.includes("docs/foundry.json") && r.moved.includes(".foundry/state.json"), "archive on the old layout reports the .foundry names it moved");
-    ok(hasFile(repo, "docs/flights/w1-share/foundry.json") && !hasFile(repo, "docs/flights/w1-share/kukulu.json"), "...and keeps foundry.json's name in the archive");
-    ok(hasFile(repo, ".foundry/state.json") && !hasFile(repo, ".kukulu"), "...writing the fresh state where the project keeps it");
-  });
-}
-
-const snapshot2 = (repo, files) => Object.fromEntries(files.map((f) => [f, hasFile(repo, f) ? readFile(repo, f) : null]));
-
-// ---------------------------------------------------------------- migrate from the Foundry layout (RN-07)
-
-/** A project on the pre-0.6.0 layout: state, feedback, config, ignore lines, generated agents. */
-function foundryProject() {
-  const repo = plannedRepo();
-  writeFile(repo, ".gitignore", "node_modules/\n.foundry/implement.lock\ndist/\n");
-  writeFile(repo, ".kukulu/feedback.jsonl", '{"at":"x","stage":"plan","round":0,"category":"other","message":"m","source":"agent"}\n');
-  setState(repo, { round: 0, implemented: false });
+  // The same archive naming a base branch that exists: finalize uses it and is not refused.
+  const oldCfg = JSON.parse(readFile(repo, "docs/flights/w1-share/foundry.json"));
+  git(repo, ["branch", "alt-base"]);
+  writeFile(repo, "docs/flights/w1-share/foundry.json", JSON.stringify({ ...oldCfg, baseBranch: "alt-base" }, null, 2) + "\n");
   git(repo, ["add", "-A"]);
-  git(repo, ["commit", "-qm", "chore: state"]);
-  useLegacyLayout(repo);
-  writeFile(repo, ".claude/agents/foundry-planner.md", "---\nname: foundry-planner\n---\n<!-- generated by foundry_agents_sync; edit config, not this file -->\n");
-  writeFile(repo, ".claude/agents/foundry-reviewer.md", "---\nname: foundry-reviewer\n---\nmy own reviewer\n");
-  writeFile(repo, ".git/info/exclude", ".claude/agents/foundry-*.md\n.foundry/worktrees/\n.foundry/mutation.json\n");
-  return repo;
-}
-const MIGRATED = [".foundry/state.json", ".foundry/feedback.jsonl", "docs/foundry.json", ".gitignore"];
-
-{
-  const repo = foundryProject();
-  const before = snapshot2(repo, MIGRATED);
+  git(repo, ["commit", "-qm", "chore: archived config names an existing base"]);
   await withServer(repo, async ({ call }) => {
-    const r = await call("kukulu_migrate");
-    eq(JSON.stringify(r.moved), JSON.stringify([[".foundry/state.json", ".kukulu/state.json"], [".foundry/feedback.jsonl", ".kukulu/feedback.jsonl"], ["docs/foundry.json", "docs/kukulu.json"]]), "migrate moves state, feedback and config");
-    eq(readFile(repo, ".kukulu/state.json"), before[".foundry/state.json"], "...state.json byte-identical");
-    eq(readFile(repo, ".kukulu/feedback.jsonl"), before[".foundry/feedback.jsonl"], "...feedback.jsonl byte-identical");
-    eq(readFile(repo, "docs/kukulu.json"), before["docs/foundry.json"], "...and the config byte-identical");
-    ok(!hasFile(repo, ".foundry"), "...with the old directory gone");
-    eq(readFile(repo, ".gitignore"), "node_modules/\n.kukulu/implement.lock\ndist/\n", "...and the ignore line renamed where it stood");
-    eq(r.gitignore, "rewritten", "...and reported");
-    eq(subject(repo), "chore: migrate .foundry layout to .kukulu", "...in one commit");
-    eq(git(repo, ["status", "--porcelain", "--", ".", ":!.claude"]), "", "...leaving the tree clean");
-    eq(r.removedAgents.join(","), ".claude/agents/foundry-planner.md", "a generated foundry agent file is removed");
-    eq(r.keptAgents.join(","), ".claude/agents/foundry-reviewer.md", "...and one without the generated marker is kept and reported");
-    eq(readFile(repo, ".git/info/exclude"), ".claude/agents/foundry-*.md\n.kukulu/worktrees/\n.kukulu/mutation.json\n.claude/agents/kukulu-*.md\n.claude/settings.local.json\n", "...the exclude file follows, mutation line included");
-    eq(r.permissions, "added", "...and the allow rule is ensured");
-    eq((await call("kukulu_status")).deprecations.length, 0, "after it, the layout notice is gone");
-    isError(await call("kukulu_migrate"), /already uses \.kukulu\/ and docs\/kukulu\.json/, "a second migrate refuses");
-  });
-}
-
-{
-  const repo = foundryProject();
-  fs.rmSync(path.join(repo, ".claude/agents/foundry-reviewer.md"));
-  await withServer(repo, async ({ call }) => {
-    const r = await call("kukulu_migrate");
-    eq(readFile(repo, ".git/info/exclude"), ".kukulu/worktrees/\n.kukulu/mutation.json\n.claude/agents/kukulu-*.md\n.claude/settings.local.json\n", "with no foundry agent file left, the old exclude pattern goes too");
-    eq(r.keptAgents.length, 0, "...and nothing is kept");
-  });
-}
-
-{
-  // CRLF ignore files are renamed too, keeping their line endings.
-  const repo = foundryProject();
-  writeFile(repo, ".gitignore", "node_modules/\r\n.foundry/implement.lock\r\n");
-  git(repo, ["add", "-A"]);
-  git(repo, ["commit", "-qm", "chore: crlf ignore"]);
-  await withServer(repo, async ({ call }) => {
-    await call("kukulu_migrate");
-    eq(readFile(repo, ".gitignore"), "node_modules/\r\n.kukulu/implement.lock\r\n", "a CRLF .gitignore is renamed in place with its line endings");
-    like(readFile(repo, ".git/info/exclude"), /^\.claude\/settings\.local\.json$/m, "migrate excludes .claude/settings.local.json, which it may create");
-    eq(git(repo, ["status", "--porcelain"]), "", "...so the tree is clean afterwards");
-  });
-}
-
-{
-  const repo = plannedRepo();
-  fs.rmSync(path.join(repo, "docs/kukulu.json"));
-  await withServer(repo, async ({ call }) => {
-    isError(await call("kukulu_migrate"), /neither \.foundry\/ nor docs\/foundry\.json/, "migrate refuses a project with neither layout");
-  });
-}
-
-for (const [label, setup, re] of [
-  ["an armed run", (r) => writeFile(r, ".foundry/implement.lock", "0\n"), /armed \(\.foundry\/implement\.lock exists\)/],
-  ["a mutation in progress", (r) => writeFile(r, ".foundry/mutation.json", "{}"), /left \.foundry\/mutation\.json/],
-  ["a stream worktree", (r) => fs.mkdirSync(path.join(r, ".foundry/worktrees/api"), { recursive: true }), /stream worktrees exist under \.foundry\/worktrees/],
-  ["an unknown file in .foundry/", (r) => writeFile(r, ".foundry/notes.txt", "x"), /holds files kukulu_migrate does not know: notes\.txt/],
-  ["a dirty tree", (r) => writeFile(r, "docs/PLAN.md", "# edited\n"), /working tree is not clean/],
-]) {
-  const repo = foundryProject();
-  setup(repo);
-  const before = snapshot2(repo, MIGRATED);
-  await withServer(repo, async ({ call }) => {
-    isError(await call("kukulu_migrate"), re, `migrate refuses ${label}`);
-    const after = snapshot2(repo, MIGRATED);
-    ok(MIGRATED.every((f) => after[f] === before[f]) && !hasFile(repo, ".kukulu"), "...and nothing moved");
-  });
-}
-
-{
-  const dir = mkDir();
-  writeFile(dir, "docs/foundry.json", "{}");
-  await withServer(dir, async ({ call }) => {
-    isError(await call("kukulu_migrate"), /must be a git repository/, "migrate refuses outside a git repository");
-  });
-}
-
-{
-  // a failed commit puts every path back
-  const repo = foundryProject();
-  const hook = path.join(repo, ".git", "hooks", "commit-msg");
-  fs.mkdirSync(path.dirname(hook), { recursive: true });
-  fs.writeFileSync(hook, `#!/bin/sh\nif head -n1 "$1" | grep -q '^chore: migrate'; then echo rejected >&2; exit 1; fi\n`);
-  fs.chmodSync(hook, 0o755);
-  const before = snapshot2(repo, MIGRATED);
-  const head = git(repo, ["rev-parse", "HEAD"]);
-  await withServer(repo, async ({ call }) => {
-    isError(await call("kukulu_migrate"), /commit failed/, "a failed migrate commit is an error");
-    const after = snapshot2(repo, MIGRATED);
-    ok(MIGRATED.every((f) => after[f] === before[f]), "...and every source is back, byte-identical");
-    ok(!hasFile(repo, ".kukulu") && !hasFile(repo, "docs/kukulu.json"), "...no new file remains");
-    eq(git(repo, ["diff", "--cached", "--name-only"]), "", "...nothing is staged");
-    eq(git(repo, ["rev-parse", "HEAD"]), head, "...HEAD did not move");
-    ok(hasFile(repo, ".claude/agents/foundry-planner.md"), "...and the generated agent was not touched");
-    eq((await call("kukulu_status")).deprecations.length, 1, "...and the project is still read as the old layout");
+    const r = await call("kukulu_pr_finalize", { breaking: false });
+    ok(!r.error, "...and a foundry.json naming an existing base branch is used, not refused for a missing merge base");
   });
 }
 

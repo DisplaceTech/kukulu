@@ -10,7 +10,9 @@ repos:
     hooks:
       - id: trailing-whitespace
         exclude: '\.md$'
+      # The owner's approval file is applied verbatim and never edited by a flight.
       - id: end-of-file-fixer
+        exclude: '^docs/site/copy-changes\.json$'
       - id: check-merge-conflict
       - id: check-added-large-files
         args: ["--maxkb=256"]

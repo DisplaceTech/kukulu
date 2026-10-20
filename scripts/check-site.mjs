@@ -14,7 +14,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 // Rules this file implements, for the "ok" line. Each task that adds a rule extends it.
-const IMPLEMENTED_RULES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14];
+const IMPLEMENTED_RULES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 16];
 
 // Files the site is made of besides the seeded assets (SPEC section 4).
 const SITE_FILES = ["index.html", "404.html", "styles.css", "copy.js", "_headers", "robots.txt"];
@@ -108,6 +108,7 @@ function defaultOpts() {
     siteDir: path.join(ROOT, "site"),
     configPath: path.join(ROOT, "docs/site/checks.json"),
     mockupPath: path.join(ROOT, "docs/site/mockup.html"),
+    copyChangesPath: path.join(ROOT, "docs/site/copy-changes.json"),
     assetsDir: path.join(ROOT, "docs/site/assets"),
     pluginMarketplacePath: path.join(ROOT, ".claude-plugin/marketplace.json"),
     packageJsonPath: path.join(ROOT, "package.json"),
@@ -813,6 +814,66 @@ function rule14(ctx) {
   }
 }
 
+// ---- rule 16: approved copy changes stay applied
+
+const COPY_CHANGES_KEYS = ["approved", "approvedAt", "changes"];
+const COPY_CHANGE_KEYS = ["old", "new"];
+const COPY_CHANGES_NAME = "docs/site/copy-changes.json";
+
+// The owner's file is read, never written. With no file there is nothing to hold the page to.
+function rule16(ctx) {
+  const file = ctx.opts.copyChangesPath;
+  if (!file || !fs.existsSync(file)) return;
+  const bad = (what) => ctx.fail(16, COPY_CHANGES_NAME, what, "restore the file from git; it is the owner's approval and no check or task edits it");
+  let data;
+  try {
+    data = JSON.parse(fs.readFileSync(file, "utf8"));
+  } catch (e) {
+    bad(`is not valid JSON (${e.message})`);
+    return;
+  }
+  if (!isPlainObject(data)) {
+    bad("must be a JSON object");
+    return;
+  }
+  let shaped = true;
+  const flag = (what) => {
+    bad(what);
+    shaped = false;
+  };
+  for (const k of Object.keys(data)) if (!COPY_CHANGES_KEYS.includes(k)) flag(`has an unknown key "${k}"`);
+  for (const k of ["approved", "approvedAt"]) {
+    if (typeof data[k] !== "string" || data[k] === "") flag(`"${k}" must be a non-empty string`);
+  }
+  if (!Array.isArray(data.changes) || data.changes.length === 0) flag('"changes" must be a non-empty array of { old, new }');
+  else {
+    data.changes.forEach((c, k) => {
+      const n = k + 1;
+      if (!isPlainObject(c)) return flag(`change ${n} must be an object with "old" and "new"`);
+      for (const key of Object.keys(c)) if (!COPY_CHANGE_KEYS.includes(key)) flag(`change ${n} has an unknown key "${key}"`);
+      if (typeof c.old !== "string" || c.old === "") flag(`change ${n}: "old" must be a non-empty string`);
+      if (typeof c.new !== "string") flag(`change ${n}: "new" must be a string`);
+    });
+  }
+  if (!shaped) return;
+  const targets = [
+    ["docs/site/mockup.html", ctx.opts.mockupPath],
+    ["site/index.html", path.join(ctx.opts.siteDir, "index.html")],
+  ];
+  for (const [label, p] of targets) {
+    let text;
+    try {
+      text = fs.readFileSync(p, "utf8");
+    } catch (e) {
+      ctx.fail(16, label, `cannot be read (${e.code || e.message})`, "restore the file from git");
+      continue;
+    }
+    data.changes.forEach((c, k) => {
+      if (text.includes(c.old) || !text.includes(c.new)) ctx.fail(16, label, `approved copy change ${k + 1} not applied`, "apply docs/site/copy-changes.json");
+    });
+  }
+}
+
 export function checkSite(overrides = {}) {
   const opts = { ...defaultOpts(), ...overrides };
   const failures = [];
@@ -839,6 +900,7 @@ export function checkSite(overrides = {}) {
   rule12(ctx);
   rule13(ctx);
   rule14(ctx);
+  rule16(ctx);
   return failures;
 }
 
@@ -1031,6 +1093,25 @@ CASES.push(
   { rule: 14, name: "rule 14: a third-party import", expect: 'imports "left-pad"', inject: (t) => fs.appendFileSync(path.join(t.scripts, "check-site.mjs"), ["", "import pad " + "from" + ' "left-pad";', ""].join("\n")) },
 );
 
+// A pair of the approved copy changes, from the temp copy of the owner's file.
+const pairOf = (t, n) => readJson(t.copyChanges).changes[n - 1];
+const editMockup = (t, from, to) => {
+  const text = fs.readFileSync(t.mockup, "utf8");
+  if (!text.includes(from)) throw new Error(`self-test case cannot find ${JSON.stringify(from)} in the mockup`);
+  fs.writeFileSync(t.mockup, text.replace(from, () => to));
+};
+const writeCopyChanges = (t, data) => fs.writeFileSync(t.copyChanges, `${JSON.stringify(data, null, 2)}\n`);
+
+CASES.push(
+  { rule: 16, name: "rule 16: a pair not applied to the page", expect: "approved copy change 1 not applied", inject: (t) => sub(t, "index.html", pairOf(t, 1).new, pairOf(t, 1).old) },
+  { rule: 16, name: "rule 16: a pair not applied to the mockup", expect: "approved copy change 2 not applied", inject: (t) => editMockup(t, pairOf(t, 2).new, pairOf(t, 2).old) },
+  { rule: 16, name: "rule 16: an old string still present", expect: "approved copy change 3 not applied", inject: (t) => sub(t, "index.html", "</main>", `<p>${pairOf(t, 3).old}</p></main>`) },
+  { rule: 16, name: "rule 16: a malformed copy-changes file", expect: 'has an unknown key "extra"', inject: (t) => writeCopyChanges(t, { ...readJson(t.copyChanges), extra: 1 }) },
+  { rule: 16, name: "rule 16: an empty changes list", expect: '"changes" must be a non-empty array', inject: (t) => writeCopyChanges(t, { ...readJson(t.copyChanges), changes: [] }) },
+  { rule: 16, name: "rule 16: a change with an empty old", expect: 'change 1: "old" must be a non-empty string', inject: (t) => writeCopyChanges(t, { ...readJson(t.copyChanges), changes: [{ old: "", new: "x" }] }) },
+  { rule: 16, name: "rule 16: a copy-changes file that is not JSON", expect: "is not valid JSON", inject: (t) => fs.writeFileSync(t.copyChanges, "{ nope") },
+);
+
 function makeTemp(opts) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "check-site-"));
   const t = {
@@ -1039,10 +1120,14 @@ function makeTemp(opts) {
     config: path.join(dir, "checks.json"),
     pkg: path.join(dir, "package.json"),
     scripts: path.join(dir, "scripts"),
+    mockup: path.join(dir, "mockup.html"),
+    copyChanges: path.join(dir, "copy-changes.json"),
   };
   fs.cpSync(opts.siteDir, t.site, { recursive: true });
   fs.copyFileSync(opts.configPath, t.config);
   fs.copyFileSync(opts.packageJsonPath, t.pkg);
+  fs.copyFileSync(opts.mockupPath, t.mockup);
+  if (fs.existsSync(opts.copyChangesPath)) fs.copyFileSync(opts.copyChangesPath, t.copyChanges);
   fs.mkdirSync(t.scripts);
   for (const p of opts.scriptPaths) fs.copyFileSync(p, path.join(t.scripts, path.basename(p)));
   return t;
@@ -1054,6 +1139,8 @@ function optsFor(t, base) {
     siteDir: t.site,
     configPath: t.config,
     packageJsonPath: t.pkg,
+    mockupPath: t.mockup,
+    copyChangesPath: t.copyChanges,
     scriptPaths: fs.readdirSync(t.scripts).map((n) => path.join(t.scripts, n)),
   };
 }

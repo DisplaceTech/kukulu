@@ -89,20 +89,18 @@ A flight can run independent tasks at the same time (see [architecture.md](./arc
 
 Some rules cannot hold from the first commit: "no `TODO` left in `src/`" is false until the cleanup task has run, and a script a later task creates cannot be checked before it exists. Say which task makes the rule true. The planner then gives the rule `from: "<that task's id>"` in `docs/kukulu.json`: the rule stays inactive until that task is in progress, and still self-tests its own fixtures. The old idiom, wrapping a command in `test ! -f X || bash X`, is no longer needed, and it was a trap: it passed forever if `X` was never written.
 
-## Provenance logging
+## Clean-room flights
 
-If a spec needs Kūkulu's own activity logged or tagged (an audit trail, a provenance record), do not try to change Kūkulu's commit subjects or its clean-tree checks. Both are part of how the pipeline tracks itself. Ask for a `commit-msg` hook instead: `.githooks/commit-msg`, enabled with `git config core.hooksPath .githooks`, which appends a trailer derived from the subject. Keep a live log gitignored, and have a phase-end task snapshot it.
+Some builds must show that the builder never saw something: a reference implementation, a library's source, a dataset. Kūkulu's clean-room mode checks every tool call against a policy and keeps a signed, hash-chained log of what happened; [cleanroom.md](./cleanroom.md) has the whole reference. The spec's part is small:
 
-```sh
-#!/bin/sh
-# Append a trailer from the commit subject: "<ID>: ..." gets Task: <ID>;
-# progress:, review:, plan: and chore: commits get Stage: kukulu.
-subject=$(head -n 1 "$1")
-case "$subject" in
-  [PR][0-9]*-[0-9]*:*) printf '\nTask: %s\n' "${subject%%:*}" >> "$1" ;;
-  progress:*|review:*|plan:*|chore:*) printf '\nStage: kukulu\n' >> "$1" ;;
-esac
-```
+1. **Write the policy.** Copy `templates/cleanroom.example.json` to `docs/cleanroom.json` and edit it: the paths and words the build must not touch (`deny`), the few places it may (`allow`), and any directory the build must not edit (`protected`). A policy with a pattern that has no `shouldMatch` and `shouldNotMatch` examples is refused, and the guard self-tests every pattern before a flight starts.
+2. **Commit it on the base branch** before the first `/kukulu:go-flight`. The first `kukulu_next` writes the genesis entry and pins the policy's hash; changing the file afterwards fails the gate.
+3. **Name the lockdown task.** `lockdown.after` takes the id of the plan's task after which the build may no longer use the network at all (the task that downloads its last fixture). Say in the spec which task that is, so the planner uses the same id.
+4. **Configure the controls.** If the finished code is to be scored for similarity to prior art, give `cleanroom.similarity` in `docs/kukulu.json` the subject, a negative and a positive control and the test pairs ([operations.md](./operations.md) has the keys). Keep the prior art outside the repository.
+
+Every commit the server makes in a clean-room flight ends with `Kukulu-Stage` and `Kukulu-Task` trailers, added by the server and not by a git hook, so `--no-verify` cannot skip them. The implementer adds the same two trailers to its task commits. You do not write a git hook for this. A commit without a `Kukulu-Stage` trailer is work outside the pipeline, and the attestation lists it as a coverage gap.
+
+Tell the operator, in the spec, to say `record intervention: <what you did>` for anything done by hand, and `record verdict: #<seq>: false positive — <why>` for each denial that was a mistake of the guard; both are entries in the chain and not notes in a side file.
 
 ## A worked fragment
 

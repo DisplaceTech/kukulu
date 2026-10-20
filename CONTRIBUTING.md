@@ -29,7 +29,7 @@ Every behaviour change to the server therefore needs a test, because the thing u
 | `templates/SPEC.md` | The spec skeleton users copy |
 | `templates/kukulu.config.example.json`, `templates/ccr/` | The global routing config and claude-code-router provider manifests |
 | `templates/constraints.example.json` | Three worked `docs/kukulu.json` `constraints` rules, with fixtures |
-| `test/` | Harness plus eleven suites |
+| `test/` | Harness plus thirteen suites |
 | `docs/` | Architecture, tool reference, routing guide, spec guide, runbook |
 | `docs/plans/` | The task-by-task plan behind each release |
 | `docs/feedback/` | Stumbling blocks a real flight hit, feeding the next release plan; gitignored, local to the maintainer |
@@ -50,11 +50,13 @@ The display name is **Kūkulu**, with the macron (kahakō) over the first u, U+0
 
 `node scripts/check-names.mjs` enforces this and runs inside `npm run lint`, pre-commit and CI. It fails on a macron outside the standalone word, a decomposed u + U+0304, a non-ASCII path, the ASCII spelling of the display name in Markdown prose (code spans, fenced blocks and URLs are exempt), and an apostrophe where the ʻokina belongs. Archived flights, `docs/plans/`, `docs/feedback/`, `docs/SPEC.md` and the changelog below its newest entry are history and are not checked for prose.
 
+When `docs/feedback/.private-names` exists on your machine (gitignored; see [Flight feedback](#flight-feedback)), the same script also fails on any real project name listed there that appears in a file outside `docs/feedback/` and `test/fixtures/`. It cites the entry's number, never the name, and without the file it prints that it skipped the check.
+
 ## Tests
 
 ```bash
 npm run lint                    # node --check, bash -n, JSON parse, exec bits
-npm test                        # all eleven suites
+npm test                        # all thirteen suites
 npm test -- guard protocol      # named suites only
 node test/state.mjs             # one suite, directly
 KEEP_REPO=1 npm test -- drive   # keep the temp repos for inspection
@@ -75,6 +77,8 @@ npm install --no-save mermaid jsdom && node scripts/check-diagrams.mjs
 | `feedback` | `kukulu_feedback_log`, `.kukulu/feedback.jsonl`, and the `policies.feedback` opt-out |
 | `streams` | Parallel workstreams: stream tags, waves, partition validation, stream-scoped tools, worktrees, `kukulu_stream_finish`, `kukulu_next`'s `streams`, pausing at a wave |
 | `guard` | The Stop / SubagentStop hook: scoping, blocking, counting, giving up, environment handling |
+| `cleanroom` | Clean-room mode: the policy loader and its refusals, the guard, the hash chain, checkpoints, the gate and scoring |
+| `attest` | The offline verifier (`scripts/verify-attestation.mjs`), attestation bundles, tamper detection, and pre-0.6.0 logs |
 | `drive` | Complete flights end to end over real stdio: one serial, and parallel ones (a wave, `maxStreams: 1`, an overlapping partition) |
 
 Suites are plain Node programs that print TAP-ish lines and exit non-zero on failure. `test/harness.mjs` provides temp git repos, an MCP client, fixtures and the assertion helpers. Add assertions to the suite that owns the behaviour; add a new suite only for a new surface.
@@ -88,6 +92,16 @@ Every suite creates its own throwaway repos under the system temp directory and 
 - Error messages are written for a model that has to recover from them: say what is wrong, and what to do instead.
 - Diagrams are Mermaid. Box-drawing characters are only allowed in a ` ```text ` fence (the repo-layout tree), and the `plugin` suite enforces it.
 - Markdown prose is not hard-wrapped: each paragraph and list item is one line, and the renderer wraps it. `.markdownlint.yaml` turns the line-length rule off for this reason.
+
+## Flight feedback
+
+Flight feedback is how a real flight's friction reaches the next release. During a flight, `kukulu_feedback_log` appends one JSON line to `.kukulu/feedback.jsonl` with `at`, `stage`, `round`, `category`, `message` and `source`, and commits it. A maintainer runs `/kukulu:pull-feedback` against that project's checkout, which turns its log, and every `docs/flights/*/feedback.jsonl` an archive moved, into a file in `docs/feedback/` of this repository, deduping by exact `at`. The pulled files are gitignored and stay on the maintainer's machine.
+
+- One file per flight, named `<date>-<project>.md`, with items `F-01`, `F-02`, … that are never renumbered.
+- Each item says what happened, why it cost time, and the workaround used.
+- The header names the source logs with the number of items from each and the plugin version the flight ran against, and, once one exists, the release plan or spec that addressed the file.
+- A release plan gives every item a decision: fixed, deferred, or declined, with the reason.
+- Only Kūkulu and cleanflate are named. The file is `<date>-<label>.md` (or the public name): any other project is written under the next free `project-<letter>` label, from `project-e` on, its real name is recorded only in the gitignored `docs/feedback/.private-names` (one `<label> <real name>` line each, mode 0600), and items are cited as `<label> F-nn`.
 
 ## CI
 

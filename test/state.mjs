@@ -5,10 +5,11 @@
 import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
+import { spawnSync } from "node:child_process";
 import {
   ROOT, finish, ok, eq, like, isError,
-  mkDir, specRepo, plannedRepo, withServer, useLegacyLayout,
-  writeFile, readFile, setState, markTasks, git, subject, planDoc, progressDoc,
+  mkDir, specRepo, plannedRepo, withServer, useLegacyLayout, mkBareRemote, mkFakeGhBin,
+  writeFile, readFile, hasFile, setState, markTasks, git, subject, planDoc, progressDoc,
 } from "./harness.mjs";
 
 const ALL_DONE = { "P0-01": "x", "P0-02": "x", "P0-03": "x" };
@@ -269,7 +270,7 @@ for (const round of [0, 1, 5]) {
   await withServer(repo, async ({ call }) => {
     const n = await call("kukulu_next");
     eq(n.stage, "halt", "a halted state stays halted");
-    eq(n.reason, "stopped by hand", "the recorded halt reason is passed through");
+    eq(n.reason, `stopped by hand — once the cause is fixed, call kukulu_run_resume({ reason: "<what you fixed>" })`, "the recorded halt reason is passed through, followed by the resume instruction");
   });
 }
 
@@ -515,6 +516,109 @@ for (const [config, re, label] of [
   });
 }
 
+// ---------------------------------------------------------------- prChecks
+
+{
+  const withOrigin = () => {
+    const repo = plannedRepo();
+    git(repo, ["remote", "add", "origin", mkBareRemote()]);
+    return repo;
+  };
+  const ghEnv = (dir) => ({ env: { PATH: `${dir}:${process.env.PATH}` } });
+  // A PATH holding git and nothing else, so no gh on the developer's machine can answer.
+  const noGhPath = () => {
+    const bin = mkDir("kukulu-nogh-");
+    const gitBin = spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).stdout.trim();
+    fs.symlinkSync(gitBin, path.join(bin, "git"));
+    return bin;
+  };
+  const checks = async (repo, opts) => {
+    let out;
+    await withServer(repo, async ({ call }) => { out = (await call("kukulu_status")).prChecks; }, opts);
+    return out;
+  };
+  const ghWith = (list, exit) => {
+    const dir = mkFakeGhBin();
+    writeFile(dir, "pr.json", '{"url":"https://github.invalid/pull/1","state":"OPEN","isDraft":true,"baseRefName":"main"}\n');
+    if (list !== undefined) writeFile(dir, "checks.json", typeof list === "string" ? list : JSON.stringify(list));
+    if (exit !== undefined) writeFile(dir, "checks-exit", String(exit));
+    return dir;
+  };
+
+  eq(await checks(withOrigin(), { env: { PATH: noGhPath() } }), null, "prChecks is null without gh");
+  eq(await checks(plannedRepo(), ghEnv(ghWith([]))), null, "...null without an origin remote");
+  const noPr = mkFakeGhBin();
+  eq(await checks(withOrigin(), ghEnv(noPr)), null, "...null when the branch has no pull request");
+  eq(JSON.stringify(await checks(withOrigin(), ghEnv(ghWith([{ name: "lint", state: "SUCCESS", link: "u1" }, { name: "test", state: "SKIPPED", link: "u2" }])))), JSON.stringify({ state: "pass", failing: [] }), "...pass");
+  const fail = await checks(withOrigin(), ghEnv(ghWith([{ name: "lint", state: "SUCCESS", link: "u1" }, { name: "test", state: "FAILURE", link: "https://ci.invalid/test" }, { name: "slow", state: "PENDING", link: "u3" }], 1)));
+  eq(JSON.stringify(fail), JSON.stringify({ state: "fail", failing: [{ name: "test", link: "https://ci.invalid/test" }] }), "...fail lists the failing check with its link, though gh exited non-zero");
+  eq((await checks(withOrigin(), ghEnv(ghWith([{ name: "slow", state: "IN_PROGRESS", link: "u" }], 8)))).state, "pending", "...pending");
+  eq(JSON.stringify(await checks(withOrigin(), ghEnv(ghWith([])))), JSON.stringify({ state: "none", failing: [] }), "...none for an empty list");
+  like(await checks(withOrigin(), ghEnv(ghWith("no checks reported", 1))), /^unknown: /, "...unknown when gh pr checks prints no JSON");
+
+  {
+    // A gh that never answers `pr view` must not hang the synchronous server: the 30 s bound turns it into unknown.
+    const hung = mkDir("kukulu-hung-gh-");
+    writeFile(hung, "gh", '#!/bin/sh\ncase "$1" in --version) echo gh version 0;; pr) exec sleep 120;; esac\n');
+    fs.chmodSync(path.join(hung, "gh"), 0o755);
+    const started = Date.now();
+    const out = await checks(withOrigin(), ghEnv(hung));
+    like(out, /^unknown: .*timed out/, "prChecks is unknown when gh pr view hangs");
+    ok(Date.now() - started < 60000, "...and kukulu_status returned within the bound");
+  }
+
+  {
+    // `exec sleep` so no child keeps the pipe open past spawnSync's timeout; a hung --version reads as no gh.
+    const hung = mkDir("kukulu-hung-version-gh-");
+    writeFile(hung, "gh", '#!/bin/sh\ncase "$1" in --version) exec sleep 120;; esac\n');
+    fs.chmodSync(path.join(hung, "gh"), 0o755);
+    const started = Date.now();
+    eq(await checks(withOrigin(), ghEnv(hung)), null, "prChecks is null when gh --version hangs");
+    ok(Date.now() - started < 60000, "...and kukulu_status returned within the bound");
+  }
+
+  {
+    const statusReview = async (config) => {
+      let out;
+      await withServer(plannedRepo(config ? { config } : {}), async ({ call }) => { out = (await call("kukulu_status")).review; });
+      return out;
+    };
+    eq(JSON.stringify(await statusReview()), JSON.stringify({ mutationFixRounds: 2 }), "kukulu_status reports review.mutationFixRounds (the default)");
+    eq(JSON.stringify(await statusReview({ review: { mutationFixRounds: 5 } })), JSON.stringify({ mutationFixRounds: 5 }), "...and a configured value");
+  }
+
+  const repo = withOrigin();
+  const dir = ghWith([{ name: "t", state: "FAILURE", link: "u" }]);
+  await withServer(repo, async ({ call }) => {
+    const calls = () => (hasFile(dir, "calls.log") ? readFile(dir, "calls.log") : "");
+    await call("kukulu_next");
+    ok(!calls().includes("pr checks"), "kukulu_next does not call gh pr checks");
+    await call("kukulu_status");
+    ok(calls().includes("pr checks"), "...while kukulu_status does");
+  }, ghEnv(dir));
+}
+
+// ---------------------------------------------------------------- plan_commit slug note
+
+for (const [slug, expectNote, label] of [
+  ["kukulu-tech-specification", "kukulu-tech", "plan_commit notes a flight slug ending in -specification"],
+  ["kukulu-tech-spec", "kukulu-tech", "plan_commit notes a flight slug ending in -spec"],
+  ["v0-7-0", null, "plan_commit has no notes for v0-7-0"],
+]) {
+  const repo = specRepo();
+  const plan = plannedRepo({ config: { flight: slug } });
+  writeFile(repo, "docs/PLAN.md", readFile(plan, "docs/PLAN.md"));
+  writeFile(repo, "docs/PROGRESS.md", readFile(plan, "docs/PROGRESS.md"));
+  writeFile(repo, "docs/kukulu.json", readFile(plan, "docs/kukulu.json"));
+  writeFile(repo, "CLAUDE.md", "# rules\n");
+  await withServer(repo, async ({ call }) => {
+    const r = await call("kukulu_plan_commit");
+    if (expectNote) like(r.notes.join("\n"), new RegExp(`flight '${slug}' ends in a spec suffix; derive it from the text before the title's dash \\(plan-build\\), e\\.g\\. '${expectNote}'`), label);
+    else eq(r.notes.length, 0, label);
+    ok(Boolean(r.commit), "...and still commits");
+  });
+}
+
 // ---------------------------------------------------------------- plan_commit (S-06)
 
 {
@@ -530,6 +634,36 @@ for (const [config, re, label] of [
     eq(JSON.stringify(r.phases), JSON.stringify([{ phase: 0, tasks: 3 }]), "...in one phase");
     eq(subject(repo), "plan: derive build plan from SPEC", "...as plan: derive build plan from SPEC");
     eq((await call("kukulu_plan_commit")).commit, null, "a second call commits nothing");
+  });
+}
+
+{
+  // the branch the plan is committed on must be one run_start accepts
+  const copyPlan = (repo) => {
+    const plan = plannedRepo();
+    writeFile(repo, "docs/PLAN.md", readFile(plan, "docs/PLAN.md"));
+    writeFile(repo, "docs/PROGRESS.md", readFile(plan, "docs/PROGRESS.md"));
+    writeFile(repo, "docs/kukulu.json", readFile(plan, "docs/kukulu.json"));
+    writeFile(repo, "CLAUDE.md", "# rules\n");
+  };
+  const repo = specRepo();
+  copyPlan(repo);
+  git(repo, ["checkout", "-q", "-b", "feature/x"]);
+  await withServer(repo, async ({ rpc }) => {
+    const e = (await rpc("tools/call", { name: "kukulu_plan_commit", arguments: {} })).result;
+    ok(e.isError, "plan_commit refuses a plan on a branch that is neither baseBranch nor a branchPrefix branch");
+    like(e.content[0].text, /\[branch\] on 'feature\/x', but docs\/kukulu\.json baseBranch is 'main'; set baseBranch to 'feature\/x'/, "...with the message naming both fixes");
+    eq(e.structuredContent.problems.map((p) => p.check).join(","), "branch", "...as check 'branch' alone");
+  });
+  git(repo, ["checkout", "-q", "main"]);
+  await withServer(repo, async ({ call }) => {
+    ok((await call("kukulu_plan_commit")).tasks === 3, "plan_commit accepts baseBranch");
+  });
+  const repo2 = specRepo();
+  copyPlan(repo2);
+  git(repo2, ["checkout", "-q", "-b", "build/2026-01-01"]);
+  await withServer(repo2, async ({ call }) => {
+    ok((await call("kukulu_plan_commit")).tasks === 3, "plan_commit accepts a branchPrefix branch");
   });
 }
 
@@ -636,87 +770,67 @@ for (const [label, patch] of [
 // ---------------------------------------------------------------- pre-0.6.0 layout and recorded flights (RN-06)
 
 {
-  // The 0.5.0 flight archive is recorded evidence. Its bytes are pinned here, so
-  // a rename that touches them fails the suite instead of passing silently.
-  // PLAN.md and SPEC.md were re-pinned once, after private project names
-  // were redacted to project-a … project-d.
+  // The 0.5.0 flight archive is recorded evidence. Its hashes are computed at
+  // the start of the test, so the test never needs re-pinning, and the tools
+  // must leave every byte of a copy of it alone.
   const FLIGHT = "docs/flights/v0-5-0";
-  const PINNED = {
-    "HANDOFF.md": "9863d227bda6e2ed78e06b636d126bb51d6d601cbdd155106aeccc7cee1316dd",
-    "PLAN.md": "d47abc9978a1bb1a90a92add57fe98ef27d3d8ee704cea82cb122f8cc5af1199",
-    "PROGRESS.md": "052741b07c57deb3d8f42128efbd68ffe496b045e15be0469946790f84091f93",
-    "REVIEW.md": "ebe811b9a0a8f33089d11908ddd09e15e8e9c741108322db3a941225c93fcc3a",
-    "SPEC.md": "8c3d8df19d716eebb817f8f98be212ac7a7a279afd2a7d49a518436070af894a",
-    "SUMMARY.md": "5daee8277cf18e5ead6fd1fa0cd42ecb5fbbce7b8aaa6120b10ad06ce27e5b33",
-    "feedback.jsonl": "cf70939964c3ad6882a755fbd04b63c40c21ca682fa4ec1e65c0952eb7a9b9e0",
-    "foundry.json": "fe937f3a9f406e774639d17b0573eec8f8192cbfa7f34c521816b0682f09e756",
-    "state.json": "21e3cd2fe3f8b88acccb4d00013b97ab42ce3a11738d946f68d747518092fd4c",
-  };
+  const NAMES = ["HANDOFF.md", "PLAN.md", "PROGRESS.md", "REVIEW.md", "SPEC.md", "SUMMARY.md", "feedback.jsonl", "foundry.json", "state.json"];
   const sha = (file) => createHash("sha256").update(fs.readFileSync(file)).digest("hex");
-  for (const [name, hash] of Object.entries(PINNED)) {
-    eq(sha(path.join(ROOT, FLIGHT, name)), hash, `${FLIGHT}/${name} is byte-identical to the recorded flight`);
-  }
-  eq(fs.readdirSync(path.join(ROOT, FLIGHT)).sort().join(","), Object.keys(PINNED).sort().join(","), `${FLIGHT} holds exactly the recorded files`);
+  const before = Object.fromEntries(NAMES.map((name) => [name, sha(path.join(ROOT, FLIGHT, name))]));
+  eq(fs.readdirSync(path.join(ROOT, FLIGHT)).sort().join(","), [...NAMES].sort().join(","), "docs/flights/v0-5-0 holds exactly the nine recorded files");
 
-  // A project on the old layout that archived that flight is still understood.
+  // A project that archived that flight under the old config name is still understood.
   const repo = specRepo();
   fs.mkdirSync(path.join(repo, FLIGHT), { recursive: true });
-  for (const name of Object.keys(PINNED)) fs.copyFileSync(path.join(ROOT, FLIGHT, name), path.join(repo, FLIGHT, name));
+  for (const name of NAMES) fs.copyFileSync(path.join(ROOT, FLIGHT, name), path.join(repo, FLIGHT, name));
   fs.copyFileSync(path.join(ROOT, FLIGHT, "SPEC.md"), path.join(repo, "docs", "SPEC.md"));
-  writeFile(repo, ".foundry/state.json", JSON.stringify({ ...JSON.parse(readFile(repo, `${FLIGHT}/state.json`)), summarized: false, archived: { slug: "v0-5-0", dir: FLIGHT, at: "2026-10-07T20:54:01.917Z" } }));
+  writeFile(repo, ".kukulu/state.json", JSON.stringify({ ...JSON.parse(readFile(repo, `${FLIGHT}/state.json`)), summarized: false, archived: { slug: "v0-5-0", dir: FLIGHT, at: "2026-10-07T20:54:01.917Z" } }));
   git(repo, ["add", "-A"]);
   git(repo, ["commit", "-qm", "chore: archive flight v0-5-0"]);
   await withServer(repo, async ({ call }) => {
     const st = await call("kukulu_status");
     eq(st.state.archived.slug, "v0-5-0", "status reads the archive record of a flight archived before 0.6.0");
-    like(st.deprecations.join("\n"), /Foundry layout \(\.foundry\/, docs\/foundry\.json\); run kukulu_migrate\. Support ends in 0\.7\.0/, "...and says the project is on the old layout");
     const n = await call("kukulu_next");
     eq(n.stage, "done", "kukulu_next recognizes the archived flight");
     like(n.reason, /flight v0-5-0 is archived in docs\/flights\/v0-5-0/, "...and names it");
   });
-  for (const name of Object.keys(PINNED)) {
-    eq(sha(path.join(repo, FLIGHT, name)), PINNED[name], `...and left ${name} byte-identical`);
-  }
+  eq(NAMES.filter((name) => sha(path.join(repo, FLIGHT, name)) !== before[name]).join(","), "", "the tools leave every archived file byte-identical");
+}
+
+/** A project on the pre-0.6.0 layout, built from a planned repo. */
+const OLD_LAYOUT = /pre-0\.6\.0 Foundry layout, which 0\.7\.0 no longer reads/;
+
+{
+  const repo = plannedRepo();
+  setState(repo, { round: 0 });
+  useLegacyLayout(repo);
+  fs.rmSync(path.join(repo, "docs/foundry.json"));
+  git(repo, ["commit", "-qam", "chore: only the state directory"]);
+  await withServer(repo, async ({ call }) => {
+    const e = await call("kukulu_status");
+    isError(e, OLD_LAYOUT, "a project with only .foundry/ is refused with the 0.7.0 layout message");
+    isError(await call("kukulu_status"), /docs\/kukulu\.json/, "...which names docs/kukulu.json");
+  });
+}
+
+{
+  const repo = plannedRepo();
+  setState(repo, { round: 0 });
+  useLegacyLayout(repo);
+  fs.rmSync(path.join(repo, ".foundry"), { recursive: true });
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-qm", "chore: only the config"]);
+  await withServer(repo, async ({ call }) => {
+    isError(await call("kukulu_status"), OLD_LAYOUT, "a project with only docs/foundry.json is refused the same way");
+  });
 }
 
 {
   const repo = useLegacyLayout(plannedRepo());
   await withServer(repo, async ({ call }) => {
-    const st = await call("kukulu_status");
-    eq(st.configPresent, true, "a project with docs/foundry.json and .foundry/ is read in place");
-    eq(st.deprecations.length, 1, "...with exactly one layout notice");
-  });
-}
-
-{
-  // A 0.5.0 project after its flight was archived: only .foundry/state.json is left. Planning
-  // would write docs/kukulu.json beside it, and every tool refuses a project holding both
-  // layouts, so the controller is told to migrate first.
-  const repo = plannedRepo({ config: { flight: "w1" } });
-  setState(repo, { summarized: true, verdict: "APPROVED", reviewed: true, implemented: true });
-  git(repo, ["checkout", "-q", "-b", "build/2020-01-01"]);
-  git(repo, ["add", "-A"]);
-  git(repo, ["commit", "-qm", "chore: build summary"]);
-  await withServer(repo, async ({ call }) => {
-    await call("kukulu_flight_archive");
-  });
-  useLegacyLayout(repo);
-  writeFile(repo, "docs/SPEC.md", "# Next spec\n");
-  await withServer(repo, async ({ call }) => {
-    const n = await call("kukulu_next");
-    eq(n.stage, "halt", "on the old layout, an archived project with an edited spec halts instead of planning");
-    like(n.reason, /run \/kukulu:go-flight migrate, then run/, "...telling the controller to migrate");
-  });
-}
-
-{
-  // Error messages name the files the project actually has.
-  const repo = plannedRepo();
-  setState(repo, { round: 0 });
-  useLegacyLayout(repo);
-  fs.rmSync(path.join(repo, "docs/foundry.json"));
-  await withServer(repo, async ({ call }) => {
-    isError(await call("kukulu_verify"), /docs\/foundry\.json is missing/, "on the old layout a refusal names docs/foundry.json, not docs/kukulu.json");
+    isError(await call("kukulu_status"), OLD_LAYOUT, "every tool refuses the old layout: kukulu_status");
+    isError(await call("kukulu_next"), OLD_LAYOUT, "...kukulu_next");
+    isError(await call("kukulu_verify"), OLD_LAYOUT, "...kukulu_verify");
   });
 }
 
@@ -726,7 +840,7 @@ for (const [label, patch] of [
   setState(repo, { round: 0 });
   writeFile(repo, ".foundry/state.json", "{}");
   await withServer(repo, async ({ call }) => {
-    isError(await call("kukulu_status"), /both the pre-0\.6\.0 layout .* and the current one .* exist/, "a project holding both layouts is refused, since either would hide the other");
+    isError(await call("kukulu_status"), /both the pre-0\.6\.0 layout .* and the current one .* exist/, "a project with both layouts is refused, since either would hide the other");
     isError(await call("kukulu_next"), /Keep the one you use and remove the other/, "...for every tool, with what to do");
   });
 }

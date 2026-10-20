@@ -57,6 +57,28 @@ function proseOf(text) {
     .replace(/https?:\/\/\S+/g, " ");
 }
 
+// Another project's real name is private: docs/feedback/.private-names (gitignored,
+// one `<label> <real name>` line each) lists them, and no tracked file outside the
+// recorded history may contain one. A failure cites the entry's number, never the name.
+const DENYLIST = path.join(root, "docs", "feedback", ".private-names");
+const NAMES_EXEMPT = [/^docs\/feedback\//, /^test\/fixtures\//];
+const escapeRegExp = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+let denied = [];
+if (fs.existsSync(DENYLIST)) {
+  denied = fs.readFileSync(DENYLIST, "utf8")
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l && !l.startsWith("#"))
+    .map((l, i) => {
+      const at = l.search(/\s/);
+      return { n: i + 1, name: at < 0 ? "" : l.slice(at).trim() };
+    })
+    .filter((e) => e.name)
+    .map((e) => ({ n: e.n, re: new RegExp(`\\b${escapeRegExp(e.name)}\\b`, "i") }));
+} else {
+  process.stdout.write("check-names: private-name check skipped (no docs/feedback/.private-names)\n");
+}
+
 const lineOf = (text, index) => text.slice(0, index).split("\n").length;
 
 // The macron letter belongs only to the standalone word, never to an identifier, path, key
@@ -85,6 +107,13 @@ for (const file of listFiles()) {
     if (spans.some(([from, to]) => m.index >= from && m.index < to)) continue;
     fail(file, lineOf(text, m.index), `a ${U} outside the standalone word ${DISPLAY}; identifiers, paths, keys, env vars and URLs are ASCII (kukulu, KUKULU_)`);
     break;
+  }
+
+  if (denied.length && !NAMES_EXEMPT.some((x) => x.test(file))) {
+    for (const entry of denied) {
+      const hit = text.split("\n").findIndex((l) => entry.re.test(l));
+      if (hit >= 0) fail(file, hit + 1, `contains private project name #${entry.n} (see docs/feedback/.private-names); replace it with its label`);
+    }
   }
 
   if (!file.endsWith(".md")) continue;

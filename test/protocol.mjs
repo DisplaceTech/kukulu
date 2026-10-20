@@ -17,13 +17,16 @@ const EXPECTED_TOOLS = [
   "kukulu_stream_finish",
   "kukulu_run_finish",
   "kukulu_run_halt",
+  "kukulu_run_resume",
   "kukulu_flight_options",
+  "kukulu_cleanroom_record",
   "kukulu_feedback_log",
   "kukulu_mutate",
   "kukulu_review_submit",
   "kukulu_summary_commit",
+  "kukulu_similarity",
+  "kukulu_attest",
   "kukulu_flight_archive",
-  "kukulu_migrate",
   "kukulu_pr_finalize",
   "kukulu_agents_sync",
   "kukulu_config_show",
@@ -88,8 +91,8 @@ eq(
 );
 eq(
   byName.kukulu_review_submit.inputSchema.properties.tasks.items.required.join(","),
-  "title,goal,files,tests",
-  "fix tasks require title, goal, files and tests",
+  "title,goal,files,tests,source",
+  "fix tasks require title, goal, files, tests and source",
 );
 
 // -------------------------------------------------------------- error mapping

@@ -15,6 +15,36 @@ const json = (rel) => JSON.parse(read(rel));
 const exists = (rel) => fs.existsSync(path.join(ROOT, rel));
 const listDir = (rel) => fs.readdirSync(path.join(ROOT, rel));
 
+/** The files git tracks in `root`, repo-relative with forward slashes; a link may only land on one of these. */
+function trackedFiles(root) {
+  const r = spawnSync("git", ["ls-files", "-z"], { cwd: root, encoding: "utf8" });
+  return r.status === 0 ? r.stdout.split("\0").filter(Boolean) : [];
+}
+
+/** The documentation set: tracked README, CONTRIBUTING, CHANGELOG and top-level docs/*.md. */
+const docFiles = (tracked) => tracked.filter((f) => ["README.md", "CONTRIBUTING.md", "CHANGELOG.md"].includes(f) || /^docs\/[^/]+\.md$/.test(f));
+
+/**
+ * Every relative link in the documentation that does not land on a tracked
+ * file (or a directory holding one), as `<file> → <target>`. A gitignored file
+ * on the maintainer's machine must not make a link pass.
+ */
+function brokenLinks(root, content = (f) => fs.readFileSync(path.join(root, f), "utf8")) {
+  const tracked = trackedFiles(root);
+  const broken = [];
+  for (const file of docFiles(tracked)) {
+    const dir = path.posix.dirname(file);
+    // Inline code spans quote example link text (a PLAN task shows the line it will add elsewhere), so they are not links.
+    for (const m of content(file).replace(/`[^`\n]*`/g, "").matchAll(/\[[^\]]*\]\(([^)]+)\)/g)) {
+      const target = m[1].split("#")[0];
+      if (!target || /^(https?:|mailto:)/.test(target)) continue;
+      const resolved = path.posix.normalize(path.posix.join(dir, target)).replace(/\/$/, "");
+      if (!tracked.some((f) => f === resolved || f.startsWith(`${resolved}/`))) broken.push(`${file} → ${m[1]}`);
+    }
+  }
+  return broken;
+}
+
 const MODELS = ["fable", "opus", "sonnet", "haiku", "inherit"];
 const EFFORTS = ["low", "medium", "high"];
 
@@ -61,15 +91,15 @@ ok(exists(server.args[0].replace("${CLAUDE_PLUGIN_ROOT}/", "")), "the server fil
 eq(server.env.KUKULU_PROJECT_DIR, "${CLAUDE_PROJECT_DIR}", "the server is told which project it is operating on");
 eq(server.env.KUKULU_CONFIG, "${KUKULU_CONFIG:-}", "the global routing config path passes through, empty by default");
 eq(server.env.KUKULU_PROFILE, "${KUKULU_PROFILE:-}", "the routing profile passes through, empty by default");
-eq(server.env.FOUNDRY_CONFIG, "${FOUNDRY_CONFIG:-}", "the pre-0.6.0 config variable still passes through, until 0.7.0");
-eq(server.env.FOUNDRY_PROFILE, "${FOUNDRY_PROFILE:-}", "the pre-0.6.0 profile variable still passes through, until 0.7.0");
+eq(server.env.FOUNDRY_CONFIG, undefined, ".mcp.json no longer passes FOUNDRY_CONFIG");
+eq(server.env.FOUNDRY_PROFILE, undefined, "...or FOUNDRY_PROFILE");
 
 // ---------------------------------------------------------------- hooks
 
 eq(plugin.hooks, "./hooks/hooks.json", "the plugin points at hooks/hooks.json");
 const hooks = json("hooks/hooks.json");
-eq(Object.keys(hooks.hooks).sort().join(","), "Stop,SubagentStop", "the guard is wired to Stop and SubagentStop");
-for (const [event, entries] of Object.entries(hooks.hooks)) {
+eq(Object.keys(hooks.hooks).sort().join(","), "PostToolUse,PreToolUse,Stop,SubagentStop,UserPromptSubmit", "hooks.json wires Stop, SubagentStop, PreToolUse, PostToolUse and UserPromptSubmit");
+for (const [event, entries] of Object.entries(hooks.hooks).filter(([e]) => e === "Stop" || e === "SubagentStop")) {
   const cmd = entries[0].hooks[0];
   eq(cmd.type, "command", `${event} runs a command hook`);
   like(cmd.command, /^"\$\{CLAUDE_PLUGIN_ROOT\}"\//, `${event}'s command quotes the plugin root, so a path with spaces still works`);
@@ -82,7 +112,19 @@ for (const [event, entries] of Object.entries(hooks.hooks)) {
 // SubagentStop is scoped to the implementer at the hook-registration level
 // (F-07): the harness never even runs the guard for any other subagent.
 like(hooks.hooks.SubagentStop[0].matcher, /kukulu.implementer/, "SubagentStop's matcher names the implementer");
-like(hooks.hooks.SubagentStop[0].matcher, /foundry.implementer/, "...and still names the pre-0.6.0 implementer, until 0.7.0");
+eq(hooks.hooks.SubagentStop[0].matcher, "^(kukulu:implementer|kukulu-implementer)$", "SubagentStop's matcher names only the kukulu implementer");
+{
+  const wired = (event) => hooks.hooks[event].flatMap((e) => e.hooks.map((h) => h.command));
+  const CR = (script) => `"${"$"}{CLAUDE_PLUGIN_ROOT}"/scripts/${script}`;
+  eq(JSON.stringify(wired("PreToolUse")), JSON.stringify([CR("cleanroom-guard.mjs")]), "PreToolUse runs the clean-room guard");
+  ok(hooks.hooks.PreToolUse.every((e) => !e.matcher), "...with no matcher, so every tool is checked");
+  eq(JSON.stringify(wired("PostToolUse")), JSON.stringify([CR("cleanroom-log.mjs")]), "PostToolUse runs the clean-room logger");
+  eq(JSON.stringify(wired("UserPromptSubmit")), JSON.stringify([CR("cleanroom-log.mjs")]), "UserPromptSubmit runs the clean-room logger");
+  for (const script of ["scripts/cleanroom-guard.mjs", "scripts/cleanroom-log.mjs"]) {
+    ok(exists(script) && fs.statSync(path.join(ROOT, script)).mode & 0o111 && /^#!\/usr\/bin\/env node\n/.test(read(script)), `${script} is executable with a shebang`);
+  }
+  ok(spawnSync("git", ["ls-files", "-s", "scripts/cleanroom-guard.mjs", "scripts/cleanroom-log.mjs"], { cwd: ROOT, encoding: "utf8" }).stdout.split("\n").filter(Boolean).every((l) => l.startsWith("100755")), "both clean-room hook scripts are mode 755 in git");
+}
 ok(!hooks.hooks.Stop[0].matcher, "Stop carries no matcher — a Stop event has no agent to match against");
 
 // ---------------------------------------------------------------- agents and skills
@@ -138,12 +180,49 @@ for (const name of ["plan-build", "implement"]) {
   const ws = read("docs/writing-specs.md");
   like(ws, /from: "<that task's id>"/, "writing-specs.md teaches from");
   like(ws, /mutation\.targeted/, "writing-specs.md teaches mutation.targeted");
-  like(ws, /commit-msg/, "writing-specs.md shows a commit-msg hook for provenance logging");
+  like(ws, /^## Clean-room flights$/m, "writing-specs.md has a Clean-room flights section");
+  like(ws, /`Kukulu-Stage` and `Kukulu-Task` trailers, added by the server and not by a git hook/, "...naming the built-in trailers");
+  ok(!/commit-msg/.test(ws), "...and no longer shows a commit-msg hook");
   like(read("templates/SPEC.md"), /\{filter\}/, "templates/SPEC.md names the {filter} placeholder");
+}
+{
+  const opsDoc = read("docs/operations.md");
+  const keys = /const CLEANROOM_KEYS = \[([^\]]*)\]/.exec(read("mcp/server.mjs"))[1].match(/"([A-Za-z]+)"/g).map((k) => k.replaceAll('"', ""));
+  const missing = keys.filter((k) => !opsDoc.includes("`cleanroom." + k + "`"));
+  eq(missing.join(",") + "|" + keys.length, "|" + keys.length, "operations.md documents every cleanroom key (" + keys.join(", ") + ")");
+  ok(opsDoc.includes("`KUKULU_CLEANROOM_LOG`") && opsDoc.includes("kukulu_run_resume"), "operations.md documents KUKULU_CLEANROOM_LOG and the resume call");
+  ok(!/foundry/i.test(opsDoc), "operations.md has no pre-0.6.0 name left");
+  const arch = read("docs/architecture.md");
+  ok(arch.includes("cleanroom-guard.mjs") && arch.includes("cleanroom-log.mjs") && /^## Clean-room mode$/m.test(arch), "architecture.md shows the clean-room hook scripts");
+  ok(!/decision 4a/i.test(arch) && /```mermaid\nflowchart LR\n    N\["kukulu_next picks a stage"\]/.test(arch), "architecture.md places the gate in a diagram, not in the numbered stage decisions");
+}
+{
+  const readme = read("README.md");
+  like(readme, /^## Upgrading to 0\.7\.0$/m, "README has a 0.7.0 migration paragraph");
+  like(readme, /\.foundry\/state\.json[\s\S]*\.kukulu\/[\s\S]*`FOUNDRY_\*` environment variables are no longer read/, "...naming the manual move and the unread FOUNDRY_ variables");
+  like(readme, /\*\*Clean-room mode\*\*, opt-in with a policy file/, "README's feature list names clean-room mode");
+  like(readme, /thirteen suites/, "README counts thirteen suites");
+  const tools = read("docs/mcp-tools.md");
+  ok(tools.includes("`prChecks`") && tools.includes("`gate`") && /"source": "review"/.test(tools) && tools.includes("`constraints`"), "mcp-tools documents prChecks, gate and source (and the mutate constraints)");
+  ok(!tools.includes("kukulu_migrate"), "mcp-tools has no kukulu_migrate");
+  const sections = Array.from(tools.matchAll(/^## `(kukulu_[a-z_]+)`$/gm), (m) => m[1]).join(",");
+  ok(["kukulu_run_resume", "kukulu_cleanroom_record", "kukulu_similarity", "kukulu_attest"].every((t) => sections.includes(t)), "mcp-tools has a section for every 0.7.0 tool");
 }
 like(read("docs/operations.md"), /^## Running flight after flight$/m, "operations.md explains running flight after flight");
 like(read("docs/operations.md"), /^## Signing$/m, "operations.md has a signing section");
 like(read("skills/pull-feedback/SKILL.md"), /docs\/flights\/\*\/feedback\.jsonl/, "pull-feedback reads archived flight logs too");
+{
+  const pull = read("skills/pull-feedback/SKILL.md");
+  ok(!/git commit|Commit the new/.test(pull) && /Do not commit/.test(pull), "pull-feedback never runs git commit");
+  like(pull, /docs\/feedback\/\.private-names/, "...names .private-names");
+  like(pull, /next letter after the highest label in `docs\/feedback\/\.private-names`, never earlier than `project-e`/, "pull-feedback assigns project-<letter> labels after the highest in .private-names");
+  like(pull, /creating it with mode 0600/, "...creates .private-names with mode 0600");
+  like(pull, /write the real name nowhere else: not in the feedback file, a commit, a plan, a spec, a test name or the changelog/, "...writes the real name nowhere else");
+  like(read("CONTRIBUTING.md"), /`<date>-<label>\.md`/, "CONTRIBUTING's Flight feedback names files by label");
+  like(pull, /CONTRIBUTING\.md#flight-feedback/, "...links CONTRIBUTING.md#flight-feedback, a tracked target");
+  ok(trackedFiles(ROOT).includes("CONTRIBUTING.md"), "...and CONTRIBUTING.md is tracked");
+  like(read("CONTRIBUTING.md"), /^## Flight feedback$/m, "CONTRIBUTING.md has a Flight feedback section");
+}
 like(read("skills/pull-feedback/SKILL.md"), /how many items came from each/, "...and its header names every source log with its count");
 
 {
@@ -224,7 +303,7 @@ const goFlight = read("skills/go-flight/SKILL.md");
 const fmGo = frontmatter(goFlight);
 const allowed = String(fmGo["allowed-tools"]).split(",").map((s) => s.trim());
 const toolNames = Array.from(serverSrc.matchAll(/name: "(kukulu_[a-z_]+)"/g), (m) => m[1]);
-eq(toolNames.length, 22, "the server defines twenty-two tools");
+eq(toolNames.length, 25, "the server defines twenty-five tools");
 
 const COUNT_WORDS = { 18: "Eighteen", 19: "Nineteen", 20: "Twenty", 21: "Twenty-one", 22: "Twenty-two", 23: "Twenty-three", 24: "Twenty-four", 25: "Twenty-five" };
 like(read("docs/mcp-tools.md").split("\n")[2], new RegExp(`^${COUNT_WORDS[toolNames.length]} tools,`), "docs/mcp-tools.md states the tool count in words");
@@ -353,33 +432,102 @@ const PROSE = [...MD, ...skillNames.map((n) => `skills/${n}/SKILL.md`), ...agent
 // built yet, so the tool/skill-name check cannot hold for them.
 const FLIGHT_ARTIFACTS = ["docs/SPEC.md", "docs/PLAN.md", "docs/PROGRESS.md", "docs/HANDOFF.md", "docs/REVIEW.md", "docs/SUMMARY.md"];
 
+// Retired tools stay in the history of CHANGELOG.md and README.md and nowhere else.
+const RETIRED_TOOLS = ["kukulu_migrate"];
+const RETIRED_ALLOWED = ["CHANGELOG.md", "README.md"];
+for (const name of skillNames) {
+  ok(!/\.foundry\//.test(read(`skills/${name}/SKILL.md`)), `no skill mentions the .foundry/ layout (${name})`);
+}
+ok(!/FOUNDRY_/.test(read("docs/operations.md")), "operations.md no longer documents the FOUNDRY_* fallbacks");
+
+like(goFlight, /"resume: <reason>".*kukulu_run_resume\(\{ reason \}\)/, "go-flight maps resume: <reason> to kukulu_run_resume");
+{
+  const ops = read("docs/operations.md");
+  const halts = ops.slice(ops.indexOf("## Halts"), ops.indexOf("## Halts") + ops.slice(ops.indexOf("## Halts") + 3).indexOf("\n## ") + 3);
+  ok(!/\$EDITOR/.test(halts) && !/"halted": null/.test(ops), "operations.md's Halts section names no hand edit of .kukulu/state.json");
+}
+
+like(read("skills/review-build/SKILL.md"), /Capping mutation-only rounds[\s\S]*review\.mutationFixRounds/, "review-build caps mutation-only rounds at mutationFixRounds");
+like(read("skills/review-build/SKILL.md"), /Round 2 and later\*\*: read `prChecks`/, "review-build reads prChecks from round 2");
+{
+  const skill = read("skills/review-build/SKILL.md");
+  const cap = skill.slice(skill.indexOf("Capping mutation-only rounds"));
+  ok(/read it from `kukulu_status`'s `review\.mutationFixRounds`/.test(cap) && !cap.split("\n")[0].includes("kukulu_config_show"), "the review-build skill reads mutationFixRounds from kukulu_status");
+  const reviewerTools = read("agents/reviewer.md").match(/^tools:.*$/m)[0];
+  const missing = [...new Set(skill.match(/\bkukulu_[a-z_]+/g))].filter((t) => !reviewerTools.includes(`mcp__plugin_kukulu_kukulu__${t}`));
+  eq(missing.join(","), "", "...and every kukulu_* tool the skill names is in agents/reviewer.md's tools");
+}
+
+{
+  const planSkill = read("skills/plan-build/SKILL.md");
+  ok(/kukulu\.tech — Specification" gives `kukulu-tech`/.test(planSkill) && /K\u016bkulu 0\.7\.0 — Specification" gives `kukulu-0-7-0`/.test(planSkill), "plan-build states the slug rule with both examples");
+}
+
+like(goFlight, /"record: <text>".*kukulu_cleanroom_record\(\{ text, kind \}\)/, "go-flight maps record: to kukulu_cleanroom_record");
+like(goFlight, /print `gate: ok \(<n> checks\)`/, "go-flight prints the gate line");
+
+like(read("skills/implement/SKILL.md"), /A denial is not an obstacle to route around/, "the implement skill says a denial is never worked around");
+like(read("skills/review-build/SKILL.md"), /A denial that was worked around[^.]*is a category 1 finding/, "review-build treats a worked-around denial as category 1");
+ok(read("README.md").includes("(./docs/cleanroom.md)") && exists("docs/cleanroom.md"), "docs/cleanroom.md is linked from the README");
+
+like(read("skills/plan-build/SKILL.md"), /Write the deliverables in the order 3, 1, 2, 4: `docs\/kukulu\.json` first/, "plan-build writes docs/kukulu.json first in clean-room mode");
+
+like(read("agents/summarizer.md"), /mcp__plugin_kukulu_kukulu__kukulu_similarity/, "agents/summarizer names kukulu_similarity");
+like(read("agents/summarizer.md"), /mcp__plugin_kukulu_kukulu__kukulu_attest/, "agents/summarizer names kukulu_attest");
+{
+  const cleanroomDoc = read("docs/cleanroom.md");
+  ok(cleanroomDoc.includes("## Reading a bundle") && cleanroomDoc.includes("## Verifying offline"), "docs/cleanroom.md has Reading a bundle and Verifying offline");
+  ok(/node docs\/attestation\/verify\.mjs docs\/attestation --key sha256:<fingerprint>/.test(cleanroomDoc) && cleanroomDoc.includes("`--json`") && cleanroomDoc.includes("--legacy-log"), "docs/cleanroom.md documents verify-attestation.mjs with --key, --json and --legacy-log");
+  ok(cleanroomDoc.includes("verify-attestation: PASS") && /verify-attestation: FAIL \(\d+ reasons?\)/.test(cleanroomDoc), "...with sample PASS and FAIL output");
+  const contributing = read("CONTRIBUTING.md");
+  ok(/^\| `cleanroom` \|/m.test(contributing) && /^\| `attest` \|/m.test(contributing), "CONTRIBUTING's suite table lists cleanroom and attest");
+}
+
+{
+  const summarize = read("skills/summarize/SKILL.md");
+  like(summarize, /When `docs\/kukulu\.json` configures `cleanroom\.similarity`, call `kukulu_similarity` once, after `kukulu_summary_commit`/, "summarize calls kukulu_similarity when cleanroom.similarity is configured");
+  like(summarize, /`## Contamination score` section[\s\S]*`kukulu_summary_commit\(\{ content \}\)` a second time/, "...under ## Contamination score, committed with a second summary_commit");
+  like(summarize, /call `kukulu_attest` once, after `kukulu_similarity`[^.]*and before `kukulu_flight_archive`/, "summarize calls kukulu_attest before kukulu_flight_archive");
+  like(summarize, /`## Attestation` section to your summary text: the directory, the manifest hash[^.]*fingerprint[^.]*verifier's result line/, "...adds ## Attestation");
+  ok(summarize.indexOf("kukulu_attest") < summarize.indexOf("call `kukulu_flight_archive`"), "...and the attestation paragraph comes first in the skill");
+}
+
 let unknownTool = null;
+let retiredMention = null;
 let unknownSkill = null;
 for (const file of PROSE) {
   if (FLIGHT_ARTIFACTS.includes(file)) continue;
   const body = read(file);
   for (const m of body.matchAll(/\bkukulu_[a-z_]+/g)) {
-    if (!toolNames.includes(m[0]) && !unknownTool) unknownTool = `${file}: ${m[0]}`;
+    if (RETIRED_TOOLS.includes(m[0])) {
+      if (!RETIRED_ALLOWED.includes(file) && !retiredMention) retiredMention = `${file}: ${m[0]}`;
+    } else if (!toolNames.includes(m[0]) && !unknownTool) unknownTool = `${file}: ${m[0]}`;
   }
   for (const m of body.matchAll(/\bkukulu:([a-z-]+)/g)) {
     if (!skillNames.includes(m[1]) && !agentNames.includes(m[1]) && !unknownSkill) unknownSkill = `${file}: ${m[0]}`;
   }
 }
 eq(unknownTool, null, "every kukulu_* tool named in prose exists on the server");
+eq(retiredMention, null, "kukulu_migrate appears only in CHANGELOG.md and README.md");
+ok(!/migrate/.test(goFlight) && !allowed.some((t) => t.endsWith("kukulu_migrate")), "go-flight no longer offers migrate");
 eq(unknownSkill, null, "every kukulu:* skill or agent named in prose exists");
 
-// Documentation links have to land somewhere.
-let brokenLink = null;
-for (const file of MD) {
-  const dir = path.dirname(path.join(ROOT, file));
-  // Inline code spans quote example link text (a PLAN task shows the line it will add elsewhere), so they are not links.
-  for (const m of read(file).replace(/`[^`\n]*`/g, "").matchAll(/\[[^\]]*\]\(([^)]+)\)/g)) {
-    const target = m[1].split("#")[0];
-    if (!target || /^(https?:|mailto:)/.test(target)) continue;
-    if (!fs.existsSync(path.resolve(dir, target)) && !brokenLink) brokenLink = `${file} → ${m[1]}`;
-  }
+// Documentation links have to land somewhere that git tracks.
+eq(brokenLinks(ROOT).join("\n"), "", "every relative link in the documentation resolves");
+
+{
+  const tmp = mkDir("kukulu-links-");
+  const git = (...args) => spawnSync("git", args, { cwd: tmp, encoding: "utf8" });
+  git("init", "-q");
+  fs.mkdirSync(path.join(tmp, "docs"));
+  fs.writeFileSync(path.join(tmp, "README.md"), "See [x](docs/x.md).\n");
+  fs.writeFileSync(path.join(tmp, "docs", "x.md"), "# x\n");
+  git("add", "README.md");
+  eq(brokenLinks(tmp).join("\n"), "README.md → docs/x.md", "a link to an untracked file fails the link check, naming the file and target");
+  git("add", "docs/x.md");
+  eq(brokenLinks(tmp).join("\n"), "", "...and passes once the target is tracked");
 }
-eq(brokenLink, null, "every relative link in the documentation resolves");
+
 
 // Diagrams are Mermaid, not ASCII art: box-drawing belongs only in a `text`
 // fence (a file tree), never in a fence pretending to be a diagram.
@@ -472,6 +620,17 @@ ok(read("skills/plan-build/SKILL.md").includes("templates/constraints.example.js
       ok(opsDoc.includes("`mutation.targeted`"), "operations.md documents mutation.targeted");
       continue;
     }
+    if (key === "cleanroom") {
+      ok(opsDoc.includes("`cleanroom.policy`") && opsDoc.includes("`cleanroom.signingKey`"), "operations.md documents cleanroom.policy and cleanroom.signingKey");
+      ok(opsDoc.includes("`KUKULU_CLEANROOM_KEY`"), "operations.md documents KUKULU_CLEANROOM_KEY");
+      ok(opsDoc.includes("`cleanroom.idleGapHours`"), "operations.md documents cleanroom.idleGapHours");
+      ok(opsDoc.includes("`cleanroom.similarity`") && ["subject", "pairs", "languages", "ngram", "minIdentLen", "commentNgram", "identExclusions", "near", "separationMargin"].every((k) => opsDoc.includes(`\`${k}\``)), "operations.md documents cleanroom.similarity");
+      continue;
+    }
+    if (key === "review") {
+      ok(opsDoc.includes("`review.mutationFixRounds`"), "operations.md documents review.mutationFixRounds");
+      continue;
+    }
     if (key === "parallel") {
       ok(opsDoc.includes("`parallel.maxStreams`"), "operations.md documents parallel.maxStreams");
       ok(opsDoc.includes("`parallel.setup`"), "operations.md documents parallel.setup");
@@ -513,7 +672,7 @@ ok(versions.length >= 3, `the matrix covers several Node versions (${versions.jo
 // Every document in docs/ is reachable from the README.
 const readme = read("README.md");
 let orphan = null;
-for (const f of listDir("docs").filter((f) => f.endsWith(".md"))) {
+for (const f of docFiles(trackedFiles(ROOT)).filter((f) => f.startsWith("docs/")).map((f) => f.slice(5))) {
   if (!readme.includes(`docs/${f}`) && !orphan) orphan = f;
 }
 eq(orphan, null, "every document in docs/ is linked from the README");
@@ -615,6 +774,22 @@ ok(glRev && glPin === glRev, "secret-scan.yml pins GITLEAKS_VERSION to the pre-c
   const apostrophe = run({ "README.md": "Hawai'i and '\u014dlelo.\n" });
   eq(apostrophe.status, 1, "check-names refuses an apostrophe where the okina belongs");
   like(apostrophe.stderr, /\u02bbokina/, "...and names the okina");
+  // The private-name denylist: always a temp root, never the maintainer's own file.
+  {
+    const names = "# private names\nproject-e Orbit\nproject-f Quasar Works\n";
+    const withNames = (files) => run({ "docs/feedback/.private-names": names, ...files });
+    const named = withNames({ "docs/notes.md": "Intro line.\nSee the quasar works dashboard.\n" });
+    eq(named.status, 1, "a tracked file naming private project #2 fails check-names");
+    like(named.stderr, /check-names: docs\/notes\.md:2: contains private project name #2 \(see docs\/feedback\/\.private-names\); replace it with its label/, "...with file, line and #2");
+    ok(!/quasar/i.test(named.stdout + named.stderr), "...and no output contains the name");
+    eq(withNames({ "docs/feedback/2026-01-01-project-f.md": "Quasar Works did this.\n", "test/fixtures/x.jsonl": "Orbit\n" }).status, 0, "the same name under docs/feedback/ passes");
+    const none = run({ "README.md": "Orbit.\n" });
+    eq(none.status, 0, "without a denylist check-names still passes");
+    like(none.stdout, /private-name check skipped \(no docs\/feedback\/\.private-names\)/, "...and prints the skipped line");
+    eq(withNames({ "docs/notes.md": "The orbital and orbiting words, Quasar Worksheets.\n" }).status, 0, "a private name is matched only as a whole word");
+    ok(spawnSync("git", ["check-ignore", "-q", "docs/feedback/.private-names"], { cwd: ROOT }).status === 0, "docs/feedback/.private-names is gitignored");
+  }
+
   const okina = run({ "README.md": "Hawai\u02bbi and \u02bb\u014dlelo.\n" });
   eq(okina.status, 0, "check-names accepts the okina");
 }

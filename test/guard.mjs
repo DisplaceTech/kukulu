@@ -93,12 +93,10 @@ eq(
   eq(j.decision, "block", "the plugin-agent name kukulu:implementer also blocks");
 }
 
-// Agents generated before the rename are still named foundry-<role>; the guard
-// keeps blocking them until the 0.7.0 cleanup.
+// Agents named before the rename are no longer the implementer.
 for (const legacy of ["foundry-implementer", "foundry:implementer"]) {
   const repo = armed();
-  const j = JSON.parse(guard(repo, { input: implementerStop(repo, { agent_type: legacy }) }));
-  eq(j.decision, "block", `the pre-rename agent name ${legacy} still blocks`);
+  eq(guard(repo, { input: implementerStop(repo, { agent_type: legacy }) }), "", `a ${legacy} stop is allowed`);
 }
 
 {
@@ -125,12 +123,11 @@ for (const legacy of ["foundry-implementer", "foundry:implementer"]) {
 }
 
 // A transcript recorded before the rename names the tool foundry_run_start; the
-// guard still recognizes it until the 0.7.0 cleanup.
+// guard no longer recognizes it.
 {
   const repo = armed();
   writeFile(repo, "transcript.jsonl", `${toolUseLine("mcp__plugin_foundry_foundry__foundry_run_start")}\n`);
-  const j = JSON.parse(guard(repo, { input: { hook_event_name: "Stop", transcript_path: TRANSCRIPT(repo) } }));
-  eq(j.decision, "block", "a Stop whose transcript called the pre-rename foundry_run_start still blocks");
+  eq(guard(repo, { input: { hook_event_name: "Stop", transcript_path: TRANSCRIPT(repo) } }), "", "a foundry_run_start call in the transcript does not make a Stop the implementer's");
 }
 
 {
@@ -322,29 +319,19 @@ for (const legacy of ["foundry-implementer", "foundry:implementer"]) {
   eq(j.decision, undefined, "with no lock.cap, the env var is used instead of the default");
 }
 
-// The pre-0.6.0 spelling still works until 0.7.0, and the new one wins.
+// The pre-0.6.0 spelling is gone.
 {
   const repo = armed();
   writeFile(repo, ".kukulu/implement.lock", '{"count":9}\n');
   const j = JSON.parse(guard(repo, { input: implementerStop(repo), legacyCap: 5 }));
-  eq(j.decision, undefined, "FOUNDRY_GUARD_CAP is still honored when KUKULU_GUARD_CAP is unset");
+  eq(j.decision, "block", "FOUNDRY_GUARD_CAP is not read");
 }
 
-{
-  const repo = armed();
-  writeFile(repo, ".kukulu/implement.lock", '{"count":9}\n');
-  const j = JSON.parse(guard(repo, { input: implementerStop(repo), cap: 100, legacyCap: 5 }));
-  eq(j.decision, "block", "KUKULU_GUARD_CAP wins over FOUNDRY_GUARD_CAP");
-}
-
-// A project that has not migrated keeps its lock in .foundry/ (until 0.7.0).
 {
   const repo = armed(TASKS, null);
   writeFile(repo, ".foundry/implement.lock", "0\n");
-  const j = JSON.parse(guard(repo, { input: implementerStop(repo) }));
-  eq(j.decision, "block", "a lock under .foundry/ still blocks a stop with open tasks");
-  eq(readFile(repo, ".foundry/implement.lock").trim(), "1", "...and the counter is kept in that lock");
-  ok(!fs.existsSync(path.join(repo, ".kukulu")), "...without creating .kukulu/");
+  eq(guard(repo, { input: implementerStop(repo) }), "", "a .foundry/implement.lock is ignored");
+  eq(readFile(repo, ".foundry/implement.lock").trim(), "0", "...and its counter is untouched");
 }
 
 // ---------------------------------------------------------------- environment
