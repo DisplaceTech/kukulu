@@ -79,7 +79,7 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] R1-04 Test verifyChain's prev linkage and seq density in mcp/cleanroom.mjs
 - [x] R1-05 Test the verifier's prev linkage and add the rehashed edit to the both-copies-agree fixtures
 - [x] R1-06 Test the gate's liveness kind, genesis match and the trailer's default task
-- [ ] R1-07 Bound every gh call in prChecks; report mutationFixRounds where the reviewer can read it
+- [x] R1-07 Bound every gh call in prChecks; report mutationFixRounds where the reviewer can read it
 
 ## Log
 
@@ -313,3 +313,7 @@ Added check-3 test (rehashed edit with refreshed manifest and signature -> "entr
 ### R1-06 — 8374d6c
 Three tests added; each hand-mutated in mcp/server.mjs and confirmed to fail (liveness `!== "gate"`, genesis check deleted, trailer fallback removed); server.mjs restored.
 Interpretation: kukulu_feedback_log commit has stage from its argument (implement), so the trailer assertion is Stage: implement, Task: P0-01.
+
+### R1-07 — a91fbb6
+prChecks: gh --version and gh pr view now timeout CHECKS_TIMEOUT_MS (30 s); view timeout -> "unknown: gh pr view failed: timed out after 30000 ms". kukulu_status gains review: { mutationFixRounds } from cfg(); skill reads it from there. docs/mcp-tools.md status table and prChecks bound updated; tool description updated.
+Interpretation: hang test uses the real bound (adds ~30 s to the state suite). Codebase note: a fake gh that hangs must `exec sleep`, otherwise the sleep child keeps the pipe open past spawnSync's timeout.
