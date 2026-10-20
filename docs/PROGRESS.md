@@ -99,7 +99,7 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] R6-01 Guard: xargs options with an optional argument never take the next token, env -S's \_ separates words, and the missing sudo/env valued options are listed
 - [x] R6-02 Guard: cp -T and abbreviated --recursive/--archive are read, so a recursive copy onto a protected directory is judged at the directory
 - [x] R7-01 Guard: cp long options are resolved against cp's own option list, and -T is read in a valued bundle
-- [ ] R7-02 Guard: xargs --process-slot-var and BSD xargs -J/-R/-S are valued
+- [x] R7-02 Guard: xargs --process-slot-var and BSD xargs -J/-R/-S are valued
 
 ## Log
 
@@ -400,3 +400,6 @@ Interpretation: -T in a short bundle applies to mv/ln/install too; long-prefix r
 
 ### R7-01 — 414e166
 cp long options now resolved via cpLong first (valued only --target-directory/--suffix); -T read from letters before the valued letter in a bundle. 9 fixtures added (6 denied, 3 allowed). docs/cleanroom.md rule 6 updated. Self-test 425 cases ok; npm test green.
+
+### R7-02 — 59baf7a
+Added --process-slot-var and -J -R -S to xargs valued options; 8 fixtures (incl. -iE optShort bundle). docs/cleanroom.md rule 6 updated. Self-test 433 cases ok; npm test green.
