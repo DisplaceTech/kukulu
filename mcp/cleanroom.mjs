@@ -908,7 +908,9 @@ export function evaluate(policy, hookInput, env) {
         // A pattern, script or program operand is text, not a path: only the "outside the repository" clause judges it.
         const patterns = patternOperands(word, rest);
         const realPaths = rest.filter((t, i) => isPathLike(t) && !patterns.has(i));
-        for (const t of realPaths) {
+        // A bare operand (`cat zlib.txt`) is the same file as `./zlib.txt`, so it gets the same decision.
+        const operands = rest.filter((t, i) => !patterns.has(i) && (isPathLike(t) || !t.startsWith("-")));
+        for (const t of operands) {
           if (wordIn(t) && !exempt(tokenPath(t))) return denied(`forbidden word in path argument: ${t}`);
         }
         const outside = realPaths.length ? realPaths.some((t) => !inRepo(tokenPath(t))) : !inRepo(".");

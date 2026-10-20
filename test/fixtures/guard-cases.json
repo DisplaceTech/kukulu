@@ -6126,5 +6126,92 @@
    "cwd": "__ROOT__"
   },
   "expect": "allowed"
+ },
+ {
+  "name": "cat of a bare operand with a denied word (P0-03)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat zlib.txt"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "forbidden word in path argument"
+ },
+ {
+  "name": "head of a bare operand with a denied word (P0-03)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "head -n 5 zlib.txt"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "forbidden word in path argument"
+ },
+ {
+  "name": "less of a bare operand with a denied word (P0-03)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "less miniz.c"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "forbidden word in path argument"
+ },
+ {
+  "name": "grep pattern with a denied word stays text (P0-03)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "grep -n zlib src/a.rs"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "sed script with a denied word stays text (P0-03)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "sed -n 's/zlib/x/p' src/a.rs"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "bare operand under allow.paths is exempt (P0-03)",
+  "policy": {
+   "version": 1,
+   "deny": {
+    "words": [
+     "zlib"
+    ]
+   },
+   "allow": {
+    "paths": [
+     "."
+    ]
+   }
+  },
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat zlib.txt"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
  }
 ]
