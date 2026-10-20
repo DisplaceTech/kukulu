@@ -137,6 +137,8 @@ Every prompt typed into a session, and every `kukulu_flight_options`, `kukulu_ru
 | `evidence/<path>` | any extra files the operator named, at their own paths |
 | `verify.mjs` | a byte copy of `scripts/verify-attestation.mjs` |
 
+The bundle's `SUMMARY.md` is the summary as attested; the Attestation section added afterwards cites the manifest's SHA-256 and lives only in the repository's copy.
+
 The manifest's fields, in the order it writes them:
 
 - `version` (1), `flight`, `mode` (`clean-room`) and `at`.
