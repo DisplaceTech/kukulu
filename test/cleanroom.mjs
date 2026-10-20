@@ -920,6 +920,9 @@ async function genesisRepo(planOpts = {}) {
   const run = (command) => evaluate(policy, { tool_name: "Bash", tool_input: { command }, cwd: "/p" }, env);
   eq(run("tar xf evil.tar -C docs").reason, "protected path: /p/docs/cleanroom.json (tar extracts into docs; the archive's contents cannot be known)", "a tar extraction denial names the directory");
   eq(run("rsync evil/cleanroom.json docs/").reason, "protected path: /p/docs/cleanroom.json (rsync writes it into docs/)", "an rsync denial names its destination");
+  eq(run("install -S evil/cleanroom.json docs").reason, "protected path: /p/docs/cleanroom.json (install writes it into docs)", "install's BSD-only denial names its directory");
+  ok(!/null/.test(run("install -S evil/cleanroom.json docs").reason), "...and never says null");
+  eq(run("install -S .bak evil/cleanroom.json docs").reason, "protected path: /p/docs/cleanroom.json (install writes it into docs)", "install's GNU-reading denial names its directory");
 }
 
 // ---------------------------------------------------------------- self-protection

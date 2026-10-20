@@ -1015,10 +1015,10 @@ export function evaluate(policy, hookInput, env) {
         if (writeDenied) return writeDenied;
         // cp, mv, ln and install into a directory write `<directory>/<basename of source>`, a path no operand names.
         const landed = destinationPaths(word, rest);
-        for (const { target } of landed.targets) {
+        for (const { target, dir: into } of landed.targets) {
           const forms = writeForms(target);
           const f = forms.find((x) => protectedList.some((p) => underPrefix(x, p) || (landed.recursive && underPrefix(p, x))));
-          if (f) return denied(`protected path: ${f} (${word} writes it into ${landed.dir})`);
+          if (f) return denied(`protected path: ${f} (${word} writes it into ${into})`);
           const w = wildcardNames(forms, protectedList);
           if (w) return denied(`protected path: ${w} (can be named by the wildcard ${target})`);
         }
@@ -1182,7 +1182,7 @@ function destinationPathsFor(word, rest, spec) {
     const base = path.basename(trimmed);
     // `cp -r src/ dst` writes dst/src: only a `.` or `..` basename names the directory itself.
     const standsForDir = asSelf || base === "." || base === ".." || base === "";
-    return { target: standsForDir ? dir : `${dir.replace(/\/+$/, "") || "/"}/${base}`, standsForDir };
+    return { target: standsForDir ? dir : `${dir.replace(/\/+$/, "") || "/"}/${base}`, standsForDir, dir };
   });
   return { dir, recursive, targets };
 }

@@ -6503,5 +6503,43 @@
    "cwd": "__ROOT__"
   },
   "expect": "allowed"
+ },
+ {
+  "name": "install -S evil/cleanroom.json docs, the BSD reading (P0-06)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "install -S evil/cleanroom.json docs"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*/docs/cleanroom\\.json \\(install writes it into docs\\)"
+ },
+ {
+  "name": "install -S .bak evil/cleanroom.json docs, the GNU reading (P0-06)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "install -S .bak evil/cleanroom.json docs"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*/docs/cleanroom\\.json \\(install writes it into docs\\)"
+ },
+ {
+  "name": "install -S .bak a.txt build/ stays allowed (P0-06)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "install -S .bak a.txt build/"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
  }
 ]
