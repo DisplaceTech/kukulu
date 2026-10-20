@@ -6541,5 +6541,109 @@
    "cwd": "__ROOT__"
   },
   "expect": "allowed"
+ },
+ {
+  "name": "tar -rf docs/cleanroom.json x (R1-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "tar -rf docs/cleanroom.json x"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "tar uf docs/cleanroom.json src (R1-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "tar uf docs/cleanroom.json src"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "tar --append --file=docs/cleanroom.json x (R1-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "tar --append --file=docs/cleanroom.json x"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "tar --update -f docs/cleanroom.json src (R1-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "tar --update -f docs/cleanroom.json src"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "tar --get -f a.tar -C docs (R1-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "tar --get -f a.tar -C docs"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "rsync evil/cleanroom.json docs -e ssh (R1-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "rsync evil/cleanroom.json docs -e ssh"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "rsync evil/x docs/cleanroom.js?? (R1-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "rsync evil/x docs/cleanroom.js??"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "can be named by the wildcard"
+ },
+ {
+  "name": "tar cf docs/cleanroom.js?? src (R1-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "tar cf docs/cleanroom.js?? src"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "can be named by the wildcard"
  }
 ]
