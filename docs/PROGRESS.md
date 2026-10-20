@@ -23,7 +23,7 @@ Started: 2026-10-20T19:18:49.092Z
 - [x] P2-02 CHANGELOG 0.7.1, the version and the feedback header
 - [x] P2-03 Phase 2 end: push and record the release check
 - [x] R1-01 Test the base sync's failed commit, signing fallback and parallel-plan paths
-- [ ] R1-02 Guard fixtures for tar append/update, --get, rsync -e and the rsync/tar wildcard checks
+- [x] R1-02 Guard fixtures for tar append/update, --get, rsync -e and the rsync/tar wildcard checks
 
 ## Log
 
@@ -101,3 +101,7 @@ Push: pushed build/2026-10-20 to origin. Manual check: NOT VERIFIED (human): the
 ### R1-01 — c4a6c16
 
 Added 2 tests in test/implement.mjs (failed merge commit rollback; signing-auto unsigned retry) and 1 in test/streams.mjs (serial task_next skips base in streams plan, serial run_start syncs). No server change. kukulu_verify green. Mutation runs (kukulu_mutate) not available to the implementer; not run.
+
+### R1-02 — 4fe6928
+
+Added 8 denied fixtures (R1-02) to test/fixtures/guard-cases.json (509 guard cases now); no guard change. Verify green. kukulu_mutate not available to implementer; mutants not run.
