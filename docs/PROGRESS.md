@@ -13,7 +13,7 @@ Started: 2026-10-20T19:18:49.092Z
 - [x] P0-06 install's BSD-only denial names its directory
 - [x] P0-07 The gate, the genesis and the manifest pin mcp/cleanroom.mjs
 - [x] P0-08 Phase 0 end: push and record the manual check
-- [ ] P1-01 renumber rewrites ids in the flight's CLAUDE.md notes
+- [x] P1-01 renumber rewrites ids in the flight's CLAUDE.md notes
 - [ ] P1-02 Refuse task and halt text that would break a PROGRESS.md constraint
 - [ ] P1-03 policies.syncBase merges the base branch into the build branch
 - [ ] P1-04 The hard cap's documentation says what reviewSubmit does
@@ -59,3 +59,7 @@ cleanroomHash added to pluginHashes/genesis/state/gate check 3/manifest/verifier
 ### P0-08 — 83eb7c6
 
 Push: pushed build/2026-10-20 to origin. Manual check: NOT VERIFIED (human): in a live clean-room session with the working-tree plugin (claude --plugin-dir .), git add docs/* is allowed and rsync evil/cleanroom.json docs/ is denied; CI is green on the pushed branch
+
+### P1-01 — c71a003
+
+flightNotesRange/swapFlightNotes in server.mjs; CLAUDE.md written inside withRollback only when changed; two new notes. Five test groups in state.mjs. Interpretation: ### subsections remain in the notes; heading match is exact modulo trailing whitespace. Final verify was green except a markdownlint MD038 in docs/mcp-tools.md that I fixed after (docs-only).
