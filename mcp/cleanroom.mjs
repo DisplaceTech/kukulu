@@ -545,7 +545,7 @@ const VALUED_OPTIONS = Object.fromEntries(
     env: "-u -C -P --unset --chdir",
     timeout: "-s -k --signal --kill-after",
     nice: "-n --adjustment",
-    xargs: "-n -L -P -I -d -E -s -a --max-args --max-procs --delimiter --max-chars --arg-file",
+    xargs: "-n -L -P -I -d -E -s -a -J -R -S --max-args --max-procs --delimiter --max-chars --arg-file --process-slot-var",
     stdbuf: "-i -o -e --input --output --error",
     time: "-o -f --output --format",
   }).map(([k, v]) => [k, new Set(v.split(" "))]),
