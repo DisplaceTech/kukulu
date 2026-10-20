@@ -1,7 +1,7 @@
 {
   "name": "kukulu",
   "displayName": "Kūkulu",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "description": "Spec-driven plan → implement → review → fix → summarize pipeline with per-role, per-machine model routing. Drop docs/SPEC.md in a repo and run /kukulu:go-flight.",
   "author": {
     "name": "Eric Mann",

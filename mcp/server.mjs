@@ -90,7 +90,7 @@ const MCP_ALLOW_RULE = "mcp__plugin_kukulu_kukulu";
 const PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 // Keep in sync with .claude-plugin/plugin.json and package.json; test/plugin.mjs checks it.
-const VERSION = "0.7.0";
+const VERSION = "0.7.1";
 
 // ---------------------------------------------------------------- clean-room mode (SPEC D-06)
 
