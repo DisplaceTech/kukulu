@@ -1009,11 +1009,17 @@ export function evaluate(policy, hookInput, env) {
   }
 }
 
+// Valued options of cp, mv, ln and install, for scanOption.
+const COPY_SPEC = {
+  short: new Set("tSmog"),
+  long: new Set(["--target-directory", "--suffix", "--mode", "--owner", "--group"]),
+};
+
 /**
  * Where cp, mv, ln and install put their sources: the -t/--target-directory
  * value, else the last operand, is the destination directory, and each source
- * lands at `<directory>/<basename>`. A source whose basename is `.` or `..`, or
- * that ends in `/`, stands for the directory itself. `recursive` is a cp -r/-R/-a.
+ * lands at `<directory>/<basename>`. A source whose basename is `.` or `..`
+ * stands for the directory itself. `recursive` is a cp -r/-R/-a.
  */
 function destinationPaths(word, rest) {
   const none = { dir: null, recursive: false, targets: [] };
@@ -1027,11 +1033,13 @@ function destinationPaths(word, rest) {
       operands.push(...rest.slice(i + 1));
       break;
     }
-    if (t === "-t" || t === "--target-directory") dir = rest[++i] ?? dir;
-    else if (t.startsWith("--target-directory=")) dir = t.slice(19);
-    else if (/^-t./.test(t) && !t.startsWith("--")) dir = t.slice(2);
-    else if (/^(?:-S|-m|-o|-g|--suffix|--mode|--owner|--group)$/.test(t)) i++;
-    else if (t.startsWith("-") && t.length > 1) {
+    const opt = t.startsWith("-") ? scanOption(t, COPY_SPEC) : null;
+    if (opt) {
+      const value = opt.value ?? rest[++i];
+      if (opt.name === "t" || opt.name === "--target-directory") dir = value ?? dir;
+      // A bundle's letters before the valued one still count (`cp -rt docs`).
+      if (word === "cp" && !t.startsWith("--") && /[rRa]/.test(t.slice(1, t.search(/[tSmog]/)))) recursive = true;
+    } else if (t.startsWith("-") && t.length > 1) {
       if (word === "cp" && (/^-[A-Za-z]*[rRa][A-Za-z]*$/.test(t) || t === "--recursive" || t === "--archive")) recursive = true;
     } else operands.push(t);
   }
@@ -1041,7 +1049,8 @@ function destinationPaths(word, rest) {
   const targets = sources.map((src) => {
     const trimmed = src.replace(/\/+$/, "");
     const base = path.basename(trimmed);
-    const standsForDir = src.endsWith("/") || base === "." || base === ".." || base === "";
+    // `cp -r src/ dst` writes dst/src: only a `.` or `..` basename names the directory itself.
+    const standsForDir = base === "." || base === ".." || base === "";
     return { target: standsForDir ? dir : `${dir.replace(/\/+$/, "") || "/"}/${base}`, standsForDir };
   });
   return { dir, recursive, targets };
