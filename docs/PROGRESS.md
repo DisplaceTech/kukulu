@@ -94,7 +94,7 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] R4-02 Guard: compact function headers and arms without a space are stripped, and a cd operand without a slash is judged by rule 6b
 - [x] R4-03 Guard: a cp, mv, ln or install into a directory is judged at the path it writes, so a protected file cannot be replaced without being named
 - [x] R5-01 Guard: env -S's split words are parsed as env options, and one getopt-style scanner reads wrapper option bundles and long-option abbreviations
-- [ ] R5-02 Guard: cp, mv, ln and install read -t through the option scanner, and a source ending in / no longer stands for the destination
+- [x] R5-02 Guard: cp, mv, ln and install read -t through the option scanner, and a source ending in / no longer stands for the destination
 - [ ] R5-03 Guard: a bare glob operand and a cd into a glob are judged by rule 6b's glob check
 
 ## Log
@@ -379,3 +379,6 @@ destinationPaths() builds <dir>/<basename> for cp/mv/ln/install (-t, --target-di
 
 ### R5-01 — 28f8cbb
 Added exported scanOption(token, {short,long}) in mcp/cleanroom.mjs (getopt bundle, =value, unique-prefix long names); VALUED_SPEC derived from VALUED_OPTIONS (env gets S/--split-string). commandWord no longer breaks after env split: words are spliced and the option loop continues. 17 fixtures added; self-test 370 cases ok; docs/cleanroom.md rule 6 updated. R5-02 can import scanOption.
+
+### R5-02 — b037814
+destinationPaths now uses scanOption with COPY_SPEC (t S m o g; --target-directory --suffix --mode --owner --group); recursive letters in a bundle before the valued letter still count. standsForDir only for basename ./../empty. 12 fixtures; self-test 382 ok; docs rule 6 updated.
