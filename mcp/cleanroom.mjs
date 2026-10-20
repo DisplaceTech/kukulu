@@ -535,6 +535,18 @@ export function shellWords(segment) {
 }
 
 const WRAPPERS = new Set(["sudo", "env", "time", "command", "xargs", "nice", "exec", "nohup", "timeout", "stdbuf", "setsid"]);
+// Options whose value is the next token, per wrapper, short and long.
+const VALUED_OPTIONS = Object.fromEntries(
+  Object.entries({
+    sudo: "-u -g -h -p -C -D -r -t -U --user --group --host --prompt --close-from --chdir --role --type --other-user",
+    env: "-u -C --unset --chdir",
+    timeout: "-s -k --signal --kill-after",
+    nice: "-n --adjustment",
+    xargs: "-n -L -P -I -i -d -E -s -a --max-args --max-lines --max-procs --replace --delimiter --eof --max-chars --arg-file",
+    stdbuf: "-i -o -e --input --output --error",
+    time: "-o -f --output --format",
+  }).map(([k, v]) => [k, new Set(v.split(" "))]),
+);
 const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
 
 /**
@@ -555,11 +567,23 @@ export function commandWord(tokens) {
       i++;
       while (i < tokens.length && tokens[i].startsWith("-")) {
         const flag = tokens[i++];
-        if (base === "nice" && flag === "-n" && i < tokens.length) i++;
-        if (base === "timeout" && /^-[sk]$/.test(flag) && i < tokens.length) i++;
-        // The value after these flags is not the command (`sudo -u root curl ...`, `env -C /tmp curl ...`).
-        if (base === "sudo" && /^-[ughpCDrtU]$/.test(flag) && i < tokens.length) i++;
-        if (base === "env" && /^-[uCS]$/.test(flag) && i < tokens.length) i++;
+        // env -S / --split-string: GNU env splits the value into the command, so its words take the value's place.
+        if (base === "env") {
+          const split = flag === "-S" || flag === "--split-string";
+          const attached = flag.startsWith("--split-string=") ? flag.slice(15) : /^-S./.test(flag) ? flag.slice(2) : null;
+          if (split && i < tokens.length) {
+            tokens = [...tokens.slice(0, i - 1), ...shellWords(tokens[i]), ...tokens.slice(i + 1)];
+            i--;
+            break;
+          }
+          if (attached !== null) {
+            tokens = [...tokens.slice(0, i - 1), ...shellWords(attached), ...tokens.slice(i)];
+            i--;
+            break;
+          }
+        }
+        // The value after these options is not the command (`sudo -u root curl ...`); an `=` form is one token.
+        if (VALUED_OPTIONS[base]?.has(flag) && i < tokens.length) i++;
       }
       // timeout's first operand is its duration, not the command.
       if (base === "timeout" && i < tokens.length && /^\d+(?:\.\d+)?[smhd]?$/.test(tokens[i])) i++;
