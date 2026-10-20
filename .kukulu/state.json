@@ -1,10 +1,10 @@
 {
-  "round": 6,
-  "implemented": true,
-  "reviewed": false,
-  "verdict": null,
+  "round": 7,
+  "implemented": false,
+  "reviewed": true,
+  "verdict": "CHANGES REQUESTED",
   "summarized": false,
-  "halted": null,
+  "halted": "review round 7 exceeds the hard cap maxRoundsHard=6 (findings per round: 7 → 7 → 3 → 3 → 3 → 2 → 2); a human must decide whether to continue: call kukulu_flight_options({ maxRoundsHard: 7, resume: true })",
   "preexistingUntracked": [],
   "policies": {
     "signing": "auto",
@@ -64,11 +64,23 @@
       "verdict": "CHANGES REQUESTED",
       "nonConverging": false,
       "at": "2026-10-20T14:59:34.037Z"
+    },
+    {
+      "round": 7,
+      "fixTasks": 2,
+      "unblocked": 0,
+      "verdict": "CHANGES REQUESTED",
+      "nonConverging": true,
+      "at": "2026-10-20T15:29:30.411Z"
     }
   ],
   "archived": {
     "slug": "kukulu-tech",
     "dir": "docs/flights/kukulu-tech",
     "at": "2026-10-19T19:03:35.359Z"
+  },
+  "haltCap": {
+    "cap": "maxRoundsHard",
+    "round": 7
   }
 }

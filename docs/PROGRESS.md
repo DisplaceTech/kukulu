@@ -98,6 +98,8 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] R5-03 Guard: a bare glob operand and a cd into a glob are judged by rule 6b's glob check
 - [x] R6-01 Guard: xargs options with an optional argument never take the next token, env -S's \_ separates words, and the missing sudo/env valued options are listed
 - [x] R6-02 Guard: cp -T and abbreviated --recursive/--archive are read, so a recursive copy onto a protected directory is judged at the directory
+- [ ] R7-01 Guard: cp long options are resolved against cp's own option list, and -T is read in a valued bundle
+- [ ] R7-02 Guard: xargs --process-slot-var and BSD xargs -J/-R/-S are valued
 
 ## Log
 
