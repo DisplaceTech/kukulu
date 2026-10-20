@@ -96,7 +96,7 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] R5-01 Guard: env -S's split words are parsed as env options, and one getopt-style scanner reads wrapper option bundles and long-option abbreviations
 - [x] R5-02 Guard: cp, mv, ln and install read -t through the option scanner, and a source ending in / no longer stands for the destination
 - [x] R5-03 Guard: a bare glob operand and a cd into a glob are judged by rule 6b's glob check
-- [ ] R6-01 Guard: xargs options with an optional argument never take the next token, env -S's \_ separates words, and the missing sudo/env valued options are listed
+- [x] R6-01 Guard: xargs options with an optional argument never take the next token, env -S's \_ separates words, and the missing sudo/env valued options are listed
 - [ ] R6-02 Guard: cp -T and abbreviated --recursive/--archive are read, so a recursive copy onto a protected directory is judged at the directory
 
 ## Log
@@ -387,3 +387,7 @@ destinationPaths now uses scanOption with COPY_SPEC (t S m o g; --target-directo
 
 ### R5-03 — 28dc670
 Glob check in bashVerdict now also covers bare cd/pushd/read-family operands, and any such operand when shellCwd (kept as literal glob text after cd to a glob) contains a wildcard. 9 fixtures; self-test 391 ok; docs rule 6 updated.
+
+### R6-01 — fc939a0
+scanOption gained optShort/optLong (attached-only values); xargs -i -l -e, --replace --max-lines --eof moved there. env -S value has backslash-underscore replaced by a space. Added sudo -R/-T/--chroot/--command-timeout, env -P. 14 fixtures added.
+Interpretation: shellWords now keeps a backslash in double quotes unless it precedes $ ` " \ newline (bash semantics); needed for env -S"curl\_x". docs/cleanroom.md rule 6 updated. KNOWN_LIMITS unchanged.
