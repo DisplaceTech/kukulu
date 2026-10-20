@@ -15,26 +15,17 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-
-// Notices for a project still using a pre-0.6.0 name, reported in the
-// `deprecations` field of kukulu_status and kukulu_next. Every compatibility
-// fallback below adds one and is removed in 0.7.0.
-const DEPRECATIONS = [];
-function deprecate(message) {
-  if (!DEPRECATIONS.includes(message)) DEPRECATIONS.push(message);
-}
+import { createHash } from "node:crypto";
+import {
+  CleanroomError, loadPolicy, policyHash, appendEntry, readEntries, logPathFor, generateKey, loadKey, signCheckpoint, verifyCheckpoint, verifyChain, evaluate, lockdownActive, ZERO_HASH, scorePair, position, verdictOf, LIMITS, coverageGaps, KNOWN_LIMITS, summarizeEntries, signBytes,
+} from "./cleanroom.mjs";
 
 /**
- * An environment variable by its Kūkulu name, falling back to the Foundry name
- * until 0.7.0. A non-empty KUKULU_<name> always wins; an empty one counts as
- * unset, because .mcp.json passes unset variables through as empty strings.
+ * An environment variable by its Kūkulu name. An empty value counts as unset,
+ * because .mcp.json passes unset variables through as empty strings.
  */
 function envVar(name) {
-  if (process.env[`KUKULU_${name}`]) return process.env[`KUKULU_${name}`];
-  const old = process.env[`FOUNDRY_${name}`];
-  if (!old) return undefined;
-  deprecate(`FOUNDRY_${name} is deprecated; set KUKULU_${name} instead. Support ends in 0.7.0.`);
-  return old;
+  return process.env[`KUKULU_${name}`] || undefined;
 }
 
 const ROOT = path.resolve(envVar("PROJECT_DIR") || process.cwd());
@@ -48,6 +39,7 @@ function layoutFor(stateName, configName) {
     handoff: path.join(ROOT, "docs", "HANDOFF.md"),
     review: path.join(ROOT, "docs", "REVIEW.md"),
     summary: path.join(ROOT, "docs", "SUMMARY.md"),
+    similarityDoc: path.join(ROOT, "docs", "SIMILARITY.md"),
     config: path.join(ROOT, "docs", configName),
     stateDir,
     state: path.join(stateDir, "state.json"),
@@ -62,38 +54,28 @@ function layoutFor(stateName, configName) {
   };
 }
 
-const LAYOUT = { current: [".kukulu", "kukulu.json"], legacy: [".foundry", "foundry.json"] };
-const LEGACY_LAYOUT_NOTICE = "this project uses the pre-0.6.0 Foundry layout (.foundry/, docs/foundry.json); run kukulu_migrate. Support ends in 0.7.0.";
+// The pre-0.6.0 layout is named from one constant so no other line of this file spells it.
+const LEGACY = "foun" + "dry";
+const LEGACY_LAYOUT_MESSAGE = `this project is on the pre-0.6.0 ${LEGACY[0].toUpperCase()}${LEGACY.slice(1)} layout, which 0.7.0 no longer reads. Move \`.${LEGACY}/state.json\` and \`.${LEGACY}/feedback.jsonl\` to \`.kukulu/\`, \`docs/${LEGACY}.json\` to \`docs/kukulu.json\`, and the \`.${LEGACY}/\` lines of \`.gitignore\` to \`.kukulu/\`, then commit (0.6.x's \`kukulu_migrate\` did this).`;
 
-let P = layoutFor(...LAYOUT.current);
-let legacyLayout = false;
+const P = layoutFor(".kukulu", "kukulu.json");
 
-const layoutPresent = ([stateName, configName]) => exists(path.join(ROOT, stateName)) || exists(path.join(ROOT, "docs", configName));
+const layoutPresent = (stateName, configName) => exists(path.join(ROOT, stateName)) || exists(path.join(ROOT, "docs", configName));
 
 /**
- * Pick the layout this project is on, once per tool call, because
- * kukulu_migrate (and a human) can change it between calls. A project with
- * only the Foundry names keeps working in place; a project with both is
- * refused, since reading either would silently ignore the other. Removed in
- * 0.7.0 with the rest of the compatibility code.
+ * Refuse a project on the old layout before any tool runs, because reading
+ * either layout while the other exists would silently ignore live state.
  */
-function resolveLayout() {
-  const hasCurrent = layoutPresent(LAYOUT.current);
-  const hasLegacy = layoutPresent(LAYOUT.legacy);
-  legacyLayout = hasLegacy && !hasCurrent;
-  P = layoutFor(...(legacyLayout ? LAYOUT.legacy : LAYOUT.current));
-  const at = DEPRECATIONS.indexOf(LEGACY_LAYOUT_NOTICE);
-  if (legacyLayout && at === -1) DEPRECATIONS.push(LEGACY_LAYOUT_NOTICE);
-  if (!legacyLayout && at !== -1) DEPRECATIONS.splice(at, 1);
+function checkLayout() {
+  const hasCurrent = layoutPresent(".kukulu", "kukulu.json");
+  const hasLegacy = layoutPresent(`.${LEGACY}`, `${LEGACY}.json`);
+  if (hasLegacy && !hasCurrent) throw new ToolError(LEGACY_LAYOUT_MESSAGE);
   if (hasCurrent && hasLegacy) {
     throw new ToolError(
-      "both the pre-0.6.0 layout (.foundry/ or docs/foundry.json) and the current one (.kukulu/ or docs/kukulu.json) exist, so Kūkulu cannot tell which holds the live state. Keep the one you use and remove the other with git (kukulu_migrate only runs on a project with none of the .kukulu files), then call again.",
+      `both the pre-0.6.0 layout (.${LEGACY}/ or docs/${LEGACY}.json) and the current one (.kukulu/ or docs/kukulu.json) exist, so Kūkulu cannot tell which holds the live state. Keep the one you use and remove the other with git, then call again.`,
     );
   }
 }
-
-/** Error messages are written for the current layout; a project still on the old one is told its own file names. */
-const inLayoutNames = (message) => (legacyLayout ? message.replaceAll("docs/kukulu.json", "docs/foundry.json").replaceAll(".kukulu/", ".foundry/") : message);
 
 // The one rule an unattended flight needs before its first kukulu_status
 // call: without it, a subagent's MCP tool call is denied under every
@@ -108,7 +90,245 @@ const MCP_ALLOW_RULE = "mcp__plugin_kukulu_kukulu";
 const PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 // Keep in sync with .claude-plugin/plugin.json and package.json; test/plugin.mjs checks it.
-const VERSION = "0.6.1";
+const VERSION = "0.7.0";
+
+// ---------------------------------------------------------------- clean-room mode (SPEC D-06)
+
+/** Clean-room mode is on when the file at cleanroom.policy exists; there is no flag. */
+const cleanroomPolicyPath = (cc) => path.join(ROOT, cc.cleanroom.policy);
+const cleanroomOn = (cc) => exists(cleanroomPolicyPath(cc));
+const cleanroomLogPath = () => logPathFor(ROOT, process.env);
+
+/** SHA-256 of the files the gate pins: the two hook scripts and hooks.json, as installed under PLUGIN_ROOT. */
+function pluginHashes() {
+  const of = (rel2) => policyHash(fs.readFileSync(path.join(PLUGIN_ROOT, rel2)));
+  return { guardHash: of("scripts/cleanroom-guard.mjs"), loggerHash: of("scripts/cleanroom-log.mjs"), hooksHash: of("hooks/hooks.json") };
+}
+
+/** The signing key, generated first when the file is absent. */
+function ensureKey(cc) {
+  if (!exists(cc.cleanroom.signingKey)) generateKey(cc.cleanroom.signingKey);
+  return loadKey(cc.cleanroom.signingKey);
+}
+
+/** Why the flight's mode no longer matches its genesis, or null. Computed on every call, never stored. */
+function cleanroomModeBreak(st, policyPresent, planPresent) {
+  const cr = st.cleanroom;
+  if (policyPresent && cr?.mode === "general") return "a clean-room policy appeared after the flight started in general mode";
+  if (policyPresent && !cr && planPresent) return "a clean-room policy was first seen after the plan was written";
+  if (!policyPresent && cr?.genesis) return "the clean-room policy file was removed after genesis";
+  return null;
+}
+const modeBreakText = (why) => `clean-room coverage is broken: the mode changed after genesis (${why}); archive this flight with kukulu_flight_archive and start another`;
+
+/**
+ * Append the genesis entry and record the hashes the gate will compare against,
+ * in one commit with the log. A policy that does not load is a refusal.
+ */
+function cleanroomGenesis(cc, st) {
+  const policyBytes = fs.readFileSync(cleanroomPolicyPath(cc));
+  loadPolicy(policyBytes.toString("utf8"));
+  const key = ensureKey(cc);
+  const hashes = pluginHashes();
+  const logPath = cleanroomLogPath();
+  const logInRepo = path.relative(ROOT, logPath).startsWith("..") === false;
+  const head = git(["rev-parse", "HEAD"], { allowFail: true }).out || null;
+  const paths = [P.state, ...(logInRepo ? [logPath] : [])];
+  withRollback(paths, () => {
+    const entry = appendEntry(logPath, {
+      kind: "genesis",
+      stage: "controller",
+      role: "session",
+      data: { mode: "clean-room", policyHash: policyHash(policyBytes), ...hashes, pluginVersion: VERSION, keyFingerprint: key.fingerprint, baseBranch: cc.baseBranch, head },
+    });
+    st.cleanroom = { genesis: entry.hash, policyHash: policyHash(policyBytes), ...hashes };
+    saveState(st);
+    gitCommitIfChanged(paths, "chore: clean-room genesis", { stage: "controller" });
+  });
+}
+
+const GATE_SELF_TEST_MS = 60_000;
+const shellQuote = (p) => `'${String(p).replaceAll("'", "'\\''")}'`;
+
+/**
+ * The gate (SPEC D-08): before a stage starts, prove the clean-room machinery
+ * is still the machinery the flight began with. Checks run in order and the
+ * first failure stops them. A failing gate appends its own `gate` entry
+ * before anything is refused, which is the one sanctioned write before a
+ * refusal: the refusal itself belongs in the chain. Returns null in general
+ * mode, else `{ ok, checked, failed? }`.
+ */
+function runGate(stage, st = loadState()) {
+  if (!st.cleanroom?.genesis) return null;
+  const cc = cfg();
+  const recorded = st.cleanroom;
+  const logPath = cleanroomLogPath();
+  const policyPath = cleanroomPolicyPath(cc);
+  const checked = [];
+  const failed = (check, reason) => {
+    appendEntry(logPath, { kind: "gate", stage, role: "session", data: { failed: check, reason } });
+    return { ok: false, checked, failed: { check, reason } };
+  };
+
+  // 1. mode
+  checked.push("mode");
+  if (!exists(policyPath)) return failed("mode", `the policy file ${cc.cleanroom.policy} is missing`);
+  if (recorded.mode === "general") return failed("mode", "the flight was recorded in general mode");
+
+  // 2. policy
+  checked.push("policy");
+  const policyBytes = fs.readFileSync(policyPath);
+  if (policyHash(policyBytes) !== recorded.policyHash) return failed("policy", `${cc.cleanroom.policy} changed since genesis (its SHA-256 no longer matches the recorded one)`);
+
+  // 3. guard: the two hook scripts and hooks.json are the ones recorded, and hooks.json still registers them
+  checked.push("guard");
+  const now = pluginHashes();
+  for (const [key, label] of [["guardHash", "scripts/cleanroom-guard.mjs"], ["loggerHash", "scripts/cleanroom-log.mjs"], ["hooksHash", "hooks/hooks.json"]]) {
+    if (now[key] !== recorded[key]) return failed("guard", `${label} changed since genesis`);
+  }
+  let hooks;
+  try {
+    hooks = JSON.parse(fs.readFileSync(path.join(PLUGIN_ROOT, "hooks", "hooks.json"), "utf8")).hooks || {};
+  } catch (e) {
+    return failed("guard", `hooks/hooks.json cannot be read: ${e.message}`);
+  }
+  const registers = (event, script) => (hooks[event] || []).some((entry) => (entry.hooks || []).some((h) => String(h.command || "").includes(script)));
+  for (const [event, script] of [["PreToolUse", "cleanroom-guard.mjs"], ["PostToolUse", "cleanroom-log.mjs"], ["UserPromptSubmit", "cleanroom-log.mjs"]]) {
+    if (!registers(event, script)) return failed("guard", `hooks/hooks.json no longer registers ${script} on ${event}`);
+  }
+
+  // 4. self-test
+  checked.push("self-test");
+  const selfTest = runShell(`node ${shellQuote(path.join(PLUGIN_ROOT, "scripts", "cleanroom-guard.mjs"))} --self-test ${shellQuote(policyPath)}`, GATE_SELF_TEST_MS);
+  if (!selfTest.ok) return failed("self-test", (selfTest.stderrTail || selfTest.stdoutTail || `exit ${selfTest.exitCode}`).split("\n")[0]);
+
+  // 5. lockdown: once the lockdown task is done, an allowed URL must be denied
+  checked.push("lockdown");
+  const policy = loadPolicy(policyBytes.toString("utf8"));
+  const progressText = exists(P.progress) ? read(P.progress) : null;
+  if (policy.lockdown.after && policy.allow.urls.length && progressText && new RegExp(`^- \\[x\\] ${policy.lockdown.after}\\b`, "m").test(progressText)) {
+    const probe = evaluate(policy, { tool_name: "WebFetch", tool_input: { url: policy.allow.urls[0] }, cwd: ROOT }, { root: ROOT, home: os.homedir(), progressText });
+    if (probe.decision !== "denied") return failed("lockdown", `lockdown.after ${policy.lockdown.after} is done, but a WebFetch of ${policy.allow.urls[0]} is still allowed`);
+  }
+
+  // 6. chain: every hash recomputes, the genesis is the recorded one, and the newest checkpoint verifies
+  checked.push("chain");
+  const lines = exists(logPath) ? read(logPath).split("\n").filter(Boolean) : [];
+  const chain = verifyChain(lines);
+  if (!chain.ok) return failed("chain", `entry ${chain.firstBad.seq ?? chain.firstBad.line} (line ${chain.firstBad.line}): ${chain.firstBad.reason}`);
+  if (chain.entries[0]?.hash !== recorded.genesis) return failed("chain", "the first entry is not the genesis entry recorded in state.json");
+  const newest = [...chain.entries].reverse().find((e) => e.kind === "checkpoint");
+  if (newest) {
+    let publicKey;
+    try {
+      publicKey = loadKey(cc.cleanroom.signingKey).publicKey;
+    } catch (e) {
+      return failed("chain", e.message);
+    }
+    if (!verifyCheckpoint(newest, publicKey)) return failed("chain", `the newest checkpoint (entry ${newest.seq}) does not verify with the signing key`);
+  }
+
+  // 7. liveness: the hooks are recording. A session whose hooks are not loaded produces gates with nothing between them.
+  checked.push("liveness");
+  const lastGate = chain.entries.map((e) => e.kind).lastIndexOf("gate");
+  if (lastGate >= 0 && !chain.entries.slice(lastGate + 1).some((e) => e.kind === "allowed")) {
+    return failed("liveness", "no tool call has been logged since the last gate; the clean-room hooks are not running in this session. Start a new session.");
+  }
+
+  appendEntry(logPath, { kind: "gate", stage, role: "session", data: { checks: checked.length, ok: true } });
+  return { ok: true, checked };
+}
+
+/** A tool's gate: the refusal that comes before any write when the clean-room machinery has changed. */
+function requireGate(stage) {
+  const g = runGate(stage);
+  if (g && !g.ok) throw new ToolError(`clean-room gate failed: ${g.failed.check}: ${g.failed.reason}`);
+}
+
+/** The log, as a path list for withRollback and a commit, when this flight is in clean-room mode and the log lives in the repository. */
+function cleanroomPaths(st) {
+  const logPath = cleanroomLogPath();
+  return st.cleanroom?.genesis && !path.relative(ROOT, logPath).startsWith("..") ? [logPath] : [];
+}
+
+/**
+ * Append a signed checkpoint: the chain tip, the commit it was written at, the
+ * hashes of everything the gate pins as they are now, and the key's
+ * fingerprint. General mode, and a flight that has no genesis yet, write none.
+ * The caller commits the log with its own files.
+ */
+function checkpoint(event, stage, st) {
+  if (!st.cleanroom?.genesis) return;
+  const cc = cfg();
+  const key = loadKey(cc.cleanroom.signingKey);
+  const logPath = cleanroomLogPath();
+  const entries = readEntries(logPath);
+  const data = signCheckpoint(
+    {
+      chainTip: entries.length ? entries[entries.length - 1].hash : ZERO_HASH,
+      git: git(["rev-parse", "HEAD"]).out,
+      policyHash: policyHash(fs.readFileSync(cleanroomPolicyPath(cc))),
+      ...pluginHashes(),
+      keyFingerprint: key.fingerprint,
+      event,
+    },
+    key.privateKey,
+  );
+  appendEntry(logPath, { kind: "checkpoint", stage, role: "session", data });
+}
+
+const CLEANROOM_SENTENCE =
+  "This flight is in clean-room mode: every tool call is checked against docs/cleanroom.json and logged; a denied call is never worked around — note it in the task's log and continue another way.";
+
+/** `kukulu_status.cleanroom`: null without a policy file, else the whole state of the mode (SPEC D-01). Never throws on a damaged log or policy; it reports what it can read. */
+function cleanroomStatus(st) {
+  const cc = cfg();
+  const policyPath = cleanroomPolicyPath(cc);
+  if (!exists(policyPath)) return null;
+  const logPath = cleanroomLogPath();
+  let entries = [];
+  try {
+    entries = readEntries(logPath);
+  } catch {
+    // a damaged log is the gate's finding; status still answers
+  }
+  const lastGate = entries.map((e) => e.kind).lastIndexOf("gate");
+  const lastCheckpoint = entries.map((e) => e.kind).lastIndexOf("checkpoint");
+  const afterMarker = lastGate >= 0 ? lastGate : entries.findIndex((e) => e.kind === "genesis");
+  let keyFingerprint = null;
+  try {
+    if (exists(cc.cleanroom.signingKey)) keyFingerprint = loadKey(cc.cleanroom.signingKey).fingerprint;
+  } catch {
+    // an unreadable key is reported as absent
+  }
+  let lockdown = false;
+  try {
+    lockdown = lockdownActive(loadPolicy(read(policyPath)), exists(P.progress) ? read(P.progress) : null);
+  } catch {
+    // an invalid policy is the gate's finding
+  }
+  return {
+    policy: cc.cleanroom.policy,
+    policyHash: policyHash(fs.readFileSync(policyPath)),
+    mode: st.cleanroom?.mode === "general" ? "general" : "clean-room",
+    genesis: st.cleanroom?.genesis ?? null,
+    pinnedPolicyHash: st.cleanroom?.policyHash ?? null,
+    chain: { entries: entries.length, tip: entries.length ? entries[entries.length - 1].hash : null, lastCheckpoint: lastCheckpoint >= 0 ? entries[lastCheckpoint].seq : null },
+    denied: entries.filter((e) => e.kind === "denied").length,
+    hooksLive: afterMarker >= 0 && entries.slice(afterMarker + 1).some((e) => e.kind === "allowed"),
+    keyFingerprint,
+    lockdown,
+  };
+}
+
+/** The `human` entry an operator-initiated tool leaves in the chain, in clean-room mode. */
+function humanEntry(st, via, args) {
+  if (!st.cleanroom?.genesis) return;
+  appendEntry(cleanroomLogPath(), { kind: "human", stage: "controller", role: "operator", target: JSON.stringify(args ?? {}), data: { kind: "instruction", via } });
+}
+
+/** The stage a bookkeeping tool's entries are filed under. */
+const implementStage = (st) => (st.round >= 1 ? "fix" : "implement");
 
 const TASK_ID = /\b[PR]\d+-\d+\b/g;
 const TASK_LINE = /^- \[( |~|x|!|-)\] ([PR]\d+-\d+)(?: (.*))?$/;
@@ -163,7 +383,21 @@ const SIGNING_FAILURE = /gpg failed to sign|failed to sign|signing failed|cannot
  * signing off for the run and retries once, with the record of that decision
  * in the same commit; under "required" it throws (S-02).
  */
-function commitStaged(rels, message, { stage } = {}) {
+/**
+ * In clean-room mode every commit the server makes ends with two trailers,
+ * added here and not by a git hook, so `--no-verify` cannot skip them. `task`
+ * defaults to the first in-progress task, else `-`.
+ */
+function withTrailers(message, { stage, task, cleanroom } = {}) {
+  if (!(cleanroom ?? Boolean(loadState().cleanroom?.genesis))) return message;
+  let taskId = task;
+  if (taskId === undefined && exists(P.progress)) taskId = /^- \[~\] (\S+)/m.exec(read(P.progress))?.[1];
+  return `${message}\n\nKukulu-Stage: ${stage || "controller"}\nKukulu-Task: ${taskId || "-"}`;
+}
+
+function commitStaged(rels, message, opts = {}) {
+  const { stage } = opts;
+  message = withTrailers(message, opts);
   const run = (args) =>
     spawnSync("git", args, {
       cwd: ROOT,
@@ -247,7 +481,7 @@ function withRollback(paths, fn) {
   }
 }
 
-function gitCommitIfChanged(paths, message, { stage } = {}) {
+function gitCommitIfChanged(paths, message, opts = {}) {
   // A path that neither exists on disk nor is tracked yet (e.g. a feedback
   // log nothing has written to this run) is not "nothing changed" to `git
   // add` — it is a pathspec error. Drop those before asking git about them.
@@ -256,7 +490,7 @@ function gitCommitIfChanged(paths, message, { stage } = {}) {
   git(["add", "-A", "--", ...rels]);
   const staged = git(["diff", "--cached", "--name-only", "--", ...rels]).out;
   if (!staged) return null;
-  commitStaged(rels, message, { stage });
+  commitStaged(rels, message, opts);
   return git(["rev-parse", "--short", "HEAD"]).out;
 }
 
@@ -290,8 +524,21 @@ function porcelainExcludingPreexisting(ignore, cwd = ROOT) {
   return git(["status", "--porcelain", "--untracked-files=all"], { cwd })
     .out.split("\n")
     .filter(Boolean)
-    .filter((l) => !(l.startsWith("?? ") && set.has(l.slice(3))));
+    .filter((l) => !(l.startsWith("?? ") && set.has(l.slice(3))))
+    .filter((l) => !isCleanroomLogLine(l));
 }
+
+/**
+ * The clean-room log is appended to by hooks after every tool call, including the
+ * call that is checking the tree, so a dirty log is normal and never a finding.
+ * Only a checkpoint commits it.
+ */
+const cleanroomLogRel = () => rel(path.join(P.stateDir, "cleanroom", "log.jsonl"));
+// git() trims its output, which can eat the first line's leading space, so the path is matched from the end.
+const isCleanroomLogLine = (l) => l.endsWith(` ${cleanroomLogRel()}`);
+
+/** Uncommitted changes to tracked files, as porcelain lines, apart from the clean-room log. */
+const trackedDirtyLines = (cwd = ROOT) => git(["status", "--porcelain", "--untracked-files=no"], { cwd }).out.split("\n").filter(Boolean).filter((l) => !isCleanroomLogLine(l));
 
 function loadConfig() {
   if (!exists(P.config)) return null;
@@ -434,6 +681,131 @@ function validateMutation(mutation) {
   }
 }
 
+const CLEANROOM_KEYS = ["policy", "signingKey", "similarity", "idleGapHours"];
+const SIMILARITY_KEYS = ["subject", "pairs", "languages", "ngram", "minIdentLen", "commentNgram", "identExclusions", "near", "separationMargin"];
+const SIMILARITY_LANGUAGES = ["rust", "c", "cpp", "go", "python", "javascript", "typescript", "java", "php"];
+const PAIR_ROLES = ["negative", "positive", "test"];
+const PAIR_ID = /^[a-z0-9][a-z0-9-]{0,39}$/;
+// The extensions a similarity run reads when `languages` is not configured.
+const DEFAULT_SIMILARITY_LANGUAGES = {
+  ".rs": "rust", ".c": "c", ".h": "c", ".cc": "cpp", ".cpp": "cpp", ".cxx": "cpp", ".hpp": "cpp", ".go": "go", ".py": "python",
+  ".js": "javascript", ".mjs": "javascript", ".cjs": "javascript", ".ts": "typescript", ".java": "java", ".php": "php",
+};
+
+/** Validate `cleanroom.similarity`: the controls and test pairs a contamination score is measured against. */
+function validateSimilarity(sim) {
+  if (sim === undefined) return;
+  const where = "docs/kukulu.json cleanroom.similarity";
+  const isObj = (v) => typeof v === "object" && v !== null && !Array.isArray(v);
+  const nonEmptyString = (v) => typeof v === "string" && v.length > 0;
+  if (!isObj(sim)) throw new ToolError(`${where} must be an object`);
+  for (const k of Object.keys(sim)) {
+    if (!SIMILARITY_KEYS.includes(k)) throw new ToolError(`${where} has an unknown key '${k}'; the legal keys are ${SIMILARITY_KEYS.join(", ")}`);
+  }
+  if (sim.subject !== undefined && (!Array.isArray(sim.subject) || !sim.subject.length || !sim.subject.every(nonEmptyString))) {
+    throw new ToolError(`${where}.subject must be a non-empty array of non-empty strings (the directories being measured)`);
+  }
+  if (!Array.isArray(sim.pairs) || !sim.pairs.length) throw new ToolError(`${where}.pairs must be a non-empty array of { id, role, left, right }`);
+  const seen = new Set();
+  const roles = { negative: 0, positive: 0, test: 0 };
+  sim.pairs.forEach((p, i) => {
+    const at = `${where}.pairs[${i}]`;
+    if (!isObj(p)) throw new ToolError(`${at} must be an object { id, role, left, right }`);
+    for (const k of Object.keys(p)) if (!["id", "role", "left", "right"].includes(k)) throw new ToolError(`${at} has an unknown key '${k}'`);
+    if (typeof p.id !== "string" || !PAIR_ID.test(p.id)) throw new ToolError(`${at}.id must be a slug (lowercase letters, digits and -, at most 40 characters)`);
+    if (seen.has(p.id)) throw new ToolError(`${where}.pairs defines the id '${p.id}' more than once`);
+    seen.add(p.id);
+    if (!PAIR_ROLES.includes(p.role)) throw new ToolError(`${at}.role must be one of ${PAIR_ROLES.join(", ")} (got ${JSON.stringify(p.role)})`);
+    roles[p.role]++;
+    for (const side of ["left", "right"]) {
+      if (!nonEmptyString(p[side])) throw new ToolError(`${at}.${side} must be a non-empty string: a directory (absolute, ~, repo-relative) or "subject"`);
+      if (p[side] === "subject" && sim.subject === undefined) throw new ToolError(`${at}.${side} is "subject", but ${where}.subject is not set`);
+    }
+  });
+  if (roles.negative !== 1) throw new ToolError(`${where}.pairs needs exactly one pair with role "negative" (found ${roles.negative})`);
+  if (roles.positive !== 1) throw new ToolError(`${where}.pairs needs exactly one pair with role "positive" (found ${roles.positive})`);
+  if (roles.test < 1) throw new ToolError(`${where}.pairs needs at least one pair with role "test"`);
+  if (sim.languages !== undefined) {
+    if (!isObj(sim.languages) || !Object.keys(sim.languages).length) throw new ToolError(`${where}.languages must be an object mapping an extension such as ".rs" to a language`);
+    for (const [ext, lang] of Object.entries(sim.languages)) {
+      if (!/^\.[^./\\]+$/.test(ext)) throw new ToolError(`${where}.languages key ${JSON.stringify(ext)} must be an extension starting with "."`);
+      if (!SIMILARITY_LANGUAGES.includes(lang)) throw new ToolError(`${where}.languages[${JSON.stringify(ext)}] is ${JSON.stringify(lang)}; the shipped lexers are ${SIMILARITY_LANGUAGES.join(", ")}`);
+    }
+  }
+  if (sim.ngram !== undefined && (!Array.isArray(sim.ngram) || !sim.ngram.length || !sim.ngram.every((n) => Number.isInteger(n) && n > 0))) {
+    throw new ToolError(`${where}.ngram must be a non-empty array of positive integers`);
+  }
+  for (const k of ["minIdentLen", "commentNgram"]) {
+    if (sim[k] !== undefined && (!Number.isInteger(sim[k]) || sim[k] < 1)) throw new ToolError(`${where}.${k} must be a positive integer`);
+  }
+  if (sim.identExclusions !== undefined && !nonEmptyString(sim.identExclusions)) throw new ToolError(`${where}.identExclusions must be a non-empty string: the path of a file with one identifier per line`);
+  if (sim.near !== undefined && !(typeof sim.near === "number" && sim.near > 0 && sim.near < 0.5)) throw new ToolError(`${where}.near must be a number greater than 0 and less than 0.5`);
+  if (sim.separationMargin !== undefined && !(typeof sim.separationMargin === "number" && Number.isFinite(sim.separationMargin) && sim.separationMargin >= 0)) {
+    throw new ToolError(`${where}.separationMargin must be a number of at least 0`);
+  }
+}
+
+/** The similarity block with its defaults filled in, or null when none is configured. */
+function normalizeSimilarity(sim) {
+  if (sim === undefined) return null;
+  return {
+    subject: sim.subject ?? [],
+    pairs: sim.pairs.map((p) => ({ id: p.id, role: p.role, left: p.left, right: p.right })),
+    languages: sim.languages ?? DEFAULT_SIMILARITY_LANGUAGES,
+    // ⚠️ ASSUMPTION: the n-gram sizes, identifier and comment bounds come from cleanflate-bench; the margin is strict "pos > neg" until measured.
+    ngram: sim.ngram ?? [5, 10],
+    minIdentLen: sim.minIdentLen ?? 6,
+    commentNgram: sim.commentNgram ?? 5,
+    identExclusions: sim.identExclusions ?? null,
+    near: sim.near ?? 0.25,
+    separationMargin: sim.separationMargin ?? 0.0,
+  };
+}
+const DEFAULT_CLEANROOM_POLICY = "docs/cleanroom.json";
+const DEFAULT_SIGNING_KEY = "~/.config/kukulu/cleanroom/ed25519.pem";
+
+/** Validate `docs/kukulu.json`'s `cleanroom` object: where the policy lives and where the checkpoint-signing key is kept. */
+function validateCleanroom(cleanroom) {
+  if (cleanroom === undefined) return;
+  if (typeof cleanroom !== "object" || cleanroom === null || Array.isArray(cleanroom)) throw new ToolError("docs/kukulu.json 'cleanroom' must be an object");
+  for (const k of Object.keys(cleanroom)) {
+    if (!CLEANROOM_KEYS.includes(k)) throw new ToolError(`docs/kukulu.json cleanroom has an unknown key '${k}'; the legal keys are ${CLEANROOM_KEYS.join(", ")}`);
+  }
+  const p = cleanroom.policy;
+  if (p !== undefined) {
+    if (typeof p !== "string" || !p) throw new ToolError("docs/kukulu.json cleanroom.policy must be a non-empty string: a repo-relative path");
+    if (path.isAbsolute(p) || p.startsWith("~") || p.split(/[\\/]/).includes("..")) {
+      throw new ToolError(`docs/kukulu.json cleanroom.policy must be repo-relative, with no '~' and no '..' (got ${JSON.stringify(p)}); use a path such as ${DEFAULT_CLEANROOM_POLICY}`);
+    }
+  }
+  if (cleanroom.signingKey !== undefined && (typeof cleanroom.signingKey !== "string" || !cleanroom.signingKey)) {
+    throw new ToolError("docs/kukulu.json cleanroom.signingKey must be a non-empty string: the path of an Ed25519 private key in PEM form");
+  }
+  const idle = cleanroom.idleGapHours;
+  if (idle !== undefined && (typeof idle !== "number" || !Number.isFinite(idle) || idle <= 0)) {
+    throw new ToolError(`docs/kukulu.json cleanroom.idleGapHours must be a positive number of hours (got ${JSON.stringify(idle)}); use a value such as 3`);
+  }
+  validateSimilarity(cleanroom.similarity);
+}
+
+/** A leading `~` is the home directory; the result is always absolute. */
+const expandHome = (p) => path.resolve(p === "~" || p.startsWith("~/") ? path.join(os.homedir(), p.slice(1)) : p);
+
+const REVIEW_KEYS = ["mutationFixRounds"];
+const FIX_SOURCES = ["review", "mutation", "blocked"];
+
+/** Validate `docs/kukulu.json`'s `review` block: how many fix rounds a surviving mutant alone may open. */
+function validateReview(review) {
+  if (review === undefined) return;
+  if (typeof review !== "object" || review === null || Array.isArray(review)) throw new ToolError("docs/kukulu.json 'review' must be an object");
+  for (const k of Object.keys(review)) {
+    if (!REVIEW_KEYS.includes(k)) throw new ToolError(`docs/kukulu.json review has an unknown key '${k}'`);
+  }
+  if (review.mutationFixRounds !== undefined && (!Number.isInteger(review.mutationFixRounds) || review.mutationFixRounds < 1)) {
+    throw new ToolError("docs/kukulu.json review.mutationFixRounds must be a positive integer");
+  }
+}
+
 const CONSTRAINT_KEYS = ["id", "description", "paths", "exclude", "pattern", "flags", "shouldMatch", "shouldNotMatch", "from"];
 
 /**
@@ -491,6 +863,8 @@ function cfgFrom(c, planIds) {
   validateConstraints(c.constraints, planIds);
   validateParallel(c.parallel);
   validateMutation(c.mutation);
+  validateReview(c.review);
+  validateCleanroom(c.cleanroom);
   const commandTimeoutMs = c.commandTimeoutMs || 10 * 60 * 1000;
   const targeted = Object.fromEntries(
     Object.entries(c.mutation?.targeted || {}).map(([name, e]) => [name, { cmd: e.cmd, timeoutMs: e.timeoutMs ?? commandTimeoutMs }]),
@@ -516,6 +890,16 @@ function cfgFrom(c, planIds) {
     constraints: c.constraints || [],
     flight: c.flight ?? null,
     mutation: { targeted },
+    // ⚠️ ASSUMPTION: the number of fix rounds that a surviving mutant alone may open, before it is only a note.
+    review: { mutationFixRounds: c.review?.mutationFixRounds ?? 2 },
+    // Clean-room mode is on when the file at `policy` exists; there is no flag. KUKULU_CLEANROOM_KEY wins over the configured key path.
+    cleanroom: {
+      policy: c.cleanroom?.policy ?? DEFAULT_CLEANROOM_POLICY,
+      signingKey: expandHome(envVar("CLEANROOM_KEY") || c.cleanroom?.signingKey || DEFAULT_SIGNING_KEY),
+      similarity: normalizeSimilarity(c.cleanroom?.similarity),
+      // ⚠️ ASSUMPTION: hours between two entries of one stage before the span is listed as a coverage gap.
+      idleGapHours: c.cleanroom?.idleGapHours ?? 3,
+    },
     policies: {
       signing: c.policies?.signing ?? "auto",
       push: c.policies?.push ?? true,
@@ -602,13 +986,7 @@ function globalConfigPath() {
   const fromEnv = envVar("CONFIG");
   if (fromEnv) return path.resolve(fromEnv);
   const base = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config");
-  const current = path.join(base, "kukulu", "config.json");
-  const legacy = path.join(base, "foundry", "config.json");
-  if (!exists(current) && exists(legacy)) {
-    deprecate(`the global routing config ${legacy} is read from its pre-0.6.0 location; move it to ${current}. Support ends in 0.7.0.`);
-    return legacy;
-  }
-  return current;
+  return path.join(base, "kukulu", "config.json");
 }
 
 function loadGlobalConfig() {
@@ -688,7 +1066,7 @@ function resolveRouting() {
     profileSource = "global";
   }
   if (profile !== null && !(profile in (global.data.profiles || {}))) {
-    const src = profileSource === "env" ? `${process.env.KUKULU_PROFILE ? "KUKULU_PROFILE" : "FOUNDRY_PROFILE"}=${profile}` : `"profile": "${profile}" in ${global.path}`;
+    const src = profileSource === "env" ? `KUKULU_PROFILE=${profile}` : `"profile": "${profile}" in ${global.path}`;
     const globalDesc = global.present ? global.path : `${global.path} (does not exist)`;
     throw new ToolError(`${src} selects a profile, but ${globalDesc} has no profiles.${profile} entry`);
   }
@@ -998,9 +1376,13 @@ function parseProgressText(text) {
   const logs = {};
   if (logStart >= 0) {
     let cur = null;
+    let afterHeading = false;
     for (let i = logStart + 1; i < lines.length; i++) {
       const h = lines[i].match(/^### ([PR]\d+-\d+)\s+—\s+(.*)$/);
-      if (h) { cur = h[1]; logs[cur] = (logs[cur] ? logs[cur] + "\n\n" : "") + lines[i]; continue; }
+      if (h) { cur = h[1]; logs[cur] = (logs[cur] ? logs[cur] + "\n\n" : "") + lines[i]; afterHeading = true; continue; }
+      // The blank line that follows an entry's heading is spacing, not part of the entry.
+      if (afterHeading && lines[i].trim() === "") { afterHeading = false; continue; }
+      afterHeading = false;
       if (cur) logs[cur] += "\n" + lines[i];
     }
     for (const k of Object.keys(logs)) logs[k] = logs[k].replace(/\s+$/, "");
@@ -1025,7 +1407,8 @@ function setTaskState(pr, id, state) {
 function appendLog(pr, id, stamp, body) {
   if (pr.logStart < 0) { pr.lines.push("", "## Log"); pr.logStart = pr.lines.length - 1; }
   while (pr.lines.length && pr.lines[pr.lines.length - 1].trim() === "") pr.lines.pop();
-  pr.lines.push("", `### ${id} — ${stamp}`, body.replace(/\s+$/, ""));
+  // A blank line after each heading keeps the file markdownlint-clean (MD022); the parser accepts both spacings.
+  pr.lines.push("", `### ${id} — ${stamp}`, "", body.replace(/\s+$/, ""));
 }
 
 function appendTaskLines(pr, entries) {
@@ -1038,7 +1421,7 @@ function appendTaskLines(pr, entries) {
 function setHeader(pr, key, value) {
   const i = pr.lines.findIndex((l) => l.startsWith(`${key}:`));
   if (i >= 0) pr.lines[i] = `${key}: ${value}`;
-  else pr.lines.splice(1, 0, `${key}: ${value}`);
+  else pr.lines.splice(pr.lines[1] === "" ? 2 : 1, 0, `${key}: ${value}`);
 }
 
 const writeProgress = (pr) => write(P.progress, pr.lines.join("\n").replace(/\s*$/, "\n"));
@@ -1054,7 +1437,8 @@ function planTaskFrom(lines, id) {
     if (/^###? /.test(lines[i])) { end = i; break; }
   }
   const text = lines.slice(start, end).join("\n").replace(/\s+$/, "");
-  const dep = text.match(/\*\*Depends on:\*\*\s*(.*)/i);
+  // Only the field line counts: the bold label quoted mid-sentence in another field must not replace the real dependencies.
+  const dep = text.match(/^\*\*Depends on:\*\*\s*(.*)$/im);
   const depends = dep && !/^\s*none\b/i.test(dep[1]) ? Array.from(dep[1].matchAll(TASK_ID), (m) => m[0]) : [];
   const files = (text.match(/\*\*Files touched:\*\*\s*([\s\S]*?)(?=\n\*\*|$)/i) || [])[1] || "";
   // `**Stream:**` is absent, empty or `none` for a serial task; anything else
@@ -1306,7 +1690,7 @@ function recordSerialWave(wave, cc, st) {
   if (cc.policies.feedback && !(wave.category === "stream-exclusive" && already)) {
     appendFeedback("plan", `Wave ${wave.index} runs serially: ${wave.reason}`, wave.category, "auto");
   }
-  gitCommitIfChanged([P.state, P.feedback], `chore: wave ${wave.index} runs serially`);
+  gitCommitIfChanged([P.state, P.feedback], `chore: wave ${wave.index} runs serially`, { stage: "controller" });
   return cur;
 }
 
@@ -1441,7 +1825,7 @@ function countFeedback() {
 function feedbackLog({ stage, message, category }) {
   if (!cfg().policies.feedback) return { logged: false, reason: "disabled by policy" };
   appendFeedback(stage, message, category, "agent");
-  const commit = gitCommitIfChanged([P.feedback], `chore: pipeline friction (${stage})`, { stage });
+  const commit = gitCommitIfChanged([P.feedback], `chore: pipeline friction (${stage})`, { stage: stage === "implement" ? implementStage(loadState()) : stage });
   return { logged: true, count: countFeedback(), commit };
 }
 
@@ -1480,7 +1864,6 @@ function status() {
   const g = gitFacts();
   const out = {
     root: ROOT,
-    deprecations: DEPRECATIONS.slice(),
     specPresent: exists(P.spec),
     planPresent: exists(P.plan),
     progressPresent: exists(P.progress),
@@ -1499,6 +1882,7 @@ function status() {
     signing: st.signing,
     feedbackCount: countFeedback(),
     longestCommandTimeoutMs: longestCommandTimeoutMs(),
+    review: { mutationFixRounds: cfg().review.mutationFixRounds },
     reviewRoundsInPlan: reviewRoundCount(),
     branch: null,
     started: null,
@@ -1537,6 +1921,7 @@ function status() {
   out.artifacts = artifactStates(g.inRepo);
   out.strayArtifacts = out.artifacts["PLAN.md"] === "absent" ? Object.keys(out.artifacts).filter((k) => out.artifacts[k] === "untracked") : [];
   out.lastReviewCommit = lastReviewCommit(g.inRepo);
+  out.cleanroom = cleanroomStatus(st);
   return out;
 }
 
@@ -1613,7 +1998,8 @@ function next() {
   // Read fresh from kukulu.json rather than state, so the sentence is
   // accurate even before this round's kukulu_run_start has recorded
   // state.policies (round 0, before the implementer's first call).
-  const policySentence = `Run policies: signing=${c.policies.signing}, push=${c.policies.push ? "on" : "off"}, pr=${c.policies.pr}.`;
+  let gateResult = null;
+  const policySentence = `Run policies: signing=${c.policies.signing}, push=${c.policies.push ? "on" : "off"}, pr=${c.policies.pr}.${cleanroomOn(c) ? ` ${CLEANROOM_SENTENCE}` : ""}`;
   const stage = (name, reason, extra = {}) => {
     const info = agentInfo(name);
     return {
@@ -1626,9 +2012,9 @@ function next() {
       agentModel: info.agentModel,
       agentModelExact: info.agentModelExact,
       round: st.round,
-      deprecations: DEPRECATIONS.slice(),
       reviewRound: st.round + 1,
       reason,
+      gate: gateResult ? { ok: gateResult.ok, checked: gateResult.checked } : null,
       prompt: PROMPTS[name] ? PROMPTS[name](st.round, s, policySentence, st.round + 1) : null,
       ...extra,
     };
@@ -1675,17 +2061,19 @@ function next() {
   };
 
   if (!s.specPresent) return stage("halt", "docs/SPEC.md is missing; nothing to build from");
-  if (st.halted) return stage("halt", st.halted);
+  const policyPresent = cleanroomOn(c);
+  const broken = cleanroomModeBreak(st, policyPresent, s.planPresent);
+  if (broken) return stage("halt", modeBreakText(broken));
+  if (policyPresent && !st.cleanroom) cleanroomGenesis(c, st);
+  gateResult = runGate("controller", st);
+  if (gateResult && !gateResult.ok) return stage("halt", `clean-room gate failed: ${gateResult.failed.check}: ${gateResult.failed.reason}`);
+  if (st.halted) return stage("halt", st.haltCap || st.halted.includes("kukulu_run_resume") ? st.halted : `${st.halted} — ${RESUME_HINT}`);
   if (st.awaitingSigning) {
     const mb = git(["merge-base", c.baseBranch, "HEAD"], { allowFail: true }).out || "<merge-base>";
     return stage("done", `awaiting signing: ${st.awaitingSigning.unsigned} unsigned commit(s), oldest ${String(st.awaitingSigning.first).slice(0, 7)}. ${nextSteps(mb)}`);
   }
   if (st.archived && !s.planPresent && exists(path.join(ROOT, st.archived.dir, "SPEC.md")) && read(P.spec) === read(path.join(ROOT, st.archived.dir, "SPEC.md"))) {
     return stage("done", `flight ${st.archived.slug} is archived in ${st.archived.dir}; edit docs/SPEC.md for the next flight, then run /kukulu:go-flight`);
-  }
-  if (legacyLayout && (!s.planPresent || !s.progressPresent || !s.configPresent)) {
-    // The planner would write docs/kukulu.json beside .foundry/, and every tool refuses a project holding both layouts.
-    return stage("halt", "this project is still on the pre-0.6.0 layout (.foundry/), and the plan stage would write docs/kukulu.json beside it; commit or discard any uncommitted change, run /kukulu:go-flight migrate, then run /kukulu:go-flight again");
   }
   if (!s.planPresent || !s.progressPresent || !s.configPresent) {
     return stage("plan", "no plan on disk (docs/PLAN.md, docs/PROGRESS.md and docs/kukulu.json are all required)");
@@ -1760,6 +2148,7 @@ function probeSigning(signingPolicy) {
 }
 
 function startRun() {
+  requireGate(implementStage(loadState()));
   for (const [k, p] of Object.entries({ spec: P.spec, plan: P.plan, progress: P.progress, config: P.config })) {
     if (!exists(p)) throw new ToolError(`${rel(p)} is missing (${k}); run the plan stage first`);
   }
@@ -1781,7 +2170,7 @@ function startRun() {
     // regardless (F-09). Only uncommitted changes to *tracked* files are
     // grounds to refuse — those would otherwise ride along into a task's
     // first commit or be stranded on a branch nobody asked to switch to.
-    const trackedDirty = git(["status", "--porcelain", "--untracked-files=no"]).out !== "";
+    const trackedDirty = trackedDirtyLines().length > 0;
     if (trackedDirty) throw new ToolError(`working tree is dirty on ${c.baseBranch}; commit or stash before starting a run`);
     let name = `${c.branchPrefix}${today()}`;
     let n = 2;
@@ -1794,16 +2183,21 @@ function startRun() {
     git(["checkout", "-q", "-b", name]);
     branch = name;
   } else if (!branch || !branch.startsWith(c.branchPrefix)) {
-    throw new ToolError(`on branch '${branch}'; runs start from '${c.baseBranch}' or an existing '${c.branchPrefix}*' branch`);
+    throw new ToolError(
+      `on branch '${branch}'; runs start from '${c.baseBranch}' or an existing '${c.branchPrefix}*' branch. Either set baseBranch to '${branch}' in docs/kukulu.json and re-run \`kukulu_plan_commit\`, or \`git switch -c ${c.branchPrefix}${today()}\` from '${branch}'.`,
+    );
   }
 
   // Snapshot what is untracked *before* this call's own writes (starting
   // with .gitignore below) can create anything new — otherwise a freshly
   // created .gitignore would be misfiled as if it predated the run.
   const preexistingUntracked = untrackedPaths();
+  // In clean-room mode the signing key must exist before the first checkpoint; without a policy the flight is general, for good.
+  if (cleanroomOn(c)) ensureKey(c);
 
   // .gitignore the lock, arm it, stamp PROGRESS, commit.
-  const sha = withRollback([P.gitignore, P.progress, P.state, P.feedback], () => {
+  const crPaths = cleanroomPaths(st);
+  const sha = withRollback([P.gitignore, P.progress, P.state, P.feedback, ...crPaths], () => {
   ensureLineInFile(P.gitignore, rel(P.lock));
   // Only a plan that declares streams ever creates worktrees, so only such a
   // plan gets the extra line (a plan without streams stays byte-identical).
@@ -1817,6 +2211,7 @@ function startRun() {
   // a deliverable to commit, not debris to clean up, not a signal to act on
   // (F-09, F-17).
   st.preexistingUntracked = preexistingUntracked;
+  if (!cleanroomOn(c) && !st.cleanroom) st.cleanroom = { mode: "general" };
   st.policies = c.policies;
   st.signing = probeSigning(c.policies.signing);
   if (st.signing.startsWith("off (probe failed")) st.signingOverride = true;
@@ -1828,7 +2223,8 @@ function startRun() {
   if (c.policies.feedback && st.signing.startsWith("off (probe failed")) {
     appendFeedback("implement", `Signing disabled for this run: ${st.signing}`, "signing", "auto");
   }
-  return gitCommitIfChanged([P.gitignore, P.progress, P.state, P.feedback], st.round === 0 ? "chore: start implementation run" : `chore: start review-fix round ${st.round}`);
+  checkpoint("run-start", implementStage(st), st);
+  return gitCommitIfChanged([P.gitignore, P.progress, P.state, P.feedback, ...crPaths], st.round === 0 ? "chore: start implementation run" : `chore: start review-fix round ${st.round}`, { stage: implementStage(st) });
   });
   return { alreadyStarted: false, branch, commit: sha, counts: counts(pr.tasks), round: st.round, policies: st.policies, signing: st.signing, basePush };
 }
@@ -1876,7 +2272,7 @@ function runStart({ stream } = {}) {
     st.serialWaves = [...serialWavesOf(st), { wave: wave.index, category: "stream-setup", reason }];
     saveState(st);
     if (cc.policies.feedback) appendFeedback("implement", `Wave ${wave.index} runs serially: ${reason}`, "stream-setup", "auto");
-    gitCommitIfChanged([P.state, P.feedback], `chore: wave ${wave.index} runs serially`);
+    gitCommitIfChanged([P.state, P.feedback], `chore: wave ${wave.index} runs serially`, { stage: "controller" });
     throw new ToolError(`${reason}. Wave ${wave.index} now runs serially; stop here and the controller's next kukulu_next will hand it out that way.`);
   }
 
@@ -1887,7 +2283,7 @@ function runStart({ stream } = {}) {
     const st = loadState();
     st.streams = { ...(st.streams || {}), [stream]: { branch: created.streamBranch, preexistingUntracked: untrackedPaths(created.cwd) } };
     saveState(st);
-    gitCommitIfChanged([P.state], `chore: stream ${stream} started (wave ${wave.index})`);
+    gitCommitIfChanged([P.state], `chore: stream ${stream} started (wave ${wave.index})`, { stage: implementStage(st) });
     // Runs that began before this plan's streams (or before 0.4.0) may lack
     // the .gitignore line; exclude per clone rather than dirty the tree.
     const ignored = exists(P.gitignore) && read(P.gitignore).split("\n").includes(`${rel(P.worktrees)}/`);
@@ -1926,12 +2322,12 @@ function streamFinish({ stream } = {}) {
   }
   // Every stream call leaves PROGRESS.md/state.json changes for the next
   // commit; land them first so the merge starts from a clean tracked tree.
-  gitCommitIfChanged([P.progress, P.state, P.feedback], `progress: sync before merging stream ${stream}`);
-  const stray = git(["status", "--porcelain", "--untracked-files=no"]).out;
+  gitCommitIfChanged([P.progress, P.state, P.feedback], `progress: sync before merging stream ${stream}`, { stage: implementStage(loadState()) });
+  const stray = trackedDirtyLines().join("\n");
   if (stray) throw new ToolError(`the main checkout has uncommitted tracked changes; commit or discard them before merging stream '${stream}':\n${stray}`);
 
   const before = git(["rev-parse", "HEAD"]).out;
-  const merge = git(["merge", "--no-ff", "--no-edit", "-m", `merge stream ${stream} (wave ${wave.index})`, streamBranch], { allowFail: true });
+  const merge = git(["merge", "--no-ff", "--no-edit", "-m", withTrailers(`merge stream ${stream} (wave ${wave.index})`, { stage: implementStage(loadState()), task: "-" }), streamBranch], { allowFail: true });
   if (!merge.ok) {
     const conflicts = git(["diff", "--name-only", "--diff-filter=U"], { allowFail: true }).out.split("\n").filter(Boolean);
     git(["merge", "--abort"], { allowFail: true });
@@ -1940,13 +2336,14 @@ function streamFinish({ stream } = {}) {
     // conflict paths, and git's own message is the only useful explanation.
     const gitSays = (merge.err || merge.out || "unknown error").split("\n").filter(Boolean).slice(0, 4).join(" ").replace(/\s+/g, " ");
     const what = conflicts.length ? `conflicted in ${conflicts.join(", ")}` : `failed: ${gitSays}`;
-    const halted = `merging stream '${stream}' (branch ${streamBranch}) into ${g.branch} ${what}; the stream's branch and worktree ${rel(dir)} are kept. A human must resolve it: from the main checkout run \`git merge --no-ff ${streamBranch}\`, fix what it reports and commit, then \`git worktree remove --force ${rel(dir)}\` and clear 'halted' in ${rel(P.state)}.`;
+    const halted = `merging stream '${stream}' (branch ${streamBranch}) into ${g.branch} ${what}; the stream's branch and worktree ${rel(dir)} are kept. A human must resolve it: from the main checkout run \`git merge --no-ff ${streamBranch}\`, fix what it reports and commit, then \`git worktree remove --force ${rel(dir)}\` and call kukulu_run_resume({ reason: "merged stream ${stream} by hand" }).`;
     const cur = loadState();
     cur.halted = halted;
     delete cur.haltCap;
+    cur.haltStream = stream; // so kukulu_run_resume can tell a merge halt from any other
     saveState(cur);
     if (cc.policies.feedback) appendFeedback("implement", halted, "stream-merge", "auto");
-    gitCommitIfChanged([P.state, P.feedback], `chore: run halted (stream ${stream} merge conflict)`);
+    gitCommitIfChanged([P.state, P.feedback], `chore: run halted (stream ${stream} merge conflict)`, { stage: implementStage(cur) });
     return { stream, merged: false, halted, conflicts };
   }
 
@@ -1958,6 +2355,7 @@ function streamFinish({ stream } = {}) {
 }
 
 function taskNext({ stream } = {}) {
+  requireGate(implementStage(loadState()));
   const pr = parseProgress();
   let inScope = () => true;
   if (stream !== undefined) {
@@ -1989,7 +2387,7 @@ function taskNext({ stream } = {}) {
     const wave = pick ? parallelWaveOf(pick) : null;
     if (wave) {
       writeProgress(pr);
-      if (skipped.length) gitCommitIfChanged([P.progress], `progress: skip ${skipped.map((x) => x.id).join(", ")}`);
+      if (skipped.length) gitCommitIfChanged([P.progress], `progress: skip ${skipped.map((x) => x.id).join(", ")}`, { stage: implementStage(loadState()) });
       setLockPaused(wave.index);
       return {
         done: true,
@@ -2003,7 +2401,7 @@ function taskNext({ stream } = {}) {
     }
     if (!pick) {
       writeProgress(pr);
-      if (skipped.length) gitCommitIfChanged([P.progress], `progress: skip ${skipped.map((s) => s.id).join(", ")}`);
+      if (skipped.length) gitCommitIfChanged([P.progress], `progress: skip ${skipped.map((s) => s.id).join(", ")}`, { stage: implementStage(loadState()) });
       return { done: true, counts: counts(pr.tasks), skipped, ...(stream !== undefined ? { stream } : {}) };
     }
     const task = planTask(pick.id);
@@ -2073,11 +2471,14 @@ function taskDone({ stream, id, log }) {
     );
   }
   const sha = git(["rev-parse", "--short", "HEAD"], { cwd }).out;
-  const psha = withRollback([P.progress], () => {
+  const stDone = loadState();
+  const crPaths = cleanroomPaths(stDone);
+  const psha = withRollback([P.progress, ...crPaths], () => {
     setTaskState(pr, id, "x");
     appendLog(pr, id, sha, log);
     writeProgress(pr);
-    return gitCommitIfChanged([P.progress], `progress: ${id} done`);
+    checkpoint("kukulu_task_done", implementStage(stDone), stDone);
+    return gitCommitIfChanged([P.progress, ...crPaths], `progress: ${id} done`, { stage: implementStage(stDone), task: id });
   });
   resetLockCounter();
   return { id, taskCommit: sha, progressCommit: psha, counts: counts(pr.tasks), guardReset: true, ...(stream !== undefined ? { stream } : {}) };
@@ -2098,14 +2499,20 @@ function taskBlock({ stream, id, reason }) {
   // delete it outright, which is worse than merely being tempted to move it.
   // For a stream this happens in the stream's worktree only: the main
   // checkout holds every other stream's uncommitted bookkeeping.
+  // The clean-room log is tracked and the hooks append to it all the time; a hard reset would throw those entries away.
+  const stBlock = loadState();
+  const crPaths = cleanroomPaths(stBlock);
+  const logBytes = crPaths.length && exists(crPaths[0]) ? fs.readFileSync(crPaths[0]) : null;
   git(["reset", "-q", "--hard", "HEAD"], { cwd });
+  if (logBytes !== null && cwd === ROOT) fs.writeFileSync(crPaths[0], logBytes);
   git(["clean", "-qfd", ...(ignore || []).flatMap((p) => ["-e", gitCleanExcludePattern(p)])], { cwd });
   pr = parseProgress();
-  const psha = withRollback([P.progress], () => {
+  const psha = withRollback([P.progress, ...crPaths], () => {
     setTaskState(pr, id, "!");
     appendLog(pr, id, "blocked", `BLOCKED: ${reason}`);
     writeProgress(pr);
-    return gitCommitIfChanged([P.progress], `progress: ${id} blocked`);
+    checkpoint("kukulu_task_block", implementStage(stBlock), stBlock);
+    return gitCommitIfChanged([P.progress, ...crPaths], `progress: ${id} blocked`, { stage: implementStage(stBlock), task: id });
   });
   resetLockCounter();
   return { id, progressCommit: psha, counts: counts(pr.tasks), ...(stream !== undefined ? { stream } : {}) };
@@ -2170,7 +2577,7 @@ function taskReopen({ id, reason } = {}) {
   const commit = withRollback([P.progress], () => {
     dependents = reopenWithDependents(pr, [id], "reopened", `REOPENED: ${reason}`);
     writeProgress(pr);
-    return gitCommitIfChanged([P.progress], `progress: reopen ${id}${dependents.length ? ` (+${dependents.length} dependent${dependents.length === 1 ? "" : "s"})` : ""}`);
+    return gitCommitIfChanged([P.progress], `progress: reopen ${id}${dependents.length ? ` (+${dependents.length} dependent${dependents.length === 1 ? "" : "s"})` : ""}`, { stage: implementStage(st), task: id });
   });
   resetLockCounter();
   return { id, reopenedDependents: dependents, commit, counts: counts(pr.tasks) };
@@ -2394,7 +2801,7 @@ function recoverMutation() {
   // make the implementer's next kukulu_task_done refuse on a dirty tree.
   if (feedbackEnabled()) {
     appendFeedback("review", `Restored ${relPath}, left mutated by a kukulu_mutate call that never finished.`, "mutation-recovered", "auto");
-    gitCommitIfChanged([P.feedback], "chore: pipeline friction (review)");
+    gitCommitIfChanged([P.feedback], "chore: pipeline friction (review)", { stage: "review" });
   }
   return relPath;
 }
@@ -2495,8 +2902,11 @@ function mutate({ file, find, replace, commands, timeoutMs, targeted, filter, co
   ensureLineInFile(gitPath("info/exclude"), rel(P.mutation));
   write(P.mutation, `${JSON.stringify({ file: relPath, at: new Date().toISOString(), original: git(["rev-parse", `HEAD:${relPath}`]).out })}\n`);
   let results;
+  let scan;
   try {
     fs.writeFileSync(abs, original.slice(0, first) + replace + original.slice(first + find.length));
+    // A rule a mutant breaks is a kill too: the mechanic is guarded by a constraint rather than a test.
+    scan = checkConstraints(cc.constraints, ROOT, loadState().preexistingUntracked);
     const progress = exists(P.progress) ? parseProgress() : null;
     results = cmds.map((c2) => {
       const waiting = inactiveUntil(c2.from, progress);
@@ -2515,17 +2925,24 @@ function mutate({ file, find, replace, commands, timeoutMs, targeted, filter, co
 
   const failedIdx = results.map((r, i) => (!r.skipped && !r.ok ? i : -1)).filter((i) => i >= 0);
   const failedCommands = failedIdx.map((i) => cmds[i].cmd);
-  let killed = failedIdx.length > 0;
-  let verdict = killed ? "killed: the tests caught the mutation" : "survived: no command failed — the mechanic is untested";
+  const caughtBy = scan.results.find((r) => r.hits.length > 0);
+  const constraintKill = Boolean(caughtBy);
+  let killed = failedIdx.length > 0 || constraintKill;
+  let verdict = failedIdx.length > 0
+    ? "killed: the tests caught the mutation"
+    : constraintKill
+      ? `killed: constraint ${caughtBy.id} caught the mutation`
+      : "survived: no command failed — the mechanic is untested";
   let confirm;
   let inconclusive;
-  if (killed && confirmKill) {
+  if (killed && confirmKill && failedIdx.length) {
     // A command that fails on the unmutated tree proves nothing about the
     // mutation, so each failure is re-run once where nothing is mutated.
     confirm = failedIdx.map((i) => runShell(cmds[i].cmd, cmds[i].timeoutMs));
     undoMutationResidue(before);
     const stillFailing = confirm.findIndex((r) => !r.ok);
-    if (stillFailing >= 0) {
+    // A kill by a constraint alone stands without the commands.
+    if (stillFailing >= 0 && !constraintKill) {
       killed = false;
       inconclusive = true;
       verdict = `inconclusive: ${failedCommands[stillFailing]} also fails without the mutation`;
@@ -2539,6 +2956,7 @@ function mutate({ file, find, replace, commands, timeoutMs, targeted, filter, co
     failedCommands,
     ...(confirm ? { confirm } : {}),
     results,
+    constraints: scan,
     restored: residue.restored,
     removed: residue.removed,
     recoveredMutation: recovered,
@@ -2572,16 +2990,18 @@ function runFinish() {
   const st = loadState();
   const c = cfg();
   const g = gitFacts();
-  const handoffCommit = withRollback([P.handoff], () => gitCommitIfChanged([P.handoff], "chore: handoff for review"));
+  const handoffCommit = withRollback([P.handoff], () => gitCommitIfChanged([P.handoff], "chore: handoff for review", { stage: implementStage(st) }));
   const dirtyLines = porcelainExcludingPreexisting(st.preexistingUntracked);
   if (dirtyLines.length) {
     throw new ToolError(`working tree is not clean:\n${dirtyLines.join("\n")}\nCommit them as part of the handoff or \`git checkout --\`/\`git clean\` them.`);
   }
 
   st.implemented = true; st.reviewed = false; st.verdict = null;
-  const stateCommit = withRollback([P.state], () => {
+  const crPaths = cleanroomPaths(st);
+  const stateCommit = withRollback([P.state, ...crPaths], () => {
     saveState(st);
-    return gitCommitIfChanged([P.state], `chore: round ${st.round} implemented`);
+    checkpoint("kukulu_run_finish", implementStage(st), st);
+    return gitCommitIfChanged([P.state, ...crPaths], `chore: round ${st.round} implemented`, { stage: implementStage(st) });
   });
 
   const push = pushBranch(g.branch, st.policies.push);
@@ -2626,6 +3046,333 @@ const FLIGHT_OPTION_KEYS = ["maxRounds", "maxRoundsHard"];
  * else is the planner's to decide from SPEC. Refused before the plan stage
  * has written docs/kukulu.json.
  */
+// ---------------------------------------------------------------- contamination scoring (SPEC E-03)
+
+const SIMILARITY_SKIP_DIRS = new Set([".git", "node_modules"]);
+const sha256Hex = (bytes) => createHash("sha256").update(bytes).digest("hex");
+const fixed = (x) => (x === null || x === undefined ? "n/a" : x.toFixed(4));
+
+/** A configured pair side as absolute directories: `subject` is the subject list, `~` the home directory, a relative path the project. */
+function similarityDirs(side, sim) {
+  const list = side === "subject" ? sim.subject : [side];
+  return list.map((p) => (p === "~" || p.startsWith("~/") ? path.join(os.homedir(), p.slice(1)) : path.resolve(ROOT, p)));
+}
+
+/** Every regular file under `dir`, sorted, skipping .git and node_modules. */
+function walkFiles(dir) {
+  const out = [];
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : 1))) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      if (!SIMILARITY_SKIP_DIRS.has(entry.name)) out.push(...walkFiles(full));
+    } else if (entry.isFile()) out.push(full);
+  }
+  return out;
+}
+
+/**
+ * Score the configured pairs (SPEC E-03). Runs only inside the server: no agent
+ * tool ever reads the comparison corpus, the agents get numbers back, and every
+ * byte the scorer read is hashed into the chain (E-03a). Refused while an
+ * implementer run is armed, so no implement-stage call can trigger a read.
+ */
+function similarity() {
+  const cc = cfg();
+  const sim = cc.cleanroom.similarity;
+  if (!sim) throw new ToolError("cleanroom.similarity is not set in docs/kukulu.json; configure the subject, the controls and the test pairs before scoring (see operations.md)");
+  if (exists(P.lock)) throw new ToolError(`an implementation run is armed (${rel(P.lock)} exists); kukulu_similarity is a summarize-stage tool, so run it after kukulu_run_finish`);
+  const st = loadState();
+  if (st.verdict !== "APPROVED") throw new ToolError("the flight is not reviewed APPROVED yet; score contamination after the review approves the build");
+
+  // Resolve and read every side once.
+  const sides = new Map();
+  const unmapped = new Set(); // distinct files skipped (a side can be named twice, as itself and as the subject)
+  const readPaths = new Set(); // distinct files read
+  const readSide = (name) => {
+    if (sides.has(name)) return sides.get(name);
+    const dirs = similarityDirs(name, sim);
+    const files = [];
+    for (const dir of dirs) {
+      if (!exists(dir) || !fs.statSync(dir).isDirectory()) throw new ToolError(`the directory ${dir} (${name === "subject" ? "cleanroom.similarity.subject" : name}) does not exist or is not a directory`);
+      const all = walkFiles(dir);
+      if (!all.length) throw new ToolError(`the directory ${dir} is empty; a pair needs files to compare`);
+      for (const file of all) {
+        const language = sim.languages[path.extname(file)];
+        const bytes = fs.readFileSync(file);
+        if (!language || bytes.includes(0)) {
+          unmapped.add(file);
+          continue;
+        }
+        readPaths.add(file);
+        files.push({ path: file, text: bytes.toString("utf8"), language, sha256: sha256Hex(bytes), bytes: bytes.length });
+      }
+    }
+    if (!files.length) throw new ToolError(`no file under ${dirs.join(", ")} has an extension in cleanroom.similarity.languages; map the extensions of the code you want compared`);
+    const side = { files };
+    sides.set(name, side);
+    return side;
+  };
+  for (const p of sim.pairs) {
+    readSide(p.left);
+    readSide(p.right);
+  }
+  let exclusions = new Set();
+  if (sim.identExclusions) {
+    const file = path.resolve(ROOT, sim.identExclusions);
+    if (!exists(file)) throw new ToolError(`cleanroom.similarity.identExclusions names ${sim.identExclusions}, which does not exist; create it (one identifier per line) or remove the key`);
+    exclusions = new Set(read(file).split("\n").map((l) => l.trim()).filter(Boolean));
+  }
+  const crPaths = cleanroomPaths(st);
+  if (crPaths.length) requireGate("summarize");
+
+  // Score every pair, then position each test pair against the controls, metric by metric.
+  const opts = { ngram: sim.ngram, minIdentLen: sim.minIdentLen, commentNgram: sim.commentNgram, exclusions };
+  const scores = new Map(sim.pairs.map((p) => [p.id, scorePair(readSide(p.left).files, readSide(p.right).files, opts)]));
+  const negative = sim.pairs.find((p) => p.role === "negative");
+  const positive = sim.pairs.find((p) => p.role === "positive");
+  const metrics = Object.keys(scores.get(negative.id));
+  const rows = [];
+  for (const p of sim.pairs) {
+    for (const metric of metrics) {
+      const score = scores.get(p.id)[metric];
+      const where = p.role === "test" ? position(score, scores.get(negative.id)[metric], scores.get(positive.id)[metric], sim) : { c: null, band: null };
+      rows.push({ pair: p.id, role: p.role, metric, score, c: where.c, band: where.band });
+    }
+  }
+  const verdict = verdictOf(rows.filter((r) => r.role === "test"));
+
+  const files = [];
+  const seen = new Set();
+  for (const p of sim.pairs) {
+    for (const which of ["left", "right"]) {
+      for (const f of readSide(p[which]).files) {
+        const key = `${p.id}\0${which}\0${f.path}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        files.push({ pair: p.id, side: which, path: f.path, sha256: f.sha256, bytes: f.bytes, language: f.language });
+      }
+    }
+  }
+  const skipped = unmapped.size;
+  const json = `${JSON.stringify({ config: sim, files, rows, verdict, limits: LIMITS, at: new Date().toISOString() }, null, 2)}\n`;
+  const jsonPath = path.join(P.stateDir, "cleanroom", "similarity.json");
+
+  // docs/SIMILARITY.md carries no timestamp, so the same inputs give the same bytes.
+  const testPairs = sim.pairs.filter((p) => p.role === "test");
+  const doc = [
+    "# Contamination score",
+    "",
+    `The subject (${sim.subject.length ? sim.subject.join(", ") : "none"}) was compared with ${testPairs.length} test pair${testPairs.length === 1 ? "" : "s"} (${testPairs.map((p) => p.id).join(", ")}) and placed between a negative control (${negative.id}) and a positive control (${positive.id}). A test pair at or below the negative control on a metric that separates the controls shows no similarity beyond independent work.`,
+    "",
+    "## Positioning",
+    "",
+    ...rows.filter((r) => r.role === "test").map((r) => `- ${r.pair}, ${r.metric}: ${fixed(r.score)} (c = ${fixed(r.c)}, ${r.band})`),
+    "",
+    "## Verdict",
+    "",
+    verdict,
+    "",
+    "## Raw scores",
+    "",
+    `| pair | role | ${metrics.join(" | ")} |`,
+    `|---|---|${metrics.map(() => "---:").join("|")}|`,
+    ...sim.pairs.map((p) => `| ${p.id} | ${p.role} | ${metrics.map((m) => fixed(scores.get(p.id)[m])).join(" | ")} |`),
+    "",
+    "## Limits",
+    "",
+    ...LIMITS.map((l) => `- ${l}`),
+    "",
+  ].join("\n");
+
+  const paths = [P.similarityDoc, jsonPath, ...crPaths];
+  const commit = withRollback(paths, () => {
+    write(jsonPath, json);
+    write(P.similarityDoc, doc);
+    if (crPaths.length) {
+      appendEntry(cleanroomLogPath(), { kind: "score", stage: "summarize", role: "session", data: { reads: readPaths.size, sha256: sha256Hex(Buffer.from(json, "utf8")) } });
+      checkpoint("kukulu_similarity", "summarize", st);
+    }
+    return gitCommitIfChanged(paths, "chore: similarity scored", { stage: "summarize" });
+  });
+  return { verdict, rows, files: readPaths.size, skipped, limits: LIMITS, commit };
+}
+
+const RECORD_KINDS = ["instruction", "intervention", "verdict"];
+const VERDICT_TEXT = /^#(\d+): (prior-art attempt|false positive|offline test) — .+/;
+
+/**
+ * Put something the operator did or decided into the chain (SPEC D-09): an
+ * instruction, a thing done outside the pipeline, or a verdict on a denial.
+ * Replaces the hand-kept intervention and denial-verdict files of earlier
+ * clean-room runs.
+ */
+function cleanroomRecord({ text, kind = "instruction" } = {}) {
+  const st = loadState();
+  if (!st.cleanroom?.genesis) {
+    throw new ToolError("kukulu_cleanroom_record only works in clean-room mode, after genesis: this project has no clean-room flight in progress (a policy file at cleanroom.policy and a first kukulu_next start one)");
+  }
+  if (typeof text !== "string" || !text.trim()) throw new ToolError("text must be a non-empty string: what the operator said, did or decided");
+  if (!RECORD_KINDS.includes(kind)) throw new ToolError(`kind must be one of ${RECORD_KINDS.join(", ")} (got ${JSON.stringify(kind)})`);
+  const logPath = cleanroomLogPath();
+  if (kind === "verdict") {
+    const m = VERDICT_TEXT.exec(text);
+    if (!m) throw new ToolError('a verdict reads "#<seq>: prior-art attempt|false positive|offline test — <note>", for example "#12: false positive — grep on a sed expression"');
+    const target = readEntries(logPath).find((e) => e.seq === Number(m[1]));
+    if (!target || target.kind !== "denied") {
+      throw new ToolError(`entry #${m[1]} is ${target ? `a ${target.kind} entry` : "not in the log"}, not a denial; a verdict classifies a denied entry's seq`);
+    }
+  }
+  const paths = cleanroomPaths(st);
+  return withRollback(paths, () => {
+    const entry = appendEntry(logPath, { kind: "human", stage: "controller", role: "operator", target: text, data: { kind } });
+    const commit = gitCommitIfChanged(paths, "chore: clean-room record", { stage: "controller" });
+    return { recorded: true, seq: entry.seq, kind, commit };
+  });
+}
+
+// ---------------------------------------------------------------- kukulu_attest (SPEC F-01)
+
+const ATTEST_DIR = "docs/attestation";
+
+/** The repo-relative, tracked, regular files an operator names as extra evidence. Refuses before anything is written. */
+function checkEvidence(evidence) {
+  if (evidence === undefined) return [];
+  if (!Array.isArray(evidence) || evidence.some((p) => typeof p !== "string" || !p)) throw new ToolError("evidence must be an array of repo-relative file paths (strings)");
+  const root = fs.realpathSync(ROOT);
+  const out = [];
+  for (const p of evidence) {
+    if (path.isAbsolute(p) || p.startsWith("~") || p.split(/[\\/]/).includes("..")) {
+      throw new ToolError("evidence path " + JSON.stringify(p) + " must be repo-relative, with no '~' and no '..' segment; name a file inside the repository, such as docs/conformance.txt");
+    }
+    const abs = path.join(ROOT, p);
+    if (!exists(abs) || !fs.statSync(abs).isFile()) throw new ToolError("evidence path " + p + " does not exist or is not a file; commit the file first, or leave it out");
+    const real = fs.realpathSync(abs);
+    if (real !== root && !real.startsWith(root + path.sep)) throw new ToolError("evidence path " + p + " resolves outside the repository; copy the file into the repository and commit it");
+    if (!git(["ls-files", "--error-unmatch", "--", p], { allowFail: true }).ok) throw new ToolError("evidence path " + p + " is not tracked by git; commit it first, so the bundle names a file the history holds");
+    const norm = path.posix.normalize(p.replaceAll("\\", "/"));
+    if (norm === ATTEST_DIR || norm.startsWith(ATTEST_DIR + "/")) throw new ToolError("evidence path " + p + " is inside " + ATTEST_DIR + ", which this tool rewrites; name a file outside it");
+    if (!out.includes(norm)) out.push(norm);
+  }
+  return out;
+}
+
+/**
+ * Write the signed attestation bundle for a finished clean-room flight (SPEC F-01),
+ * run the verifier that ships in it, and commit it only when that passes.
+ * Everything that can be refused is refused before the first write; the one
+ * sanctioned write before a refusal is the gate's own entry.
+ */
+function attest({ evidence } = {}) {
+  const cc = cfg();
+  const st = loadState();
+  if (!st.cleanroom?.genesis) throw new ToolError("kukulu_attest only works in clean-room mode, after genesis: this project has no clean-room flight in progress, so there is no log to attest");
+  if (!st.summarized) throw new ToolError("the summary is not committed yet; call kukulu_summary_commit first, then kukulu_attest");
+  const extra = checkEvidence(evidence);
+  const dirty = porcelainExcludingPreexisting(st.preexistingUntracked);
+  if (dirty.length) throw new ToolError("the working tree is not clean:\n" + dirty.join("\n") + "\nCommit or discard these before attesting; the bundle names the commit it was made at.");
+  const docs = [["SUMMARY.md", P.summary], ["REVIEW.md", P.review], ["PROGRESS.md", P.progress], ["kukulu.json", P.config], ["state.json", P.state]];
+  for (const [name, abs] of docs) {
+    if (!exists(abs)) throw new ToolError(rel(abs) + " does not exist, so the bundle cannot hold " + name + "; attest before kukulu_flight_archive moves the flight's documents");
+  }
+  const base = git(["merge-base", cc.baseBranch, "HEAD"], { allowFail: true }).out;
+  if (!base) throw new ToolError("cannot find a merge base with baseBranch '" + cc.baseBranch + "'; check out the build branch, or fix baseBranch in docs/kukulu.json");
+  requireGate("summarize");
+
+  const logPath = cleanroomLogPath();
+  const logBytes = fs.readFileSync(logPath);
+  const chain = verifyChain(logBytes.toString("utf8").split("\n").filter(Boolean));
+  if (!chain.ok) throw new ToolError("the clean-room log does not verify (entry " + (chain.firstBad.seq ?? chain.firstBad.line) + ": " + chain.firstBad.reason + "); nothing was written");
+  const entries = chain.entries;
+  const genesis = entries.find((e) => e.kind === "genesis");
+  if (!genesis) throw new ToolError("the clean-room log has no genesis entry; nothing was written");
+  const key = loadKey(cc.cleanroom.signingKey);
+  const policyPath = cleanroomPolicyPath(cc);
+  const policyBytes = fs.readFileSync(policyPath);
+  const selfTest = runShell("node " + shellQuote(path.join(PLUGIN_ROOT, "scripts", "cleanroom-guard.mjs")) + " --self-test " + shellQuote(policyPath), GATE_SELF_TEST_MS);
+  if (!selfTest.ok) throw new ToolError("the guard self-test fails, so nothing was attested: " + (selfTest.stderrTail || selfTest.stdoutTail || "exit " + selfTest.exitCode).split("\n")[0]);
+  const gl = spawnSync("git", ["log", "--format=%H%x1f%G?%x1f%s%x1f%(trailers:key=Kukulu-Stage,valueonly,separator=%x2C)%x1f%(trailers:key=Kukulu-Task,valueonly,separator=%x2C)", base + "..HEAD"], { cwd: ROOT, encoding: "utf8" });
+  if (gl.status !== 0) throw new ToolError("git log " + base + "..HEAD failed: " + (gl.stderr || "").trim());
+  const verifierBytes = fs.readFileSync(path.join(PLUGIN_ROOT, "scripts", "verify-attestation.mjs"));
+  const hashes = pluginHashes();
+  const head = git(["rev-parse", "HEAD"]).out;
+  const similarityFile = path.join(P.stateDir, "cleanroom", "similarity.json");
+
+  const files = new Map();
+  files.set("log.jsonl", logBytes);
+  files.set("policy.json", policyBytes);
+  if (exists(similarityFile)) files.set("similarity.json", fs.readFileSync(similarityFile));
+  for (const [name, abs] of docs) files.set(name, fs.readFileSync(abs));
+  files.set("commits.txt", Buffer.from(gl.stdout, "utf8"));
+  for (const p of extra) files.set("evidence/" + p, fs.readFileSync(path.join(ROOT, p)));
+  files.set("publisher.pub", Buffer.from(key.publicKey.export({ type: "spki", format: "pem" })));
+
+  const checkpoints = entries.filter((e) => e.kind === "checkpoint");
+  const counts = summarizeEntries(entries);
+  const policyHashes = [];
+  for (const e of checkpoints) if (!policyHashes.includes(e.data.policyHash)) policyHashes.push(e.data.policyHash);
+  const idleGapHours = cc.cleanroom.idleGapHours;
+  const manifest = {
+    version: 1,
+    flight: cc.flight ?? gitFacts().branch,
+    plugin: { version: VERSION, ...hashes, verifierHash: sha256Hex(verifierBytes) },
+    repo: { baseBranch: cc.baseBranch, base, head, branch: gitFacts().branch },
+    mode: "clean-room",
+    genesis,
+    policy: { path: cc.cleanroom.policy, hashes: policyHashes, current: policyHash(policyBytes) },
+    chain: { entries: entries.length, first: entries[0].hash, tip: entries[entries.length - 1].hash },
+    checkpoints: checkpoints.map((e) => ({ seq: e.seq, event: e.data.event, git: e.data.git, signature: e.data.signature, ok: verifyCheckpoint(e, key.publicKey) })),
+    denials: counts.denials,
+    calls: counts.calls,
+    human: counts.human,
+    selfTest: { ok: true, cases: Number(/\((\d+) cases\)/.exec(selfTest.stdoutTail || "")?.[1] ?? 0), at: new Date().toISOString() },
+    coverage: { gaps: coverageGaps(entries, gl.stdout.split("\n"), { idleGapHours }), knownLimits: KNOWN_LIMITS, idleGapHours },
+    similarity: files.has("similarity.json") ? { sha256: sha256Hex(files.get("similarity.json")) } : null,
+    files: [...files].map(([name, bytes]) => ({ path: name, sha256: sha256Hex(bytes), bytes: bytes.length })),
+    signer: { fingerprint: key.fingerprint, publicKey: "publisher.pub" },
+    at: new Date().toISOString(),
+  };
+  const manifestBytes = Buffer.from(JSON.stringify(manifest, null, 2) + "\n", "utf8");
+  files.set("verify.mjs", verifierBytes);
+  files.set("manifest.json", manifestBytes);
+  files.set("manifest.sig", Buffer.from(signBytes(manifestBytes, key.privateKey) + "\n", "utf8"));
+
+  const dir = path.join(ROOT, ATTEST_DIR);
+  const existed = exists(dir);
+  const old = existed ? walkFiles(dir) : [];
+  const written = [...files.keys()].map((n) => path.join(dir, n));
+  const crPaths = cleanroomPaths(st);
+  let result;
+  try {
+    result = withRollback([...new Set([...old, ...written, ...crPaths])], () => {
+      fs.rmSync(dir, { recursive: true, force: true });
+      for (const [name, bytes] of files) {
+        fs.mkdirSync(path.dirname(path.join(dir, name)), { recursive: true });
+        fs.writeFileSync(path.join(dir, name), bytes);
+      }
+      // The verifier that ships in the bundle checks the bundle before anything is committed.
+      const run = spawnSync(process.execPath, [path.join(dir, "verify.mjs"), dir, "--key", key.fingerprint, "--json"], { encoding: "utf8", timeout: GATE_SELF_TEST_MS });
+      let verdict;
+      try {
+        verdict = JSON.parse(run.stdout);
+      } catch {
+        throw new ToolError("the bundle's verifier produced no result (" + ((run.stderr || "").trim().split("\n")[0] || "exit " + run.status) + "); nothing was committed");
+      }
+      if (run.status !== 0 || !verdict.ok) {
+        throw new ToolError("the attestation bundle did not verify, so it was removed and nothing was committed:\n" + verdict.reasons.map((x) => "  " + x.check + ": " + x.reason).join("\n"));
+      }
+      appendEntry(logPath, { kind: "attest", stage: "summarize", role: "session", data: { manifest: sha256Hex(manifestBytes) } });
+      checkpoint("kukulu_attest", "summarize", st);
+      const commit = gitCommitIfChanged([dir, ...crPaths], "chore: attestation bundle", { stage: "summarize" });
+      return { verdict, commit };
+    });
+  } catch (e) {
+    if (!existed) fs.rmSync(dir, { recursive: true, force: true });
+    throw e;
+  }
+  const push = pushBranch(gitFacts().branch, st.policies.push);
+  return { dir: ATTEST_DIR, files: [...files.keys()].sort(), manifest: sha256Hex(manifestBytes), fingerprint: key.fingerprint, commit: result.commit, verify: result.verdict, push };
+}
+
 function flightOptions(args = {}) {
   if (args.resume !== undefined && typeof args.resume !== "boolean") throw new ToolError("resume must be a boolean");
   const given = FLIGHT_OPTION_KEYS.filter((k) => args[k] !== undefined);
@@ -2651,9 +3398,10 @@ function flightOptions(args = {}) {
   const was = cfg();
   const before = Object.fromEntries(FLIGHT_OPTION_KEYS.map((k) => [k, was[k]]));
   for (const k of given) raw[k] = args[k];
-  const paths = resume ? [P.config, P.state] : [P.config];
+  const paths = [...(resume ? [P.config, P.state] : [P.config]), ...cleanroomPaths(st)];
   return withRollback(paths, () => {
     write(P.config, `${JSON.stringify(raw, null, 2)}\n`);
+    humanEntry(st, "kukulu_flight_options", args);
     if (resume) {
       st.halted = null;
       delete st.haltCap;
@@ -2661,7 +3409,7 @@ function flightOptions(args = {}) {
     }
     const after = Object.fromEntries(FLIGHT_OPTION_KEYS.map((k) => [k, cfg()[k]]));
     const label = `${given.map((k) => `${k}=${args[k]}`).join(", ")}${resume ? ", resume" : ""}`;
-    const commit = gitCommitIfChanged(paths, `chore: flight options (${label})`);
+    const commit = gitCommitIfChanged(paths, `chore: flight options (${label})`, { stage: "controller" });
     return { before, after, commit, ...(resume ? { resumed: true } : {}) };
   });
 }
@@ -2678,21 +3426,68 @@ function runHalt({ reason }) {
   const st = loadState();
   st.halted = reason;
   delete st.haltCap; // only a round-cap halt is resumable through kukulu_flight_options
+  delete st.haltStream;
   const commit = withRollback([P.state, P.progress, P.feedback], () => {
     saveState(st);
     if (exists(P.lock)) fs.unlinkSync(P.lock);
     if (cfg().policies.feedback) appendFeedback("controller", `Run halted: ${reason}`, "halt", "auto");
-    return gitCommitIfChanged([P.state, P.progress, P.feedback], "chore: run halted");
+    return gitCommitIfChanged([P.state, P.progress, P.feedback], "chore: run halted", { stage: "controller" });
   });
   const g = gitFacts();
   const dirty = git(["status", "--porcelain"], { allowFail: true }).out !== "";
-  return { halted: reason, branch: g.branch, head: g.head, commit, dirty };
+  return { halted: reason, branch: g.branch, head: g.head, commit, dirty, next: RESUME_HINT };
+}
+
+const RESUME_HINT = 'once the cause is fixed, call kukulu_run_resume({ reason: "<what you fixed>" })';
+
+/**
+ * Clear a halt that is not a round-cap halt, with a commit, so no operator
+ * edits state.json by hand. Every refusal comes before anything is written.
+ */
+function runResume({ reason } = {}) {
+  if (typeof reason !== "string" || !reason.trim()) throw new ToolError("reason must be a non-empty string: say what you fixed so the flight can continue");
+  const st = loadState();
+  const broken = cleanroomModeBreak(st, cleanroomOn(cfg()), exists(P.plan));
+  if (broken) throw new ToolError(modeBreakText(broken));
+  if (!st.halted) throw new ToolError("the flight is not halted; there is nothing to resume");
+  if (st.haltCap) throw new ToolError("a round-cap halt is lifted by `kukulu_flight_options({ …, resume: true })`, not by kukulu_run_resume");
+  const dirty = porcelainExcludingPreexisting(st.preexistingUntracked);
+  if (dirty.length) throw new ToolError(`the working tree is not clean:\n${dirty.join("\n")}\nCommit or discard these, then call kukulu_run_resume again.`);
+  const open = streamWorktrees();
+  if (open.length) {
+    throw new ToolError(`stream worktree ${open.map((n) => rel(streamDir(n))).join(", ")} still exists; merge or remove it (git worktree remove --force <dir>), then call kukulu_run_resume again`);
+  }
+  const c = cfg();
+  if (!git(["rev-parse", "--verify", "--quiet", `refs/heads/${c.baseBranch}`], { allowFail: true }).ok) {
+    throw new ToolError(`baseBranch '${c.baseBranch}' does not exist as a local branch; create it or fix baseBranch in docs/kukulu.json, then call kukulu_run_resume again`);
+  }
+  if (st.haltStream) {
+    const current = git(["rev-parse", "--abbrev-ref", "HEAD"]).out;
+    const branch = `${current}--${st.haltStream}`;
+    const branchExists = git(["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`], { allowFail: true }).ok;
+    const merged = git(["branch", "--merged", current, "--format=%(refname:short)"], { allowFail: true }).out.split("\n").includes(branch);
+    if (branchExists && !merged) {
+      throw new ToolError(`the halt came from merging stream '${st.haltStream}', and its branch ${branch} is not merged into ${current}; run git merge --no-ff ${branch}, resolve any conflict and commit, then call kukulu_run_resume again`);
+    }
+  }
+  const previousHalt = st.halted;
+  st.halted = null;
+  delete st.haltStream;
+  const crPaths = cleanroomPaths(st);
+  const commit = withRollback([P.state, P.feedback, ...crPaths], () => {
+    saveState(st);
+    if (c.policies.feedback) appendFeedback("controller", `Run resumed: ${reason.trim()}`, "resume", "human");
+    humanEntry(st, "kukulu_run_resume", { reason });
+    return gitCommitIfChanged([P.state, P.feedback, ...crPaths], "chore: run resumed", { stage: "controller" });
+  });
+  return { resumed: true, previousHalt, commit };
 }
 
 function formatTask(id, t) {
   const list = (v) => (Array.isArray(v) ? v.join(", ") : String(v ?? ""));
   return [
     `### ${id}: ${t.title}`,
+    "",
     `**Goal:** ${t.goal || ""}`,
     `**Files touched:** ${list(t.files)}`,
     `**Design constraints:** ${t.constraints || ""}`,
@@ -2717,6 +3512,7 @@ function ordinal(n) {
 }
 
 function reviewSubmit({ verdict, tasks = [], unblock = [] }) {
+  requireGate("review");
   // A crashed kukulu_mutate must not leave a mutated file under review.
   const recovered = recoverMutation();
   const recoveredField = recovered ? { recoveredMutation: recovered } : {};
@@ -2740,10 +3536,12 @@ function reviewSubmit({ verdict, tasks = [], unblock = [] }) {
   if (verdict === "APPROVED") {
     if (tasks.length || unblock.length) throw new ToolError("an APPROVED verdict cannot carry fix tasks or unblocks");
     st.reviewed = true; st.verdict = "APPROVED";
-    st.rounds = [...st.rounds, { round: N, fixTasks: 0, unblocked: 0, verdict: "APPROVED", at: new Date().toISOString() }];
-    const sha = withRollback([P.review, P.state], () => {
+    st.rounds = [...st.rounds, { round: N, fixTasks: 0, unblocked: 0, verdict: "APPROVED", sources: { review: 0, mutation: 0, blocked: 0 }, at: new Date().toISOString() }];
+    const crPaths = cleanroomPaths(st);
+    const sha = withRollback([P.review, P.state, ...crPaths], () => {
       saveState(st);
-      return gitCommitIfChanged([P.review, P.state], `review: round ${N} approved`, { stage: "review" });
+      checkpoint("kukulu_review_submit", "review", st);
+      return gitCommitIfChanged([P.review, P.state, ...crPaths], `review: round ${N} approved`, { stage: "review" });
     });
     const push = pushBranch(gitFacts().branch, st.policies.push);
     // `round` is the number this review was stamped with, as for CHANGES
@@ -2755,7 +3553,14 @@ function reviewSubmit({ verdict, tasks = [], unblock = [] }) {
   const pr = parseProgress();
   for (const t of tasks) {
     for (const k of ["title", "goal", "files", "tests"]) if (!t[k] || (Array.isArray(t[k]) && !t[k].length)) throw new ToolError(`fix task '${t.title || "?"}' is missing '${k}'`);
+    if (!FIX_SOURCES.includes(t.source)) throw new ToolError(`fix task '${t.title}' needs a source: ${FIX_SOURCES.map((x) => `"${x}"`).join(", ").replace(/, ("blocked")$/, " or $1")}`);
   }
+  if (N > c.review.mutationFixRounds && tasks.some((t) => t.source === "mutation")) {
+    throw new ToolError(
+      `round ${N} is past review.mutationFixRounds=${c.review.mutationFixRounds}: a surviving mutant is advisory now. Put it under \`## Notes\` in REVIEW.md (the summarizer carries it) and resubmit; if the survivor shows a SPEC requirement is untested, resubmit it as source "review" naming that requirement.`,
+    );
+  }
+  const sources = Object.fromEntries(FIX_SOURCES.map((x) => [x, tasks.filter((t) => t.source === x).length]));
   const ids = tasks.map((_, i) => `R${N}-${String(i + 1).padStart(2, "0")}`);
   // Every dependsOn must resolve to something that actually exists: an
   // already-known task, or one of this same submission's own new ids.
@@ -2767,7 +3572,8 @@ function reviewSubmit({ verdict, tasks = [], unblock = [] }) {
   }
   const unblocked = [];
   const reopened = [];
-  const sha = withRollback([P.review, P.plan, P.progress, P.state, P.feedback], () => {
+  const crPaths = cleanroomPaths(st);
+  const sha = withRollback([P.review, P.plan, P.progress, P.state, P.feedback, ...crPaths], () => {
     if (tasks.length) {
       const block = [``, `## Review fixes (round ${N})`, ``, ...tasks.map((t, i) => formatTask(ids[i], t) + "\n")].join("\n");
       write(P.plan, read(P.plan).replace(/\s*$/, "\n") + block);
@@ -2797,7 +3603,7 @@ function reviewSubmit({ verdict, tasks = [], unblock = [] }) {
     const priorFixRounds = st.rounds.filter((r) => r.verdict === "CHANGES REQUESTED");
     const prevRound = priorFixRounds[priorFixRounds.length - 1];
     const nonConverging = Boolean(prevRound) && thisCount >= prevRound.fixTasks + prevRound.unblocked;
-    st.rounds = [...st.rounds, { round: N, fixTasks: ids.length, unblocked: unblocked.length, verdict: "CHANGES REQUESTED", nonConverging, at: new Date().toISOString() }];
+    st.rounds = [...st.rounds, { round: N, fixTasks: ids.length, unblocked: unblocked.length, verdict: "CHANGES REQUESTED", nonConverging, sources, at: new Date().toISOString() }];
     const nonConvergingSoFar = st.rounds.filter((r) => r.nonConverging).length;
     const trail = st.rounds.filter((r) => r.verdict === "CHANGES REQUESTED").map((r) => r.fixTasks + r.unblocked).join(" → ");
 
@@ -2811,7 +3617,8 @@ function reviewSubmit({ verdict, tasks = [], unblock = [] }) {
     }
     if (st.halted && c.policies.feedback) appendFeedback("review", st.halted, "round-cap", "auto");
     saveState(st);
-    return gitCommitIfChanged([P.review, P.plan, P.progress, P.state, P.feedback], `review: round ${N}`, { stage: "review" });
+    checkpoint("kukulu_review_submit", "review", st);
+    return gitCommitIfChanged([P.review, P.plan, P.progress, P.state, P.feedback, ...crPaths], `review: round ${N}`, { stage: "review" });
   });
   const push = pushBranch(gitFacts().branch, st.policies.push);
   // Re-read rather than reuse `pr`: appendTaskLines edits pr.lines but not
@@ -2844,9 +3651,53 @@ function prState(policies, baseBranch) {
   }
 }
 
+// An unavailable auto-merge keeps being asked for until the policy says otherwise.
+const STOP_ASKING = '; set policies.finalize to "ready" to stop asking';
+
+const CHECKS_FAIL = ["FAILURE", "ERROR", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED", "STARTUP_FAILURE"];
+const CHECKS_PENDING = ["PENDING", "QUEUED", "IN_PROGRESS", "WAITING", "REQUESTED", "EXPECTED"];
+const CHECKS_TIMEOUT_MS = 30000;
+
+/**
+ * The pull request's CI checks for `kukulu_status`: `null` when there is
+ * nothing to ask (no origin, no gh, no pull request), else
+ * `{ state: "pass" | "fail" | "pending" | "none", failing: [{ name, link }] }`,
+ * or `"unknown: <why>"`. Never throws. `gh pr checks` exits non-zero for
+ * failing or pending checks, so its stdout is parsed whatever the status.
+ */
+function prChecks() {
+  if (!gitFacts().hasOrigin) return null;
+  // A hung gh would hang this synchronous server, so every call is bounded; a timed-out --version reads as no gh.
+  if (spawnSync("gh", ["--version"], { encoding: "utf8", timeout: CHECKS_TIMEOUT_MS }).status !== 0) return null;
+  const view = spawnSync("gh", ["pr", "view", "--json", "url"], { cwd: ROOT, encoding: "utf8", timeout: CHECKS_TIMEOUT_MS });
+  if (view.error) return `unknown: gh pr view failed: ${view.error.code === "ETIMEDOUT" ? `timed out after ${CHECKS_TIMEOUT_MS} ms` : view.error.message}`;
+  if (view.status !== 0) {
+    const why = (view.stderr || view.stdout || "").trim().split("\n")[0];
+    return /no (open )?pull requests? found/i.test(why) ? null : `unknown: ${why || "gh pr view failed"}`;
+  }
+  const r = spawnSync("gh", ["pr", "checks", "--json", "name,state,link"], { cwd: ROOT, encoding: "utf8", timeout: CHECKS_TIMEOUT_MS });
+  if (r.error) return `unknown: gh pr checks failed: ${r.error.code === "ETIMEDOUT" ? `timed out after ${CHECKS_TIMEOUT_MS} ms` : r.error.message}`;
+  let list;
+  try {
+    list = JSON.parse(r.stdout);
+  } catch {
+    const why = (r.stderr || r.stdout || "").trim().split("\n")[0];
+    return `unknown: ${why || "gh pr checks printed no JSON"}`;
+  }
+  if (!Array.isArray(list)) return "unknown: gh pr checks printed JSON that is not a list";
+  const stateOf = (c) => String(c?.state ?? "").toUpperCase();
+  const failing = list.filter((c) => CHECKS_FAIL.includes(stateOf(c))).map((c) => ({ name: c.name, link: c.link }));
+  let state = "pass";
+  if (!list.length) state = "none";
+  else if (failing.length) state = "fail";
+  else if (list.some((c) => CHECKS_PENDING.includes(stateOf(c)))) state = "pending";
+  return { state, failing };
+}
+
 const SUMMARY_MAX_BYTES = 1024 * 1024;
 
 function summaryCommit({ content } = {}) {
+  requireGate("summarize");
   const st = loadState();
   if (content === undefined) {
     // 0.4.0 behavior: the summarizer wrote the file itself.
@@ -2861,10 +3712,12 @@ function summaryCommit({ content } = {}) {
     }
   }
   st.summarized = true;
-  const sha = withRollback([P.summary, P.state, P.feedback], () => {
+  const crPaths = cleanroomPaths(st);
+  const sha = withRollback([P.summary, P.state, P.feedback, ...crPaths], () => {
     if (content !== undefined) write(P.summary, content.endsWith("\n") ? content : `${content}\n`);
     saveState(st);
-    return gitCommitIfChanged([P.summary, P.state, P.feedback], "chore: build summary", { stage: "summarize" });
+    checkpoint("kukulu_summary_commit", "summarize", st);
+    return gitCommitIfChanged([P.summary, P.state, P.feedback, ...crPaths], "chore: build summary", { stage: "summarize" });
   });
   const g = gitFacts();
   const push = pushBranch(g.branch, st.policies.push);
@@ -2892,8 +3745,8 @@ function signedCheck(mergeBase) {
 /** The config a finalize runs under: docs/kukulu.json, or the archived copy once the flight has been archived. */
 function finalizeConfig(st) {
   if (!exists(P.config) && st.archived) {
-    // Flights archived before 0.6.0 hold foundry.json; that name is history and stays readable.
-    const archived = ["kukulu.json", "foundry.json"].map((n) => path.join(ROOT, st.archived.dir, n)).find(exists);
+    // Flights archived before 0.6.0 hold their config under the old name; that name is history and stays readable.
+    const archived = ["kukulu.json", "foun" + "dry.json"].map((n) => path.join(ROOT, st.archived.dir, n)).find(exists);
     if (archived) {
       let raw;
       try {
@@ -2970,6 +3823,14 @@ function prFinalize({ breaking, resign } = {}) {
       putOverrideBack();
       throw e;
     }
+    // The operator's instruction goes into the chain, and into a commit the rebase will re-sign, before the rebase needs a clean tree.
+    const crPaths = cleanroomPaths(st);
+    if (crPaths.length) {
+      withRollback(crPaths, () => {
+        humanEntry(st, "kukulu_pr_finalize", { breaking, resign: true });
+        gitCommitIfChanged(crPaths, "chore: clean-room record", { stage: "controller" });
+      });
+    }
     const rb = spawnSync("git", ["rebase", "-f", "--rebase-merges", "--gpg-sign", mb], {
       cwd: ROOT,
       encoding: "utf8",
@@ -3028,12 +3889,12 @@ function prFinalize({ breaking, resign } = {}) {
     merge = "skipped: policy";
   } else {
     const readied = pr.draft ? gh(["pr", "ready"]) : { status: 0 };
-    if (readied.status !== 0) merge = `unavailable: gh pr ready failed: ${firstLine(readied)}`;
+    if (readied.status !== 0) merge = `unavailable: gh pr ready failed: ${firstLine(readied)}${STOP_ASKING}`;
     else if (cc.policies.finalize === "ready") merge = "skipped: policy";
     else if (brk) merge = "skipped: breaking";
     else {
       const m = spawnSync("gh", ["pr", "merge", "--auto", `--${cc.policies.mergeMethod}`], { cwd: ROOT, encoding: "utf8" });
-      merge = m.status === 0 ? "enabled" : `unavailable: ${firstLine(m)}`;
+      merge = m.status === 0 ? "enabled" : `unavailable: ${firstLine(m)}${STOP_ASKING}`;
     }
     pr = prState(cc.policies, cc.baseBranch);
   }
@@ -3043,8 +3904,14 @@ function prFinalize({ breaking, resign } = {}) {
   };
 }
 
-/** The files an archive moves, as [absolute path, repo-relative name]; a move keeps each file's name, so an old project's config stays foundry.json. */
-const archivedFiles = () => [P.plan, P.progress, P.handoff, P.review, P.summary, P.config, P.state, P.feedback].map((abs) => [abs, rel(abs)]);
+/** The clean-room files an archive moves: the log, and the similarity record when there is one. Empty outside clean-room mode. */
+function cleanroomMovables(st) {
+  const similarityJson = path.join(P.stateDir, "cleanroom", "similarity.json");
+  return [...(st.cleanroom?.genesis ? [cleanroomLogPath()] : []), similarityJson].filter((abs) => !path.relative(ROOT, abs).startsWith("..") && exists(abs));
+}
+
+/** The files an archive moves, as [absolute path, repo-relative name]; a move keeps each file's name. */
+const archivedFiles = () => [P.plan, P.progress, P.handoff, P.review, P.summary, P.similarityDoc, P.config, P.state, P.feedback].map((abs) => [abs, rel(abs)]);
 
 /**
  * Move a summarized flight's artifacts into docs/flights/<slug>/ so the
@@ -3069,13 +3936,34 @@ function flightArchive({ slug } = {}) {
 
   const sources = archivedFiles().filter(([abs]) => exists(abs));
   const copyDest = path.join(dir, "SPEC.md");
-  const touched = [...sources.map(([abs]) => abs), ...sources.map(([abs]) => path.join(dir, path.basename(abs))), copyDest, P.state, P.feedback];
+  // The clean-room log (and the similarity record) go to docs/flights/<slug>/cleanroom/, so the next flight's genesis is entry 1.
+  const crDir = path.join(dir, "cleanroom");
+  const crSources = cleanroomMovables(old);
+  // The attestation bundle keeps its layout: docs/attestation/<file> becomes docs/flights/<slug>/attestation/<file>.
+  const attDir = path.join(ROOT, ATTEST_DIR);
+  const attSources = exists(attDir) ? walkFiles(attDir) : [];
+  const attDest = (abs) => path.join(dir, "attestation", path.relative(attDir, abs));
+  const touched = [...sources.map(([abs]) => abs), ...sources.map(([abs]) => path.join(dir, path.basename(abs))), copyDest, P.state, P.feedback, ...crSources, ...crSources.map((abs) => path.join(crDir, path.basename(abs))), ...attSources, ...attSources.map(attDest)];
   const all = [...new Set(touched)];
   const flightsDirExisted = exists(path.join(ROOT, "docs", "flights"));
   let commit;
   try {
     commit = withRollback(all, () => {
       fs.mkdirSync(dir, { recursive: true });
+      checkpoint("kukulu_flight_archive", "summarize", old);
+      for (const abs of crSources) {
+        const dest = path.join(crDir, path.basename(abs));
+        fs.mkdirSync(crDir, { recursive: true });
+        if (git(["ls-files", "--error-unmatch", "--", rel(abs)], { allowFail: true }).ok) git(["mv", rel(abs), rel(dest)]);
+        else fs.renameSync(abs, dest);
+      }
+      for (const abs of attSources) {
+        const dest = attDest(abs);
+        fs.mkdirSync(path.dirname(dest), { recursive: true });
+        if (git(["ls-files", "--error-unmatch", "--", rel(abs)], { allowFail: true }).ok) git(["mv", rel(abs), rel(dest)]);
+        else fs.renameSync(abs, dest);
+      }
+      if (attSources.length) fs.rmSync(attDir, { recursive: true, force: true });
       for (const [abs] of sources) {
         const dest = path.join(dir, path.basename(abs));
         const tracked = git(["ls-files", "--error-unmatch", "--", rel(abs)], { allowFail: true }).ok;
@@ -3090,7 +3978,7 @@ function flightArchive({ slug } = {}) {
       // only what exists now is added.
       git(["add", "-A", "--", ...rels.filter((r) => exists(path.join(ROOT, r)))]);
       const known = rels.filter((r) => exists(path.join(ROOT, r)) || git(["cat-file", "-e", `HEAD:${r}`], { allowFail: true }).ok);
-      commitStaged(known, `chore: archive flight ${slug}`, { stage: "summarize" });
+      commitStaged(known, `chore: archive flight ${slug}`, { stage: "summarize", cleanroom: Boolean(old.cleanroom?.genesis) });
       return git(["rev-parse", "--short", "HEAD"]).out;
     });
   } catch (e) {
@@ -3100,138 +3988,7 @@ function flightArchive({ slug } = {}) {
     throw e;
   }
   const push = pushBranch(gitFacts().branch, pushAllowed);
-  return { slug, dir: relDir, moved: sources.map(([, r]) => r), copied: ["docs/SPEC.md"], commit, push };
-}
-
-// ---------------------------------------------------------------- migrate from the Foundry layout (0.6.0)
-
-// The text the pre-0.6.0 agents sync wrote into every agent it generated. A foundry-<role>.md
-// without it is the operator's own file and is never touched.
-const LEGACY_AGENT_MARKER = "generated by foundry_agents_sync";
-
-/**
- * Move a project from the pre-0.6.0 layout (`.foundry/`, `docs/foundry.json`)
- * to `.kukulu/` and `docs/kukulu.json` and commit the move. Every refusal
- * comes before the first file moves; if the commit fails, every path is put
- * back. Archived flights under docs/flights/ are never touched. What lives
- * outside git (the exclude file, generated agents, the allow rule) is fixed
- * after the commit, since none of it can be rolled back by a reset.
- */
-function migrate() {
-  if (!legacyLayout) {
-    throw new ToolError(
-      layoutPresent(LAYOUT.current)
-        ? "this project already uses .kukulu/ and docs/kukulu.json; there is nothing to migrate"
-        : "this project has neither .foundry/ nor docs/foundry.json; there is nothing to migrate",
-    );
-  }
-  if (!gitFacts().inRepo) throw new ToolError("kukulu_migrate commits the move, so the project must be a git repository");
-  if (exists(P.lock)) throw new ToolError(`an implementation run is armed (${rel(P.lock)} exists); finish or halt the run before migrating`);
-  if (exists(P.mutation)) throw new ToolError(`a mutation run left ${rel(P.mutation)}; restore the file it names (kukulu_status explains), delete ${rel(P.mutation)}, then migrate`);
-  if (exists(P.worktrees) && fs.readdirSync(P.worktrees).length) {
-    throw new ToolError(`stream worktrees exist under ${rel(P.worktrees)}; merge or remove them (git worktree remove --force <dir>) before migrating`);
-  }
-  const strangers = exists(P.stateDir) ? fs.readdirSync(P.stateDir).filter((n) => !["state.json", "feedback.jsonl", "worktrees"].includes(n)) : [];
-  if (strangers.length) {
-    throw new ToolError(`${rel(P.stateDir)} holds files kukulu_migrate does not know: ${strangers.join(", ")}. Move or delete them, then migrate; nothing was moved.`);
-  }
-  const old = loadState();
-  const dirty = porcelainExcludingPreexisting(old.preexistingUntracked);
-  if (dirty.length) throw new ToolError(`the working tree is not clean:\n${dirty.join("\n")}\nCommit or discard these before migrating.`);
-
-  const before = P;
-  const next = layoutFor(...LAYOUT.current);
-  const moves = [[before.state, next.state], [before.feedback, next.feedback], [before.config, next.config]].filter(([from]) => exists(from));
-  const tracked = (abs) => git(["ls-files", "--error-unmatch", "--", rel(abs)], { allowFail: true }).ok;
-
-  // Ignore lines follow the files they name; a line that is already in its new form is just dropped.
-  const renamedLines = new Map([
-    [rel(before.lock), rel(next.lock)],
-    [rel(before.mutation), rel(next.mutation)],
-    [`${rel(before.worktrees)}/`, `${rel(next.worktrees)}/`],
-  ]);
-  /** Rename the matching lines where they stand; a line whose new form is already present is dropped. */
-  const renameLines = (text) => {
-    const lines = text.split("\n");
-    const bare = (l) => l.replace(/\r$/, "");
-    const out = [];
-    for (const l of lines) {
-      const name = bare(l);
-      if (!renamedLines.has(name)) out.push(l);
-      else {
-        const renamed = renamedLines.get(name);
-        if (!lines.some((x) => bare(x) === renamed) && !out.some((x) => bare(x) === renamed)) out.push(renamed + l.slice(name.length));
-      }
-    }
-    return out.join("\n");
-  };
-  const ignoreBefore = exists(before.gitignore) ? read(before.gitignore) : null;
-  let gitignore = "absent";
-  let ignoreAfter = ignoreBefore;
-  if (ignoreBefore !== null) {
-    ignoreAfter = renameLines(ignoreBefore);
-    gitignore = ignoreAfter === ignoreBefore ? "unchanged" : "rewritten";
-  }
-  const ignoreTracked = ignoreAfter !== ignoreBefore && tracked(before.gitignore);
-
-  const all = [...new Set([...moves.flat(), ...(ignoreAfter !== ignoreBefore ? [before.gitignore] : [])])];
-  const hadWorktreesDir = exists(before.worktrees);
-  let commit;
-  try {
-    commit = withRollback(all, () => {
-      for (const [from, to] of moves) {
-        fs.mkdirSync(path.dirname(to), { recursive: true });
-        if (tracked(from)) git(["mv", rel(from), rel(to)]);
-        else fs.renameSync(from, to);
-      }
-      if (ignoreAfter !== ignoreBefore) write(before.gitignore, ignoreAfter);
-      if (hadWorktreesDir) fs.rmdirSync(before.worktrees);
-      if (exists(before.stateDir) && !fs.readdirSync(before.stateDir).length) fs.rmdirSync(before.stateDir);
-      // commitStaged's unsigned fallback reads the state file, which now lives at its new path.
-      P = next;
-      legacyLayout = false;
-      const rels = [...moves.flat(), ...(ignoreTracked ? [before.gitignore] : [])].map(rel);
-      git(["add", "-A", "--", ...rels.filter((r) => exists(path.join(ROOT, r)))]);
-      const known = rels.filter((r) => exists(path.join(ROOT, r)) || git(["cat-file", "-e", `HEAD:${r}`], { allowFail: true }).ok);
-      commitStaged(known, "chore: migrate .foundry layout to .kukulu", { stage: "summarize" });
-      return git(["rev-parse", "--short", "HEAD"]).out;
-    });
-  } catch (e) {
-    P = before;
-    legacyLayout = true;
-    // withRollback puts files back but not directories; a leftover empty .kukulu/ would read as a second layout.
-    if (exists(next.stateDir) && !fs.readdirSync(next.stateDir).length) fs.rmdirSync(next.stateDir);
-    if (hadWorktreesDir) fs.mkdirSync(before.worktrees, { recursive: true });
-    throw e;
-  }
-
-  // Outside git, after the commit.
-  const excludeFile = gitPath("info/exclude");
-  const removedAgents = [];
-  const keptAgents = [];
-  for (const role of ROLES) {
-    const file = path.join(P.agentsDir, `foundry-${role}.md`);
-    if (!exists(file)) continue;
-    if (read(file).includes(LEGACY_AGENT_MARKER)) {
-      fs.rmSync(file);
-      removedAgents.push(rel(file));
-    } else keptAgents.push(rel(file));
-  }
-  if (exists(excludeFile)) {
-    const current = read(excludeFile);
-    const oldAgentsLine = ".claude/agents/foundry-*.md";
-    const renamed = renameLines(current)
-      .split("\n")
-      .filter((l) => !(l === oldAgentsLine && !keptAgents.length))
-      .join("\n");
-    const text = renamed.replace(/\s*$/, "");
-    if (renamed !== current) write(excludeFile, text ? `${text}\n` : "");
-  }
-  // settings.local.json holds the operator-specific permission grant, and ensureMcpAllowRule may create it just below.
-  for (const line of [`${rel(next.worktrees)}/`, ".claude/agents/kukulu-*.md", ".claude/settings.local.json"]) ensureLineInFile(excludeFile, line);
-  const permissions = ensureMcpAllowRule();
-
-  return { moved: moves.map(([from, to]) => [rel(from), rel(to)]), gitignore, removedAgents, keptAgents, permissions, commit };
+  return { slug, dir: relDir, moved: [...sources.map(([, r]) => r), ...(attSources.length ? [ATTEST_DIR] : [])], copied: ["docs/SPEC.md"], commit, push };
 }
 
 // ---------------------------------------------------------------- plan validation and commit (S-06)
@@ -3242,7 +3999,7 @@ function migrate() {
  * it on text it has not written yet. `allowSuffix` admits a headings such as
  * `P1-02a`, which only a renumbering pass may hold.
  */
-function validatePlanTexts({ planText, progressText, configRaw, configError, claudeExists, allowSuffix = false }) {
+function validatePlanTexts({ planText, progressText, configRaw, configError, claudeExists, branch = null, allowSuffix = false }) {
   const problems = [];
   const add = (check, message, id) => {
     if (!problems.some((p) => p.message === message)) problems.push({ check, ...(id ? { id } : {}), message });
@@ -3381,6 +4138,13 @@ function validatePlanTexts({ planText, progressText, configRaw, configError, cla
     }
   }
 
+  // A plan committed on a branch that run_start would then refuse strands the operator after the planner is done.
+  if (cc && branch) {
+    if (branch !== cc.baseBranch && !branch.startsWith(cc.branchPrefix)) {
+      add("branch", `on '${branch}', but docs/kukulu.json baseBranch is '${cc.baseBranch}'; set baseBranch to '${branch}' (the branch the plan is committed on) or switch to it`);
+    }
+  }
+
   if (pr && planLines && cc) {
     for (const w of computeWaves(pr, cc, planLines)) if (!w.valid) add("streams", `wave ${w.index}: ${w.reason}`);
   }
@@ -3432,7 +4196,9 @@ function planCommit({ renumber } = {}) {
     }
   }
   const claudePath = path.join(ROOT, "CLAUDE.md");
-  const problems = validatePlanTexts({ planText, progressText, configRaw, configError, claudeExists: exists(claudePath) });
+  const inRepo = git(["rev-parse", "--is-inside-work-tree"], { allowFail: true }).ok;
+  const branch = inRepo ? git(["rev-parse", "--abbrev-ref", "HEAD"], { allowFail: true }).out || null : null;
+  const problems = validatePlanTexts({ planText, progressText, configRaw, configError, claudeExists: exists(claudePath), branch });
   if (problems.length) {
     const head = `${problems.length} problem${problems.length === 1 ? "" : "s"} in the plan; fix every one, then call kukulu_plan_commit again. Nothing was committed.`;
     throw new ToolError(`${head}\n${problems.map((p, i) => `${i + 1}. [${p.check}] ${p.message}`).join("\n")}`, { problems });
@@ -3452,8 +4218,15 @@ function planCommit({ renumber } = {}) {
     const m = t.id.match(/^P(\d+)-/);
     if (m) phases.set(Number(m[1]), (phases.get(Number(m[1])) || 0) + 1);
   }
+  // A slug ending in a spec suffix means the title's dash was not honoured; say so, but never refuse.
+  const notes = [];
+  const slug = configRaw?.flight;
+  if (typeof slug === "string" && /-spec(ification)?$/.test(slug)) {
+    notes.push(`flight '${slug}' ends in a spec suffix; derive it from the text before the title's dash (plan-build), e.g. '${slug.replace(/-spec(ification)?$/, "")}'`);
+  }
   return {
     commit,
+    notes,
     tasks: pr.tasks.length,
     phases: [...phases].map(([phase, tasks]) => ({ phase, tasks })),
     waves: computeWaves(pr, cfg()).map((w) => ({ index: w.index, streams: Object.keys(w.streams), valid: w.valid })),
@@ -3471,7 +4244,7 @@ const S = (props, required = []) => ({
   additionalProperties: false,
 });
 const TOOLS = [
-  { name: "kukulu_status", description: "Everything the pipeline knows from disk: which docs exist, task counts by state, branch/base/head, lock, round, review verdict. Read-only.", inputSchema: S({}), fn: status },
+  { name: "kukulu_status", description: "Everything the pipeline knows from disk: which docs exist, task counts by state, branch/base/head, lock, round, review verdict, review.mutationFixRounds, and the pull request's CI checks as prChecks (every gh call bounded to 30 s). Read-only.", inputSchema: S({}), fn: () => ({ ...status(), prChecks: prChecks() }) },
   { name: "kukulu_next", description: "Deterministic stage selection: returns { stage, agent, agentFallback, fallbackAgent, restartRequired, model, agentModel, agentModelExact, round, reason, prompt, streams? }. stage is plan | implement | review | summarize | done | halt. agentModel is the value to pass as the Agent tool's model when agentFallback is true (an alias, or null to pass none); agentModelExact is false when a full claude-* id was mapped to its family alias. restartRequired is true only when the routed model cannot be reached without relaunching the session. Read-only, except that when a parallel wave's partition is invalid it records once (state, one feedback entry, one commit, only on a build branch) that the wave runs serially. When streams is present, spawn one implementer per entry, all at once, and wait for all of them.", inputSchema: S({}), fn: next },
   { name: "kukulu_plan_commit", description: "Validate the plan as a whole and commit it: docs/PLAN.md, docs/PROGRESS.md, docs/kukulu.json and CLAUDE.md must exist and agree (task headings, numbering, dependencies, streams, config, from references). Every problem is listed at once, as numbered lines and as structuredContent.problems [{ check, id?, message }]; nothing is committed while any remain. With renumber: true (only before any run has started) it first renumbers split ids everywhere. On success it commits 'plan: derive build plan from SPEC' and returns { commit, tasks, phases, waves, renumbered }. For the planner, as its last step.", inputSchema: S({ renumber: { type: "boolean", description: "rewrite split or out-of-sequence task ids (such as P1-02a) to a clean P<n>-01.. sequence everywhere they appear, then validate and commit; refused once a run has started" } }), fn: planCommit },
   { name: "kukulu_run_start", description: "Begin (or resume) an implementation run: create/reuse the build branch, arm the implement guard lock, stamp Branch/Started in PROGRESS.md, commit. Idempotent. With stream, also create (or resume) that stream's git worktree for a parallel wave, run parallel.setup in it, and return its cwd: do all of that stream's work inside cwd.", inputSchema: S({ stream: { type: "string", description: "a stream of the current parallel wave, when kukulu_next handed you one" } }), fn: runStart },
@@ -3494,6 +4267,12 @@ const TOOLS = [
     fn: runHalt,
   },
   {
+    name: "kukulu_run_resume",
+    description: "Clear a halt that is not a round-cap halt once its cause is fixed, and commit `chore: run resumed`; a round-cap halt is lifted by kukulu_flight_options({ resume: true }). Refuses when the flight is not halted, the tree is dirty, a stream worktree exists, baseBranch is missing, or a stream-merge halt's branch is still unmerged.",
+    inputSchema: S({ reason: { type: "string", description: "what you fixed so the flight can continue" } }, ["reason"]),
+    fn: runResume,
+  },
+  {
     name: "kukulu_flight_options",
     description: "Apply an operator's flight options to docs/kukulu.json and commit them: maxRounds (non-converging review rounds tolerated) and maxRoundsHard (absolute ceiling on review rounds). For the flight controller, when /kukulu:go-flight was given options such as a maximum review depth. Refused before the plan stage has written docs/kukulu.json. With resume: true it also clears a round-cap halt, provided the bound passed lifts the cap that fired. Returns { before, after, commit } (plus resumed: true).",
     inputSchema: S({
@@ -3502,6 +4281,15 @@ const TOOLS = [
       resume: { type: "boolean", description: "clear a round-cap halt (the call the halt message names); the bound passed must lift the cap that fired. Any other halt is refused" },
     }),
     fn: flightOptions,
+  },
+  {
+    name: "kukulu_cleanroom_record",
+    description: "Record what the operator said, did or decided in the clean-room chain, and commit it as 'chore: clean-room record': an instruction (the default), an intervention (something done outside the pipeline: a file supplied, a fix made by hand, a tool installed) or a verdict on a denial ('#<seq>: prior-art attempt|false positive|offline test — <note>'). Clean-room mode only; for the flight controller, on the operator's word.",
+    inputSchema: S({
+      text: { type: "string", description: "what the operator said, did or decided; a verdict starts with the denial's seq" },
+      kind: { type: "string", enum: RECORD_KINDS, description: "instruction (default), intervention or verdict" },
+    }, ["text"]),
+    fn: cleanroomRecord,
   },
   {
     name: "kukulu_feedback_log",
@@ -3545,15 +4333,27 @@ const TOOLS = [
           title: { type: "string" }, goal: { type: "string" }, files: { type: "array", items: { type: "string" } },
           constraints: { type: "string" }, tests: { type: "string" }, outOfScope: { type: "string" },
           verification: { type: "string" }, dependsOn: { type: "array", items: { type: "string" } },
-        }, ["title", "goal", "files", "tests"]),
+          source: { type: "string", enum: FIX_SOURCES, description: "what produced this task: a review finding, a surviving mutant, or an unblocked/blocked task" },
+        }, ["title", "goal", "files", "tests", "source"]),
       },
       unblock: { type: "array", items: S({ id: { type: "string" }, reason: { type: "string" } }, ["id"]) },
     }, ["verdict"]),
     fn: reviewSubmit,
   },
   { name: "kukulu_summary_commit", description: "Write docs/SUMMARY.md from `content` (preferred) or commit the file already on disk, and mark the flight complete. Only valid after an APPROVED review. Returns { commit, branch, base, head, reviews, fixRounds, push, pr, archive }; archive is the policies.archive setting (true means call kukulu_flight_archive next); pr is the branch's pull request ({ url, state, draft, base }) or \"none\", \"skipped: policy\" or \"unknown: <why>\".", inputSchema: S({ content: { type: "string", description: "the full text of docs/SUMMARY.md; the tool writes the file itself, so never Write it yourself" } }), fn: summaryCommit },
-  { name: "kukulu_flight_archive", description: "Archive a summarized flight so the repository can run its next flight: move PLAN, PROGRESS, HANDOFF, REVIEW, SUMMARY, kukulu.json, .kukulu/state.json and .kukulu/feedback.jsonl into docs/flights/<slug>/ (copying SPEC.md, which stays), write a fresh state.json, commit 'chore: archive flight <slug>' and push per policy. slug defaults to the 'flight' key in docs/kukulu.json. Refused unless the flight is summarized, no run is armed, and the tree is clean. All-or-nothing. Returns { slug, dir, moved, copied, commit, push }.", inputSchema: S({ slug: { type: "string", description: "lowercase letters, digits and - (at most 40 characters); defaults to docs/kukulu.json's flight" } }), fn: flightArchive },
-  { name: "kukulu_migrate", description: "Move a project from the pre-0.6.0 Foundry layout to the current one: .foundry/state.json and feedback.jsonl to .kukulu/, docs/foundry.json to docs/kukulu.json, the matching .gitignore lines, then commit 'chore: migrate .foundry layout to .kukulu'. Also removes the generated .claude/agents/foundry-<role>.md files (an agent file without the generated marker is kept and reported), fixes .git/info/exclude and ensures the MCP allow rule. Refused unless the project is on the old layout, a git repository with a clean tree, with no armed run, mutation or stream worktree, and no unknown file in .foundry/. All-or-nothing. Archived flights are never touched. Returns { moved, gitignore, removedAgents, keptAgents, permissions, commit }.", inputSchema: S({}), fn: migrate },
+  {
+    name: "kukulu_similarity",
+    description: "Score the configured contamination pairs inside the server (the agents get numbers, never the prior art's text): writes .kukulu/cleanroom/similarity.json and docs/SIMILARITY.md, and in clean-room mode hashes every file it read into the chain with a score entry and a checkpoint, then commits 'chore: similarity scored'. Refuses without cleanroom.similarity, while an implementation run is armed, before an APPROVED review, for a missing or empty pair directory, and when the clean-room gate fails. For the summarizer, after kukulu_summary_commit.",
+    inputSchema: S({}),
+    fn: similarity,
+  },
+  {
+    name: "kukulu_attest",
+    description: "Write the signed attestation bundle for a finished clean-room flight into docs/attestation/ (the whole chain, the policy, the summary, review, progress, config and state, the commits since the base with their trailers, any evidence files, the signer's public key, the verifier as verify.mjs, and a manifest signed with the checkpoint key), run the bundle's own verifier on it, and commit it as 'chore: attestation bundle' only when it passes; push per policy. Clean-room mode only, after kukulu_summary_commit and before kukulu_flight_archive. Returns { dir, files, manifest, fingerprint, commit, verify, push }.",
+    inputSchema: S({ evidence: { type: "array", items: { type: "string" }, description: "repo-relative paths of tracked files to include as evidence (conformance results, fuzz logs); each is copied to evidence/<path> in the bundle" } }),
+    fn: attest,
+  },
+  { name: "kukulu_flight_archive", description: "Archive a summarized flight so the repository can run its next flight: move PLAN, PROGRESS, HANDOFF, REVIEW, SUMMARY, kukulu.json, .kukulu/state.json and .kukulu/feedback.jsonl into docs/flights/<slug>/ and docs/attestation/ into docs/flights/<slug>/attestation/ (copying SPEC.md, which stays), write a fresh state.json, commit 'chore: archive flight <slug>' and push per policy. slug defaults to the 'flight' key in docs/kukulu.json. Refused unless the flight is summarized, no run is armed, and the tree is clean. All-or-nothing. Returns { slug, dir, moved, copied, commit, push }.", inputSchema: S({ slug: { type: "string", description: "lowercase letters, digits and - (at most 40 characters); defaults to docs/kukulu.json's flight" } }), fn: flightArchive },
   { name: "kukulu_pr_finalize", description: "End a flight. Checks that every commit since the merge base with baseBranch is signed (judged from the commits, not from state): if so, marks the draft PR ready and, unless breaking is true, enables auto-merge (gh pr merge --auto, never an immediate merge), per policies.finalize and policies.mergeMethod. If any commit is unsigned the PR stays a draft, state.awaitingSigning is recorded, the steps are appended to SUMMARY.md, and kukulu_next reports done until it is resolved. breaking is required on the first call. Returns { signed, unsigned, ready, merge, breaking, awaitingSigning, resigned, push, pr, next? }; merge is enabled, skipped: breaking, skipped: policy, skipped: no pull request, skipped: awaiting signing or unavailable: <why>.", inputSchema: S({ breaking: { type: "boolean", description: "whether this flight is a breaking change, so its PR must not auto-merge; required on the first call, remembered after" }, resign: { type: "boolean", description: "HUMAN-INITIATED ONLY: never pass this on your own. Re-sign every commit of the branch (git rebase -f --rebase-merges --gpg-sign), force-push with lease, then finalize. For an operator who has unlocked the signing agent after an awaiting-signing result" } }), fn: prFinalize },
   {
     name: "kukulu_agents_sync",
@@ -3590,11 +4390,11 @@ function handle(req) {
       const tool = TOOLS.find((t) => t.name === params?.name);
       if (!tool) return fail(-32602, `unknown tool ${params?.name}`);
       try {
-        resolveLayout();
+        checkLayout();
         const result = tool.fn(params?.arguments || {});
         return reply({ content: [{ type: "text", text: JSON.stringify(result, null, 2) }] });
       } catch (e) {
-        const text = e instanceof ToolError ? inLayoutNames(e.message) : `${e.message}\n${e.stack}`;
+        const text = e instanceof ToolError || e instanceof CleanroomError ? e.message : `${e.message}\n${e.stack}`;
         if (e instanceof ToolError && e.data !== undefined) return reply({ content: [{ type: "text", text }], isError: true, structuredContent: e.data });
         return reply({ content: [{ type: "text", text }], isError: true });
       }

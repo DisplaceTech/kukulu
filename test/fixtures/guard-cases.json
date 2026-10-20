@@ -1,0 +1,6130 @@
+[
+ {
+  "name": "deny.tools denies a listed tool",
+  "policy": {
+   "version": 1,
+   "deny": {
+    "tools": [
+     "Agent"
+    ]
+   }
+  },
+  "input": {
+   "tool_name": "Agent",
+   "tool_input": {
+    "subagent_type": "x",
+    "description": "y"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "tool Agent is denied by deny.tools"
+ },
+ {
+  "name": "deny.tools leaves an unlisted tool alone",
+  "policy": {
+   "version": 1,
+   "deny": {
+    "tools": [
+     "Agent"
+    ]
+   }
+  },
+  "input": {
+   "tool_name": "Read",
+   "tool_input": {
+    "file_path": "__ROOT__/a.txt"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "WebSearch is denied under deny.network",
+  "policy": {
+   "version": 1
+  },
+  "input": {
+   "tool_name": "WebSearch",
+   "tool_input": {
+    "query": "deflate"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network access is denied \\(WebSearch\\)"
+ },
+ {
+  "name": "WebSearch is also denied by the template through deny.tools",
+  "policy": "template",
+  "input": {
+   "tool_name": "WebSearch",
+   "tool_input": {
+    "query": "deflate"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "tool WebSearch is denied by deny.tools"
+ },
+ {
+  "name": "WebSearch is allowed with deny.network false",
+  "policy": {
+   "version": 1,
+   "deny": {
+    "network": false
+   }
+  },
+  "input": {
+   "tool_name": "WebSearch",
+   "tool_input": {
+    "query": "deflate"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "WebFetch of an allowed URL is allowed before lockdown",
+  "policy": "template",
+  "progress": "# p\n\n## Tasks\n\n- [x] P0-01 a\n- [~] P0-10 b\n- [ ] P0-11 c\n",
+  "input": {
+   "tool_name": "WebFetch",
+   "tool_input": {
+    "url": "https://www.rfc-editor.org/rfc/rfc1951.txt"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "WebFetch of another URL is denied",
+  "policy": "template",
+  "progress": "# p\n\n## Tasks\n\n- [x] P0-01 a\n- [~] P0-10 b\n- [ ] P0-11 c\n",
+  "input": {
+   "tool_name": "WebFetch",
+   "tool_input": {
+    "url": "https://example.invalid/x"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "is not in allow\\.urls"
+ },
+ {
+  "name": "WebFetch of an allowed URL is denied once lockdown is active",
+  "policy": "template",
+  "progress": "# p\n\n## Tasks\n\n- [x] P0-01 a\n- [x] P0-10 b\n- [ ] P0-11 c\n",
+  "input": {
+   "tool_name": "WebFetch",
+   "tool_input": {
+    "url": "https://www.rfc-editor.org/rfc/rfc1951.txt"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "lockdown is active"
+ },
+ {
+  "name": "Write to a protected path is denied",
+  "policy": "template",
+  "input": {
+   "tool_name": "Write",
+   "tool_input": {
+    "file_path": "__ROOT__/tools/build.sh",
+    "content": "x"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "Edit of a protected path is denied",
+  "policy": "template",
+  "input": {
+   "tool_name": "Edit",
+   "tool_input": {
+    "file_path": "__ROOT__/tools/build.sh",
+    "old_string": "a",
+    "new_string": "b"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "MultiEdit of a protected path is denied",
+  "policy": "template",
+  "input": {
+   "tool_name": "MultiEdit",
+   "tool_input": {
+    "file_path": "__ROOT__/tools/build.sh",
+    "edits": []
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "NotebookEdit of a protected path is denied",
+  "policy": "template",
+  "input": {
+   "tool_name": "NotebookEdit",
+   "tool_input": {
+    "notebook_path": "__ROOT__/tools/n.ipynb"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "Read of a protected path is allowed",
+  "policy": "template",
+  "input": {
+   "tool_name": "Read",
+   "tool_input": {
+    "file_path": "__ROOT__/tools/build.sh"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "Write inside the project is allowed",
+  "policy": "template",
+  "input": {
+   "tool_name": "Write",
+   "tool_input": {
+    "file_path": "__ROOT__/docs/notes.md",
+    "content": "x"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "Read under a deny.paths prefix is denied",
+  "policy": "template",
+  "input": {
+   "tool_name": "Read",
+   "tool_input": {
+    "file_path": "__HOME__/.cargo/registry/src/index/x.rs"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "\\(deny\\.paths\\)"
+ },
+ {
+  "name": "Read of a deny.paths file is denied",
+  "policy": "template",
+  "input": {
+   "tool_name": "Read",
+   "tool_input": {
+    "file_path": "/usr/include/zlib.h"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "\\(deny\\.paths\\)"
+ },
+ {
+  "name": "Read matching a pathPattern is denied",
+  "policy": "template",
+  "input": {
+   "tool_name": "Read",
+   "tool_input": {
+    "file_path": "__ROOT__/target/debug/build/x/out"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "pathPatterns build-script-output"
+ },
+ {
+  "name": "Read beside the pattern is allowed",
+  "policy": "template",
+  "input": {
+   "tool_name": "Read",
+   "tool_input": {
+    "file_path": "__ROOT__/target/debug/deps/x"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "Read of a path with a forbidden word is denied",
+  "policy": "template",
+  "input": {
+   "tool_name": "Read",
+   "tool_input": {
+    "file_path": "__ROOT__/vendor/zlib-notes.txt"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "forbidden word in path"
+ },
+ {
+  "name": "Read of the same word under allow.paths is allowed",
+  "policy": "template",
+  "input": {
+   "tool_name": "Read",
+   "tool_input": {
+    "file_path": "__ROOT__/docs/zlib-notes.md"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "Glob with a forbidden word at the root is denied",
+  "policy": "template",
+  "input": {
+   "tool_name": "Glob",
+   "tool_input": {
+    "pattern": "**/*zlib*"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "forbidden word in pattern"
+ },
+ {
+  "name": "Glob with a forbidden word under allow.paths is allowed",
+  "policy": "template",
+  "input": {
+   "tool_name": "Glob",
+   "tool_input": {
+    "path": "__ROOT__/crates/cleanflate",
+    "pattern": "**/zlib*"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "Grep for a forbidden word at the root is denied",
+  "policy": "template",
+  "input": {
+   "tool_name": "Grep",
+   "tool_input": {
+    "path": "__ROOT__",
+    "pattern": "flate2"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "forbidden word in pattern"
+ },
+ {
+  "name": "Grep for a forbidden word under allow.paths is allowed",
+  "policy": "template",
+  "input": {
+   "tool_name": "Grep",
+   "tool_input": {
+    "path": "__ROOT__/crates/oracle",
+    "pattern": "flate2"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "Grep glob with a forbidden word is denied outside allow.paths",
+  "policy": "template",
+  "input": {
+   "tool_name": "Grep",
+   "tool_input": {
+    "path": "__ROOT__/src",
+    "glob": "*zopfli*",
+    "pattern": "x"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "forbidden word in glob"
+ },
+ {
+  "name": "curl to an unlisted URL is denied",
+  "policy": "template",
+  "progress": "# p\n\n## Tasks\n\n- [x] P0-01 a\n- [~] P0-10 b\n- [ ] P0-11 c\n",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "curl -s https://example.invalid/x"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command curl is denied"
+ },
+ {
+  "name": "curl to an allowed URL is allowed before lockdown",
+  "policy": "template",
+  "progress": "# p\n\n## Tasks\n\n- [x] P0-01 a\n- [~] P0-10 b\n- [ ] P0-11 c\n",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "curl -s https://www.rfc-editor.org/rfc/rfc1951.txt -o __ROOT__/docs/rfc1951.txt"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "curl to an allowed URL is denied once lockdown is active",
+  "policy": "template",
+  "progress": "# p\n\n## Tasks\n\n- [x] P0-01 a\n- [x] P0-10 b\n- [ ] P0-11 c\n",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "curl -s https://www.rfc-editor.org/rfc/rfc1951.txt"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command curl is denied"
+ },
+ {
+  "name": "curl with one URL outside allow.urls is denied",
+  "policy": "template",
+  "progress": "# p\n\n## Tasks\n\n- [x] P0-01 a\n- [~] P0-10 b\n- [ ] P0-11 c\n",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "curl https://www.rfc-editor.org/rfc/rfc1951.txt https://example.invalid/x"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command curl"
+ },
+ {
+  "name": "wget of an allowed URL is allowed",
+  "policy": "template",
+  "progress": "# p\n\n## Tasks\n\n- [x] P0-01 a\n- [~] P0-10 b\n- [ ] P0-11 c\n",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "wget https://www.rfc-editor.org/rfc/rfc1951.txt"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "gh is never allowed",
+  "policy": "template",
+  "progress": "# p\n\n## Tasks\n\n- [x] P0-01 a\n- [~] P0-10 b\n- [ ] P0-11 c\n",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "gh pr view 3"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command gh is denied"
+ },
+ {
+  "name": "git clone is never allowed",
+  "policy": "template",
+  "progress": "# p\n\n## Tasks\n\n- [x] P0-01 a\n- [~] P0-10 b\n- [ ] P0-11 c\n",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "git clone https://www.rfc-editor.org/rfc/rfc1951.txt"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command git clone is denied"
+ },
+ {
+  "name": "git status is not a network command",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "git status --short"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "npm ci is denied",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "npm ci"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command npm ci is denied"
+ },
+ {
+  "name": "a network command behind a wrapper and an assignment is denied",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "FOO=1 sudo -E ssh host true"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command ssh is denied"
+ },
+ {
+  "name": "a network command in the second segment is denied",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "echo ok && wget https://example.invalid/a"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command wget is denied"
+ },
+ {
+  "name": "network commands are allowed with deny.network false",
+  "policy": {
+   "version": 1,
+   "deny": {
+    "network": false
+   }
+  },
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "curl https://example.invalid/x"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "a Bash token under deny.paths is denied",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat __HOME__/.cargo/registry/src/x.rs"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "\\(deny\\.paths\\)"
+ },
+ {
+  "name": "a Bash token matching a pathPattern is denied",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "ls __ROOT__/target/release/build/out"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "pathPatterns build-script-output"
+ },
+ {
+  "name": "a Bash option value under deny.paths is denied",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "tar --directory=/usr/include/zlib.h x"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "\\(deny\\.paths\\)"
+ },
+ {
+  "name": "a read-family path argument with a forbidden word is denied",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat /opt/zlib/README"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "forbidden word in path argument: /opt/zlib/README"
+ },
+ {
+  "name": "a forbidden word in a path argument under allow.paths is allowed",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat __ROOT__/docs/zlib-notes.md"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "a non-path word inside the repository is allowed",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "grep -rn zlib __ROOT__/crates/cleanflate/src"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "a non-path word with a path outside the repository is denied",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "grep zlib /etc/hosts"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "forbidden word in command outside the repository: zlib"
+ },
+ {
+  "name": "a non-path word with no path and a cwd inside the repository is allowed",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "grep zlib"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "a non-path word with no path and a cwd outside the repository is denied",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "grep zlib"
+   },
+   "cwd": "__HOME__/elsewhere"
+  },
+  "expect": "denied",
+  "reason": "forbidden word in command outside the repository"
+ },
+ {
+  "name": "a forbidden word in a non-read command is not judged",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "echo zlib is mentioned"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "cp onto a protected path is denied",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cp __ROOT__/docs/a __ROOT__/tools/b"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "a redirection onto a protected path is denied",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "echo x > __ROOT__/tools/z.sh"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "an appending redirection onto a protected path is denied",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "echo x >>__ROOT__/tools/z.sh"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "a redirection of stderr to a project file is allowed",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "make 2>__ROOT__/docs/err.log"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "2>&1 is not a redirection target",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "make 2>&1 | tail -3"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "tee onto a protected path is denied",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "echo x | tee __ROOT__/tools/q"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "git config core.hooksPath is denied",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "git config core.hooksPath /tmp/hooks"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "rm inside the project is allowed",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "rm -rf __ROOT__/docs/old"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "a commandPatterns match is denied with its id",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "perf record target/release/oracle"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "commandPatterns no-profiling-oracle"
+ },
+ {
+  "name": "a command beside the pattern is allowed",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "perf record target/release/examples/profile_decode"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "an interpreter escape is allowed (a documented gap)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "python3 -c \"print(open('/usr/include/zlib.h').read())\""
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "Agent is allowed",
+  "policy": "template",
+  "input": {
+   "tool_name": "Agent",
+   "tool_input": {
+    "subagent_type": "kukulu-implementer",
+    "description": "build"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "Skill is allowed",
+  "policy": "template",
+  "input": {
+   "tool_name": "Skill",
+   "tool_input": {
+    "skill": "kukulu:implement"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "an mcp tool is allowed",
+  "policy": "template",
+  "input": {
+   "tool_name": "mcp__plugin_kukulu_kukulu__kukulu_status",
+   "tool_input": {},
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "cleanflate false positive 1 (sed -i expression with a word, 2026-09-30T14:40:33)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd __ROOT__/crates/oracle/src; \nsed -i 's/cleanflate_mib_s_min/cleanflate_mib_s_best/g; s/c_zlib_mib_s_min/c_zlib_mib_s_best/g; s/\\bmin_ns\\b/best_ns/g; s/(min)/(best)/g; s/cf_min/cf_best/g; s/cz_min/cz_best/g; s/median_and_min_odd_even/median_and_best_odd_even/' bench.rs bench_json.rs bench_compare.rs\nsed -i 's/^        schema: 1,\\n        kind: args/X/' bench.rs\npython3 - <<'EOF'\nimport re\np='bench.rs'; s=open(p).read()\ns=s.replace(\"    let json = BenchJson {\\n        schema: 1,\",\"    let json = BenchJson {\\n        schema: SCHEMA,\",1)\ns=s.replace(\"use crate::bench_json::{\",\"use crate::bench_json::{SCHEMA, \",1) if \"use crate::bench_json::{\" in s else s\ns=s.replace('''    out.push_str(\"|---|---:|---:|---:|---:|\\\\n\");\n    for a in &json.aggregates {\n        out.push_str(&format!(\n            \"| {} | {:.1} | {:.1} | {:.1} | {:.3} |\\\\n\",\n            a.key,\n            a.cleanflate_mib_s_median,\n            a.cleanflate_mib_s_best,\n            a.c_zlib_mib_s_median,\n            a.ratio\n        ));\n    }\n    out\n''','''    out.push_str(\"|---|---:|---:|---:|---:|\\\\n\");\n    for a in &json.aggregates {\n        out.push_str(&format!(\n            \"| {} | {:.1} | {:.1} | {:.1} | {:.3} |\\\\n\",\n            a.key,\n            a.cleanflate_mib_s_median,\n            a.cleanflate_mib_s_best,\n            a.c_zlib_mib_s_median,\n            a.ratio\n        ));\n    }\n    out.push('\\\\n');\n    out.push_str(TABLE_FOOTER);\n    out\n''',1)\ns=s.replace(\"/// A markdown table of the aggregates.\",'''/// Two-line definition footer printed under the stdout table.\npub const TABLE_FOOTER: &str = \"median: throughput from the median per-decode time of the samples; best: throughput of the fastest sample. Aggregates: total bytes / sum of per-file times.\\\\nratio: cleanflate median / C zlib median.\\\\n\";\n\n/// A markdown table of the aggregates.''',1)\nopen(p,'w').write(s)\n\np='bench_json.rs'; s=open(p).read()\ns=s.replace(\"schema 1;\",\"schema 2;\",1)\ns=s.replace(\"use serde::{Deserialize, Serialize};\",\"\"\"use serde::{Deserialize, Serialize};\n\n/// The schema number writers emit.\npub const SCHEMA: u32 = 2;\"\"\",1)\ns=s.replace(\"    pub best_ns: f64,\",\"    #[serde(alias = \\\"min_ns\\\")]\\n    pub best_ns: f64,\",1)\ns=s.replace(\"    /// Minimum nanoseconds per decode.\",\"    /// Best (fastest sample) nanoseconds per decode.\")\ns=s.replace(\"    pub cleanflate_mib_s_best: f64,\",\"    #[serde(alias = \\\"cleanflate_mib_s_min\\\")]\\n    pub cleanflate_mib_s_best: f64,\",1)\ns=s.replace(\"    pub c_zlib_mib_s_best: f64,\",\"    #[serde(alias = \\\"c_zlib_mib_s_min\\\")]\\n    pub c_zlib_mib_s_best: f64,\",1)\ns=s.replace(\"per-file minimums\",\"per-file best times\").replace(\"from minimums\",\"from best times\")\ns=s.replace(\"    /// Always 1.\\n    pub schema: u32,\\n    /// `full`\",\"    /// 2 for files written now; 1 (read-only) is also accepted on load.\\n    pub schema: u32,\\n    /// `full`\",1)\ns=s.replace(\"/// Format seconds since\",'''impl BenchJson {\n    /// Parse a bench JSON, accepting schema 1 (old field names) and 2.\n    pub fn parse(text: &str) -> Result<BenchJson, String> {\n        let j: BenchJson = serde_json::from_str(text).map_err(|e| e.to_string())?;\n        if j.schema != 1 && j.schema != SCHEMA {\n            return Err(format!(\n                \"unsupported bench schema {} (this build reads 1 and {SCHEMA}); regenerate the file with `make bench` or use a matching oracle build\",\n                j.schema\n            ));\n        }\n        Ok(j)\n    }\n}\n\n/// Format seconds since''',1)\ns=s.replace(\"            schema: 1,\",\"            schema: SCHEMA,\",1)\ns=s.replace('''    #[test]\n    fn utc_formatting''','''    #[test]\n    fn schema1_file_loads_with_best_fields() {\n        let path = concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/../../docs/perf/baselines/phase2.json\");\n        let text = std::fs::read_to_string(path).expect(\"phase2 baseline is committed\");\n        let j = BenchJson::parse(&text).expect(\"schema-1 loads\");\n        assert_eq!(j.schema, 1);\n        assert!(j.results.iter("
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "cleanflate false positive 2 (perf report on target/profile, 2026-09-30T16:11:51)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd __ROOT__/target/profile; perf report -i silesia-rfc1951-l1-oneshot/perf.data --stdio --no-children -g none --sort dso 2>/dev/null | grep -E '^ +[0-9]' | head; perf report -i silesia-rfc1951-l1-streaming/perf.data --stdio --no-children -g none --sort dso 2>/dev/null | grep -E '^ +[0-9]'|head -4; grep -E \"page-faults|instructions|task-clock\" silesia-rfc1951-l1-streaming/stat.txt canterbury-rfc1952-l1-oneshot/stat.txt | cut -c1-100; cat /proc/sys/kernel/perf_event_paranoid; head -12 canterbury-rfc1952-l1-oneshot/top.txt | tail -5; ls ../../testdata/perf-inputs/canterbury"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "cleanflate false positive 3 (perf report with P=target/profile, 2026-09-30T16:11:56)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd __ROOT__; P=target/profile; perf report -i $P/silesia-rfc1951-l1-oneshot/perf.data --stdio --no-children -g none --sort dso 2>/dev/null | grep -E '^ +[0-9]' | head -5; grep -E \"page-faults|instructions|task-clock\" $P/silesia-rfc1951-l1-streaming/stat.txt | cut -c1-100; cat /proc/sys/kernel/perf_event_paranoid"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "cleanflate false positive 4 (recursive grep over src, 2026-09-30T17:00:19)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd __ROOT__/crates/cleanflate; grep -n \"CRC32_TABLES\\|CRC32_SLICES\" -r src | grep -v \"^src/checksum.rs\"; sed -n 60,200p src/tests/checksum.rs"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "cleanflate false positive 5 (grep -E alternation in profile output, 2026-09-30T17:21:39)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd __ROOT__; make profile PROFILE_KEY=canterbury/rfc1950/l1/streaming PROFILE_ITERS=300 > target/p204-a.log 2>&1; for k in silesia-rfc1950-l6-streaming silesia-rfc1952-l6-streaming canterbury-rfc1950-l1-streaming canterbury-rfc1952-l1-streaming; do echo == $k; grep -E \"ZlibDecoder|GzipDecoder|adler|Crc32|Inflater::step\" target/profile/$k/top.txt target/profile/$k/top-children.txt | sed 's#target/profile/##' | cut -c1-150; done"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "cleanflate false positive 6 (grep -v with escaped alternation, 2026-09-30T17:23:20)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd __ROOT__; grep -rn \"\\.step(\" crates --include=*.rs --exclude-dir=target | grep -v \"^crates/cleanflate/src/\\(inflate\\|zlib\\|gzip\\|stream\\).rs\" | wc -l; grep -rn \"\\.step(\" crates --include=*.rs --exclude-dir=target | grep -v \"^crates/cleanflate/src/\\(inflate\\|zlib\\|gzip\\|stream\\).rs\" | cut -c1-110 | head -20; grep -rn \"copy_match\\|history_available\\|fast_loop::run\" crates --include=*.rs --exclude-dir=target | grep -v \"^crates/cleanflate/src/\\(window\\|fast_loop\\|inflate\\).rs\" | cut -c1-120 | head"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "cleanflate false positive 7 (bench-compare table filter, 2026-09-30T18:13:45)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd __ROOT__; S=__ROOT__/target/scratch; B=docs/perf/baselines; make -s bench-compare A=docs/perf/phase3/P2-07-before.json B=docs/perf/phase3/P2-07.json NOISE=$B/phase3-noise-quick.json 2>&1 | cut -c1-200 | grep -E \"^\\| (silesia|canterbury)/(raw|gzip|zlib)/l(1|6)/oneshot\" | awk -F'|' '{print $2,$5,$7,$11}'; python3 - <<'EOF'\nimport json\nfor f in ['P2-07-before','P2-07']:\n    j=json.load(open(f'__ROOT__/docs/perf/phase3/{f}.json')); print(f,j['machine']['loadavg'][:16],j['machine']['loadavg_end'][:16])\nEOF\nrun(){ $S/pd_$1 --dir testdata/perf-inputs/$2 --format $3 --iters $4 --mode $5 | sed 's/.*= //;s/ (.*//;s/ MiB.s//'; }\nfor key in \"silesia/rfc1951-l1 rfc1951 2 oneshot\" \"silesia/rfc1951-l6 rfc1951 2 oneshot\" \"silesia/rfc1952-l6 rfc1952 2 oneshot\" \"canterbury/rfc1951-l1 rfc1951 200 oneshot\" \"canterbury/rfc1952-l1 rfc1952 200 oneshot\"; do set -- $key; echo \"== $key\"; for i in 1 2 3 4 5 6; do b=$(run before $1 $2 $3 $4); a=$(run after $1 $2 $3 $4); echo \"$b $a\"; done; done"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "cleanflate false positive 8 (bench-quick comparison, 2026-09-30T20:53:01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd __ROOT__; (make bench-quick BENCH_ID=P4-03 BENCH_OUT=docs/perf/phase3/P4-03.json > target/p403-qa.log 2>&1; echo DONE >> target/p403-qa.log) >/dev/null 2>&1 &\nuntil grep -q DONE target/p403-qa.log; do sleep 5; done; B=docs/perf/baselines; make -s bench-compare A=docs/perf/phase3/P4-03-before.json B=docs/perf/phase3/P4-03.json NOISE=$B/phase3-noise-quick.json > target/p403-cmp.txt 2>&1; cut -c1-200 target/p403-cmp.txt | grep -E \"^\\| (silesia|canterbury)/(raw|gzip|zlib)/l(1|6)/(oneshot|streaming)\" | awk -F'|' '{print $2,$5,$7,$9,$10,$11,$12}' | head -30; grep -c \"^REGRESSION\" target/p403-cmp.txt; python3 - <<'EOF'\nimport json\nfor f in ['P4-03-before','P4-03']:\n    j=json.load(open(f'__ROOT__/docs/perf/phase3/{f}.json')); print(f,j['machine']['loadavg'][:16],j['machine']['loadavg_end'][:16])\nEOF"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "cleanflate real prior-art attempt (find for libz-sys, 2026-09-29T14:54:47)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "python3 -c \"\nimport subprocess\n\" \nfind / -path '*/libz-sys-*/src/lib.rs' 2>/dev/null | head -3"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "forbidden word in path argument"
+ },
+ {
+  "name": "Write of the policy is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Write",
+   "tool_input": {
+    "file_path": "__ROOT__/docs/cleanroom.json",
+    "content": "x"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "Edit of the policy is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Edit",
+   "tool_input": {
+    "file_path": "__ROOT__/docs/cleanroom.json",
+    "old_string": "a",
+    "new_string": "b"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "MultiEdit of the policy is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "MultiEdit",
+   "tool_input": {
+    "file_path": "__ROOT__/docs/cleanroom.json",
+    "edits": []
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "NotebookEdit of the policy is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "NotebookEdit",
+   "tool_input": {
+    "notebook_path": "__ROOT__/docs/cleanroom.json"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "Write of the log is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Write",
+   "tool_input": {
+    "file_path": "__ROOT__/.kukulu/cleanroom/log.jsonl",
+    "content": "x"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "Edit of the log is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Edit",
+   "tool_input": {
+    "file_path": "__ROOT__/.kukulu/cleanroom/log.jsonl",
+    "old_string": "a",
+    "new_string": "b"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "MultiEdit of the log is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "MultiEdit",
+   "tool_input": {
+    "file_path": "__ROOT__/.kukulu/cleanroom/log.jsonl",
+    "edits": []
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "NotebookEdit of the log is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "NotebookEdit",
+   "tool_input": {
+    "notebook_path": "__ROOT__/.kukulu/cleanroom/log.jsonl"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "Write of the state is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Write",
+   "tool_input": {
+    "file_path": "__ROOT__/.kukulu/state.json",
+    "content": "x"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "Edit of the state is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Edit",
+   "tool_input": {
+    "file_path": "__ROOT__/.kukulu/state.json",
+    "old_string": "a",
+    "new_string": "b"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "MultiEdit of the state is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "MultiEdit",
+   "tool_input": {
+    "file_path": "__ROOT__/.kukulu/state.json",
+    "edits": []
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "NotebookEdit of the state is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "NotebookEdit",
+   "tool_input": {
+    "notebook_path": "__ROOT__/.kukulu/state.json"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "Write of docs/kukulu.json once the plan exists is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Write",
+   "tool_input": {
+    "file_path": "__ROOT__/docs/kukulu.json",
+    "content": "x"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "Edit of docs/kukulu.json once the plan exists is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Edit",
+   "tool_input": {
+    "file_path": "__ROOT__/docs/kukulu.json",
+    "old_string": "a",
+    "new_string": "b"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "MultiEdit of docs/kukulu.json once the plan exists is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "MultiEdit",
+   "tool_input": {
+    "file_path": "__ROOT__/docs/kukulu.json",
+    "edits": []
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "NotebookEdit of docs/kukulu.json once the plan exists is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "NotebookEdit",
+   "tool_input": {
+    "notebook_path": "__ROOT__/docs/kukulu.json"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "Write of the project settings is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Write",
+   "tool_input": {
+    "file_path": "__ROOT__/.claude/settings.json",
+    "content": "x"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "Edit of the project settings is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Edit",
+   "tool_input": {
+    "file_path": "__ROOT__/.claude/settings.json",
+    "old_string": "a",
+    "new_string": "b"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "MultiEdit of the project settings is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "MultiEdit",
+   "tool_input": {
+    "file_path": "__ROOT__/.claude/settings.json",
+    "edits": []
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "NotebookEdit of the project settings is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "NotebookEdit",
+   "tool_input": {
+    "notebook_path": "__ROOT__/.claude/settings.json"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "Write of the local settings is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Write",
+   "tool_input": {
+    "file_path": "__ROOT__/.claude/settings.local.json",
+    "content": "x"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "Edit of the local settings is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Edit",
+   "tool_input": {
+    "file_path": "__ROOT__/.claude/settings.local.json",
+    "old_string": "a",
+    "new_string": "b"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "MultiEdit of the local settings is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "MultiEdit",
+   "tool_input": {
+    "file_path": "__ROOT__/.claude/settings.local.json",
+    "edits": []
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "NotebookEdit of the local settings is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "NotebookEdit",
+   "tool_input": {
+    "notebook_path": "__ROOT__/.claude/settings.local.json"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "Write of the project hooks is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Write",
+   "tool_input": {
+    "file_path": "__ROOT__/.claude/hooks/pre.sh",
+    "content": "x"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "Edit of the project hooks is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Edit",
+   "tool_input": {
+    "file_path": "__ROOT__/.claude/hooks/pre.sh",
+    "old_string": "a",
+    "new_string": "b"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "MultiEdit of the project hooks is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "MultiEdit",
+   "tool_input": {
+    "file_path": "__ROOT__/.claude/hooks/pre.sh",
+    "edits": []
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "NotebookEdit of the project hooks is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "NotebookEdit",
+   "tool_input": {
+    "notebook_path": "__ROOT__/.claude/hooks/pre.sh"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "Write of the MCP config is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Write",
+   "tool_input": {
+    "file_path": "__ROOT__/.mcp.json",
+    "content": "x"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "Edit of the MCP config is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Edit",
+   "tool_input": {
+    "file_path": "__ROOT__/.mcp.json",
+    "old_string": "a",
+    "new_string": "b"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "MultiEdit of the MCP config is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "MultiEdit",
+   "tool_input": {
+    "file_path": "__ROOT__/.mcp.json",
+    "edits": []
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "NotebookEdit of the MCP config is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "NotebookEdit",
+   "tool_input": {
+    "notebook_path": "__ROOT__/.mcp.json"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "Write of the installed plugin is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Write",
+   "tool_input": {
+    "file_path": "__HOME__/plugin-root/scripts/cleanroom-guard.mjs",
+    "content": "x"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "Edit of the installed plugin is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Edit",
+   "tool_input": {
+    "file_path": "__HOME__/plugin-root/scripts/cleanroom-guard.mjs",
+    "old_string": "a",
+    "new_string": "b"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "MultiEdit of the installed plugin is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "MultiEdit",
+   "tool_input": {
+    "file_path": "__HOME__/plugin-root/scripts/cleanroom-guard.mjs",
+    "edits": []
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "NotebookEdit of the installed plugin is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "NotebookEdit",
+   "tool_input": {
+    "notebook_path": "__HOME__/plugin-root/scripts/cleanroom-guard.mjs"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "Write of the plugins directory is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Write",
+   "tool_input": {
+    "file_path": "__HOME__/.claude/plugins/cache/k/hooks.json",
+    "content": "x"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "Edit of the plugins directory is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Edit",
+   "tool_input": {
+    "file_path": "__HOME__/.claude/plugins/cache/k/hooks.json",
+    "old_string": "a",
+    "new_string": "b"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "MultiEdit of the plugins directory is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "MultiEdit",
+   "tool_input": {
+    "file_path": "__HOME__/.claude/plugins/cache/k/hooks.json",
+    "edits": []
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "NotebookEdit of the plugins directory is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "NotebookEdit",
+   "tool_input": {
+    "notebook_path": "__HOME__/.claude/plugins/cache/k/hooks.json"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "Write of the user settings is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Write",
+   "tool_input": {
+    "file_path": "__HOME__/.claude/settings.json",
+    "content": "x"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "Edit of the user settings is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Edit",
+   "tool_input": {
+    "file_path": "__HOME__/.claude/settings.json",
+    "old_string": "a",
+    "new_string": "b"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "MultiEdit of the user settings is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "MultiEdit",
+   "tool_input": {
+    "file_path": "__HOME__/.claude/settings.json",
+    "edits": []
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "NotebookEdit of the user settings is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "NotebookEdit",
+   "tool_input": {
+    "notebook_path": "__HOME__/.claude/settings.json"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "Write of the signing key is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Write",
+   "tool_input": {
+    "file_path": "__HOME__/.config/kukulu/cleanroom/ed25519.pem",
+    "content": "x"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "Edit of the signing key is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Edit",
+   "tool_input": {
+    "file_path": "__HOME__/.config/kukulu/cleanroom/ed25519.pem",
+    "old_string": "a",
+    "new_string": "b"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "MultiEdit of the signing key is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "MultiEdit",
+   "tool_input": {
+    "file_path": "__HOME__/.config/kukulu/cleanroom/ed25519.pem",
+    "edits": []
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "NotebookEdit of the signing key is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "NotebookEdit",
+   "tool_input": {
+    "notebook_path": "__HOME__/.config/kukulu/cleanroom/ed25519.pem"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "Write of the signing key's public half is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Write",
+   "tool_input": {
+    "file_path": "__HOME__/.config/kukulu/cleanroom/ed25519.pem.pub",
+    "content": "x"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "Edit of the signing key's public half is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Edit",
+   "tool_input": {
+    "file_path": "__HOME__/.config/kukulu/cleanroom/ed25519.pem.pub",
+    "old_string": "a",
+    "new_string": "b"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "MultiEdit of the signing key's public half is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "MultiEdit",
+   "tool_input": {
+    "file_path": "__HOME__/.config/kukulu/cleanroom/ed25519.pem.pub",
+    "edits": []
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "NotebookEdit of the signing key's public half is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "NotebookEdit",
+   "tool_input": {
+    "notebook_path": "__HOME__/.config/kukulu/cleanroom/ed25519.pem.pub"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "Write of git hooks is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Write",
+   "tool_input": {
+    "file_path": "__ROOT__/.git/hooks/pre-commit",
+    "content": "x"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "Edit of git hooks is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Edit",
+   "tool_input": {
+    "file_path": "__ROOT__/.git/hooks/pre-commit",
+    "old_string": "a",
+    "new_string": "b"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "MultiEdit of git hooks is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "MultiEdit",
+   "tool_input": {
+    "file_path": "__ROOT__/.git/hooks/pre-commit",
+    "edits": []
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "NotebookEdit of git hooks is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "NotebookEdit",
+   "tool_input": {
+    "notebook_path": "__ROOT__/.git/hooks/pre-commit"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "Write of git config is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Write",
+   "tool_input": {
+    "file_path": "__ROOT__/.git/config",
+    "content": "x"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "Edit of git config is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Edit",
+   "tool_input": {
+    "file_path": "__ROOT__/.git/config",
+    "old_string": "a",
+    "new_string": "b"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "MultiEdit of git config is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "MultiEdit",
+   "tool_input": {
+    "file_path": "__ROOT__/.git/config",
+    "edits": []
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "NotebookEdit of git config is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "NotebookEdit",
+   "tool_input": {
+    "notebook_path": "__ROOT__/.git/config"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "Write of git info is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Write",
+   "tool_input": {
+    "file_path": "__ROOT__/.git/info/exclude",
+    "content": "x"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "Edit of git info is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Edit",
+   "tool_input": {
+    "file_path": "__ROOT__/.git/info/exclude",
+    "old_string": "a",
+    "new_string": "b"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "MultiEdit of git info is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "MultiEdit",
+   "tool_input": {
+    "file_path": "__ROOT__/.git/info/exclude",
+    "edits": []
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "NotebookEdit of git info is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "NotebookEdit",
+   "tool_input": {
+    "notebook_path": "__ROOT__/.git/info/exclude"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "docs/kukulu.json is writable before docs/PLAN.md exists",
+  "policy": "template",
+  "planExists": false,
+  "input": {
+   "tool_name": "Write",
+   "tool_input": {
+    "file_path": "__ROOT__/docs/kukulu.json",
+    "content": "{}"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "docs/kukulu.json is protected after docs/PLAN.md exists",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Write",
+   "tool_input": {
+    "file_path": "__ROOT__/docs/kukulu.json",
+    "content": "{}"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "reading docs/cleanroom.json is allowed",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Read",
+   "tool_input": {
+    "file_path": "__ROOT__/docs/cleanroom.json"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "reading .mcp.json is allowed",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Read",
+   "tool_input": {
+    "file_path": "__ROOT__/.mcp.json"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "reading the project settings is allowed",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Read",
+   "tool_input": {
+    "file_path": "__ROOT__/.claude/settings.json"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "reading the installed plugin is allowed",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Read",
+   "tool_input": {
+    "file_path": "__HOME__/plugin-root/hooks/hooks.json"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "reading the log is allowed",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Read",
+   "tool_input": {
+    "file_path": "__ROOT__/.kukulu/cleanroom/log.jsonl"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "reading the signing key is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Read",
+   "tool_input": {
+    "file_path": "__HOME__/.config/kukulu/cleanroom/ed25519.pem"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "\\(deny\\.paths\\)"
+ },
+ {
+  "name": "reading the signing key's public half is allowed",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Read",
+   "tool_input": {
+    "file_path": "__HOME__/.config/kukulu/cleanroom/ed25519.pem.pub"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "grepping inside the signing key's directory is allowed, the key itself is not",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Grep",
+   "tool_input": {
+    "path": "__HOME__/.config/kukulu/cleanroom/ed25519.pem",
+    "pattern": "BEGIN"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "\\(deny\\.paths\\)"
+ },
+ {
+  "name": "cat of the signing key is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat __HOME__/.config/kukulu/cleanroom/ed25519.pem"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "\\(deny\\.paths\\)"
+ },
+ {
+  "name": "cat of the signing key's public half is allowed",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat __HOME__/.config/kukulu/cleanroom/ed25519.pem.pub"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "a redirection onto the state is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "echo '{}' > __ROOT__/.kukulu/state.json"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "a redirection onto the policy is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "echo '{}' >__ROOT__/docs/cleanroom.json"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "cp onto the policy is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cp /tmp/p.json __ROOT__/docs/cleanroom.json"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "mv of the policy away is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "mv __ROOT__/docs/cleanroom.json /tmp/gone.json"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "tee -a onto a git hook is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "echo x | tee -a __ROOT__/.git/hooks/pre-commit"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "an in-place sed on the MCP config is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "sed -i s/a/b/ __ROOT__/.mcp.json"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "rm -rf of the git hooks is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "rm -rf __ROOT__/.git/hooks"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "chmod of the plugin's guard is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "chmod 000 __HOME__/plugin-root/scripts/cleanroom-guard.mjs"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "ln onto the project settings is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "ln -sf /tmp/s.json __ROOT__/.claude/settings.json"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "dd onto the signing key is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "dd if=/dev/zero of=__HOME__/.config/kukulu/cleanroom/ed25519.pem"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "\\(deny\\.paths\\)"
+ },
+ {
+  "name": "git config core.hooksPath is denied with the project as cwd",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "git config --local core.hooksPath /tmp/hooks"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "reading a protected file with cat is allowed",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat __ROOT__/docs/cleanroom.json"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "a segment after a pipe is judged on its own",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat __ROOT__/docs/a.md | tee __ROOT__/.kukulu/cleanroom/log.jsonl"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "writing an ordinary project file with tee is allowed",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "echo x | tee __ROOT__/docs/out.md"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "a redirection glued to the word before it is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "echo hi>.kukulu/state.json"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "a glued fd redirection onto the policy is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "printf x 2>docs/cleanroom.json"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "rm -rf of .kukulu is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "rm -rf .kukulu"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "rm -rf of docs is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "rm -rf docs"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "mv of docs is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "mv docs docs2"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "rm -rf of .git is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "rm -rf .git"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "cd docs then rm of the policy is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd docs && rm cleanroom.json"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "cd .kukulu then rm of the state is denied",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd .kukulu && rm state.json"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "git add . stays allowed",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "git add ."
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "git add docs stays allowed",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "git add docs"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "cp into docs stays allowed",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cp a.txt docs/"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "rm -rf target stays allowed",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "rm -rf target"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "mv inside the project stays allowed",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "mv a b"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "git commit -F stays allowed",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "git commit -F f"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "git -C before clone is a network command",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "git -C /x clone https://a"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command git clone"
+ },
+ {
+  "name": "git -c before fetch is a network command",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "git -c a=b fetch"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command git fetch"
+ },
+ {
+  "name": "an absolute Glob pattern under deny.paths is denied",
+  "policy": "template",
+  "input": {
+   "tool_name": "Glob",
+   "tool_input": {
+    "pattern": "__HOME__/.cargo/registry/**/*.rs"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "denied path"
+ },
+ {
+  "name": "a tilde Glob pattern under deny.paths is denied",
+  "policy": "template",
+  "input": {
+   "tool_name": "Glob",
+   "tool_input": {
+    "pattern": "~/.cargo/registry/**"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "denied path"
+ },
+ {
+  "name": "$HOME in a path argument is expanded",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat $HOME/.cargo/registry/x"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "denied path"
+ },
+ {
+  "name": "${HOME} in a path argument is expanded",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat ${HOME}/.cargo/registry/x"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "denied path"
+ },
+ {
+  "name": "a command substitution is judged as a command",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "echo $(curl https://evil)"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command curl"
+ },
+ {
+  "name": "a backtick substitution is judged as a command",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "echo `curl https://evil`"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command curl"
+ },
+ {
+  "name": "bash -c string is judged as a command",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "bash -c 'curl https://evil'"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command curl"
+ },
+ {
+  "name": "eval string is judged as a command",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "eval 'cat ~/.cargo/registry/x'"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "denied path"
+ },
+ {
+  "name": "git -C with a local subcommand stays allowed",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "git -C sub status"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "a relative Glob pattern stays allowed",
+  "policy": "template",
+  "input": {
+   "tool_name": "Glob",
+   "tool_input": {
+    "pattern": "src/**/*.rs"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "a single-quoted dollar paren is literal",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "git commit -m 'fix $(curl) docs'"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "grep of a word with a path outside the repository is denied",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "grep -rn zlib /usr/include"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "forbidden word"
+ },
+ {
+  "name": "sed script over a deny.paths file is denied",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "sed -n 's/zlib/x/p' ~/.cargo/registry/a.rs"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "denied path"
+ },
+ {
+  "name": "grep of a word in a bare in-repo directory is allowed",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "grep -n zlib src"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "cd segment: cd ~/.cargo/registry",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd ~/.cargo/registry"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "denied path"
+ },
+ {
+  "name": "cd segment: cd ~/.cargo/registry && cat x",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd ~/.cargo/registry && cat x"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "denied path"
+ },
+ {
+  "name": "cd segment: pushd ~/.cargo/git",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "pushd ~/.cargo/git"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "denied path"
+ },
+ {
+  "name": "cd segment: cd ~/.cargo && cat registry/x",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd ~/.cargo && cat registry/x"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "denied path"
+ },
+ {
+  "name": "cd segment: cd /usr/include && cat zlib.h",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd /usr/include && cat zlib.h"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "forbidden word"
+ },
+ {
+  "name": "cd segment: cd / && grep -r zlib .",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd / && grep -r zlib ."
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "forbidden word"
+ },
+ {
+  "name": "cd segment: cd src && cat main.rs",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd src && cat main.rs"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "cd segment: cd crates && grep -n zlib src",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd crates && grep -n zlib src"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "grouping: (curl https://evil)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "(curl https://evil)"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command curl"
+ },
+ {
+  "name": "grouping: ( curl https://evil )",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "( curl https://evil )"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command curl"
+ },
+ {
+  "name": "grouping: { curl https://evil; }",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "{ curl https://evil; }"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command curl"
+ },
+ {
+  "name": "grouping: if true; then curl https://evil; fi",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "if true; then curl https://evil; fi"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command curl"
+ },
+ {
+  "name": "grouping: while true; do curl https://evil; done",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "while true; do curl https://evil; done"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command curl"
+ },
+ {
+  "name": "grouping: ! curl https://evil",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "! curl https://evil"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command curl"
+ },
+ {
+  "name": "grouping: timeout 5 curl https://evil",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "timeout 5 curl https://evil"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command curl"
+ },
+ {
+  "name": "grouping: nohup curl https://evil",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "nohup curl https://evil"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command curl"
+ },
+ {
+  "name": "grouping: exec curl https://evil",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "exec curl https://evil"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command curl"
+ },
+ {
+  "name": "grouping: (rm -rf .kukulu)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "(rm -rf .kukulu)"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "grouping: { rm -rf .kukulu; }",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "{ rm -rf .kukulu; }"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "grouping: (echo hi > .kukulu/state.json)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "(echo hi > .kukulu/state.json)"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "grouping: (cd docs && rm cleanroom.json)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "(cd docs && rm cleanroom.json)"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "grouping: (cd sub) && rm docs/cleanroom.json",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "(cd sub) && rm docs/cleanroom.json"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "grouping: echo x >| .kukulu/state.json",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "echo x >| .kukulu/state.json"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "grouping: echo x 2>|.kukulu/state.json",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "echo x 2>|.kukulu/state.json"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "grouping: git -C docs rm cleanroom.json",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "git -C docs rm cleanroom.json"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "grouping: git -C .kukulu clean -fdx",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "git -C .kukulu clean -fdx"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "grouping: echo a | grep a",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "echo a | grep a"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "grouping: (cd src && ls)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "(cd src && ls)"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "grouping: if [ -f a ]; then cat a; fi",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "if [ -f a ]; then cat a; fi"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "grouping: timeout 5 cargo test",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "timeout 5 cargo test"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "grouping: git -C sub status",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "git -C sub status"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "discard/glob: git stash",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "git stash"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "discard/glob: git stash -u",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "git stash -u"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "discard/glob: git stash push",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "git stash push"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "discard/glob: git reset --hard",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "git reset --hard"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "discard/glob: git reset --hard HEAD~1",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "git reset --hard HEAD~1"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "discard/glob: git checkout -f main",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "git checkout -f main"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "discard/glob: git switch --discard-changes main",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "git switch --discard-changes main"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "discard/glob: rm -rf docs/*",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "rm -rf docs/*"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "discard/glob: rm -rf *",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "rm -rf *"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "discard/glob: rm -f .kukulu/*",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "rm -f .kukulu/*"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "discard/glob: chmod 000 docs",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "chmod 000 docs"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "discard/glob: chmod a-rwx .kukulu",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "chmod a-rwx .kukulu"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "discard/glob: chown nobody docs",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "chown nobody docs"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "discard/glob: chmod 000 .",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "chmod 000 ."
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "discard/glob: git stash list",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "git stash list"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "discard/glob: git stash push -- src/a.rs",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "git stash push -- src/a.rs"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "discard/glob: git reset HEAD a.rs",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "git reset HEAD a.rs"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "discard/glob: git reset --soft HEAD~1",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "git reset --soft HEAD~1"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "discard/glob: git checkout main",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "git checkout main"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "discard/glob: git checkout -b x",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "git checkout -b x"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "discard/glob: rm -f *.o",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "rm -f *.o"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "discard/glob: rm -rf target/*",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "rm -rf target/*"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "discard/glob: chmod +x scripts/run.sh",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "chmod +x scripts/run.sh"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "discard/glob: git add .",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "git add ."
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "reach: Grep path ~/.cargo",
+  "policy": "template",
+  "input": {
+   "tool_name": "Grep",
+   "tool_input": {
+    "pattern": "inflate",
+    "path": "__HOME__/.cargo"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "deny.paths"
+ },
+ {
+  "name": "reach: Glob ** under ~/.cargo",
+  "policy": "template",
+  "input": {
+   "tool_name": "Glob",
+   "tool_input": {
+    "pattern": "**/*.rs",
+    "path": "__HOME__/.cargo"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "deny.paths"
+ },
+ {
+  "name": "reach: Glob wildcard before denied component",
+  "policy": "template",
+  "input": {
+   "tool_name": "Glob",
+   "tool_input": {
+    "pattern": "~/.cargo/regist*/**/*.rs"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "deny.paths"
+ },
+ {
+  "name": "reach: Glob wildcard as denied component",
+  "policy": "template",
+  "input": {
+   "tool_name": "Glob",
+   "tool_input": {
+    "pattern": "__HOME__/.cargo/*/src/**"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "deny.paths"
+ },
+ {
+  "name": "reach: Glob climbing out of cwd",
+  "policy": "template",
+  "input": {
+   "tool_name": "Glob",
+   "tool_input": {
+    "pattern": "../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../__HOME__/.cargo/registry/**"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "deny.paths"
+ },
+ {
+  "name": "reach: grep -r inflate ~/.cargo",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "grep -r inflate ~/.cargo"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "deny.paths"
+ },
+ {
+  "name": "reach: rg inflate ~/.cargo",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "rg inflate ~/.cargo"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "deny.paths"
+ },
+ {
+  "name": "reach: find ~/.cargo -name '*.rs'",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "find ~/.cargo -name '*.rs'"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "deny.paths"
+ },
+ {
+  "name": "reach: ls -R ~/.cargo",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "ls -R ~/.cargo"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "deny.paths"
+ },
+ {
+  "name": "reach: cp -r ~/.cargo vendor",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cp -r ~/.cargo vendor"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "deny.paths"
+ },
+ {
+  "name": "reach: cat ~/.cargo/*/index/x",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat ~/.cargo/*/index/x"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "deny.paths"
+ },
+ {
+  "name": "reach: grep -r foo src",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "grep -r foo src"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "reach: find . -name '*.rs'",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "find . -name '*.rs'"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "reach: ls ~/.cargo",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "ls ~/.cargo"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "reach: cat ~/.cargo/config.toml",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat ~/.cargo/config.toml"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "reach: Glob ** at the root",
+  "policy": "template",
+  "input": {
+   "tool_name": "Glob",
+   "tool_input": {
+    "pattern": "**/*.rs"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "allowed pin: grep -A 3 'src/zlib' src",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "grep -A 3 'src/zlib' src"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "allowed pin: grep -n -e 'src/zlib' src",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "grep -n -e 'src/zlib' src"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "allowed pin: echo \"a > .kukulu/state.json\"",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "echo \"a > .kukulu/state.json\""
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "wild/brace: cp /dev/null docs/cleanroom.js??",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cp /dev/null docs/cleanroom.js??"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "wild/brace: cp evil docs/[c]leanroom.json",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cp evil docs/[c]leanroom.json"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "wild/brace: cp evil .kukulu/state.*",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cp evil .kukulu/state.*"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "wild/brace: ln -sf /dev/null .kukulu/state.js*",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "ln -sf /dev/null .kukulu/state.js*"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "wild/brace: tee docs/cleanroom.* < /dev/null",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "tee docs/cleanroom.* < /dev/null"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "wild/brace: sed -i 1d .kukulu/cleanroo?/log.jsonl",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "sed -i 1d .kukulu/cleanroo?/log.jsonl"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "wild/brace: echo x > docs/cleanroom.*",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "echo x > docs/cleanroom.*"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "wild/brace: echo x >> .kukulu/*/log.jsonl",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "echo x >> .kukulu/*/log.jsonl"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "wild/brace: rm -rf {docs,src}",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "rm -rf {docs,src}"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "wild/brace: rm -rf docs/{cleanroom.json,}",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "rm -rf docs/{cleanroom.json,}"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "wild/brace: chmod 000 {docs,x}",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "chmod 000 {docs,x}"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "wild/brace: mv {docs,d2}",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "mv {docs,d2}"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "wild/brace: tee docs/cleanroom.{json,x} < /dev/null",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "tee docs/cleanroom.{json,x} < /dev/null"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "wild/brace: git stash -m wip",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "git stash -m wip"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "wild/brace: git stash -k -m x",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "git stash -k -m x"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "wild/brace: git stash --include-untracked -m x",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "git stash --include-untracked -m x"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "wild/brace: git read-tree -u --reset HEAD",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "git read-tree -u --reset HEAD"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "wild/brace: sed -i 1d .kukulu/*/log.jsonl",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "sed -i 1d .kukulu/*/log.jsonl"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "wild/brace: rm -rf {target,build}",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "rm -rf {target,build}"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "wild/brace: rm -f *.o",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "rm -f *.o"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "wild/brace: sed -i s/a/b/ src/*.rs",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "sed -i s/a/b/ src/*.rs"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "wild/brace: tee out.{log,txt}",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "tee out.{log,txt}"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "wild/brace: cp a.rs src/",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cp a.rs src/"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "wild/brace: git stash list",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "git stash list"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "wild/brace: git stash show -p",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "git stash show -p"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "wild/brace: git stash push -m wip -- src/a.rs",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "git stash push -m wip -- src/a.rs"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "shell: cd && cat .cargo/registry/x",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd && cat .cargo/registry/x"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "deny.paths"
+ },
+ {
+  "name": "shell: cd; ls -R .cargo",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd; ls -R .cargo"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "deny.paths"
+ },
+ {
+  "name": "shell: cd && rm -rf .claude/plugins",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd && rm -rf .claude/plugins"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "shell: cd /tmp && cd - && rm docs/cleanroom.json",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd /tmp && cd - && rm docs/cleanroom.json"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "shell: sudo -u root curl https://evil",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "sudo -u root curl https://evil"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network"
+ },
+ {
+  "name": "shell: env -u X curl https://evil",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "env -u X curl https://evil"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network"
+ },
+ {
+  "name": "shell: env -C /tmp curl https://evil",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "env -C /tmp curl https://evil"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network"
+ },
+ {
+  "name": "shell: case x in x) curl https://evil;; esac",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "case x in x) curl https://evil;; esac"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network"
+ },
+ {
+  "name": "shell: f() { curl https://evil; }; f",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "f() { curl https://evil; }; f"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network"
+ },
+ {
+  "name": "shell: function f { curl https://evil; }; f",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "function f { curl https://evil; }; f"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network"
+ },
+ {
+  "name": "shell: cd && ls",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd && ls"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "shell: cd - && ls",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd - && ls"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "shell: sudo -u root ls",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "sudo -u root ls"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "shell: env -u X cargo test",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "env -u X cargo test"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "shell: case $x in a) echo a;; esac",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "case $x in a) echo a;; esac"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "shell: f() { echo a; }; f",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "f() { echo a; }; f"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "shell: env -S curl https://evil",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "env -S curl https://evil"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network"
+ },
+ {
+  "name": "shell: env -S 'curl https://evil'",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "env -S 'curl https://evil'"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network"
+ },
+ {
+  "name": "shell: env --split-string='curl https://evil'",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "env --split-string='curl https://evil'"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network"
+ },
+ {
+  "name": "shell: sudo --user root curl https://evil",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "sudo --user root curl https://evil"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network"
+ },
+ {
+  "name": "shell: env --unset X curl https://evil",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "env --unset X curl https://evil"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network"
+ },
+ {
+  "name": "shell: env --chdir /tmp curl https://evil",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "env --chdir /tmp curl https://evil"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network"
+ },
+ {
+  "name": "shell: timeout --signal KILL 5 curl https://evil",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "timeout --signal KILL 5 curl https://evil"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network"
+ },
+ {
+  "name": "shell: timeout --kill-after 5 10 curl https://evil",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "timeout --kill-after 5 10 curl https://evil"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network"
+ },
+ {
+  "name": "shell: nice --adjustment 5 curl https://evil",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "nice --adjustment 5 curl https://evil"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network"
+ },
+ {
+  "name": "shell: xargs -n 1 curl https://evil",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "xargs -n 1 curl https://evil"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network"
+ },
+ {
+  "name": "shell: xargs -I {} curl {}",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "xargs -I {} curl {}"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network"
+ },
+ {
+  "name": "shell: stdbuf -o L curl https://evil",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "stdbuf -o L curl https://evil"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network"
+ },
+ {
+  "name": "shell: time -o /tmp/t curl https://evil",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "time -o /tmp/t curl https://evil"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network"
+ },
+ {
+  "name": "shell: env -S 'cargo test'",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "env -S 'cargo test'"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "shell: xargs -n 1 echo",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "xargs -n 1 echo"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "shell: stdbuf -o L cargo test",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "stdbuf -o L cargo test"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "shell: sudo --user root ls",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "sudo --user root ls"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "shell: f(){ curl https://evil; }; f",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "f(){ curl https://evil; }; f"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network"
+ },
+ {
+  "name": "shell: function f(){ curl https://evil; }",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "function f(){ curl https://evil; }"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network"
+ },
+ {
+  "name": "shell: case x in x)curl https://evil;; esac",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "case x in x)curl https://evil;; esac"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network"
+ },
+ {
+  "name": "shell: cd ~/.cargo && cd registry && cat x",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd ~/.cargo && cd registry && cat x"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "denied path"
+ },
+ {
+  "name": "shell: cd ~/.cargo && pushd registry && cat x",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd ~/.cargo && pushd registry && cat x"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "denied path"
+ },
+ {
+  "name": "shell: cd ~/.cargo && ls registry",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd ~/.cargo && ls registry"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "denied path"
+ },
+ {
+  "name": "shell: f(){ echo a; }; f",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "f(){ echo a; }; f"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "shell: case $x in a)echo a;; esac",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "case $x in a)echo a;; esac"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "shell: cd src && cat main.rs",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd src && cat main.rs"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "shell: cd docs && ls",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd docs && ls"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "shell: cp evil/cleanroom.json docs/",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cp evil/cleanroom.json docs/"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "shell: cp evil/cleanroom.json docs",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cp evil/cleanroom.json docs"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "shell: cp evil/state.json .kukulu/",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cp evil/state.json .kukulu/"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "shell: cd .kukulu && cp /tmp/state.json .",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd .kukulu && cp /tmp/state.json ."
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "shell: cp evil/.mcp.json .",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cp evil/.mcp.json ."
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "shell: mv evil/cleanroom.json docs/",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "mv evil/cleanroom.json docs/"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "shell: install evil/cleanroom.json docs/",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "install evil/cleanroom.json docs/"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "shell: ln -sf /evil/cleanroom.json docs/",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "ln -sf /evil/cleanroom.json docs/"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "shell: cp -t docs evil/cleanroom.json",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cp -t docs evil/cleanroom.json"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "shell: cp --target-directory=docs evil/cleanroom.json",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cp --target-directory=docs evil/cleanroom.json"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "shell: cp -r evil/. .kukulu/",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cp -r evil/. .kukulu/"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "shell: cp target/release/x .",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cp target/release/x ."
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "shell: cp -r assets build/",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cp -r assets build/"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "shell: cp README.md docs/",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cp README.md docs/"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "shell: mv a.rs src/",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "mv a.rs src/"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "shell: install -m 755 target/release/x bin/",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "install -m 755 target/release/x bin/"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "shell: env -S -i curl https://evil (R5-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "env -S -i curl https://evil"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command curl is denied"
+ },
+ {
+  "name": "shell: env -S '-i curl https://evil' (R5-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "env -S '-i curl https://evil'"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command curl is denied"
+ },
+ {
+  "name": "shell: env -S'-u X curl https://evil' (R5-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "env -S'-u X curl https://evil'"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command curl is denied"
+ },
+ {
+  "name": "shell: env -vS 'curl https://evil' (R5-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "env -vS 'curl https://evil'"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command curl is denied"
+ },
+ {
+  "name": "shell: env -vS'curl https://evil' (R5-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "env -vS'curl https://evil'"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command curl is denied"
+ },
+ {
+  "name": "shell: sudo -iu root curl https://evil (R5-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "sudo -iu root curl https://evil"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command curl is denied"
+ },
+ {
+  "name": "shell: sudo -Eu root curl https://evil (R5-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "sudo -Eu root curl https://evil"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command curl is denied"
+ },
+ {
+  "name": "shell: xargs -tn 1 curl https://evil (R5-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "xargs -tn 1 curl https://evil"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command curl is denied"
+ },
+ {
+  "name": "shell: xargs -0I {} curl {} (R5-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "xargs -0I {} curl {}"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command curl is denied"
+ },
+ {
+  "name": "shell: sudo --us root curl https://evil (R5-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "sudo --us root curl https://evil"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command curl is denied"
+ },
+ {
+  "name": "shell: timeout --sig KILL 5 curl https://evil (R5-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "timeout --sig KILL 5 curl https://evil"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command curl is denied"
+ },
+ {
+  "name": "shell: nice --adj 5 curl https://evil (R5-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "nice --adj 5 curl https://evil"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command curl is denied"
+ },
+ {
+  "name": "shell: env --split-str='curl https://evil' (R5-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "env --split-str='curl https://evil'"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command curl is denied"
+ },
+ {
+  "name": "shell: env -i cargo test (R5-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "env -i cargo test"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "shell: env -S -i cargo test (R5-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "env -S -i cargo test"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "shell: sudo -iu root ls (R5-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "sudo -iu root ls"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "shell: xargs -tn 1 echo (R5-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "xargs -tn 1 echo"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "shell: cp -vt docs evil/cleanroom.json (R5-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cp -vt docs evil/cleanroom.json"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "shell: cp -rt docs evil/cleanroom.json (R5-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cp -rt docs evil/cleanroom.json"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "shell: cp -vt .kukulu evil/state.json (R5-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cp -vt .kukulu evil/state.json"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "shell: install -Dt docs evil/cleanroom.json (R5-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "install -Dt docs evil/cleanroom.json"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "shell: ln -sft docs /evil/cleanroom.json (R5-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "ln -sft docs /evil/cleanroom.json"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "shell: cp --target=docs evil/cleanroom.json (R5-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cp --target=docs evil/cleanroom.json"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "shell: cp --target docs evil/cleanroom.json (R5-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cp --target docs evil/cleanroom.json"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "shell: cp -tdocs evil/cleanroom.json (R5-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cp -tdocs evil/cleanroom.json"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "shell: cp -r src/ . (R5-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cp -r src/ ."
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "shell: cp -r vendor/ docs/ (R5-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cp -r vendor/ docs/"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "shell: cp -vt build a.txt (R5-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cp -vt build a.txt"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "shell: install -m 755 target/release/x bin/ (R5-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "install -m 755 target/release/x bin/"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "shell: cd ~/.cargo && cd r* && cat x (R5-03)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd ~/.cargo && cd r* && cat x"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "deny.paths"
+ },
+ {
+  "name": "shell: cd ~/.cargo && cd ?egistry && cat x (R5-03)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd ~/.cargo && cd ?egistry && cat x"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "deny.paths"
+ },
+ {
+  "name": "shell: cd ~/.cargo && ls regis* (R5-03)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd ~/.cargo && ls regis*"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "deny.paths"
+ },
+ {
+  "name": "shell: cd ~/.cargo && head -n 5 r* (R5-03)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd ~/.cargo && head -n 5 r*"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "deny.paths"
+ },
+ {
+  "name": "shell: cd ~/.cargo && grep foo r* (R5-03)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd ~/.cargo && grep foo r*"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "deny.paths"
+ },
+ {
+  "name": "shell: cd ~/.carg? && cd registry && cat x (R5-03)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd ~/.carg? && cd registry && cat x"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "deny.paths"
+ },
+ {
+  "name": "shell: cd src && ls *.rs (R5-03)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd src && ls *.rs"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "shell: cd crates && cat */Cargo.toml (R5-03)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd crates && cat */Cargo.toml"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "shell: ls *.md (R5-03)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "ls *.md"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "shell: xargs -i curl https://evil (R6-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "xargs -i curl https://evil"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command curl is denied"
+ },
+ {
+  "name": "shell: xargs --replace curl https://evil (R6-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "xargs --replace curl https://evil"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command curl is denied"
+ },
+ {
+  "name": "shell: xargs --max-lines curl https://evil (R6-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "xargs --max-lines curl https://evil"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command curl is denied"
+ },
+ {
+  "name": "shell: xargs --eof curl https://evil (R6-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "xargs --eof curl https://evil"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command curl is denied"
+ },
+ {
+  "name": "shell: xargs -0i curl https://evil (R6-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "xargs -0i curl https://evil"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command curl is denied"
+ },
+ {
+  "name": "shell: xargs -l curl https://evil (R6-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "xargs -l curl https://evil"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command curl is denied"
+ },
+ {
+  "name": "shell: env -S 'curl\\_https://evil' (R6-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "env -S 'curl\\_https://evil'"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command curl is denied"
+ },
+ {
+  "name": "shell: env -S\"curl\\_-s\\_https://evil\" (R6-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "env -S\"curl\\_-s\\_https://evil\""
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command curl is denied"
+ },
+ {
+  "name": "shell: sudo -R / curl https://evil (R6-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "sudo -R / curl https://evil"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command curl is denied"
+ },
+ {
+  "name": "shell: sudo -T 60 curl https://evil (R6-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "sudo -T 60 curl https://evil"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command curl is denied"
+ },
+ {
+  "name": "shell: env -P /usr/bin curl https://evil (R6-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "env -P /usr/bin curl https://evil"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command curl is denied"
+ },
+ {
+  "name": "shell: xargs -i echo {} (R6-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "xargs -i echo {}"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "shell: xargs -ifoo echo foo (R6-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "xargs -ifoo echo foo"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "shell: env -S cargo\\_test (R6-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "env -S cargo\\_test"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "shell: cp -rT evil docs (R6-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cp -rT evil docs"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "shell: cp -Tr evil docs/ (R6-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cp -Tr evil docs/"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "shell: cp -r --no-target-directory evil docs (R6-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cp -r --no-target-directory evil docs"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "shell: cp -r --no-t evil docs (R6-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cp -r --no-t evil docs"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "shell: cp -aT evil .kukulu (R6-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cp -aT evil .kukulu"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "shell: cp --rec evil/. docs (R6-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cp --rec evil/. docs"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "shell: cp --arch evil/. .kukulu (R6-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cp --arch evil/. .kukulu"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "shell: cp -rt . evil/docs (R6-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cp -rt . evil/docs"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "shell: cp -rT assets build (R6-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cp -rT assets build"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "shell: cp --rec assets build/ (R6-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cp --rec assets build/"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "shell: cp -T a.txt b.txt (R6-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cp -T a.txt b.txt"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "shell: cp -r --o evil/. docs (R7-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cp -r --o evil/. docs"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "shell: cp -rT --o evil docs (R7-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cp -rT --o evil docs"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "shell: cp --o -rT evil docs (R7-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cp --o -rT evil docs"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "shell: cp -rTS .bak evil docs (R7-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cp -rTS .bak evil docs"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "shell: cp -TrS.bak evil docs (R7-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cp -TrS.bak evil docs"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "shell: cp -aTS~ evil .kukulu (R7-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cp -aTS~ evil .kukulu"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "shell: cp -r --o assets build/ (R7-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cp -r --o assets build/"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "shell: cp -rTS .bak assets build (R7-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cp -rTS .bak assets build"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "shell: cp --suffix=.bak -r assets build/ (R7-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cp --suffix=.bak -r assets build/"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "shell: xargs --process-slot-var V curl https://evil (R7-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "xargs --process-slot-var V curl https://evil"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command curl is denied"
+ },
+ {
+  "name": "shell: xargs --p V curl https://evil (R7-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "xargs --p V curl https://evil"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command curl is denied"
+ },
+ {
+  "name": "shell: xargs -J % curl https://evil (R7-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "xargs -J % curl https://evil"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command curl is denied"
+ },
+ {
+  "name": "shell: xargs -R 1 curl https://evil (R7-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "xargs -R 1 curl https://evil"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command curl is denied"
+ },
+ {
+  "name": "shell: xargs -S 255 curl https://evil (R7-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "xargs -S 255 curl https://evil"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command curl is denied"
+ },
+ {
+  "name": "shell: xargs -iE curl https://evil (R7-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "xargs -iE curl https://evil"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command curl is denied"
+ },
+ {
+  "name": "shell: xargs --process-slot-var=V echo hi (R7-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "xargs --process-slot-var=V echo hi"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "shell: xargs -J % echo % (R7-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "xargs -J % echo %"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "shell: cp evil/cleanroom.json docs --sparse always (R8-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cp evil/cleanroom.json docs --sparse always"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "shell: cp evil/cleanroom.json docs --no-preserve mode (R8-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cp evil/cleanroom.json docs --no-preserve mode"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "shell: cp -r evil/. docs --sparse always (R8-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cp -r evil/. docs --sparse always"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "shell: cp -rT evil docs --no-preserve all (R8-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cp -rT evil docs --no-preserve all"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "shell: cp evil/cleanroom.json docs --sp always (R8-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cp evil/cleanroom.json docs --sp always"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "shell: cp evil/state.json .kukulu --sparse never (R8-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cp evil/state.json .kukulu --sparse never"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "shell: install evil/cleanroom.json docs --strip-program strip (R8-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "install evil/cleanroom.json docs --strip-program strip"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "shell: install -S evil/cleanroom.json docs (R8-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "install -S evil/cleanroom.json docs"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "shell: cp a.txt build/ --sparse always (R8-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cp a.txt build/ --sparse always"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "shell: install a.txt build/ --strip-program strip (R8-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "install a.txt build/ --strip-program strip"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "shell: install -S .bak a.txt build/ (R8-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "install -S .bak a.txt build/"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "shell: mv --st a.txt build/ (R8-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "mv --st a.txt build/"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "shell: install --strip-program=true --strip evil/cleanroom.json docs (R9-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "install --strip-program=true --strip evil/cleanroom.json docs"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "shell: install --strip-program true --strip evil/cleanroom.json docs (R9-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "install --strip-program true --strip evil/cleanroom.json docs"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "shell: install --strip-program=true --strip -t docs evil/cleanroom.json (R9-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "install --strip-program=true --strip -t docs evil/cleanroom.json"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "shell: install --strip evil/cleanroom.json docs (R9-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "install --strip evil/cleanroom.json docs"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "shell: install -v --strip evil/cleanroom.json docs (R9-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "install -v --strip evil/cleanroom.json docs"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "shell: install --strip evil/state.json .kukulu (R9-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "install --strip evil/state.json .kukulu"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "shell: mv --st evil/cleanroom.json docs (R9-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "mv --st evil/cleanroom.json docs"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "shell: mv --strip-trailing-slashes evil/cleanroom.json docs (R9-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "mv --strip-trailing-slashes evil/cleanroom.json docs"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "shell: install --stri evil/cleanroom.json docs (R9-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "install --stri evil/cleanroom.json docs"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "shell: install --strip-p strip evil/cleanroom.json docs (R9-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "install --strip-p strip evil/cleanroom.json docs"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "shell: install --strip a.txt build/ (R9-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "install --strip a.txt build/"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "shell: install --strip-program=true --strip a.txt build/ (R9-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "install --strip-program=true --strip a.txt build/"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "shell: mv --target-directory=docs evil/cleanroom.json (R10-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "mv --target-directory=docs evil/cleanroom.json"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "shell: mv --t=docs evil/cleanroom.json (R10-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "mv --t=docs evil/cleanroom.json"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "shell: ln --target-directory=docs evil/cleanroom.json (R10-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "ln --target-directory=docs evil/cleanroom.json"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "shell: install --target-directory=docs evil/cleanroom.json (R10-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "install --target-directory=docs evil/cleanroom.json"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "shell: install --mode=644 evil/cleanroom.json docs (R10-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "install --mode=644 evil/cleanroom.json docs"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "shell: install --owner=root evil/state.json .kukulu (R10-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "install --owner=root evil/state.json .kukulu"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "shell: mv --suffix=.bak evil/cleanroom.json docs (R10-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "mv --suffix=.bak evil/cleanroom.json docs"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "shell: ln --s evil/cleanroom.json docs (R10-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "ln --s evil/cleanroom.json docs"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "shell: cp --s evil/cleanroom.json docs (R10-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cp --s evil/cleanroom.json docs"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "shell: install --mode=644 a.txt build/ (R10-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "install --mode=644 a.txt build/"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "shell: install -o root -g root a.txt build/ (R10-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "install -o root -g root a.txt build/"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "shell: mv --suffix=.bak a.txt build/ (R10-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "mv --suffix=.bak a.txt build/"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ }
+]

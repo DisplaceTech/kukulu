@@ -12,7 +12,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Kūkulu — rebuild from the spec, prove nothing leaked</title>
-<meta name="description" content="Kūkulu is an open-source Claude Code plugin that turns a written spec into a planned, built, reviewed branch. Clean-room mode is coming in 0.7.0.">
+<meta name="description" content="Kūkulu is an open-source Claude Code plugin that turns a written spec into a planned, built, reviewed branch, with a clean-room mode that guards, logs and attests the build.">
 <link rel="canonical" href="https://kukulu.tech/">
 <meta name="color-scheme" content="dark light">
 <meta name="theme-color" content="#0B1620" media="(prefers-color-scheme: dark)">
@@ -23,7 +23,7 @@
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Kūkulu">
 <meta property="og:title" content="Kūkulu — rebuild from the spec, prove nothing leaked">
-<meta property="og:description" content="An open-source Claude Code plugin that turns a written spec into a planned, built, reviewed branch. Clean-room mode is coming in 0.7.0.">
+<meta property="og:description" content="An open-source Claude Code plugin that turns a written spec into a planned, built, reviewed branch, with a clean-room mode that guards, logs and attests the build.">
 <meta property="og:url" content="https://kukulu.tech/">
 <meta property="og:image" content="https://kukulu.tech/og.png">
 <meta property="og:image:width" content="1200">
@@ -117,7 +117,7 @@ pre.lines .ln::before{content:counter(line);display:inline-block;width:2.2em;col
 <div style="flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column; gap: 28px">
 <p class="eyebrow">Spec-driven builds · a Claude Code plugin</p>
 <h1 style="margin: 0; font-size: clamp(42px, 6.6vw, 88px); line-height: 1.0; letter-spacing: -0.035em; font-weight: 800; text-wrap: balance">Rebuild from the spec. Prove nothing leaked.</h1>
-<p style="margin: 0; max-width: 660px; font-size: 19px; line-height: 1.6; color: var(--muted)">Kūkulu is an open-source Claude Code plugin that turns a written spec into a planned, built, reviewed and summarized branch. A deterministic pipeline decides what runs next, and each stage runs on the model that fits it. Clean-room mode, coming in 0.7.0, adds an enforced guard, a tamper-evident log, calibrated similarity scoring and evidence a third party can verify offline.</p>
+<p style="margin: 0; max-width: 660px; font-size: 19px; line-height: 1.6; color: var(--muted)">Kūkulu is an open-source Claude Code plugin that turns a written spec into a planned, built, reviewed and summarized branch. A deterministic pipeline decides what runs next, and each stage runs on the model that fits it. Clean-room mode, in the plugin since 0.7.0, adds an enforced guard, a tamper-evident log, calibrated similarity scoring and evidence a third party can verify offline.</p>
 </div>
 <div style="flex: 1 1 320px; min-width: 0; border: 1px solid var(--line2); border-radius: 10px; background: var(--bg); font-size: 15px">
 <div style="display: flex; justify-content: space-between; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--line2); font-family: var(--mono); font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted)"><span>Sheet 01</span><span>Specification</span></div>
@@ -125,7 +125,7 @@ pre.lines .ln::before{content:counter(line);display:inline-block;width:2.2em;col
 <div style="display: grid; grid-template-columns: 104px minmax(0, 1fr); gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--line)"><dt style="font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); padding-top: 2px">Input</dt><dd style="margin: 0"><code style="font-size: 14px">docs/SPEC.md</code></dd></div>
 <div style="display: grid; grid-template-columns: 104px minmax(0, 1fr); gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--line)"><dt style="font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); padding-top: 2px">Pipeline</dt><dd style="margin: 0">plan → implement → review → summarize</dd></div>
 <div style="display: grid; grid-template-columns: 104px minmax(0, 1fr); gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--line)"><dt style="font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); padding-top: 2px">Models</dt><dd style="margin: 0">Anthropic · OpenRouter · Ollama</dd></div>
-<div style="display: grid; grid-template-columns: 104px minmax(0, 1fr); gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--line)"><dt style="font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); padding-top: 2px">Clean room</dt><dd style="margin: 0">Coming in 0.7.0</dd></div>
+<div style="display: grid; grid-template-columns: 104px minmax(0, 1fr); gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--line)"><dt style="font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); padding-top: 2px">Clean room</dt><dd style="margin: 0">In the plugin as of 0.7.0</dd></div>
 <div style="display: grid; grid-template-columns: 104px minmax(0, 1fr); gap: 12px; padding: 12px 16px"><dt style="font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); padding-top: 2px">License</dt><dd style="margin: 0">Apache-2.0 · patent pending</dd></div>
 </dl>
 </div>
@@ -176,7 +176,7 @@ pre.lines .ln::before{content:counter(line);display:inline-block;width:2.2em;col
 <div class="wrap" style="display: flex; flex-direction: column; gap: 40px">
 <div style="display: flex; flex-direction: column; gap: 20px">
 <p class="eyebrow">03 — How it works</p>
-<h2 id="how-h" class="h2">The pipeline runs today. The clean room goes around it next.</h2>
+<h2 id="how-h" class="h2">The pipeline runs the build. The clean room goes around it.</h2>
 </div>
 
 <figure class="fig grid-bg" aria-labelledby="fig1" style="margin: 0; position: relative; padding: 48px; border: 1px solid var(--line2); border-radius: 12px; background-color: var(--bg2)">
@@ -188,7 +188,7 @@ pre.lines .ln::before{content:counter(line);display:inline-block;width:2.2em;col
 <span>Fig. 1 — The Kūkulu pipeline and its clean room</span>
 <span style="display: flex; flex-wrap: wrap; gap: 8px 20px; text-transform: none; letter-spacing: 0.02em">
 <span style="display: inline-flex; align-items: center; gap: 8px"><span aria-hidden="true" style="width: 24px; height: 0; border-top: 2px solid var(--line2)"></span>Solid: in the plugin today</span>
-<span style="display: inline-flex; align-items: center; gap: 8px"><span aria-hidden="true" style="width: 24px; height: 0; border-top: 2px dashed var(--accent)"></span>Dashed: clean-room mode, coming in 0.7.0</span>
+<span style="display: inline-flex; align-items: center; gap: 8px">Clean-room mode, in the plugin</span>
 </span>
 </figcaption>
 
@@ -198,7 +198,7 @@ pre.lines .ln::before{content:counter(line);display:inline-block;width:2.2em;col
 <svg class="conn" width="12" height="52" viewBox="0 0 12 52" aria-hidden="true" style="fill: none; stroke: var(--accent); stroke-width: 2"><path d="M6 2 V42"></path><path d="M1 41 L6 51 L11 41 Z" style="fill: var(--accent); stroke: none"></path></svg>
 </div>
 <div style="flex: 1 1 280px; min-width: 0; display: flex; flex-direction: column; align-items: center">
-<p style="margin: 0; width: 100%; display: flex; flex-direction: column; gap: 4px; padding: 14px 18px; border: 1.5px dashed var(--deny); border-radius: 10px; background: var(--panel)"><span style="font-family: var(--mono); font-size: 12px; letter-spacing: 0.1em; color: var(--deny)">BLOCKED BY THE GUARD</span><span style="font-weight: 700; font-size: 18px">The original source and other existing implementations</span></p>
+<p style="margin: 0; width: 100%; display: flex; flex-direction: column; gap: 4px; padding: 14px 18px; border: 1.5px solid var(--deny); border-radius: 10px; background: var(--panel)"><span style="font-family: var(--mono); font-size: 12px; letter-spacing: 0.1em; color: var(--deny)">BLOCKED BY THE GUARD</span><span style="font-weight: 700; font-size: 18px">The original source and other existing implementations</span></p>
 <div class="conn" aria-hidden="true" style="position: relative; width: 12px; height: 52px">
 <svg width="12" height="26" viewBox="0 0 12 26" style="display: block; fill: none; stroke: var(--deny); stroke-width: 2"><path d="M6 2 V22"></path><path d="M0 24 H12" style="stroke-width: 3"></path></svg>
 <span style="position: absolute; left: 22px; top: 12px; white-space: nowrap; font-family: var(--mono); font-size: 12px; color: var(--deny)">denied, and logged</span>
@@ -209,8 +209,8 @@ pre.lines .ln::before{content:counter(line);display:inline-block;width:2.2em;col
 <svg width="12" height="40" viewBox="0 0 12 40" style="fill: none; stroke: var(--accent); stroke-width: 2"><path d="M6 2 V30"></path><path d="M1 29 L6 39 L11 29 Z" style="fill: var(--accent); stroke: none"></path></svg>
 </div>
 
-<div class="room" role="group" aria-labelledby="room-label" style="position: relative; border: 2px dashed var(--accent); border-radius: 14px">
-<p id="room-label" style="position: absolute; left: 16px; right: 16px; top: -13px; margin: 0; display: flex; flex-wrap: wrap; gap: 4px 10px; font-family: var(--mono); font-size: 12px; letter-spacing: 0.1em; color: var(--accent-text)"><span style="padding: 0 10px; background: var(--bg2)">CLEAN ROOM · 0.7.0 · GUARD CHECKS EVERY TOOL CALL</span></p>
+<div class="room" role="group" aria-labelledby="room-label" style="position: relative; border: 2px solid var(--accent); border-radius: 14px">
+<p id="room-label" style="position: absolute; left: 16px; right: 16px; top: -13px; margin: 0; display: flex; flex-wrap: wrap; gap: 4px 10px; font-family: var(--mono); font-size: 12px; letter-spacing: 0.1em; color: var(--accent-text)"><span style="padding: 0 10px; background: var(--bg2)">CLEAN ROOM · GUARD CHECKS EVERY TOOL CALL</span></p>
 <ol class="pipe" style="list-style: none; margin: 0; padding: 0">
 <li class="stage" style="background: var(--panel); border: 1px solid var(--line2); border-radius: 10px; padding: 20px; display: flex; flex-direction: column; gap: 10px; min-height: 220px">
 <p style="margin: 0; font-family: var(--mono); font-size: 12px; letter-spacing: 0.1em; color: var(--muted)">STAGE 01</p>
@@ -246,7 +246,7 @@ pre.lines .ln::before{content:counter(line);display:inline-block;width:2.2em;col
 <span style="position: absolute; left: 0; right: 0; top: 50px; text-align: center; font-family: var(--mono); font-size: 13px; color: var(--ink)">misses go back for fixes</span>
 </li>
 </ol>
-<p style="margin: 24px 0 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding-top: 16px; border-top: 1px dashed var(--accent); font-family: var(--mono); font-size: 13px; color: var(--muted)">
+<p style="margin: 24px 0 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding-top: 16px; border-top: 1px solid var(--accent); font-family: var(--mono); font-size: 13px; color: var(--muted)">
 <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" style="flex: none; fill: none; stroke: var(--accent); stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round"><rect x="3" y="9" width="7" height="6" rx="3"></rect><rect x="14" y="9" width="7" height="6" rx="3"></rect><path d="M10 12 H14"></path></svg>
 <span><b style="color: var(--ink); font-weight: 600">Provenance log:</b> every call, allowed or denied, hash-chained</span>
 <span><b style="color: var(--ink); font-weight: 600">Controller:</b> no stage advances until isolation checks out</span>
@@ -258,19 +258,19 @@ pre.lines .ln::before{content:counter(line);display:inline-block;width:2.2em;col
 </div>
 
 <ol class="ev" aria-label="Evidence clean-room mode produces after the build" style="list-style: none; margin: 0; padding: 0">
-<li class="stage" style="border: 1.5px dashed var(--accent); border-radius: 10px; padding: 18px 20px; display: flex; flex-direction: column; gap: 8px; background: var(--bg)">
+<li class="stage" style="border: 1.5px solid var(--accent); border-radius: 10px; padding: 18px 20px; display: flex; flex-direction: column; gap: 8px; background: var(--bg)">
 <p style="margin: 0; font-family: var(--mono); font-size: 12px; letter-spacing: 0.1em; color: var(--accent-text)">EVIDENCE 01</p>
 <h3 style="margin: 0; font-size: 20px; font-weight: 700">Equivalence</h3>
 <p style="margin: 0; font-size: 15px; line-height: 1.5; color: var(--muted)">The original is used only as a black box. Conformance corpora and differential fuzzing compare outputs byte for byte.</p>
 <svg class="fwd" viewBox="0 0 56 12" aria-hidden="true" style="fill: none; stroke: var(--accent); stroke-width: 2"><path d="M4 6 H46"></path><path d="M45 1 L54 6 L45 11 Z" style="fill: var(--accent); stroke: none"></path></svg>
 </li>
-<li class="stage" style="border: 1.5px dashed var(--accent); border-radius: 10px; padding: 18px 20px; display: flex; flex-direction: column; gap: 8px; background: var(--bg)">
+<li class="stage" style="border: 1.5px solid var(--accent); border-radius: 10px; padding: 18px 20px; display: flex; flex-direction: column; gap: 8px; background: var(--bg)">
 <p style="margin: 0; font-family: var(--mono); font-size: 12px; letter-spacing: 0.1em; color: var(--accent-text)">EVIDENCE 02</p>
 <h3 style="margin: 0; font-size: 20px; font-weight: 700">Contamination score</h3>
 <p style="margin: 0; font-size: 15px; line-height: 1.5; color: var(--muted)">Similarity to existing code, placed on a scale from independent implementations to known derivations.</p>
 <svg class="fwd" viewBox="0 0 56 12" aria-hidden="true" style="fill: none; stroke: var(--accent); stroke-width: 2"><path d="M4 6 H46"></path><path d="M45 1 L54 6 L45 11 Z" style="fill: var(--accent); stroke: none"></path></svg>
 </li>
-<li class="stage" style="border: 1.5px dashed var(--accent); border-radius: 10px; padding: 18px 20px; display: flex; flex-direction: column; gap: 8px; background: var(--bg)">
+<li class="stage" style="border: 1.5px solid var(--accent); border-radius: 10px; padding: 18px 20px; display: flex; flex-direction: column; gap: 8px; background: var(--bg)">
 <p style="margin: 0; font-family: var(--mono); font-size: 12px; letter-spacing: 0.1em; color: var(--accent-text)">EVIDENCE 03</p>
 <h3 style="margin: 0; font-size: 20px; font-weight: 700">Attestation bundle</h3>
 <p style="margin: 0; font-size: 15px; line-height: 1.5; color: var(--muted)">Policy history, log, checkpoints and results in a signed manifest that a third party can verify offline.</p>
@@ -322,14 +322,14 @@ pre.lines .ln::before{content:counter(line);display:inline-block;width:2.2em;col
 
 <div role="group" aria-labelledby="cr-h" style="position: relative; border: 2px dashed var(--accent); border-radius: 14px; padding: clamp(20px, 3vw, 32px); display: flex; flex-direction: column; gap: 20px">
 <div style="display: flex; flex-direction: column; gap: 6px">
-<h3 id="cr-h" style="margin: 0; font-family: var(--mono); font-size: 13px; font-weight: 500; letter-spacing: 0.1em; text-transform: uppercase; color: var(--accent-text)">Clean-room mode · coming in 0.7.0</h3>
+<h3 id="cr-h" style="margin: 0; font-family: var(--mono); font-size: 13px; font-weight: 500; letter-spacing: 0.1em; text-transform: uppercase; color: var(--accent-text)">Clean-room mode</h3>
 <p style="margin: 0; font-size: 16px; color: var(--muted)">The method behind cleanflate, and the subject of a pending patent.</p>
 </div>
 <ul style="list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 20px 32px">
 <li style="display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 4px 14px">
 <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true" style="grid-row: span 2; fill: none; stroke: var(--accent); stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round"><path d="M12 3 L20 6 V12 C20 16.5 16.5 19.5 12 21 C7.5 19.5 4 16.5 4 12 V6 Z"></path><path d="M9 9 L15 15"></path><path d="M15 9 L9 15"></path></svg>
 <h4 style="margin: 0; font-size: 17px; font-weight: 700">Enforced isolation</h4>
-<p style="margin: 0; font-size: 15px; line-height: 1.5; color: var(--muted)">A guard checks every tool call’s target against a declarative policy before it runs. The policy and the guard are protected from the agents.</p>
+<p style="margin: 0; font-size: 15px; line-height: 1.5; color: var(--muted)">A hook checks every tool call’s target against a declarative policy before it runs. The policy, the guard, the log and the signing key are protected from the agents.</p>
 </li>
 <li style="display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 4px 14px">
 <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true" style="grid-row: span 2; fill: none; stroke: var(--accent); stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round"><rect x="4" y="4" width="16" height="16" rx="2"></rect><path d="M4 12 H20"></path><path d="M12 4 V20"></path></svg>
@@ -344,7 +344,7 @@ pre.lines .ln::before{content:counter(line);display:inline-block;width:2.2em;col
 <li style="display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 4px 14px">
 <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true" style="grid-row: span 2; fill: none; stroke: var(--accent); stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round"><path d="M3 15 H21"></path><path d="M4 13 V17"></path><path d="M20 13 V17"></path><circle cx="9" cy="15" r="2.2" style="fill: var(--bg)"></circle><path d="M12 7 L12 10"></path><path d="M9 7 H15"></path></svg>
 <h4 style="margin: 0; font-size: 17px; font-weight: 700">Calibrated contamination scoring</h4>
-<p style="margin: 0; font-size: 15px; line-height: 1.5; color: var(--muted)">Similarity scored on a scale where 0 is an independent pair of implementations and 1 is a known derivation.</p>
+<p style="margin: 0; font-size: 15px; line-height: 1.5; color: var(--muted)">Similarity scored on a scale where 0 is an independent pair of implementations and 1 is a known derivation, against control pairs you supply.</p>
 </li>
 <li style="display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 4px 14px">
 <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true" style="grid-row: span 2; fill: none; stroke: var(--accent); stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round"><path d="M6 3 H14 L19 8 V21 H6 Z"></path><path d="M14 3 V8 H19"></path><path d="M9 14 L11 16 L15 12"></path></svg>
@@ -425,7 +425,7 @@ git add docs/SPEC.md &amp;&amp; git commit -m "spec"</code></pre>
 <p class="eyebrow">06 — Proof</p>
 <h2 id="proof-h" class="h2"><span style="font-family: var(--mono); font-weight: 600; letter-spacing: -0.02em">cleanflate</span></h2>
 <p style="margin: 0; max-width: 760px; font-size: 20px; line-height: 1.55; color: var(--muted)">A clean-room DEFLATE decompressor in safe Rust, built by Kūkulu from RFCs 1950–1952 alone, without access to zlib’s source.</p>
-<p style="margin: 0; max-width: 760px; font-size: 16px; line-height: 1.55; color: var(--muted)">Built with Kūkulu 0.3.2, then named Foundry, under the clean-room controls that come to the plugin in 0.7.0.</p>
+<p style="margin: 0; max-width: 760px; font-size: 16px; line-height: 1.55; color: var(--muted)">Built with Kūkulu 0.3.2, then named Foundry, under project-local clean-room controls; their general form is the plugin’s clean-room mode, as of 0.7.0.</p>
 </div>
 
 <figure aria-labelledby="cal-h" style="margin: 0; padding: clamp(20px, 3vw, 32px); border: 1px solid var(--line2); border-radius: 10px; background: var(--bg2)">
@@ -499,8 +499,8 @@ git add docs/SPEC.md &amp;&amp; git commit -m "spec"</code></pre>
 </div>
 <ol style="list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; border-top: 1px solid var(--line2)">
 <li style="flex: 1 1 280px; min-width: 0; padding: 24px 28px 8px 0; display: flex; flex-direction: column; gap: 10px">
-<p style="margin: 0; font-family: var(--mono); font-size: 12px; letter-spacing: 0.1em; color: var(--accent-text)">NEXT 01 · 0.7.0</p>
-<p style="margin: 0; font-size: 20px; font-weight: 600; line-height: 1.35">Clean-room mode in the plugin, for modernizing legacy software into memory-safe code.</p>
+<p style="margin: 0; font-family: var(--mono); font-size: 12px; letter-spacing: 0.1em; color: var(--accent-text)">NEXT 01</p>
+<p style="margin: 0; font-size: 20px; font-weight: 600; line-height: 1.35">A hotfix lane: a short, reviewed stage for an operator fix, flagged in the attestation.</p>
 </li>
 <li style="flex: 1 1 280px; min-width: 0; padding: 24px 28px 8px 0; display: flex; flex-direction: column; gap: 10px">
 <p style="margin: 0; font-family: var(--mono); font-size: 12px; letter-spacing: 0.1em; color: var(--accent-text)">NEXT 02</p>

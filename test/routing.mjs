@@ -557,42 +557,27 @@ const cfgDir = () => mkDir("kukulu-cfg-");
   });
 }
 
-// ---------------------------------------------------------------- pre-0.6.0 names (removed in 0.7.0)
+// ---------------------------------------------------------------- FOUNDRY_* names are gone (0.7.0)
 
 {
   const repo = plannedRepo();
   const globalPath = writeGlobalConfig(cfgDir(), {
-    profiles: { local: { implementer: { model: "ollama,qwen3.6:35b-a3b" } }, cheap: { implementer: { model: "haiku" } } },
+    profiles: { local: { implementer: { model: "ollama,qwen3.6:35b-a3b" } } },
+    roles: { implementer: { model: "opus" } },
   });
 
   await withServer(repo, async ({ call }) => {
-    const st = await call("kukulu_status");
-    eq(st.deprecations.length, 0, "no deprecation notice when only KUKULU_* names are used");
-  }, { env: { KUKULU_CONFIG: globalPath, KUKULU_PROFILE: "local" } });
+    const cfg = await call("kukulu_config_show");
+    ok(cfg.roles.implementer.model !== "opus", "FOUNDRY_CONFIG is ignored");
+  }, { env: { KUKULU_CONFIG: "", FOUNDRY_CONFIG: globalPath, XDG_CONFIG_HOME: cfgDir() } });
 
   await withServer(repo, async ({ call }) => {
     const cfg = await call("kukulu_config_show");
-    eq(cfg.profile, "local", "FOUNDRY_PROFILE still selects a profile");
-    eq(cfg.roles.implementer.model, "ollama,qwen3.6:35b-a3b", "FOUNDRY_CONFIG still points at the global file");
-    const st = await call("kukulu_status");
-    eq(st.deprecations.join("\n"), [
-      "FOUNDRY_CONFIG is deprecated; set KUKULU_CONFIG instead. Support ends in 0.7.0.",
-      "FOUNDRY_PROFILE is deprecated; set KUKULU_PROFILE instead. Support ends in 0.7.0.",
-    ].join("\n"), "...and kukulu_status says to rename each, and when support ends");
-    const n = await call("kukulu_next");
-    eq(n.deprecations.length, 2, "...and kukulu_next carries the same notices");
-  }, { env: { KUKULU_CONFIG: "", FOUNDRY_CONFIG: globalPath, FOUNDRY_PROFILE: "local" } });
-
-  await withServer(repo, async ({ call }) => {
-    const cfg = await call("kukulu_config_show");
-    eq(cfg.profile, "cheap", "KUKULU_PROFILE wins over FOUNDRY_PROFILE");
-    const st = await call("kukulu_status");
-    eq(st.deprecations.length, 0, "...and a pre-0.6.0 name that lost is not reported");
-  }, { env: { KUKULU_CONFIG: globalPath, KUKULU_PROFILE: "cheap", FOUNDRY_PROFILE: "local" } });
+    ok(cfg.profile !== "local", "FOUNDRY_PROFILE does not select a profile");
+  }, { env: { KUKULU_CONFIG: globalPath, FOUNDRY_PROFILE: "local" } });
 }
 
 {
-  // The global file moved from <config>/foundry/ to <config>/kukulu/.
   const repo = plannedRepo();
   const xdg = cfgDir();
   writeFile(xdg, "foundry/config.json", JSON.stringify({ roles: { implementer: { model: "haiku" } } }));
@@ -600,17 +585,15 @@ const cfgDir = () => mkDir("kukulu-cfg-");
 
   await withServer(repo, async ({ call }) => {
     const cfg = await call("kukulu_config_show");
-    eq(cfg.roles.implementer.model, "haiku", "the global file is still read from the old foundry/ directory");
-    const st = await call("kukulu_status");
-    eq(st.deprecations.length, 1, "...with one notice");
-    like(st.deprecations[0], /move it to .*kukulu[/\\]config\.json\. Support ends in 0\.7\.0\./, "...naming the new location and the removal");
+    ok(cfg.roles.implementer.model !== "haiku", "a foundry/config.json global file is not read");
   }, { env });
 
-  writeFile(xdg, "kukulu/config.json", JSON.stringify({ roles: { implementer: { model: "sonnet" } } }));
   await withServer(repo, async ({ call }) => {
-    const cfg = await call("kukulu_config_show");
-    eq(cfg.roles.implementer.model, "sonnet", "the kukulu/ global file wins over the foundry/ one");
-    eq((await call("kukulu_status")).deprecations.length, 0, "...and nothing is reported");
+    const before = await call("kukulu_config_show");
+    ok(before.roles.implementer.model !== "opus", "the global file is absent at first");
+    writeFile(xdg, "kukulu/config.json", JSON.stringify({ roles: { implementer: { model: "opus" } } }));
+    const after = await call("kukulu_config_show");
+    eq(after.roles.implementer.model, "opus", "kukulu_config_show re-reads the global config on every call");
   }, { env });
 }
 

@@ -1,6 +1,6 @@
 # Architecture
 
-Kūkulu is four subagents, one flight controller, one MCP server and one Stop hook. The design rule behind it: a language model decides what the code should be, and nothing else. Stage selection, task selection, checkbox edits, log entries, verification and commits are implemented in code instead of described in prose for a model to carry out, because a model gets those things subtly wrong after its context has been compacted dozens of times.
+Kūkulu is four subagents, one flight controller, one MCP server and one Stop hook, plus two more hook scripts that do nothing unless the project is in clean-room mode. The design rule behind it: a language model decides what the code should be, and nothing else. Stage selection, task selection, checkbox edits, log entries, verification and commits are implemented in code instead of described in prose for a model to carry out, because a model gets those things subtly wrong after its context has been compacted dozens of times.
 
 ## The pieces
 
@@ -17,11 +17,15 @@ flowchart LR
     subgraph PL["plugin"]
         MCP["kukulu MCP server<br/>mcp/server.mjs"]
         HOOK["implement-guard.mjs<br/>Stop · SubagentStop (implementer only)"]
+        CRG["cleanroom-guard.mjs<br/>PreToolUse (clean-room only)"]
+        CRL["cleanroom-log.mjs<br/>PostToolUse · UserPromptSubmit<br/>(clean-room only)"]
+        CRM["mcp/cleanroom.mjs<br/>policy · chain · keys · scorer"]
     end
 
     subgraph REPO["your repository"]
         DOCS["docs/*.md<br/>docs/kukulu.json"]
         STATE[".kukulu/state.json<br/>.kukulu/implement.lock"]
+        LOG[".kukulu/cleanroom/log.jsonl<br/>docs/cleanroom.json"]
         GIT["git history"]
     end
 
@@ -33,6 +37,10 @@ flowchart LR
     MCP --> GIT
     HOOK -->|"reads"| STATE
     HOOK -->|"reads"| DOCS
+    CRG -->|"reads policy"| LOG
+    CRL -->|"appends"| LOG
+    MCP -->|"gate · checkpoints"| LOG
+    CRG & CRL & MCP --> CRM
 ```
 
 The flight controller is deliberately the weakest model in the system. Besides `Agent`, it may call `kukulu_status`, `kukulu_next`, `kukulu_agents_sync`, `kukulu_feedback_log`, `kukulu_run_halt` and `kukulu_flight_options`, and none of them start a run, mark a task, or record a verdict. `kukulu_agents_sync` writes only the generated agent files under `.claude/agents/`, the MCP allow rule and a `.git/info/exclude` line (see [routing.md](./routing.md)). `kukulu_flight_options` writes only the two review-loop bounds the operator passed to `/kukulu:go-flight`.
@@ -72,8 +80,7 @@ The server evaluates these decisions in this order:
 1. No `docs/SPEC.md` → **halt**.
 2. `state.halted` is set → **halt** with that reason.
 3. `state.awaitingSigning` is set (`kukulu_pr_finalize` found an unsigned commit) → **done**, "awaiting signing", with the steps to take.
-4. `state.archived` is set, `PLAN.md` is absent and `docs/SPEC.md` is byte-identical to the archived copy → **done**, "flight archived". Once the spec differs, decision 5 applies and the answer is **plan**, except on the pre-0.6.0 layout (decision 4a).
-   - Decision 4a: if the project is still on the pre-0.6.0 layout (`.foundry/`) and any of `PLAN.md`, `PROGRESS.md`, `foundry.json` is missing, the answer is **halt**, "run `/kukulu:go-flight migrate` first". Planning would write `docs/kukulu.json` beside `.foundry/`, and every tool refuses a project holding both layouts. Removed in 0.7.0 with the layout fallback.
+4. `state.archived` is set, `PLAN.md` is absent and `docs/SPEC.md` is byte-identical to the archived copy → **done**, "flight archived". Once the spec differs, decision 5 applies and the answer is **plan**.
 5. Any of `PLAN.md`, `PROGRESS.md`, `kukulu.json` missing → **plan**.
 6. Open tasks → **implement**.
 7. Lock present (a run died before its handoff) → **implement**.
@@ -86,6 +93,29 @@ The server evaluates these decisions in this order:
 Only `kukulu_review_submit` makes the round-cap decision. It is the one place that decides a round is non-converging past `maxRounds` or has reached `maxRoundsHard`, and it records that as decision 2's `state.halted`. `next()` never re-derives it from `round` and `maxRounds`: open tasks after a round that was not itself halted are the next implement stage, like any other round (V3-10). `kukulu_run_halt` also sets `state.halted` directly. An implementer calls it for an operator-level problem it cannot resolve itself, such as a dead signing agent, a full disk or a vanished base branch.
 
 Each stage comes back with a `prompt` that the flight controller passes to the subagent verbatim. The implement, review and summarize prompts each end with one sentence stating this run's policies (`signing`, `push`, `pr`), so every stage knows them without re-deriving them. The server generates the prompt and the controller only relays it, so the instruction a stage receives does not drift with the controller's context.
+
+## Clean-room mode
+
+A project is in clean-room mode when the file at `cleanroom.policy` (`docs/cleanroom.json` by default) exists; there is no flag. The server does the mechanical half and the hooks the rest, and neither calls a model.
+
+- The **guard** (`scripts/cleanroom-guard.mjs`, a `PreToolUse` hook) reads the policy and denies a tool call, with exit status 2 and a reason, when it would read what the policy forbids. It decides nothing else.
+- The **logger** (`scripts/cleanroom-log.mjs`, `PostToolUse` and `UserPromptSubmit`) appends one entry per call and per prompt to a hash-chained log. Each entry's hash covers the previous one, so an entry cannot be changed or dropped without breaking every hash after it.
+- The **server** writes the first entry (genesis) when the flight starts, signs a checkpoint in every bookkeeping tool, and runs a **gate** before each stage starts. `mcp/cleanroom.mjs` holds the pure functions all three share, so the same code runs inside a hook and inside the tests.
+
+The gate sits between stage selection and the stage:
+
+```mermaid
+flowchart LR
+    N["kukulu_next picks a stage"] --> G{"gate: seven checks"}
+    G -->|"all pass"| S["the stage runs"]
+    G -->|"one fails"| H["gate entry in the log, then halt"]
+    S --> T["each tool call: guard decides, logger records"]
+    T --> C["bookkeeping tools append a signed checkpoint"]
+    C --> N
+    S -->|"summarize"| A["attestation bundle, verified offline"]
+```
+
+The checks, in order, are mode, policy, guard, self-test, lockdown, chain and liveness; [cleanroom.md](./cleanroom.md) lists them. They are not part of the stage decisions above, and a failing gate does not change what `kukulu_next` would pick: it refuses to let the stage start. Once genesis is written the mode is sticky: removing the policy file or starting in another mode is a gate failure, so the only way out of clean-room mode is to archive the flight.
 
 ## Who may write what
 

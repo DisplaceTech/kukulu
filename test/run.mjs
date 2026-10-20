@@ -19,6 +19,8 @@ const SUITES = [
   ["feedback", "kukulu_feedback_log, .kukulu/feedback.jsonl, and the feedback policy"],
   ["streams", "parallel waves: stream tags, partition validation, worktrees, merge-back"],
   ["guard", "the Stop / SubagentStop guard hook"],
+  ["cleanroom", "clean-room mode: policy, guard, chain, checkpoints, gate, scoring"],
+  ["attest", "the offline verifier, attestation bundles and pre-0.6.0 logs"],
   ["drive", "one whole flight, end to end"],
 ];
 

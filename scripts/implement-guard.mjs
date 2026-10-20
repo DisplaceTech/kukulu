@@ -18,8 +18,7 @@
 //   1. No lock, or no open tasks: allow. Nothing to guard.
 //   2. `hook_event_name` is `SubagentStop`: block only when `agent_type`
 //      names the implementer (`kukulu-implementer` or
-//      `kukulu:implementer`, or the pre-0.6.0 `foundry-implementer` and
-//      `foundry:implementer` until 0.7.0). Any other named agent is allowed outright.
+//      `kukulu:implementer`). Any other named agent is allowed outright.
 //      A missing `agent_type` falls back to rule 3's transcript check.
 //   3. `hook_event_name` is `Stop`: block only when *this session's own
 //      transcript* holds a `tool_use` of `kukulu_run_start` — i.e. the
@@ -56,7 +55,7 @@
 //      stream that stopped early, so this is an optimisation, not the only
 //      safety net. With no worktrees, the rules above apply unchanged.
 //
-// A hard cap on re-blocks (default 60, see KUKULU_GUARD_CAP, or the pre-0.6.0 FOUNDRY_GUARD_CAP until 0.7.0, or
+// A hard cap on re-blocks (default 60, see KUKULU_GUARD_CAP, or
 // docs/kukulu.json's guardCap) still prevents a runaway. The counter
 // resets to zero on every task state change, so the cap bounds re-blocks
 // since the last time work actually moved, not over the whole run — a
@@ -66,7 +65,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-const IMPLEMENTER_AGENT_TYPES = new Set(["kukulu-implementer", "kukulu:implementer", "foundry-implementer", "foundry:implementer"]);
+const IMPLEMENTER_AGENT_TYPES = new Set(["kukulu-implementer", "kukulu:implementer"]);
 
 function readStdin() {
   try {
@@ -86,7 +85,7 @@ function parseInput(raw) {
   }
 }
 
-const RUN_START_TOOL = /^(?:mcp__.+__)?(?:kukulu|foundry)_run_start$/;
+const RUN_START_TOOL = /^(?:mcp__.+__)?kukulu_run_start$/;
 
 /**
  * The `input` of every assistant `tool_use` of kukulu_run_start in the
@@ -202,25 +201,21 @@ function openTasks(progressPath) {
   return { open, next: inProgress || todo, stalled: inProgress, byStream };
 }
 
-// A project that has not run kukulu_migrate yet keeps its state in `.foundry/`.
-// Both are checked until 0.7.0, and `.kukulu/` wins when both hold a lock.
-const STATE_DIRS = [".kukulu", ".foundry"];
+const STATE_DIR = ".kukulu";
 
 /** Does any stream worktree exist under `<state dir>/worktrees/`? A wave is in flight when one does. */
 function streamWorktreesExist(root) {
-  return STATE_DIRS.some((dir) => {
-    try {
-      return fs.readdirSync(path.join(root, dir, "worktrees"), { withFileTypes: true }).some((d) => d.isDirectory());
-    } catch {
-      return false;
-    }
-  });
+  try {
+    return fs.readdirSync(path.join(root, STATE_DIR, "worktrees"), { withFileTypes: true }).some((d) => d.isDirectory());
+  } catch {
+    return false;
+  }
 }
 
 function main() {
   const input = parseInput(readStdin());
   const root = projectRoot(input);
-  const lockPath = STATE_DIRS.map((dir) => path.join(root, dir, "implement.lock")).find((p) => fs.existsSync(p)) || path.join(root, STATE_DIRS[0], "implement.lock");
+  const lockPath = path.join(root, STATE_DIR, "implement.lock");
   const progressPath = path.join(root, "docs", "PROGRESS.md");
 
   if (!fs.existsSync(lockPath) || !fs.existsSync(progressPath)) return;
@@ -261,7 +256,7 @@ function main() {
   // the counter to zero), not the whole run — so a per-run cap set in
   // docs/kukulu.json's guardCap, carried in the lock, wins over the
   // process-wide KUKULU_GUARD_CAP env var, which wins over the default.
-  const cap = Number.isInteger(lock.json?.cap) ? lock.json.cap : Number(process.env.KUKULU_GUARD_CAP || process.env.FOUNDRY_GUARD_CAP || 60);
+  const cap = Number.isInteger(lock.json?.cap) ? lock.json.cap : Number(process.env.KUKULU_GUARD_CAP || 60);
   const count = lock.count + 1;
   writeLock(lockPath, lock, count);
 

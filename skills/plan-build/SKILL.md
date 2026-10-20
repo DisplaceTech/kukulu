@@ -15,6 +15,8 @@ You are the first of four chained roles. Your output is executed **unattended** 
 3. `docs/kukulu.json` (verification commands and run settings).
 4. `CLAUDE.md` for the repo.
 
+**Clean-room mode.** When the project has a clean-room policy (`docs/cleanroom.json`, or the path `cleanroom.policy` names), the guard protects `docs/kukulu.json` as soon as `docs/PLAN.md` exists. Write the deliverables in the order 3, 1, 2, 4: `docs/kukulu.json` first, then `docs/PLAN.md`, `docs/PROGRESS.md` and `CLAUDE.md`. Never write the policy file or anything under `.kukulu/`.
+
 Do not write implementation code. Do not create the branch, package manifest, or any source files; the first task of the first phase does that.
 
 ## Rules for the plan
@@ -51,17 +53,22 @@ A plan may split independent tasks into **streams**; the implement stage then ru
 
 ```
 # <Project> build plan
+
 Derived from docs/SPEC.md v<version> on <date>. SPEC.md wins over this file.
 
 ## Decisions
+
 - <open question> → <decision>. <rationale>
 ...
 
 ## Conventions
+
 <commit message template, anything every task shares>
 
 ## Phase 0 — <name>
+
 ### P0-01: <title>
+
 **Goal:** ...
 **Files touched:** ...
 **Design constraints:** ...
@@ -74,28 +81,33 @@ Derived from docs/SPEC.md v<version> on <date>. SPEC.md wins over this file.
 ### P0-02: ...
 
 ## Phase 1 — <name>
+
 ...
 
 ## Spec issues
+
 <anything ambiguous or contradictory in SPEC, with your proposed resolution>
 ```
 
-The `**Stream:**` line appears only on a task in a parallel wave (see "Parallel streams" above); leave it out of every serial task. Headings must be exactly `### <ID>: <title>`; the MCP extracts task text by that heading. Review rounds later append `## Review fixes (round N)` sections in the same task format; leave room for nothing else at the end.
+The `**Stream:**` line appears only on a task in a parallel wave (see "Parallel streams" above); leave it out of every serial task. Put a blank line after every heading, in both files (markdownlint's MD022). Headings must be exactly `### <ID>: <title>`; the MCP extracts task text by that heading. Review rounds later append `## Review fixes (round N)` sections in the same task format; leave room for nothing else at the end.
 
 ## `docs/PROGRESS.md` format
 
 ```
 # <Project> build progress
+
 Branch: (set by implement)
 Started: (set by implement)
 
 ## Tasks
+
 - [ ] P0-01 <title>
 - [ ] P0-02 <title>
 - [ ] P1-01 <title> {stream: api}
 ...
 
 ## Log
+
 (one entry per task, appended by implement)
 ```
 
@@ -122,7 +134,7 @@ Take the commands from SPEC's commands/tooling section. `verify` runs after ever
 
 Any command — in `verify`, `extraVerify`, or `build` — may instead be `{ "cmd": "<command>", "timeoutMs": <ms>, "exclusive": true }` when it needs a timeout other than the default (`commandTimeoutMs`, 10 minutes): a slow end-to-end suite should get its own longer timeout rather than raising the default for every other command. `exclusive: true` marks a command that starts a port-, container- or directory-keyed environment (wp-env, docker compose, a dev server): it only ever runs from the main checkout, never from a parallel stream's worktree, and any task that triggers it stays out of waves. Leave the `parallel` block out entirely unless the plan uses streams; when it does, `parallel.setup` lists commands (same string-or-object entries as `verify`) that run once in each new stream worktree, and `parallel.maxStreams` caps how many streams of one wave run at once. Leave `maxRounds` and `maxRoundsHard` at their defaults unless SPEC says the review loop needs a different tolerance; `maxRounds` bounds review rounds that fail to converge, `maxRoundsHard` is an absolute ceiling regardless.
 
-Set `"flight"` to a slug naming this flight (lowercase letters, digits and `-`, at most 40 characters). Use the operator's slug when your prompt carries `Flight slug: <slug>.`; otherwise derive it from SPEC's title: lowercase it, turn every run of other characters into `-`, trim the `-` off both ends and cut it to 40 characters. `kukulu_flight_archive` uses it as the archive's directory name.
+Set `"flight"` to a slug naming this flight (lowercase letters, digits and `-`, at most 40 characters). Use the operator's slug when your prompt carries `Flight slug: <slug>.`; otherwise derive it from SPEC's title: take the text before the first ` — `, ` - ` or `:`; fold accented letters to ASCII (a u with a macron becomes u); lowercase it; turn every run of other characters into `-`; remove a trailing word `specification` or `spec`; trim the `-` off both ends; and cut it to 40 characters. "kukulu.tech — Specification" gives `kukulu-tech`; "Kūkulu 0.7.0 — Specification" gives `kukulu-0-7-0`. `kukulu_flight_archive` uses it as the archive's directory name.
 
 Fill `mutation.targeted` when SPEC section 7 names a test command that can be narrowed to one test class or file: write the command with a single `{filter}` placeholder, unquoted (the tool quotes it), for example `"vendor/bin/phpunit --filter {filter}"`. The reviewer uses it to mutation-test one file in seconds instead of running the whole suite. Leave `mutation` out when SPEC names no such command.
 
@@ -154,7 +166,7 @@ Call `kukulu_status` before you write anything. If `strayArtifacts` is not empty
 
 Write `docs/PLAN.md`, `docs/PROGRESS.md`, `docs/kukulu.json` and `CLAUDE.md` with the `Write` tool. If the harness refuses one (some builds tell subagents to return findings as text instead), write it with a shell heredoc in one `Bash` call and continue — do not argue with the refusal, and do not return the file's content as text in your own reply (F-16).
 
-Set `docs/kukulu.json`'s `baseBranch` to the branch you are actually on when you commit, and say so in your report — do not assume it is `main`. Then call `kukulu_plan_commit`. It checks the four files together (task headings, numbering, dependencies, streams, config, `from` references) and, when they agree, commits them as `plan: derive build plan from SPEC`. If it refuses, it lists every problem at once: fix every one, then call it again. If you split a task mid-plan, give the new piece a temporary suffix id (`P1-02a`) and call `kukulu_plan_commit({ renumber: true })` instead of renumbering by hand; it rewrites the ids everywhere. You never run `git commit` yourself.
+Set `docs/kukulu.json`'s `baseBranch` to the branch you are on, unless SPEC names another, and say so in your report — do not assume it is `main`. Then call `kukulu_plan_commit`. It checks the four files together (and that the branch you are on is `baseBranch` or a `branchPrefix` branch, so `kukulu_run_start` can begin from it) (task headings, numbering, dependencies, streams, config, `from` references) and, when they agree, commits them as `plan: derive build plan from SPEC`. If it refuses, it lists every problem at once: fix every one, then call it again. If you split a task mid-plan, give the new piece a temporary suffix id (`P1-02a`) and call `kukulu_plan_commit({ renumber: true })` instead of renumbering by hand; it rewrites the ids everywhere. You never run `git commit` yourself.
 
 Report: number of tasks per phase, the decisions you made, and the spec issues you found. Quote `docs/kukulu.json` verbatim from disk (`cat docs/kukulu.json`, not from memory) in your report, except that you list the `constraints` entries by id with a fixture count instead of quoting their bodies, and state the `baseBranch` and `branchPrefix` it actually contains — a report that disagrees with the file it just wrote is worse than no report (F-06). Do not start implementation.
 

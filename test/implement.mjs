@@ -11,6 +11,7 @@ import {
   finish, ok, eq, like, isError,
   mkDir, plannedRepo, withServer, readFile, writeFile, hasFile, subject, useLegacyLayout,
   commitTask, markTasks, setState, git, mkBareRemote, mkFailingGhBin, mkFakeGhBin,
+  headingSpacingProblems, planDoc, progressDoc, DEFAULT_TASKS,
 } from "./harness.mjs";
 
 const TODAY = new Date().toISOString().slice(0, 10);
@@ -79,6 +80,7 @@ for (const missing of ["docs/SPEC.md", "docs/PLAN.md", "docs/PROGRESS.md", "docs
   git(repo, ["checkout", "-q", "-b", "feature/side-quest"]);
   await withServer(repo, async ({ call }) => {
     isError(await call("kukulu_run_start"), /runs start from 'main' or an existing 'build\/\*' branch/, "run_start refuses to hijack an unrelated branch");
+    isError(await call("kukulu_run_start"), /set baseBranch to 'feature\/side-quest'.*git switch -c build\//s, "run_start's foreign-branch refusal names both fixes");
   });
 }
 
@@ -260,7 +262,7 @@ for (const missing of ["docs/SPEC.md", "docs/PLAN.md", "docs/PROGRESS.md", "docs
     eq(t.skipped[1].dependsOn, "P0-02", "each skip records which dependency stopped it");
     eq(t.counts.skipped, 3, "the skipped count matches");
     eq(subject(repo), "progress: skip P0-02, P0-03, P0-04", "the skips land in one commit");
-    like(readFile(repo, "docs/PROGRESS.md"), /### P0-02 — skipped\nSKIPPED: depends on P0-01/, "each skip is logged with its cause");
+    like(readFile(repo, "docs/PROGRESS.md"), /### P0-02 — skipped\n\nSKIPPED: depends on P0-01/, "each skip is logged with its cause");
   });
 }
 
@@ -302,9 +304,52 @@ for (const missing of ["docs/SPEC.md", "docs/PLAN.md", "docs/PROGRESS.md", "docs
     eq(r.guardReset, true, "task_done reports that it reset the guard's counter");
     eq(JSON.parse(readFile(repo, ".kukulu/implement.lock")).count, 0, "...and the lock's counter is actually back to zero");
     eq(r.taskCommit, git(repo, ["rev-parse", "--short", "HEAD~1"]), "task_done records the task's commit sha");
-    like(readFile(repo, "docs/PROGRESS.md"), /^### P0-01 — [0-9a-f]{7,}\nAdded hello\.txt\.$/m, "the log entry is stamped with that sha");
+    like(readFile(repo, "docs/PROGRESS.md"), /^### P0-01 — [0-9a-f]{7,}\n\nAdded hello\.txt\.$/m, "the log entry is stamped with that sha");
+    eq(headingSpacingProblems(readFile(repo, "docs/PROGRESS.md")).join("; "), "", "PROGRESS.md is MD022-clean after task_done");
     eq(subject(repo), "progress: P0-01 done", "the bookkeeping commit is separate from the task commit");
     eq(git(repo, ["status", "--porcelain"]), "", "task_done leaves a clean tree");
+  });
+}
+
+// The dependency label quoted in prose does not replace the real field.
+{
+  const tasks = [
+    { id: "P0-01", title: "First", files: "a.txt" },
+    { id: "P0-02", title: "Second", files: "b.txt", depends: ["P0-01"], constraints: "Quote the format as **Depends on:** P0-03 in the docs." },
+    { id: "P0-03", title: "Third", files: "c.txt" },
+  ];
+  const repo = plannedRepo({ tasks });
+  await withServer(repo, async ({ call }) => {
+    const p = await call("kukulu_plan_commit");
+    ok(!p.error, "kukulu_plan_commit reports no depends problem for a quoted label");
+    await call("kukulu_run_start");
+    await call("kukulu_task_next");
+    commitTask(repo, "P0-01", "First", { "a.txt": "a\n" });
+    await call("kukulu_task_done", { id: "P0-01", log: "ok" });
+    const n = await call("kukulu_task_next");
+    eq(n.id, "P0-02", "the second task is selected");
+    eq(JSON.stringify(n.dependsOn), JSON.stringify(["P0-01"]), "a quoted dependency label in a task's prose does not replace its real dependency");
+  });
+}
+
+// PLAN.md and PROGRESS.md written in the 0.6 spacing (no blank line after a heading) still parse.
+{
+  const repo = plannedRepo();
+  writeFile(repo, "docs/PLAN.md", planDoc(DEFAULT_TASKS, { legacy: true }));
+  writeFile(repo, "docs/PROGRESS.md", progressDoc(DEFAULT_TASKS, { legacy: true }));
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-qm", "chore: 0.6 spacing"]);
+  await withServer(repo, async ({ call }) => {
+    await call("kukulu_run_start");
+    const n = await call("kukulu_task_next");
+    eq(n.id, "P0-01", "a PROGRESS.md in the 0.6 spacing still parses: the first task is selected");
+    like(n.text, /\*\*Goal:\*\* write hello\.txt/, "...and its PLAN.md block is found");
+    commitTask(repo, "P0-01", "Create hello", { "hello.txt": "hi\n" });
+    const r = await call("kukulu_task_done", { id: "P0-01", log: "Added hello.txt." });
+    eq(r.counts.done, 1, "...and a task completes");
+    const next = await call("kukulu_task_next");
+    eq(next.id, "P0-02", "...then the next one is selected");
+    like(next.dependencyLogs["P0-01"], /Added hello\.txt\./, "...with its dependency's log entry");
   });
 }
 
@@ -327,7 +372,8 @@ for (const missing of ["docs/SPEC.md", "docs/PLAN.md", "docs/PROGRESS.md", "docs
     ok(!hasFile(repo, "half-done.txt"), "task_block deletes untracked debris");
     eq(readFile(repo, "docs/SPEC.md"), "# Spec\n", "task_block reverts tracked edits");
     ok(hasFile(repo, ".kukulu/implement.lock"), "task_block keeps the run's lock armed");
-    like(readFile(repo, "docs/PROGRESS.md"), /### P0-01 — blocked\nBLOCKED: tried A \/ fails B \/ fix C/, "the block reason is logged verbatim");
+    like(readFile(repo, "docs/PROGRESS.md"), /### P0-01 — blocked\n\nBLOCKED: tried A \/ fails B \/ fix C/, "the block reason is logged verbatim");
+    eq(headingSpacingProblems(readFile(repo, "docs/PROGRESS.md")).join("; "), "", "PROGRESS.md is MD022-clean after task_block");
     eq(subject(repo), "progress: P0-01 blocked", "the block is committed");
   });
 }
@@ -362,8 +408,9 @@ for (const missing of ["docs/SPEC.md", "docs/PLAN.md", "docs/PROGRESS.md", "docs
     eq(subject(repo), "progress: reopen P0-02 (+2 dependents)", "the reopen is one commit");
     eq(git(repo, ["status", "--porcelain"]), "", "...leaving a clean tree");
     const prog = readFile(repo, "docs/PROGRESS.md");
-    like(prog, /### P0-02 — reopened\nREOPENED: the operator supplied the corpus file/, "the reason is logged");
-    like(prog, /### P0-04 — reopened\nreopened: it was skipped because of P0-03, which is open again/, "a transitive dependent's log names its cause");
+    like(prog, /### P0-02 — reopened\n\nREOPENED: the operator supplied the corpus file/, "the reason is logged");
+    like(prog, /### P0-04 — reopened\n\nreopened: it was skipped because of P0-03, which is open again/, "a transitive dependent's log names its cause");
+    eq(headingSpacingProblems(prog).join("; "), "", "PROGRESS.md is MD022-clean after task_reopen");
 
     const n = await call("kukulu_next");
     eq(n.stage, "implement", "a finished round with reopened tasks goes back to implement");
@@ -862,6 +909,7 @@ for (const [bad, re] of [
     isError(await call("kukulu_run_halt", {}), /reason is required/, "run_halt needs a reason");
 
     const r = await call("kukulu_run_halt", { reason: "signing agent died: connection refused" });
+    like(r.next, /kukulu_run_resume\(\{ reason: "<what you fixed>" \}\)/, "kukulu_run_halt's result names kukulu_run_resume");
     eq(r.halted, "signing agent died: connection refused", "run_halt reports the reason it recorded");
     ok(!hasFile(repo, ".kukulu/implement.lock"), "run_halt disarms the lock");
     eq(JSON.parse(readFile(repo, ".kukulu/state.json")).halted, "signing agent died: connection refused", "the reason is persisted in state");
@@ -880,7 +928,7 @@ for (const [bad, re] of [
 
     const n = await call("kukulu_next");
     eq(n.stage, "halt", "the flight now halts");
-    eq(n.reason, "signing agent died: connection refused", "...with the recorded reason");
+    like(n.reason, /^signing agent died: connection refused — once the cause is fixed, call kukulu_run_resume/, "...with the recorded reason, and kukulu_next's reason for an operator halt names kukulu_run_resume");
   });
 }
 
@@ -890,6 +938,65 @@ for (const [bad, re] of [
     const r = await call("kukulu_run_halt", { reason: "operator intervened" });
     eq(r.halted, "operator intervened", "the halt itself still works");
     ok(!hasFile(repo, ".kukulu/feedback.jsonl"), "policies.feedback: false skips even the auto entry");
+  });
+}
+
+// ---------------------------------------------------------------- run_resume
+
+{
+  const repo = startedRepo();
+  await withServer(repo, async ({ call }) => {
+    isError(await call("kukulu_run_resume", { reason: "fixed" }), /the flight is not halted; there is nothing to resume/, "kukulu_run_resume refuses when the flight is not halted");
+    await call("kukulu_run_halt", { reason: "signing agent died" });
+    isError(await call("kukulu_run_resume", { reason: "  " }), /reason must be a non-empty string/, "kukulu_run_resume refuses an empty reason");
+    isError(await call("kukulu_run_resume", {}), /reason must be a non-empty string/, "...and a missing one");
+    writeFile(repo, "stray.txt", "x\n");
+    isError(await call("kukulu_run_resume", { reason: "fixed" }), /not clean:\n\?\? stray\.txt/, "kukulu_run_resume refuses a dirty tree listing the paths");
+    fs.rmSync(path.join(repo, "stray.txt"));
+    git(repo, ["branch", "-m", "main", "trunk"]);
+    isError(await call("kukulu_run_resume", { reason: "fixed" }), /baseBranch 'main' does not exist as a local branch/, "kukulu_run_resume refuses when baseBranch is missing");
+    git(repo, ["branch", "-m", "trunk", "main"]);
+    const head = git(repo, ["rev-parse", "HEAD"]);
+    const r = await call("kukulu_run_resume", { reason: "restarted the signing agent" });
+    eq(r.resumed, true, "kukulu_run_resume clears the halt");
+    eq(r.previousHalt, "signing agent died", "...reporting the halt it cleared");
+    eq(subject(repo), "chore: run resumed", "...and commits chore: run resumed");
+    ok(git(repo, ["rev-parse", "HEAD"]) !== head, "...as a new commit");
+    eq(JSON.parse(readFile(repo, ".kukulu/state.json")).halted, null, "state.halted is null afterwards");
+    const entries = readFile(repo, ".kukulu/feedback.jsonl").trim().split("\n").map((l) => JSON.parse(l));
+    const last = entries[entries.length - 1];
+    eq(last.category + "/" + last.source + "/" + last.stage, "resume/human/controller", "kukulu_run_resume logs a resume feedback entry with source human");
+    like(last.message, /restarted the signing agent/, "...naming the reason");
+    ok((await call("kukulu_next")).stage !== "halt", "kukulu_next no longer halts after a resume");
+  });
+}
+
+{
+  const repo = startedRepo();
+  await withServer(repo, async ({ call }) => {
+    await call("kukulu_run_halt", { reason: "operator stop" });
+  });
+  const hook = path.join(repo, ".git", "hooks", "commit-msg");
+  fs.mkdirSync(path.dirname(hook), { recursive: true });
+  fs.writeFileSync(hook, `#!/bin/sh\nif head -n1 "$1" | grep -q '^chore: run resumed'; then echo rejected >&2; exit 1; fi\n`);
+  fs.chmodSync(hook, 0o755);
+  const files = [".kukulu/state.json", ".kukulu/feedback.jsonl"];
+  const before = files.map((f) => readFile(repo, f));
+  const head = git(repo, ["rev-parse", "HEAD"]);
+  await withServer(repo, async ({ call }) => {
+    ok((await call("kukulu_run_resume", { reason: "fixed" })).error, "a failed resume commit is an error");
+    files.forEach((f, i) => eq(readFile(repo, f), before[i], `...${f} is byte-identical`));
+    eq(git(repo, ["diff", "--cached", "--name-only"]), "", "...nothing is staged");
+    eq(git(repo, ["rev-parse", "HEAD"]), head, "...HEAD did not move");
+  });
+}
+
+{
+  const repo = startedRepo();
+  await withServer(repo, async ({ call }) => {
+    setState(repo, { halted: "review round 2 exceeds the cap", haltCap: { cap: "maxRounds", round: 2 } });
+    git(repo, ["commit", "-qam", "chore: round-cap halt"]);
+    isError(await call("kukulu_run_resume", { reason: "fixed" }), /kukulu_flight_options.*resume: true/, "kukulu_run_resume refuses a round-cap halt naming kukulu_flight_options");
   });
 }
 
@@ -1012,21 +1119,15 @@ function rejectCommitsStarting(repo, prefix) {
   });
 }
 
-// ---------------------------------------------------------------- pre-0.6.0 layout (RN-06)
+// ---------------------------------------------------------------- pre-0.6.0 layout (refused since 0.7.0)
 
 {
-  // A project that has not migrated keeps its lock, ignore line and state in
-  // .foundry/, and no .kukulu/ appears beside them.
   const repo = plannedRepo();
   setState(repo, { round: 0 });
   useLegacyLayout(repo);
   await withServer(repo, async ({ call }) => {
-    const r = await call("kukulu_run_start");
-    eq(r.alreadyStarted, false, "run_start works on the pre-0.6.0 layout");
-    ok(hasFile(repo, ".foundry/implement.lock"), "...arming the lock under .foundry/");
-    ok(!hasFile(repo, ".kukulu"), "...without creating .kukulu/");
-    like(readFile(repo, ".gitignore"), /^\.foundry\/implement\.lock$/m, "...and ignoring the lock under its .foundry/ name");
-    eq(git(repo, ["status", "--porcelain"]), "", "...leaving the tree clean");
+    isError(await call("kukulu_run_start"), /pre-0\.6\.0 Foundry layout, which 0\.7\.0 no longer reads/, "run_start refuses the pre-0.6.0 layout");
+    ok(!hasFile(repo, ".foundry/implement.lock") && !hasFile(repo, ".kukulu"), "...arming nothing and creating no .kukulu/");
   });
 }
 

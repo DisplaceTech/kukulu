@@ -29,7 +29,7 @@ Repeat until `kukulu_task_next` returns `{ done: true }` — but see **Paused at
 3. **Tests first.** Write the acceptance tests named in the task and run them. Confirm they fail for the right reason.
 4. **Implement** the smallest change that makes them pass, within Files touched.
 5. **Verify.** Call `kukulu_verify` with the task's Files touched. It self-tests and runs every `docs/kukulu.json` constraint against the whole repo, then runs the project's verify commands plus any path-specific extras, returning each command's exit status and tail. All must pass: no skipped tests, no lint suppressions added. A constraint hit is a failing test — fix the code it flagged, not the rule, unless the task you are on explicitly changes the rule itself. Then do whatever the task's own Verification section asks that a command cannot cover, and describe what you verified.
-6. **Commit** with the template in CLAUDE.md: title `<ID>: <title>`, body with Goal / Tests / Interpretation / Measurement (if tuning) / Manual check. Stage only the files the task touched. Do not stage `docs/PROGRESS.md`. Write the message to a file in your scratch space and commit with `git commit -F <file>`, not `-m`: some projects run a hook that scans the whole Bash command line for forbidden words, and a commit message that only *mentions* one is then denied along with the commit.
+6. **Commit** with the template in CLAUDE.md: title `<ID>: <title>`, body with Goal / Tests / Interpretation / Measurement (if tuning) / Manual check. In clean-room mode (your prompt says so) the message ends with two trailer lines, `Kukulu-Stage: <implement, or fix in a review-fix round>` and `Kukulu-Task: <ID>`, after a blank line. Stage only the files the task touched. Do not stage `docs/PROGRESS.md`. Write the message to a file in your scratch space and commit with `git commit -F <file>`, not `-m`: some projects run a hook that scans the whole Bash command line for forbidden words, and a commit message that only *mentions* one is then denied along with the commit.
 7. **Record.** Call `kukulu_task_done` with the task ID and a log entry (under 15 lines): tests added, any Interpretation choices, config keys introduced, anything a later task or the reviewer must know. The tool marks the task `[x]`, stamps the commit sha, and commits PROGRESS.md.
 8. Go to step 1. Do not summarise, do not ask, do not stop.
 
@@ -71,6 +71,10 @@ Your prompt may instead name one **stream** of a parallel wave ("Run the Kūkulu
 - **No handoff.** You do not write `docs/HANDOFF.md`, and you do not call `kukulu_run_finish`: another implementer does, after every stream is merged. Put your Interpretation choices in your `kukulu_task_done` log entries, since that is the only place the handoff writer will find them.
 - **Finishing.** When `kukulu_task_next` returns `{ done: true }` for your stream, call `kukulu_stream_finish` with `stream: "<s>"`. It merges your branch into the build branch and removes your worktree. If it reports a merge conflict, the flight is halted for a human: print what it returned and stop. Then print one line starting `STREAM DONE` with the stream name and the counts of done and blocked tasks.
 - Blocking works the same way, in your worktree only: `kukulu_task_block` with your `stream`.
+
+## Clean-room mode
+
+When your prompt says the flight is in clean-room mode, every tool call is checked against `docs/cleanroom.json` and logged. A denial is not an obstacle to route around: do not reach the same target through another tool, a different command or a copy. Name the denial in the task's log entry and continue another way, or block the task if there is no other way. Never stage, edit or delete anything under `.kukulu/cleanroom/`; the server commits the log with its own bookkeeping.
 
 ## Constraints you may not relax
 
