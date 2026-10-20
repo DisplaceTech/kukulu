@@ -96,6 +96,8 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] R5-01 Guard: env -S's split words are parsed as env options, and one getopt-style scanner reads wrapper option bundles and long-option abbreviations
 - [x] R5-02 Guard: cp, mv, ln and install read -t through the option scanner, and a source ending in / no longer stands for the destination
 - [x] R5-03 Guard: a bare glob operand and a cd into a glob are judged by rule 6b's glob check
+- [ ] R6-01 Guard: xargs options with an optional argument never take the next token, env -S's \_ separates words, and the missing sudo/env valued options are listed
+- [ ] R6-02 Guard: cp -T and abbreviated --recursive/--archive are read, so a recursive copy onto a protected directory is judged at the directory
 
 ## Log
 
