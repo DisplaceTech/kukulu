@@ -776,4 +776,23 @@ const feedbackOf = (repo) => (hasFile(repo, ".kukulu/feedback.jsonl") ? readFile
   });
 }
 
+// A serial call in a plan with streams never merges the base; only a serial run_start does (SPEC B-03).
+{
+  const repo = waveRepo();
+  await withServer(repo, async ({ call }) => {
+    await call("kukulu_run_start");
+    const buildHead = git(repo, ["rev-parse", "HEAD"]);
+    const branch = git(repo, ["rev-parse", "--abbrev-ref", "HEAD"]);
+    git(repo, ["checkout", "-q", "main"]);
+    writeFile(repo, "base.txt", "from the base\n");
+    git(repo, ["add", "base.txt"]);
+    git(repo, ["commit", "-qm", "base side"]);
+    git(repo, ["checkout", "-q", branch]);
+    const t = await call("kukulu_task_next");
+    ok(t.baseSynced === undefined && git(repo, ["rev-parse", "HEAD"]) === buildHead && !hasFile(repo, "base.txt"), "a serial task_next in a plan with streams never merges the base");
+    const again = await call("kukulu_run_start");
+    eq(again.baseSynced?.commits, 1, "...while a serial run_start on the existing build branch does");
+  });
+}
+
 finish();

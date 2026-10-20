@@ -1316,6 +1316,39 @@ async function baseAhead(repo, { onBuild = null, onBase = null } = {}) {
 }
 
 {
+  const repo = plannedRepo();
+  const branch = await baseAhead(repo);
+  const hook = path.join(repo, ".git", "hooks", "commit-msg");
+  fs.mkdirSync(path.dirname(hook), { recursive: true });
+  fs.writeFileSync(hook, `#!/bin/sh\nif head -n1 "$1" | grep -q '^chore: merge'; then echo rejected >&2; exit 1; fi\n`);
+  fs.chmodSync(hook, 0o755);
+  const head = git(repo, ["rev-parse", "HEAD"]);
+  await withServer(repo, async ({ call }) => {
+    ok((await call("kukulu_task_next")).error, "a failed base-sync merge commit leaves HEAD, the tree and the index as they were");
+    eq(git(repo, ["rev-parse", "HEAD"]), head, "...HEAD is unmoved");
+    ok(!hasFile(repo, ".git/MERGE_HEAD"), "...no merge is left in progress");
+    eq(git(repo, ["status", "--porcelain"]), "", "...the tree is clean");
+    eq(git(repo, ["diff", "--cached", "--name-only"]), "", "...nothing is staged");
+    ok(!hasFile(repo, "base.txt"), "...and the base's file is absent on " + branch);
+  });
+}
+
+{
+  const repo = plannedRepo({ config: { policies: { signing: "auto" } } });
+  const branch = await baseAhead(repo);
+  git(repo, ["config", "commit.gpgsign", "true"]);
+  git(repo, ["config", "gpg.format", "openpgp"]);
+  git(repo, ["config", "gpg.program", "/nonexistent-signing-agent"]);
+  await withServer(repo, async ({ call }) => {
+    const r = await call("kukulu_run_start");
+    eq(r.baseSynced?.commits, 1, "a base sync whose signing fails under signing auto is retried unsigned and lands the merge commit");
+    eq(subject(repo), `chore: merge main into ${branch}`, "...with the usual subject");
+    eq(git(repo, ["rev-list", "--parents", "-n", "1", "HEAD"]).split(" ").length, 3, "...as a two-parent commit");
+    eq(git(repo, ["status", "--porcelain"]), "", "...and a clean tree");
+  });
+}
+
+{
   const repo = plannedRepo({ config: { policies: { syncBase: "yes" } } });
   await withServer(repo, async ({ call }) => {
     isError(await call("kukulu_run_start"), /docs\/kukulu\.json policies\.syncBase must be a boolean/, "validatePolicies refuses a non-boolean syncBase");
