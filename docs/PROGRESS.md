@@ -73,7 +73,7 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] P6-03 CHANGELOG 0.7.0, the version and the feedback header
 - [x] P6-04 Apply the approved copy, a solid clean-room diagram and check-site rule 16
 - [x] P6-05 Phase 6 end: push and record the manual check
-- [ ] R1-01 Guard: close the self-protection bypasses in Bash write rules
+- [x] R1-01 Guard: close the self-protection bypasses in Bash write rules
 - [ ] R1-02 Guard: network rule and deny.paths reach through git options, Glob patterns, $HOME and substitutions
 - [ ] R1-03 Guard: allow cleanflate's four remaining false positives by classifying pattern operands
 - [ ] R1-04 Test verifyChain's prev linkage and seq density in mcp/cleanroom.mjs
@@ -288,3 +288,8 @@ Approval gate passed: base f5892e0 from git merge-base cleanroom HEAD; docs/site
 
 ### P6-05 — d3c7978
 Empty commit d3c7978; pushed build/2026-10-19 to origin (cdeb8be..d3c7978). Manual check: NOT VERIFIED (human): deploy the build branch as a Cloudflare Pages preview (docs/site/DEPLOY.md), read every clean-room line on the preview against what the suite proves, and compare the page with the changed mockup at 360, 768 and 1440 px in both schemes; confirm the three site, ci and lint checks are green on the PR.
+
+### R1-01 — f094133
+Added 14 guard fixtures (8 denied, 6 allowed). evaluate(): redirectTargets scans raw segment (glued redirects), write-family operands all treated as paths, destructiveOperands ancestor rule, cd/pushd tracked via shellCwd.
+Interpretation: shellCwd (after cd) only used by protected-path rules (6d) so existing read-rule cases (cleanflate sed case) keep decisions. git checkout . is now denied (root contains protected paths).
+docs/cleanroom.md rule 6 updated. Self-test 178 cases.
