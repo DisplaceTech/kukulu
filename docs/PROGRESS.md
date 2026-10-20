@@ -83,7 +83,7 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] R2-01 Guard: judge cd segments again and let the effective cwd reach the read rules
 - [x] R2-02 Guard: grouping, reserved words, >|, git -C and more wrappers no longer hide the command or the target
 - [x] R2-03 Guard: deny git forms that discard the log's uncommitted entries, glob operands of destructive forms, and chmod/chown of a protected ancestor
-- [ ] R2-04 Guard: a recursive read, a search root or a glob that reaches into deny.paths is denied
+- [x] R2-04 Guard: a recursive read, a search root or a glob that reaches into deny.paths is denied
 - [ ] R2-05 Guard cases: allowed fixtures that pin grep's valued options, -e patterns and quoted >
 - [ ] R2-06 Test that a hung gh --version makes prChecks null within the bound
 - [ ] R2-07 Test that --legacy-log's default repository is the log's own repository, not an ancestor
@@ -333,3 +333,6 @@ Interpretation: hang test uses the real bound (adds ~30 s to the state suite). C
 
 ### R2-03 — 141737d
 24 fixtures (14 denied, 10 allowed). worktreeDiscard() for git stash/reset/checkout/switch; globHit() for destructive glob operands (first wildcard component, no dotfile exemption); chmod/chown always destructive. Reason names the .kukulu/cleanroom path for pathspec-less forms. Stash list/show/apply/pop allowed.
+
+### R2-04 — 31444ac
+16 fixtures (11 denied, 5 allowed). reachesDenied()/globRe()/recursiveOperands() added; Grep/Glob roots, Glob patterns (resolved against path/cwd), glob tokens and recursive Bash operands checked against deny.paths. Reach checks run after 6c so forbidden-word reasons of existing cases stay. KNOWN_LIMITS now 7 (counts updated). Interpretation: operands of find/ls -R/tree default to ".".
