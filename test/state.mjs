@@ -568,6 +568,16 @@ for (const [config, re, label] of [
   }
 
   {
+    // `exec sleep` so no child keeps the pipe open past spawnSync's timeout; a hung --version reads as no gh.
+    const hung = mkDir("kukulu-hung-version-gh-");
+    writeFile(hung, "gh", '#!/bin/sh\ncase "$1" in --version) exec sleep 120;; esac\n');
+    fs.chmodSync(path.join(hung, "gh"), 0o755);
+    const started = Date.now();
+    eq(await checks(withOrigin(), ghEnv(hung)), null, "prChecks is null when gh --version hangs");
+    ok(Date.now() - started < 60000, "...and kukulu_status returned within the bound");
+  }
+
+  {
     const statusReview = async (config) => {
       let out;
       await withServer(plannedRepo(config ? { config } : {}), async ({ call }) => { out = (await call("kukulu_status")).review; });
