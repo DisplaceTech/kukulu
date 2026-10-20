@@ -90,7 +90,7 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] R3-01 Make the Glob-climb guard fixture independent of the temp directory's depth (macOS CI)
 - [x] R3-02 Guard: wildcards and braces no longer hide a protected path from writes, redirections and destructive forms; git stash -m and read-tree -u discard the log
 - [x] R3-03 Guard: a bare cd moves to HOME, wrapper option values are skipped, and case arms and function bodies are judged
-- [ ] R4-01 Guard: env -S's value is the command again, and long-form and xargs/stdbuf/time option values no longer hide the command word
+- [x] R4-01 Guard: env -S's value is the command again, and long-form and xargs/stdbuf/time option values no longer hide the command word
 - [ ] R4-02 Guard: compact function headers and arms without a space are stripped, and a cd operand without a slash is judged by rule 6b
 - [ ] R4-03 Guard: a cp, mv, ln or install into a directory is judged at the path it writes, so a protected file cannot be replaced without being named
 
@@ -364,3 +364,6 @@ Interpretation: leading wildcard does not match dotfiles (shell rule); read-tree
 ### R3-03 — 87b8a02
 previousCwd tracking, bare cd -> HOME, sudo/env flag values skipped in commandWord, stripGrouping drops function headers, case/esac and (inside a case) arm patterns. 16 fixtures (310 cases). docs/cleanroom.md rule 6 updated.
 Interpretation: arm patterns only recognized inside a case, to keep `(cd x; ls)` working.
+
+### R4-01 — 56d7874
+VALUED_OPTIONS table replaces if-chain; env -S/--split-string/-S<v> value re-split into command words. 17 fixtures added. Interpretation: attached -S<value> also split. KNOWN_LIMITS unchanged.
