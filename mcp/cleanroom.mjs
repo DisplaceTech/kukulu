@@ -1029,6 +1029,19 @@ const COPY_SPEC = {
   long: new Set(["--target-directory", "--suffix", "--mode", "--owner", "--group"]),
 };
 
+// Every long option of GNU cp, so a prefix is read only when it names exactly one (`--rec` is --recursive, `--r` is nothing).
+const CP_LONG = (
+  "--archive --attributes-only --backup --copy-contents --debug --dereference --force --interactive --link --no-clobber --no-dereference " +
+  "--no-preserve --no-target-directory --one-file-system --parents --preserve --recursive --reflink --remove-destination --sparse " +
+  "--strip-trailing-slashes --symbolic-link --target-directory --suffix --update --verbose --context --help --version"
+).split(" ");
+const cpLong = (t) => {
+  const given = t.split("=")[0];
+  if (CP_LONG.includes(given)) return given;
+  const hits = CP_LONG.filter((n) => n.startsWith(given));
+  return hits.length === 1 ? hits[0] : null;
+};
+
 /**
  * Where cp, mv, ln and install put their sources: the -t/--target-directory
  * value, else the last operand, is the destination directory, and each source
@@ -1041,6 +1054,7 @@ function destinationPaths(word, rest) {
   let dir = null;
   const operands = [];
   let recursive = false;
+  let noTargetDir = false;
   for (let i = 0; i < rest.length; i++) {
     const t = rest[i];
     if (t === "--") {
@@ -1054,17 +1068,26 @@ function destinationPaths(word, rest) {
       // A bundle's letters before the valued one still count (`cp -rt docs`).
       if (word === "cp" && !t.startsWith("--") && /[rRa]/.test(t.slice(1, t.search(/[tSmog]/)))) recursive = true;
     } else if (t.startsWith("-") && t.length > 1) {
-      if (word === "cp" && (/^-[A-Za-z]*[rRa][A-Za-z]*$/.test(t) || t === "--recursive" || t === "--archive")) recursive = true;
+      if (word === "cp" && !t.startsWith("--")) {
+        if (/^-[A-Za-z]*[rRa][A-Za-z]*$/.test(t)) recursive = true;
+        if (/^-[A-Za-z]*T/.test(t)) noTargetDir = true;
+      } else if (word === "cp") {
+        const full = cpLong(t);
+        if (full === "--recursive" || full === "--archive") recursive = true;
+        if (full === "--no-target-directory") noTargetDir = true;
+      } else if (/^-[A-Za-z]*T/.test(t) && !t.startsWith("--")) noTargetDir = true;
     } else operands.push(t);
   }
   const sources = dir === null ? operands.slice(0, -1) : operands;
+  // -T: the last operand is the destination itself, so every source stands for it.
+  const asSelf = noTargetDir && dir === null && operands.length > 1;
   if (dir === null) dir = operands.length > 1 ? operands[operands.length - 1] : null;
   if (dir === null) return none;
   const targets = sources.map((src) => {
     const trimmed = src.replace(/\/+$/, "");
     const base = path.basename(trimmed);
     // `cp -r src/ dst` writes dst/src: only a `.` or `..` basename names the directory itself.
-    const standsForDir = base === "." || base === ".." || base === "";
+    const standsForDir = asSelf || base === "." || base === ".." || base === "";
     return { target: standsForDir ? dir : `${dir.replace(/\/+$/, "") || "/"}/${base}`, standsForDir };
   });
   return { dir, recursive, targets };
