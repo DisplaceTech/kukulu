@@ -76,7 +76,7 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] R1-01 Guard: close the self-protection bypasses in Bash write rules
 - [x] R1-02 Guard: network rule and deny.paths reach through git options, Glob patterns, $HOME and substitutions
 - [x] R1-03 Guard: allow cleanflate's four remaining false positives by classifying pattern operands
-- [ ] R1-04 Test verifyChain's prev linkage and seq density in mcp/cleanroom.mjs
+- [x] R1-04 Test verifyChain's prev linkage and seq density in mcp/cleanroom.mjs
 - [ ] R1-05 Test the verifier's prev linkage and add the rehashed edit to the both-copies-agree fixtures
 - [ ] R1-06 Test the gate's liveness kind, genesis match and the trailer's default task
 - [ ] R1-07 Bound every gh call in prChecks; report mutationFixRounds where the reviewer can read it
@@ -303,3 +303,6 @@ docs/cleanroom.md rules 5, 6 and known gaps updated.
 patternOperands(word, rest) classifies grep-family first operand/-e values, sed script/-e values, awk program, find -name/-path/-regex values as non-path in rule 6c. Self-test 194 cases.
 Now allowed by: FP1 (sed -i script + bare files, cwd in repo -> outside clause false), FP6 (grep pattern with slashes; path operand 'crates' in repo), FP7 and FP8 (grep -E/awk patterns; operands in repo). Prior-art find / -path still denied (/ outside repo).
 Interpretation: rule 6b still checks all tokens against deny.paths; shellCwd not used in read rules.
+
+### R1-04 — b32c003
+Added two fixtures (rehashed edit -> line 4 prev mismatch; seq 1,2,4 gap with consistent hashes). Checked by hand: with the prev check disabled or seq check weakened to `< 0`, the new assertions fail (the first via a TypeError crash before optional chaining was added; assertions now use firstBad?.).
