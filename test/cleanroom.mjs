@@ -1596,7 +1596,23 @@ eq(LANGUAGES.join(","), "rust,c,cpp,go,python,javascript,typescript,java,php", "
   let refused = null;
   try { coverageGaps([], [], { idleGapHours: 0 }); } catch (x) { refused = x; }
   ok(refused instanceof CleanroomError && /idleGapHours, a positive number/.test(refused.message), "coverageGaps refuses a limit that is not a positive number");
-  ok(KNOWN_LIMITS.length === 7 && KNOWN_LIMITS.every((l) => typeof l === "string" && l.endsWith(".")), "KNOWN_LIMITS is the seven fixed strings");
+  ok(KNOWN_LIMITS.length === 8 && KNOWN_LIMITS.every((l) => typeof l === "string" && l.endsWith(".")), "KNOWN_LIMITS is the eight fixed strings");
+  const tracked = spawnSync("git", ["ls-files", "docs/cleanroom.md"], { cwd: ROOT, encoding: "utf8" }).stdout.trim() === "docs/cleanroom.md";
+  ok(tracked, "docs/cleanroom.md is tracked");
+  if (tracked) {
+    const doc = fs.readFileSync(path.join(ROOT, "docs/cleanroom.md"), "utf8");
+    const lines = doc.split("\n");
+    const start = lines.indexOf("## Known gaps");
+    let end = lines.findIndex((l, i) => i > start && l.startsWith("## "));
+    if (end < 0) end = lines.length;
+    const bullets = lines.slice(start + 1, end).filter((l) => l.startsWith("- "));
+    const first5 = (t) => t.replace(/`/g, "").split(/\s+/).slice(0, 5).join(" ");
+    ok(bullets.length === 8 && bullets.every((b, i) => b.slice(2).replace(/`/g, "").includes(first5(KNOWN_LIMITS[i]))), "docs/cleanroom.md's Known gaps lists KNOWN_LIMITS one bullet each, in order");
+    const g = lines.indexOf("### What the guard decides");
+    const para = lines.slice(g + 1).find((l) => l.trim() !== "") ?? "";
+    ok(para.startsWith("The guard is a tripwire, not a sandbox."), "docs/cleanroom.md opens the guard section with the tripwire paragraph");
+    ok(lines.includes("### When a guard gap is a defect") && /Known-gap candidates/.test(doc), "docs/cleanroom.md has a When a guard gap is a defect subsection");
+  }
 }
 
 finish();

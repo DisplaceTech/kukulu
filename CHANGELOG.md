@@ -4,6 +4,12 @@ All notable changes to this plugin. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- The known-limits list is now one list of eight in the code, the docs and the bundle manifest, and it names shell expansion and option parsing; this closes the 0.7.0 review spec issues "D-03 option parsing is best-effort" and "known gaps omit shell expansion".
+
 ## [0.7.0] — 2026-10-20
 
 ### Summary

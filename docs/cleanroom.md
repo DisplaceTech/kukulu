@@ -34,6 +34,8 @@ A project without the policy file pays nothing: both hooks exit at once, before 
 
 ### What the guard decides
 
+The guard is a tripwire, not a sandbox. It judges a command by its text, so its wrapper and option parsing is best-effort. That covers the wrapper list, the options that take a value for wrappers and write-family commands, bundled short options, abbreviated long options, and operands that come after options. It follows the GNU coreutils, findutils and sudo on the CI images, and BSD/macOS forms where their manual pages differ. Neither the wrapper list nor the option tables can be proved complete across tool versions, so a spelling they do not model is a known gap, not a defect. What makes a bypass visible afterwards is [the chain](#the-log), [the signed checkpoints](#checkpoints-and-the-key) and [the gate](#genesis-sticky-mode-and-the-gate), not the guard.
+
 Every path (`file_path`, `path`, `notebook_path`, a path-like Bash token) is expanded, made absolute against the call's working directory, normalized, and resolved through symlinks; both forms are checked. A Bash command is split into top-level segments on unquoted `;`, `&&`, `||`, `|`, `&` and newlines, and each segment's command word is the first token that is not an assignment or a wrapper (`sudo`, `env`, `time`, `command`, `xargs`, `nice`). The first rule that matches denies:
 
 1. `deny.tools`.
@@ -49,6 +51,16 @@ A denial writes `kukulu clean-room guard: <reason>` to the model on stderr and a
 ### What is always protected
 
 The policy file; `.kukulu/cleanroom/`; `.kukulu/state.json`; `docs/kukulu.json` from the moment `docs/PLAN.md` exists (the planner writes it before that); `.claude/settings.json`, `.claude/settings.local.json`, `.claude/hooks/`; `.mcp.json`; the installed plugin and `~/.claude/plugins/`; `~/.claude/settings.json`; the signing key and its `.pub`; and `.git/hooks/`, `.git/config` and `.git/info/`. The policy, the settings and `.mcp.json` can be read; the signing key cannot.
+
+### When a guard gap is a defect
+
+A review finding against the guard becomes a fix task only when:
+
+- it is a regression: a form denied at an earlier commit of the flight is allowed now;
+- it writes a protected path, or reads under `deny.paths`, with a command word and option spelling these rules or the fixture set already name; or
+- a rule above is missing for a whole command word it lists.
+
+Any other unmodelled spelling is a review note, not a task. The reviewer lists its class under `Known-gap candidates` in REVIEW.md's `## Spec issues`; the summary carries it, and the owner decides whether a later release adds it to the known gaps.
 
 ### Testing a policy
 
@@ -216,4 +228,13 @@ legacy log: no hash chain or signatures; integrity rests on the git history that
 
 ## Known gaps
 
-The guard sees tool calls, not what a command does. Interpreter escapes (`python3 -c`, `node -e`) are not parsed; shell variables other than `$HOME` and strings assembled at run time are not expanded; the subprocesses of a `make` target are not individual tool calls; the insides of an MCP server are not tool calls; and hooks load at session start, so a session that writes the policy is not covered until the next one. Commands that run a command from their arguments (`find -exec`, `watch`, `parallel`, `busybox`) and programs outside the fixed network and write lists (`unlink`, `shred`, `perl -i`, `cargo fetch`, `rsync`) are not recognized. `pathPatterns` regexes are matched on the paths a call names, not on the files a recursive read or a glob reaches below a directory. Each is a limit of the method, not a bug.
+The guard sees tool calls, not what a command does. Each of these is a limit of the method, not a bug:
+
+- Interpreter escapes (`python3 -c`, `node -e`) are not parsed, so a path or word inside the quoted program is not seen.
+- Shell expansion beyond `~` and `$HOME` is not evaluated: other variables, and strings assembled at run time (a base64 decode, a variable holding a command), so a path or command built that way is not seen.
+- Option and wrapper spellings the tables do not model are not recognized: the guard judges a command by its text, its wrapper and option parsing follows GNU coreutils, findutils and sudo (and BSD/macOS forms where their manual pages differ), and no table can be proved complete across tool versions.
+- Commands that run a command from their arguments (`find -exec`, `watch`, `parallel`, `busybox`) and programs outside the fixed network and write lists (`unlink`, `shred`, `perl -i`, `cargo fetch`) are not recognized.
+- `pathPatterns` regexes are matched on the paths a call names, not on the files a recursive read or a glob reaches below a directory.
+- Subprocesses of a `make` target are not individual tool calls, so what they read is not logged.
+- MCP server internals are not tool calls, so what a server reads on its own is not logged.
+- Hooks load at session start, so a session that writes the policy is not covered until the next one; the gate's liveness check catches a session with no hooks at all.

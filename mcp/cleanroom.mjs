@@ -1534,12 +1534,13 @@ function redirectTargets(segment) {
 /** What the guard cannot see, stated in every bundle's manifest as coverage.knownLimits (SPEC D-03). */
 export const KNOWN_LIMITS = [
   "Interpreter escapes (python3 -c, node -e) are not parsed, so a path or word inside the quoted program is not seen.",
-  "Shell variables other than $HOME, and strings assembled at run time (a base64 decode, a variable holding a command), are not expanded, so a path or command built that way is not seen.",
+  "Shell expansion beyond ~ and $HOME is not evaluated: other variables, and strings assembled at run time (a base64 decode, a variable holding a command), so a path or command built that way is not seen.",
+  "Option and wrapper spellings the tables do not model are not recognized: the guard judges a command by its text, its wrapper and option parsing follows GNU coreutils, findutils and sudo (and BSD/macOS forms where their manual pages differ), and no table can be proved complete across tool versions.",
+  "Commands that run a command from their arguments (find -exec, watch, parallel, busybox) and programs outside the fixed network and write lists (unlink, shred, perl -i, cargo fetch) are not recognized.",
+  "pathPatterns regexes are matched on the paths a call names, not on the files a recursive read or a glob reaches below a directory.",
   "Subprocesses of a make target are not individual tool calls, so what they read is not logged.",
   "MCP server internals are not tool calls, so what a server reads on its own is not logged.",
   "Hooks load at session start, so a session that writes the policy is not covered until the next one; the gate's liveness check catches a session with no hooks at all.",
-  "Commands that run a command from their arguments (find -exec, watch, parallel, busybox) and programs outside the fixed network and write lists (unlink, shred, perl -i, cargo fetch, rsync) are not recognized.",
-  "pathPatterns regexes are matched on the paths a call names, not on the files a recursive read or a glob reaches below a directory.",
 ];
 
 /**
