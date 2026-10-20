@@ -71,7 +71,7 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] P6-01 Operations, architecture and writing-specs for 0.7.0
 - [x] P6-02 mcp-tools.md and README for 0.7.0
 - [x] P6-03 CHANGELOG 0.7.0, the version and the feedback header
-- [~] P6-04 Apply the approved copy, a solid clean-room diagram and check-site rule 16
+- [x] P6-04 Apply the approved copy, a solid clean-room diagram and check-site rule 16
 - [ ] P6-05 Phase 6 end: push and record the manual check
 
 ## Log
@@ -275,3 +275,6 @@ README: Clean-room mode in the feature list, the attestation sentence with a lin
 
 ### P6-03 — 1862012
 CHANGELOG [0.7.0] — 2026-10-19 with Summary, Added, Changed, Fixed (each cites kukulu-tech F-nn or Appendix A item n), Breaking changes (foundry removal, source required, plan_commit branch check, deprecations removed); version 0.7.0 in package.json, plugin.json, VERSION and the README badge. docs/feedback/2026-10-19-kukulu-tech.md (gitignored, local) got the line 'Addressed in: docs/SPEC.md v0.7.0 (flight v0-7-0)'. Plugin suite 563 assertions.
+
+### P6-04 — ad97c6b
+Approval gate passed: base f5892e0 from git merge-base cleanroom HEAD; docs/site/copy-changes.json exists there and git log base..HEAD for it is empty. All 13 pairs had exactly one old match in the mockup and in site/index.html; applied in order to both. Fig. 1 (room, blocked box, room-foot, evidence stages) solid in styles.css and the mockup's inline styles; the legend's dashed swatch removed (.swatch-dashed gone); section 04's box stays dashed. check-site rule 16 (copyChangesPath; IMPLEMENTED_RULES 1-14 and 16) with 7 CASES (self-test now 76 cases); the temp copy carries the mockup and the copy-changes file. npm run check:site and check:site:browser pass. CAUTION: change 11 reads 'fromas of 0.7.0' (owner fixed it at ef3860c on the base branch after this branch was cut; merging the base was refused by the permission system). After merge, replace 'fromas of 0.7.0' with 'as of 0.7.0' in docs/site/mockup.html and site/index.html or rule 16 fails.
