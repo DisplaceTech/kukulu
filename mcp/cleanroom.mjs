@@ -1061,12 +1061,24 @@ function destinationPaths(word, rest) {
       operands.push(...rest.slice(i + 1));
       break;
     }
-    const opt = t.startsWith("-") ? scanOption(t, COPY_SPEC) : null;
+    let opt = null;
+    if (word === "cp" && t.startsWith("--")) {
+      // cp resolves its own long options: `--o` is --one-file-system there, not install's --owner.
+      const full = cpLong(t);
+      if (full === "--target-directory" || full === "--suffix") {
+        const eq = t.indexOf("=");
+        opt = { name: full, value: eq === -1 ? null : t.slice(eq + 1) };
+      }
+    } else if (t.startsWith("-")) opt = scanOption(t, COPY_SPEC);
     if (opt) {
       const value = opt.value ?? rest[++i];
       if (opt.name === "t" || opt.name === "--target-directory") dir = value ?? dir;
       // A bundle's letters before the valued one still count (`cp -rt docs`).
-      if (word === "cp" && !t.startsWith("--") && /[rRa]/.test(t.slice(1, t.search(/[tSmog]/)))) recursive = true;
+      if (word === "cp" && !t.startsWith("--")) {
+        const before = t.slice(1, t.search(/[tSmog]/));
+        if (/[rRa]/.test(before)) recursive = true;
+        if (before.includes("T")) noTargetDir = true;
+      }
     } else if (t.startsWith("-") && t.length > 1) {
       if (word === "cp" && !t.startsWith("--")) {
         if (/^-[A-Za-z]*[rRa][A-Za-z]*$/.test(t)) recursive = true;
