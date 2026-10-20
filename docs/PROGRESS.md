@@ -66,7 +66,7 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] P5-05 Tune cleanroom.idleGapHours
 - [x] P5-06 kukulu_attest
 - [x] P5-07 Tamper tests over a real bundle; the archive moves it
-- [~] P5-08 Attestation docs and the summarize step
+- [x] P5-08 Attestation docs and the summarize step
 - [ ] P5-09 Phase 5 end: push and record the manual check
 - [ ] P6-01 Operations, architecture and writing-specs for 0.7.0
 - [ ] P6-02 mcp-tools.md and README for 0.7.0
@@ -260,3 +260,6 @@ kukulu_attest (TOOLS after kukulu_similarity; 25 tools; summarizer tools line; m
 
 ### P5-07 — a97b423
 test/attest.mjs: tamper matrix over a real kukulu_attest bundle (file, manifest, signature, log line, checkpoint with rehashed chain, policy, public key swap and forger re-sign, commit trailer; each both as-is and with a refreshed manifest where the owning check would otherwise be hidden), untampered pass with/without --key, verify.mjs alone with the repo deleted. flightArchive moves docs/attestation/ to docs/flights/<slug>/attestation/ (layout kept; moved gains docs/attestation); mcp-tools.md and the tool description updated. attest suite 207 assertions.
+
+### P5-08 — 08f6d6d
+docs/cleanroom.md: Reading a bundle (files, manifest fields, the five gap kinds) and Verifying offline (command lines with --key/--json, the ten checks, sample PASS/FAIL, the --legacy-log reader and its fixture output). skills/summarize: Attestation paragraph (non-null cleanroom status; after kukulu_similarity, before kukulu_flight_archive; ## Attestation then a further kukulu_summary_commit({content})). plugin suite asserts all of it plus CONTRIBUTING rows. No server change.
