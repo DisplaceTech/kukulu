@@ -72,7 +72,7 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] P6-02 mcp-tools.md and README for 0.7.0
 - [x] P6-03 CHANGELOG 0.7.0, the version and the feedback header
 - [x] P6-04 Apply the approved copy, a solid clean-room diagram and check-site rule 16
-- [ ] P6-05 Phase 6 end: push and record the manual check
+- [x] P6-05 Phase 6 end: push and record the manual check
 
 ## Log
 
@@ -278,3 +278,6 @@ CHANGELOG [0.7.0] — 2026-10-19 with Summary, Added, Changed, Fixed (each cites
 
 ### P6-04 — ad97c6b
 Approval gate passed: base f5892e0 from git merge-base cleanroom HEAD; docs/site/copy-changes.json exists there and git log base..HEAD for it is empty. All 13 pairs had exactly one old match in the mockup and in site/index.html; applied in order to both. Fig. 1 (room, blocked box, room-foot, evidence stages) solid in styles.css and the mockup's inline styles; the legend's dashed swatch removed (.swatch-dashed gone); section 04's box stays dashed. check-site rule 16 (copyChangesPath; IMPLEMENTED_RULES 1-14 and 16) with 7 CASES (self-test now 76 cases); the temp copy carries the mockup and the copy-changes file. npm run check:site and check:site:browser pass. CAUTION: change 11 reads 'fromas of 0.7.0' (owner fixed it at ef3860c on the base branch after this branch was cut; merging the base was refused by the permission system). After merge, replace 'fromas of 0.7.0' with 'as of 0.7.0' in docs/site/mockup.html and site/index.html or rule 16 fails.
+
+### P6-05 — d3c7978
+Empty commit d3c7978; pushed build/2026-10-19 to origin (cdeb8be..d3c7978). Manual check: NOT VERIFIED (human): deploy the build branch as a Cloudflare Pages preview (docs/site/DEPLOY.md), read every clean-room line on the preview against what the suite proves, and compare the page with the changed mockup at 360, 768 and 1440 px in both schemes; confirm the three site, ci and lint checks are green on the PR.
