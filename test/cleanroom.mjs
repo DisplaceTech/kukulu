@@ -1067,6 +1067,50 @@ const gateCheck = (reason) => (reason.match(/^clean-room gate failed: ([\w-]+):/
   });
 }
 
+{
+  // Only a hook-written allowed entry proves the hooks run: a server-written entry between gates does not.
+  const repo = cleanroomRepo();
+  await withServer(repo, async ({ call }) => {
+    const first = await call("kukulu_next");
+    eq(first.gate.ok, true, "(setup) the first gate passes");
+    appendEntry(LOG(repo), { kind: "human", stage: "controller", role: "operator", target: "a note", data: { kind: "instruction" } });
+    appendEntry(LOG(repo), { kind: "score", stage: "controller", role: "session", target: "a score", data: {} });
+    const second = await call("kukulu_next");
+    eq(second.stage + "|" + gateCheck(second.reason), "halt|liveness", "a gate followed only by server-written entries halts naming liveness");
+  });
+}
+
+{
+  // A log rebuilt from a new genesis verifies as a chain, but is not the genesis state.json recorded.
+  const repo = cleanroomRepo();
+  await live(repo, async ({ call }) => {
+    const first = await call("kukulu_next");
+    eq(first.gate.ok, true, "(setup) the first gate passes");
+    const log = LOG(repo);
+    fs.unlinkSync(log);
+    appendEntry(log, { kind: "genesis", stage: "controller", role: "operator", target: "forged", data: { mode: "clean-room" } });
+    logCall(repo);
+    eq(verifyChain(fs.readFileSync(log, "utf8").split("\n").filter(Boolean)).ok, true, "(setup) the replacement chain verifies on its own");
+    const m = await call("kukulu_next");
+    eq(m.stage + "|" + gateCheck(m.reason), "halt|chain", "a log replaced by a fresh valid chain halts naming chain");
+    like(m.reason, /the first entry is not the genesis entry recorded in state\.json/, "...saying the genesis is not the recorded one");
+  });
+}
+
+{
+  // A server commit made with no explicit task carries the first in-progress task.
+  const repo = await genesisRepo();
+  await live(repo, async ({ call }) => {
+    await call("kukulu_run_start");
+    const t = await call("kukulu_task_next");
+    eq(t.id, "P0-01", "(setup) P0-01 is in progress");
+    const f = await call("kukulu_feedback_log", { stage: "implement", message: "a stall", category: "stall" });
+    ok(!f.error, "(setup) the feedback entry is logged");
+    const body = git(repo, ["log", "-1", "--format=%B"]).trim().split("\n");
+    eq(body.slice(-2).join("|"), "Kukulu-Stage: implement|Kukulu-Task: P0-01", "a server commit with a task in progress carries that task's trailer");
+  });
+}
+
 // ---------------------------------------------------------------- human entries and kukulu_cleanroom_record
 
 {
