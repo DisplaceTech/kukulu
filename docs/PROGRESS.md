@@ -11,7 +11,7 @@ Started: 2026-10-20T19:18:49.092Z
 - [x] P0-04 git forms that write only the index are not write targets
 - [x] P0-05 rsync and tar extraction into a protected path are denied
 - [x] P0-06 install's BSD-only denial names its directory
-- [ ] P0-07 The gate, the genesis and the manifest pin mcp/cleanroom.mjs
+- [x] P0-07 The gate, the genesis and the manifest pin mcp/cleanroom.mjs
 - [ ] P0-08 Phase 0 end: push and record the manual check
 - [ ] P1-01 renumber rewrites ids in the flight's CLAUDE.md notes
 - [ ] P1-02 Refuse task and halt text that would break a PROGRESS.md constraint
@@ -51,3 +51,7 @@ rsyncParts/tarParts helpers + own rule block before 6d; rsync remote operand den
 ### P0-06 — 4b3bf80
 
 Probe: BSD-only form was denied with "install writes it into null". Targets now carry their reading's dir. 3 fixtures, 3 message assertions. Docs and CHANGELOG updated.
+
+### P0-07 — 3ef10a3
+
+cleanroomHash added to pluginHashes/genesis/state/gate check 3/manifest/verifier check 6; checkpoint() restricted to the three CHECKPOINT_KEYS hashes. Unpinned fallback (gate data.unpinned) and verifier notes for 0.7.0 records. Interpretation: harness buildBundle got opts.cleanroomHash (test/harness.mjs outside the listed files). Docs and CHANGELOG updated.
