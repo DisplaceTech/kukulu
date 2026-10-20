@@ -408,7 +408,9 @@ function commitStaged(rels, message, opts = {}) {
       timeout: SIGNING_TIMEOUT_MS,
       env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
     });
-  const r = run(["commit", "-q", "-m", message, "--", ...rels]);
+  // A merge in progress refuses `git commit -- <paths>`, so its commit takes whatever is staged.
+  const pathspec = (list) => (opts.noPathspec ? [] : ["--", ...list]);
+  const r = run(["commit", "-q", "-m", message, ...pathspec(rels)]);
   if (r.status === 0 && !r.error) return;
   const text = (r.stderr || r.stdout || "").trim();
   const timedOut = r.error?.code === "ETIMEDOUT" || Boolean(r.signal);
@@ -446,7 +448,7 @@ function commitStaged(rels, message, opts = {}) {
   let retry;
   try {
     git(["add", "-A", "--", ...all]);
-    retry = run(["-c", "commit.gpgsign=false", "commit", "-q", "-m", message, "--", ...all]);
+    retry = run(["-c", "commit.gpgsign=false", "commit", "-q", "-m", message, ...pathspec(all)]);
   } catch (e) {
     undoFallback();
     throw e;
@@ -554,7 +556,7 @@ function loadConfig() {
 
 const SIGNING_POLICIES = ["auto", "off", "required"];
 const PR_POLICIES = ["draft", "none"];
-const POLICY_KEYS = ["signing", "push", "pr", "feedback", "archive", "finalize", "mergeMethod"];
+const POLICY_KEYS = ["signing", "push", "pr", "feedback", "archive", "finalize", "mergeMethod", "syncBase"];
 const FINALIZE_POLICIES = ["auto", "ready", "draft"];
 const MERGE_METHODS = ["merge", "squash", "rebase"];
 const FLIGHT_SLUG = /^[a-z0-9][a-z0-9-]{0,39}$/;
@@ -588,6 +590,9 @@ function validatePolicies(policies) {
   }
   if (policies.mergeMethod !== undefined && !MERGE_METHODS.includes(policies.mergeMethod)) {
     throw new ToolError(`docs/kukulu.json policies.mergeMethod must be one of ${MERGE_METHODS.join(", ")}`);
+  }
+  if (policies.syncBase !== undefined && typeof policies.syncBase !== "boolean") {
+    throw new ToolError("docs/kukulu.json policies.syncBase must be a boolean");
   }
 }
 
@@ -912,6 +917,7 @@ function cfgFrom(c, planIds) {
       archive: c.policies?.archive ?? false,
       finalize: c.policies?.finalize ?? "auto",
       mergeMethod: c.policies?.mergeMethod ?? "merge",
+      syncBase: c.policies?.syncBase ?? true,
     },
   };
 }
@@ -2150,7 +2156,50 @@ function probeSigning(signingPolicy) {
   return `off (probe failed: ${errLine})`;
 }
 
-function startRun() {
+/**
+ * Merge the local base branch into the build branch when it has commits the
+ * branch lacks (SPEC B-03). Nothing is fetched. Returns null when there is
+ * nothing to do, `{ commits, merge: null, skipped }` when the tracked tree is
+ * dirty, else `{ commits, merge: <short sha> }`. A conflict aborts the merge
+ * and refuses; it never halts. Callers run it before any write of their own.
+ */
+function syncBase(tool) {
+  const cc = cfg();
+  if (!cc.policies.syncBase) return null;
+  const base = cc.baseBranch;
+  const baseRef = `refs/heads/${base}`;
+  if (!git(["rev-parse", "--verify", "--quiet", baseRef], { allowFail: true }).ok) return null;
+  const branch = gitFacts().branch;
+  if (!branch || branch === base) return null;
+  const n = Number(git(["rev-list", "--count", `HEAD..${baseRef}`], { allowFail: true }).out);
+  if (!(n > 0)) return null;
+  if (trackedDirtyLines().length) return { commits: n, merge: null, skipped: "the tracked tree has uncommitted changes" };
+  const st = loadState();
+  const crPaths = cleanroomPaths(st);
+  // withRollback puts the clean-room log back byte for byte if anything below throws, after the merge is aborted.
+  return withRollback(crPaths, () => {
+    const m = git(["merge", "--no-ff", "--no-commit", baseRef], { allowFail: true });
+    if (!m.ok) {
+      const files = git(["diff", "--name-only", "--diff-filter=U"], { allowFail: true }).out.split("\n").filter(Boolean);
+      git(["merge", "--abort"], { allowFail: true });
+      const why = files.length ? `they conflict in ${files.join(", ")}` : `the merge failed: ${(m.err || m.out || "unknown error").split("\n").filter(Boolean)[0] ?? "unknown error"}`;
+      throw new ToolError(`${base} has ${n} commits this branch lacks and ${why}; resolve the merge by hand on ${branch}, commit it, then call ${tool} again, or set policies.syncBase to false`);
+    }
+    try {
+      if (crPaths.length) {
+        checkpoint("base-sync", "implement", st);
+        git(["add", "--", ...crPaths.map(rel)]);
+      }
+      commitStaged(crPaths.map(rel), `chore: merge ${base} into ${branch}`, { stage: "implement", task: "-", noPathspec: true });
+    } catch (e) {
+      git(["merge", "--abort"], { allowFail: true });
+      throw e;
+    }
+    return { commits: n, merge: git(["rev-parse", "--short", "HEAD"]).out };
+  });
+}
+
+function startRun({ sync = false } = {}) {
   requireGate(implementStage(loadState()));
   for (const [k, p] of Object.entries({ spec: P.spec, plan: P.plan, progress: P.progress, config: P.config })) {
     if (!exists(p)) throw new ToolError(`${rel(p)} is missing (${k}); run the plan stage first`);
@@ -2158,6 +2207,9 @@ function startRun() {
   const c = cfg();
   const g = gitFacts();
   if (!g.inRepo) throw new ToolError("not a git repository");
+  // A branch this call cuts from the base is already up to date; only an existing build branch can lag behind it.
+  const baseSynced = sync && g.branch && g.branch.startsWith(c.branchPrefix) ? syncBase("kukulu_run_start") : null;
+  const withSync = (r) => (baseSynced ? { ...r, baseSynced } : r);
   const pr = parseProgress();
   const st = loadState();
 
@@ -2165,7 +2217,7 @@ function startRun() {
   let basePush;
   if (exists(P.lock) && pr.branch && !pr.branch.startsWith("(")) {
     resetLockCounter();
-    return { alreadyStarted: true, branch, counts: counts(pr.tasks), round: st.round, policies: st.policies, signing: st.signing };
+    return withSync({ alreadyStarted: true, branch, counts: counts(pr.tasks), round: st.round, policies: st.policies, signing: st.signing });
   }
   if (branch === c.baseBranch) {
     // Untracked files never block a run from starting: branching off HEAD
@@ -2229,7 +2281,7 @@ function startRun() {
   checkpoint("run-start", implementStage(st), st);
   return gitCommitIfChanged([P.gitignore, P.progress, P.state, P.feedback, ...crPaths], st.round === 0 ? "chore: start implementation run" : `chore: start review-fix round ${st.round}`, { stage: implementStage(st) });
   });
-  return { alreadyStarted: false, branch, commit: sha, counts: counts(pr.tasks), round: st.round, policies: st.policies, signing: st.signing, basePush };
+  return withSync({ alreadyStarted: false, branch, commit: sha, counts: counts(pr.tasks), round: st.round, policies: st.policies, signing: st.signing, basePush });
 }
 
 /**
@@ -2262,7 +2314,7 @@ function ensureStreamWorktree(stream, buildBranch, cc) {
 }
 
 function runStart({ stream } = {}) {
-  const res = startRun();
+  const res = startRun({ sync: stream === undefined });
   if (stream === undefined) return res;
 
   const { wave, cc } = streamScope(stream);
@@ -2359,6 +2411,9 @@ function streamFinish({ stream } = {}) {
 
 function taskNext({ stream } = {}) {
   requireGate(implementStage(loadState()));
+  // Only a serial flight syncs: a stream works in its own worktree, and a plan with streams merges them back by itself.
+  const baseSynced = stream === undefined && !parseProgress().tasks.some((t) => t.stream) ? syncBase("kukulu_task_next") : null;
+  const withSync = (r) => (baseSynced ? { ...r, baseSynced } : r);
   const pr = parseProgress();
   let inScope = () => true;
   if (stream !== undefined) {
@@ -2392,7 +2447,7 @@ function taskNext({ stream } = {}) {
       writeProgress(pr);
       if (skipped.length) gitCommitIfChanged([P.progress], `progress: skip ${skipped.map((x) => x.id).join(", ")}`, { stage: implementStage(loadState()) });
       setLockPaused(wave.index);
-      return {
+      return withSync({
         done: true,
         paused: true,
         wave: wave.index,
@@ -2400,12 +2455,12 @@ function taskNext({ stream } = {}) {
         counts: counts(pr.tasks),
         skipped,
         message: `Everything you can do serially is done: the next open task (${pick.id}) belongs to parallel wave ${wave.index}, whose streams the flight controller hands out next. Stop now. Do NOT write docs/HANDOFF.md and do NOT call kukulu_run_finish: the plan is not finished.`,
-      };
+      });
     }
     if (!pick) {
       writeProgress(pr);
       if (skipped.length) gitCommitIfChanged([P.progress], `progress: skip ${skipped.map((s) => s.id).join(", ")}`, { stage: implementStage(loadState()) });
-      return { done: true, counts: counts(pr.tasks), skipped, ...(stream !== undefined ? { stream } : {}) };
+      return withSync({ done: true, counts: counts(pr.tasks), skipped, ...(stream !== undefined ? { stream } : {}) });
     }
     const task = planTask(pick.id);
     const bad = task.depends.find((d) => {
@@ -2424,7 +2479,7 @@ function taskNext({ stream } = {}) {
     setLockPaused(null);
     const dependencyLogs = {};
     for (const d of task.depends) if (pr.logs[d]) dependencyLogs[d] = pr.logs[d];
-    return {
+    return withSync({
       done: false,
       id: task.id,
       title: task.title,
@@ -2436,7 +2491,7 @@ function taskNext({ stream } = {}) {
       counts: counts(pr.tasks),
       resumed,
       ...(stream !== undefined ? { stream } : {}),
-    };
+    });
   }
 }
 

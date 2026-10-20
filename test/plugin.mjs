@@ -614,6 +614,7 @@ ok(read("skills/plan-build/SKILL.md").includes("templates/constraints.example.js
       ok(opsDoc.includes("`policies.archive`"), "operations.md documents policies.archive");
       ok(opsDoc.includes("`policies.finalize`"), "operations.md documents policies.finalize");
       ok(opsDoc.includes("`policies.mergeMethod`"), "operations.md documents policies.mergeMethod");
+      ok(opsDoc.includes("`policies.syncBase`"), "operations.md documents policies.syncBase");
       continue;
     }
     if (key === "mutation") {

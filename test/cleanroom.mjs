@@ -528,6 +528,29 @@ async function genesisRepo(planOpts = {}) {
 }
 
 {
+  // P1-03: the base-branch sync in clean-room mode checkpoints, commits the log with the merge and carries the trailers.
+  const repo = await genesisRepo({ config: { flight: "w1" } });
+  await live(repo, async ({ call }) => {
+    const branch = (await call("kukulu_run_start")).branch;
+    git(repo, ["checkout", "-q", "main"]);
+    writeFile(repo, "base.txt", "from the base\n");
+    git(repo, ["add", "base.txt"]);
+    git(repo, ["commit", "-qm", "base side"]);
+    git(repo, ["checkout", "-q", branch]);
+    appendEntry(LOG(repo), sample(0));
+    const t = await call("kukulu_task_next");
+    eq(t.baseSynced?.commits, 1, "(setup) the base sync ran in clean-room mode");
+    const cps = checkpoints(repo);
+    eq(cps.some((c) => c.data.event === "base-sync"), true, "a base-sync checkpoint is appended");
+    eq(git(repo, ["log", "--merges", "-1", "--format=%s"]), `chore: merge main into ${branch}`, "...and the merge commit follows");
+    eq(git(repo, ["log", "-1", "--merges", "--format=%(trailers:key=Kukulu-Stage,valueonly)"]).trim(), "implement", "...with the stage trailer");
+    eq(git(repo, ["log", "-1", "--merges", "--format=%(trailers:key=Kukulu-Task,valueonly)"]).trim(), "-", "...and the task trailer");
+    eq(git(repo, ["status", "--porcelain", "--untracked-files=no"]).split("\n").filter((l) => l && !l.endsWith("log.jsonl")).join(""), "M docs/PROGRESS.md", "...the tree is clean apart from the hooks' log and the task just marked in progress");
+    ok(verifyChain(fs.readFileSync(LOG(repo), "utf8").split("\n").filter(Boolean)).ok, "...and the chain still verifies");
+  });
+}
+
+{
   const repo = await genesisRepo({ config: { flight: "w1" } });
   const publicKey = loadKey(testKeyFor(repo)).publicKey;
   await live(repo, async ({ call }) => {

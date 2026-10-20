@@ -158,7 +158,7 @@ The manifest's fields, in the order it writes them:
 **Coverage gaps** are the places where the log does not vouch for the work. They are recomputed by the verifier from `log.jsonl` and `commits.txt`, so a manifest cannot leave one out. Each is printed, and none is a failure:
 
 - `silent-gates`: two gate entries with nothing logged between them, so the hooks may not have been running.
-- `untrailed-commit`: a commit without a `Kukulu-Stage` trailer, which is work done outside the pipeline.
+- `untrailed-commit`: a commit without a `Kukulu-Stage` trailer, which is work done outside the pipeline. The commits a base-branch sync merges in (`policies.syncBase`) carry no trailer either, so they are listed here; that is the honest record of work that came from outside the flight.
 - `intervention`: a `human` entry you recorded as something done by hand.
 - `idle`: two consecutive entries of one stage more than `cleanroom.idleGapHours` apart.
 - `unsigned-commit`: a commit whose signature code is `N` (none) or `B` (bad).

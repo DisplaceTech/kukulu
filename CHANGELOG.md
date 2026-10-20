@@ -13,6 +13,7 @@ All notable changes to this plugin. Format follows
 
 ### Fixed
 
+- `kukulu_run_start` on an existing build branch and a serial `kukulu_task_next` merge new local base-branch commits into the build branch (new optional key `policies.syncBase`, default `true`; `false` keeps the old behavior). A conflict refuses without leaving a merge behind (kukulu F-03).
 - `kukulu_task_done`, `kukulu_task_block`, `kukulu_task_reopen` and `kukulu_run_halt` refuse text that would break an active constraint covering `docs/PROGRESS.md`, before anything is written, instead of letting the log commit break the tree (kukulu F-02).
 - `kukulu_plan_commit` with `renumber: true` now also rewrites the renumbered ids inside CLAUDE.md's `## Flight <slug> notes` section, and only there; a missing section or flight slug is reported in `notes` (kukulu F-01).
 - Gate check 3 now pins `mcp/cleanroom.mjs`: genesis records its hash as `cleanroomHash`, the manifest carries `plugin.cleanroomHash`, and the verifier compares it with genesis. A flight started on 0.7.0 passes with `unpinned` in its gate entry (0.7.0 REVIEW spec issue "D-08 check 3 does not pin `mcp/cleanroom.mjs`").

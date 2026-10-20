@@ -1218,4 +1218,108 @@ for (const [label, rule] of [
   });
 }
 
+// ---------------------------------------------------------------- policies.syncBase
+
+/** A started run whose build branch lags `main`: one commit (`base.txt`) is added to main after the branch was cut. */
+async function baseAhead(repo, { onBuild = null, onBase = null } = {}) {
+  let branch;
+  await withServer(repo, async ({ call }) => {
+    branch = (await call("kukulu_run_start")).branch;
+  });
+  if (onBuild) {
+    onBuild(branch);
+    git(repo, ["add", "-A"]);
+    git(repo, ["commit", "-qm", "build side"]);
+  }
+  git(repo, ["checkout", "-q", "main"]);
+  writeFile(repo, "base.txt", "from the base\n");
+  if (onBase) onBase();
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-qm", "base side"]);
+  git(repo, ["checkout", "-q", branch]);
+  return branch;
+}
+
+{
+  const repo = plannedRepo();
+  const branch = await baseAhead(repo);
+  await withServer(repo, async ({ call }) => {
+    const r = await call("kukulu_run_start");
+    eq(r.alreadyStarted + "|" + r.baseSynced.commits, "true|1", "run_start merges an ahead base into an existing build branch");
+    eq(subject(repo), `chore: merge main into ${branch}`, "...as chore: merge <base> into <branch>");
+    eq(readFile(repo, "base.txt"), "from the base\n", "...and the base's file is present");
+    eq(git(repo, ["rev-list", "--parents", "-n", "1", "HEAD"]).split(" ").length, 3, "...as a merge commit with two parents");
+    eq(r.baseSynced.merge, git(repo, ["rev-parse", "--short", "HEAD"]), "...reported by its short sha");
+    eq(git(repo, ["status", "--porcelain"]), "", "...leaving a clean tree");
+    const again = await call("kukulu_run_start");
+    ok(again.baseSynced === undefined, "a second run_start finds nothing to merge");
+  });
+}
+
+{
+  const repo = plannedRepo();
+  const branch = await baseAhead(repo);
+  await withServer(repo, async ({ call }) => {
+    const t = await call("kukulu_task_next");
+    eq(t.id + "|" + t.baseSynced.commits, "P0-01|1", "task_next merges an ahead base before choosing a task");
+    eq(subject(repo), `chore: merge main into ${branch}`, "...the merge commit comes first");
+    eq(readFile(repo, "base.txt"), "from the base\n", "...and the base's file is present");
+  });
+}
+
+{
+  const repo = plannedRepo();
+  await withServer(repo, async ({ call }) => {
+    await call("kukulu_run_start");
+    const head = git(repo, ["rev-parse", "HEAD"]);
+    const t = await call("kukulu_task_next");
+    eq(git(repo, ["rev-parse", "HEAD"]), head, "an equal base is not merged: HEAD is unmoved");
+    ok(t.baseSynced === undefined, "...and the result has no baseSynced");
+  });
+}
+
+{
+  const repo = plannedRepo();
+  const branch = await baseAhead(repo, { onBuild: () => writeFile(repo, "shared.txt", "build\n"), onBase: () => writeFile(repo, "shared.txt", "base\n") });
+  const head = git(repo, ["rev-parse", "HEAD"]);
+  const file = readFile(repo, "shared.txt");
+  await withServer(repo, async ({ call }) => {
+    isError(await call("kukulu_task_next"), new RegExp(`^main has 1 commits this branch lacks and they conflict in shared\\.txt; resolve the merge by hand on ${branch.replace(/[/.]/g, "\\$&")}, commit it, then call kukulu_task_next again, or set policies\\.syncBase to false$`), "a conflicting base refuses with the files and the way out");
+    eq(git(repo, ["rev-parse", "HEAD"]), head, "...HEAD is unmoved");
+    eq(git(repo, ["status", "--porcelain"]), "", "...the tree is as it was");
+    eq(readFile(repo, "shared.txt"), file, "...the conflicting file is byte-identical");
+    ok(!hasFile(repo, ".git/MERGE_HEAD"), "...and no merge is left in progress");
+    isError(await call("kukulu_run_start"), /conflict in shared\.txt; resolve the merge by hand[\s\S]*kukulu_run_start again/, "run_start refuses the same way, naming itself");
+  });
+}
+
+{
+  const repo = plannedRepo();
+  await baseAhead(repo);
+  writeFile(repo, "docs/PLAN.md", readFile(repo, "docs/PLAN.md") + "\nedited\n");
+  const head = git(repo, ["rev-parse", "HEAD"]);
+  await withServer(repo, async ({ call }) => {
+    const t = await call("kukulu_task_next");
+    eq(t.baseSynced.merge + "|" + t.baseSynced.commits + "|" + /uncommitted/.test(t.baseSynced.skipped), "null|1|true", "a dirty tree skips the base sync and says so");
+    eq(git(repo, ["rev-parse", "HEAD"]), head, "...HEAD is unmoved");
+  });
+}
+
+{
+  const repo = plannedRepo({ config: { policies: { syncBase: false } } });
+  await baseAhead(repo);
+  const head = git(repo, ["rev-parse", "HEAD"]);
+  await withServer(repo, async ({ call }) => {
+    const t = await call("kukulu_task_next");
+    ok(t.baseSynced === undefined && git(repo, ["rev-parse", "HEAD"]) === head && !hasFile(repo, "base.txt"), "syncBase false skips the base sync");
+  });
+}
+
+{
+  const repo = plannedRepo({ config: { policies: { syncBase: "yes" } } });
+  await withServer(repo, async ({ call }) => {
+    isError(await call("kukulu_run_start"), /docs\/kukulu\.json policies\.syncBase must be a boolean/, "validatePolicies refuses a non-boolean syncBase");
+  });
+}
+
 finish();
