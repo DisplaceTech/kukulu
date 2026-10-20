@@ -81,7 +81,7 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] R1-06 Test the gate's liveness kind, genesis match and the trailer's default task
 - [x] R1-07 Bound every gh call in prChecks; report mutationFixRounds where the reviewer can read it
 - [x] R2-01 Guard: judge cd segments again and let the effective cwd reach the read rules
-- [ ] R2-02 Guard: grouping, reserved words, >|, git -C and more wrappers no longer hide the command or the target
+- [x] R2-02 Guard: grouping, reserved words, >|, git -C and more wrappers no longer hide the command or the target
 - [ ] R2-03 Guard: deny git forms that discard the log's uncommitted entries, glob operands of destructive forms, and chmod/chown of a protected ancestor
 - [ ] R2-04 Guard: a recursive read, a search root or a glob that reaches into deny.paths is denied
 - [ ] R2-05 Guard cases: allowed fixtures that pin grep's valued options, -e patterns and quoted >
@@ -327,3 +327,6 @@ Interpretation: hang test uses the real bound (adds ~30 s to the state suite). C
 
 ### R2-01 — 1a86074
 8 cd fixtures added to guard-cases.json. cd/pushd segments now judged by all rules; shellCwd update moved to end of the segment loop; forms()/inRepo/6c outside clause use shellCwd. Replaces R1-01 interpretation (read rules keep original cwd).
+
+### R2-02 — 7973e02
+23 fixtures (9 network, 9 protected, 5 allowed). stripGrouping drops leading ( { ! and reserved words, trailing ); subshell cd restored at ). splitSegments keeps >|. gitParts handles -C for operands and destructive forms (empty operand + -C => "."). WRAPPERS += exec nohup timeout stdbuf setsid (timeout duration skipped). KNOWN_LIMITS now 6; counts updated in test/cleanroom.mjs and test/attest.mjs; docs/cleanroom.md updated.
