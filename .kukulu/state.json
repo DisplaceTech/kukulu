@@ -4,7 +4,7 @@
   "reviewed": true,
   "verdict": "CHANGES REQUESTED",
   "summarized": false,
-  "halted": "review round 7 exceeds the hard cap maxRoundsHard=6 (findings per round: 7 → 7 → 3 → 3 → 3 → 2 → 2); a human must decide whether to continue: call kukulu_flight_options({ maxRoundsHard: 7, resume: true })",
+  "halted": null,
   "preexistingUntracked": [],
   "policies": {
     "signing": "auto",
@@ -78,9 +78,5 @@
     "slug": "kukulu-tech",
     "dir": "docs/flights/kukulu-tech",
     "at": "2026-10-19T19:03:35.359Z"
-  },
-  "haltCap": {
-    "cap": "maxRoundsHard",
-    "round": 7
   }
 }

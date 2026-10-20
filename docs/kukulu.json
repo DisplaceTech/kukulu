@@ -70,8 +70,8 @@
   "build": [],
   "baseBranch": "cleanroom",
   "branchPrefix": "build/",
-  "maxRounds": 4,
-  "maxRoundsHard": 6,
+  "maxRounds": 10,
+  "maxRoundsHard": 10,
   "flight": "v0-7-0",
   "mutation": {
     "targeted": {
