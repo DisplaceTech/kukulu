@@ -39,7 +39,7 @@
   "build": [],
   "baseBranch": "main",
   "branchPrefix": "build/",
-  "maxRounds": 3,
+  "maxRounds": 6,
   "maxRoundsHard": 6,
   "flight": "v0-7-1",
   "mutation": {
@@ -105,7 +105,7 @@
     },
     {
       "id": "no-sync-merge",
-      "description": "K\u016bkulu never runs gh pr merge without --auto: the gh pr merge arguments are one inline array literal that includes --auto.",
+      "description": "Kūkulu never runs gh pr merge without --auto: the gh pr merge arguments are one inline array literal that includes --auto.",
       "paths": [
         "mcp/server.mjs"
       ],
@@ -184,7 +184,7 @@
         "<a href=\"#top\" ONCLICK = \"x()\">Top</a>"
       ],
       "shouldNotMatch": [
-        "<meta name=\"description\" content=\"K\u016bkulu is an open-source Claude Code plugin\">",
+        "<meta name=\"description\" content=\"Kūkulu is an open-source Claude Code plugin\">",
         "<button type=\"button\" class=\"copy\" data-copy-for=\"install-shell\" aria-label=\"Copy the shell install commands\" hidden>",
         "<p>Turn it on = done, once the script ran.</p>"
       ]
@@ -286,12 +286,12 @@
       "pattern": "\\bKukulu\\b",
       "shouldMatch": [
         "<h1>Kukulu builds from the spec</h1>",
-        "<title>Page not found \u2014 Kukulu</title>",
+        "<title>Page not found — Kukulu</title>",
         "<meta property=\"og:site_name\" content=\"Kukulu\">"
       ],
       "shouldNotMatch": [
         "<a href=\"https://github.com/DisplaceTech/kukulu\">GitHub</a>",
-        "<span class=\"wordmark\">K\u016bkulu</span>",
+        "<span class=\"wordmark\">Kūkulu</span>",
         "<code id=\"install-session\">/plugin install kukulu@displacetech</code>",
         "<code id=\"flight-cmd\">/kukulu:go-flight</code>"
       ]
@@ -380,7 +380,7 @@
     },
     {
       "id": "no-hardcoded-copy-feedback",
-      "description": "copyFeedbackMs (2400, \u26a0\ufe0f ASSUMPTION) appears as a literal only in copy.js's line const COPY_FEEDBACK_MS = 2400; the checkers read it from docs/site/checks.json (SPEC 5).",
+      "description": "copyFeedbackMs (2400, ⚠️ ASSUMPTION) appears as a literal only in copy.js's line const COPY_FEEDBACK_MS = 2400; the checkers read it from docs/site/checks.json (SPEC 5).",
       "paths": [
         "site/copy.js",
         "site/index.html",
@@ -407,7 +407,7 @@
     },
     {
       "id": "no-hardcoded-site-tunables",
-      "description": "The checkers and the server read every \u26a0\ufe0f ASSUMPTION value (budget.textBytes, budget.fontBytes, budget.scriptBytes, contrastMin, servePort) from docs/site/checks.json and never write the number (SPEC 5).",
+      "description": "The checkers and the server read every ⚠️ ASSUMPTION value (budget.textBytes, budget.fontBytes, budget.scriptBytes, contrastMin, servePort) from docs/site/checks.json and never write the number (SPEC 5).",
       "paths": [
         "scripts/check-site.mjs",
         "scripts/check-site-browser.mjs",
@@ -595,7 +595,7 @@
     },
     {
       "id": "no-hardcoded-target-max",
-      "description": "The log target length (4,000, \u26a0\ufe0f ASSUMPTION) is written once, as const TARGET_MAX = 4000; in mcp/cleanroom.mjs (SPEC 5.3).",
+      "description": "The log target length (4,000, ⚠️ ASSUMPTION) is written once, as const TARGET_MAX = 4000; in mcp/cleanroom.mjs (SPEC 5.3).",
       "paths": [
         "mcp/cleanroom.mjs",
         "scripts/cleanroom-guard.mjs",
@@ -617,7 +617,7 @@
     },
     {
       "id": "no-hardcoded-mutation-fix-rounds",
-      "description": "review.mutationFixRounds' default (2, \u26a0\ufe0f ASSUMPTION) is written once, on cfgFrom's review line; every other use reads the key (SPEC 5.3, B-03).",
+      "description": "review.mutationFixRounds' default (2, ⚠️ ASSUMPTION) is written once, on cfgFrom's review line; every other use reads the key (SPEC 5.3, B-03).",
       "paths": [
         "mcp/server.mjs",
         "skills/",
@@ -645,14 +645,14 @@
       ],
       "pattern": "(?<!K)\\u016b|\\u016b(?!kulu)",
       "shouldMatch": [
-        "Wrote the \u016b letter as an escape in the test.",
-        "- the refusal quotes `\u016b` from the log",
-        "the ASCII identifier is k\u016bkulu, never this",
-        "K\u016bkul is not the name"
+        "Wrote the ū letter as an escape in the test.",
+        "- the refusal quotes `ū` from the log",
+        "the ASCII identifier is kūkulu, never this",
+        "Kūkul is not the name"
       ],
       "shouldNotMatch": [
-        "# K\u016bkulu 0.7.1 build progress",
-        "P1-02: K\u016bkulu now refuses a log line that breaks a constraint.",
+        "# Kūkulu 0.7.1 build progress",
+        "P1-02: Kūkulu now refuses a log line that breaks a constraint.",
         "kukulu_task_done refuses the log; the identifier stays kukulu"
       ]
     }
