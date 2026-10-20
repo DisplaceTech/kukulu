@@ -86,7 +86,7 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] R2-04 Guard: a recursive read, a search root or a glob that reaches into deny.paths is denied
 - [x] R2-05 Guard cases: allowed fixtures that pin grep's valued options, -e patterns and quoted >
 - [x] R2-06 Test that a hung gh --version makes prChecks null within the bound
-- [ ] R2-07 Test that --legacy-log's default repository is the log's own repository, not an ancestor
+- [x] R2-07 Test that --legacy-log's default repository is the log's own repository, not an ancestor
 
 ## Log
 
@@ -342,3 +342,6 @@ Interpretation: hang test uses the real bound (adds ~30 s to the state suite). C
 
 ### R2-06 — 3f6ca12
 Added hung-gh --version test (fake gh exec sleep 120); passes at HEAD in the state suite, fails by RPC timeout with the timeout removed from the --version call (mutant applied by hand, server.mjs restored). state suite now takes ~80 s because of the extra 30 s bound.
+
+### R2-07 — c64d1ea
+Added a sibling-of-repo row to the --repo default test (candidates [2,3]); with repoRootOf returning path.dirname(dir) the assertion fails (checked by hand, script restored).
