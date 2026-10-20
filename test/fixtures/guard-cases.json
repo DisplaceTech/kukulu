@@ -2432,5 +2432,171 @@
    "cwd": "__ROOT__"
   },
   "expect": "allowed"
+ },
+ {
+  "name": "git -C before clone is a network command",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "git -C /x clone https://a"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command git clone"
+ },
+ {
+  "name": "git -c before fetch is a network command",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "git -c a=b fetch"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command git fetch"
+ },
+ {
+  "name": "an absolute Glob pattern under deny.paths is denied",
+  "policy": "template",
+  "input": {
+   "tool_name": "Glob",
+   "tool_input": {
+    "pattern": "__HOME__/.cargo/registry/**/*.rs"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "denied path"
+ },
+ {
+  "name": "a tilde Glob pattern under deny.paths is denied",
+  "policy": "template",
+  "input": {
+   "tool_name": "Glob",
+   "tool_input": {
+    "pattern": "~/.cargo/registry/**"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "denied path"
+ },
+ {
+  "name": "$HOME in a path argument is expanded",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat $HOME/.cargo/registry/x"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "denied path"
+ },
+ {
+  "name": "${HOME} in a path argument is expanded",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat ${HOME}/.cargo/registry/x"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "denied path"
+ },
+ {
+  "name": "a command substitution is judged as a command",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "echo $(curl https://evil)"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command curl"
+ },
+ {
+  "name": "a backtick substitution is judged as a command",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "echo `curl https://evil`"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command curl"
+ },
+ {
+  "name": "bash -c string is judged as a command",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "bash -c 'curl https://evil'"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command curl"
+ },
+ {
+  "name": "eval string is judged as a command",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "eval 'cat ~/.cargo/registry/x'"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "denied path"
+ },
+ {
+  "name": "git -C with a local subcommand stays allowed",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "git -C sub status"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "a relative Glob pattern stays allowed",
+  "policy": "template",
+  "input": {
+   "tool_name": "Glob",
+   "tool_input": {
+    "pattern": "src/**/*.rs"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "a single-quoted dollar paren is literal",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "git commit -m 'fix $(curl) docs'"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
  }
 ]

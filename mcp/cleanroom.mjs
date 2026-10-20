@@ -735,6 +735,10 @@ export function evaluate(policy, hookInput, env) {
       if (v) return v;
       if (!isSearch && wordIn(base) && !exempt(base)) return denied(`forbidden word in path: ${base}`);
     }
+    if (tool === "Glob" && typeof args.pattern === "string" && /^[/~]/.test(args.pattern)) {
+      const v = pathVerdict(args.pattern);
+      if (v) return v;
+    }
     if (isSearch) {
       const fields = tool === "Glob" ? [["pattern", args.pattern]] : [["glob", args.glob], ["pattern", args.pattern]];
       const baseExempt = typeof base === "string" && exempt(base);
@@ -746,12 +750,29 @@ export function evaluate(policy, hookInput, env) {
     return NO_ISSUES;
   }
 
-  if (tool === "Bash") {
-    const command = String(args.command ?? "");
-    for (const segment of splitSegments(command)) {
-      const tokens = shellWords(segment);
+  if (tool === "Bash") return bashVerdict(String(args.command ?? ""), 0);
+
+  // 7. everything else, Agent, Task, Skill and every mcp__ tool included
+  return NO_ISSUES;
+
+  /** Rule 6 for one command string; substitutions, `sh -c` and `eval` strings are judged as further commands. */
+  function bashVerdict(command, depth) {
+    if (depth > 4) return NO_ISSUES;
+    const { text, inner } = extractSubstitutions(command);
+    for (const sub of inner) {
+      const v = bashVerdict(sub, depth + 1);
+      if (v.decision === "denied") return v;
+    }
+    for (const segment of splitSegments(text)) {
+      const tokens = shellWords(segment).map((t) => (home ? t.replaceAll("${HOME}", home).replace(/\$HOME(?![A-Za-z0-9_])/g, () => home) : t));
       const { word, args: rest } = commandWord(tokens);
       if (word === null) continue;
+      // A string handed to a shell or to eval is a command line of its own.
+      const shellString = /^(?:ba|z|da|k)?sh$/.test(word) ? rest[rest.findIndex((t) => /^-[A-Za-z]*c[A-Za-z]*$/.test(t)) + 1] : word === "eval" ? rest.join(" ") : undefined;
+      if (typeof shellString === "string" && (word === "eval" || rest.some((t) => /^-[A-Za-z]*c[A-Za-z]*$/.test(t)))) {
+        const v = bashVerdict(shellString, depth + 1);
+        if (v.decision === "denied") return v;
+      }
       // A `cd` or `pushd` in an earlier segment moves every later relative operand (`cd docs && rm cleanroom.json`).
       if ((word === "cd" || word === "pushd") && !/^[<>]/.test(rest.find((t) => !t.startsWith("-")) ?? "")) {
         const dir = rest.find((t) => !t.startsWith("-"));
@@ -761,7 +782,7 @@ export function evaluate(policy, hookInput, env) {
 
       // 6a. network commands
       if (policy.deny.network) {
-        const first = rest.find((t) => !t.startsWith("-"));
+        const first = word === "git" ? gitSubcommand(rest) : rest.find((t) => !t.startsWith("-"));
         const name = NETWORK_COMMANDS.includes(word) ? word : first && NETWORK_COMMANDS.includes(`${word} ${first}`) ? `${word} ${first}` : null;
         if (name) {
           const urls = tokens.filter((t) => /^https?:\/\//i.test(t));
@@ -813,9 +834,60 @@ export function evaluate(policy, hookInput, env) {
     }
     return NO_ISSUES;
   }
+}
 
-  // 7. everything else, Agent, Task, Skill and every mcp__ tool included
-  return NO_ISSUES;
+/** The text of a command with each `$(...)`, backtick and `<(...)` / `>(...)` body cut out, and those bodies; single quotes hide a body. */
+function extractSubstitutions(command) {
+  const inner = [];
+  let text = "";
+  let quote = null;
+  for (let i = 0; i < command.length; i++) {
+    const c = command[i];
+    if (quote === "'") {
+      text += c;
+      if (c === "'") quote = null;
+      continue;
+    }
+    if (c === "\\") {
+      text += c + (command[i + 1] ?? "");
+      i++;
+      continue;
+    }
+    if (c === "'" && quote === null) {
+      quote = "'";
+      text += c;
+      continue;
+    }
+    if (c === '"') quote = quote === '"' ? null : '"';
+    if (c === "`") {
+      const end = command.indexOf("`", i + 1);
+      const stop = end === -1 ? command.length : end;
+      inner.push(command.slice(i + 1, stop));
+      text += "SUBST";
+      i = stop;
+    } else if (command[i + 1] === "(" && (c === "$" || (quote === null && (c === "<" || c === ">")))) {
+      let depth = 1;
+      let j = i + 2;
+      for (; j < command.length && depth > 0; j++) {
+        if (command[j] === "(") depth++;
+        else if (command[j] === ")") depth--;
+      }
+      inner.push(command.slice(i + 2, depth === 0 ? j - 1 : j));
+      text += "SUBST";
+      i = j - 1;
+    } else text += c;
+  }
+  return { text, inner };
+}
+
+/** The first git argument that is not one of git's global options (`-C dir`, `-c k=v`, `--git-dir=...`), i.e. its subcommand. */
+function gitSubcommand(rest) {
+  for (let i = 0; i < rest.length; i++) {
+    const t = rest[i];
+    if (!t.startsWith("-")) return t;
+    if (["-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path", "--super-prefix"].includes(t)) i++;
+  }
+  return undefined;
 }
 
 /**
@@ -876,6 +948,7 @@ function redirectTargets(segment) {
 /** What the guard cannot see, stated in every bundle's manifest as coverage.knownLimits (SPEC D-03). */
 export const KNOWN_LIMITS = [
   "Interpreter escapes (python3 -c, node -e) are not parsed, so a path or word inside the quoted program is not seen.",
+  "Shell variables other than $HOME, and strings assembled at run time (a base64 decode, a variable holding a command), are not expanded, so a path or command built that way is not seen.",
   "Subprocesses of a make target are not individual tool calls, so what they read is not logged.",
   "MCP server internals are not tool calls, so what a server reads on its own is not logged.",
   "Hooks load at session start, so a session that writes the policy is not covered until the next one; the gate's liveness check catches a session with no hooks at all.",
