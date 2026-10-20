@@ -77,7 +77,7 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] R1-02 Guard: network rule and deny.paths reach through git options, Glob patterns, $HOME and substitutions
 - [x] R1-03 Guard: allow cleanflate's four remaining false positives by classifying pattern operands
 - [x] R1-04 Test verifyChain's prev linkage and seq density in mcp/cleanroom.mjs
-- [ ] R1-05 Test the verifier's prev linkage and add the rehashed edit to the both-copies-agree fixtures
+- [x] R1-05 Test the verifier's prev linkage and add the rehashed edit to the both-copies-agree fixtures
 - [ ] R1-06 Test the gate's liveness kind, genesis match and the trailer's default task
 - [ ] R1-07 Bound every gh call in prChecks; report mutationFixRounds where the reviewer can read it
 
@@ -306,3 +306,6 @@ Interpretation: rule 6b still checks all tokens against deny.paths; shellCwd not
 
 ### R1-04 — b32c003
 Added two fixtures (rehashed edit -> line 4 prev mismatch; seq 1,2,4 gap with consistent hashes). Checked by hand: with the prev check disabled or seq check weakened to `< 0`, the new assertions fail (the first via a TypeError crash before optional chaining was added; assertions now use firstBad?.).
+
+### R1-05 — 71a90c1
+Added check-3 test (rehashed edit with refreshed manifest and signature -> "entry 4 (line 4): prev does not match") and two agreement assertions. Hand-checked: with the verifier's prev check disabled all three fail.
