@@ -681,7 +681,7 @@ function validateMutation(mutation) {
   }
 }
 
-const CLEANROOM_KEYS = ["policy", "signingKey", "similarity"];
+const CLEANROOM_KEYS = ["policy", "signingKey", "similarity", "idleGapHours"];
 const SIMILARITY_KEYS = ["subject", "pairs", "languages", "ngram", "minIdentLen", "commentNgram", "identExclusions", "near", "separationMargin"];
 const SIMILARITY_LANGUAGES = ["rust", "c", "cpp", "go", "python", "javascript", "typescript", "java", "php"];
 const PAIR_ROLES = ["negative", "positive", "test"];
@@ -780,6 +780,10 @@ function validateCleanroom(cleanroom) {
   }
   if (cleanroom.signingKey !== undefined && (typeof cleanroom.signingKey !== "string" || !cleanroom.signingKey)) {
     throw new ToolError("docs/kukulu.json cleanroom.signingKey must be a non-empty string: the path of an Ed25519 private key in PEM form");
+  }
+  const idle = cleanroom.idleGapHours;
+  if (idle !== undefined && (typeof idle !== "number" || !Number.isFinite(idle) || idle <= 0)) {
+    throw new ToolError(`docs/kukulu.json cleanroom.idleGapHours must be a positive number of hours (got ${JSON.stringify(idle)}); use a value such as 3`);
   }
   validateSimilarity(cleanroom.similarity);
 }
@@ -893,6 +897,8 @@ function cfgFrom(c, planIds) {
       policy: c.cleanroom?.policy ?? DEFAULT_CLEANROOM_POLICY,
       signingKey: expandHome(envVar("CLEANROOM_KEY") || c.cleanroom?.signingKey || DEFAULT_SIGNING_KEY),
       similarity: normalizeSimilarity(c.cleanroom?.similarity),
+      // ⚠️ ASSUMPTION: hours between two entries of one stage before the span is listed as a coverage gap.
+      idleGapHours: c.cleanroom?.idleGapHours ?? 3,
     },
     policies: {
       signing: c.policies?.signing ?? "auto",

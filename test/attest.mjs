@@ -386,6 +386,32 @@ const logLines = (dir) => fs.readFileSync(path.join(dir, "log.jsonl"), "utf8").s
 // ---------------------------------------------------------------- the verifier and the module agree
 
 {
+  // The same entries and commits.txt, scored by both implementations of F-02's gap definitions.
+  let now = Date.parse("2026-01-01T00:00:00.000Z");
+  const sha = (c) => c.repeat(40);
+  const commits = [`${sha("b")}\x1fG\x1fP0-01: fine\x1fimplement\x1fP0-01`, `${sha("c")}\x1fG\x1fhand fix\x1f\x1f`, `${sha("d")}\x1fN\x1fP0-02: x\x1fimplement\x1fP0-02`, `${sha("e")}\x1fB\x1fP0-03: y\x1fimplement\x1fP0-03`].join("\n") + "\n";
+  const g = fresh({
+    clock: () => now,
+    commits,
+    extra: (log) => {
+      const e = { stage: "controller", role: "operator" };
+      CR.appendEntry(log, { kind: "gate", ...e, data: { checks: 7, ok: true } });
+      CR.appendEntry(log, { kind: "gate", ...e, data: { checks: 7, ok: true } });
+      CR.appendEntry(log, { kind: "human", ...e, target: "by hand", data: { kind: "intervention" } });
+      now += 7.25 * 3600 * 1000;
+      CR.appendEntry(log, { kind: "human", ...e, target: "carry on", data: { kind: "instruction" } });
+    },
+  });
+  const entries = CR.readEntries(path.join(g.dir, "log.jsonl"));
+  const fromModule = CR.coverageGaps(entries, commits.split("\n"), { idleGapHours: 4 });
+  ok(fromModule.length === 6, "the module finds the six planted gaps (test setup)");
+  rewriteManifest(g.dir, g.key, (mf) => { mf.coverage.gaps = fromModule; });
+  const verdict = V.verifyBundle(g.dir);
+  ok(verdict.ok, "the verifier and mcp/cleanroom.mjs compute identical gaps");
+  eq(verdict.notes.filter((n) => n.startsWith("coverage gap: ")).map((n) => n.slice(14)).join("|"), fromModule.map((x) => JSON.stringify(x)).join("|"), "...in the same order");
+}
+
+{
   const b = fresh();
   const lines = logLines(b.dir);
   const same = (ls, label) => {

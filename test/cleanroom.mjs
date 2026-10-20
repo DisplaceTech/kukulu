@@ -17,6 +17,7 @@ import {
   tokenize, LANGUAGES, scorePair, position, verdictOf, LIMITS, BANDS,
   splitSegments, shellWords, commandWord, isPathLike, tokenPath, canonicalPaths,
   evaluate, lockdownActive, NETWORK_COMMANDS, READ_FAMILY, WRITE_FAMILY, protectedPaths,
+  coverageGaps, KNOWN_LIMITS,
   generateKey, loadKey, keyFingerprint, CHECKPOINT_KEYS, signCheckpoint, verifyCheckpoint,
 } from "../mcp/cleanroom.mjs";
 
@@ -95,6 +96,9 @@ for (const [block, re, label] of [
   [{ policy: "" }, /cleanroom\.policy must be a non-empty string/, "...and an empty one"],
   [{ other: 1 }, /cleanroom has an unknown key 'other'/, "cleanroom has an unknown key"],
   [{ signingKey: 3 }, /cleanroom\.signingKey must be a non-empty string/, "cleanroom.signingKey must be a string"],
+  [{ idleGapHours: 0 }, /cleanroom\.idleGapHours must be a positive number of hours \(got 0\)/, "cleanroom.idleGapHours must be a positive number: 0 is refused"],
+  [{ idleGapHours: -2 }, /cleanroom\.idleGapHours must be a positive number/, "...and a negative one"],
+  [{ idleGapHours: "3" }, /cleanroom\.idleGapHours must be a positive number of hours \(got "3"\)/, "...and a string"],
   [[], /'cleanroom' must be an object/, "cleanroom must be an object"],
 ]) {
   const repo = plannedRepo({ config: { cleanroom: block } });
@@ -104,7 +108,7 @@ for (const [block, re, label] of [
 }
 
 {
-  const repo = plannedRepo({ config: { cleanroom: { policy: "policy/cr.json", signingKey: "~/keys/k.pem" } } });
+  const repo = plannedRepo({ config: { cleanroom: { policy: "policy/cr.json", signingKey: "~/keys/k.pem", idleGapHours: 1.5 } } });
   await withServer(repo, async ({ call }) => {
     const st = await call("kukulu_status");
     ok(!st.error, "a valid cleanroom block is accepted");
@@ -1489,6 +1493,28 @@ eq(LANGUAGES.join(","), "rust,c,cpp,go,python,javascript,typescript,java,php", "
       isError(await call("kukulu_similarity"), /^clean-room gate failed: policy: /, "kukulu_similarity refuses when the gate fails");
     });
   }
+}
+
+// ---------------------------------------------------------------- coverage gaps
+
+{
+  const at = (h) => new Date(Date.UTC(2026, 0, 1, 0, 0, 0) + h * 3600000).toISOString();
+  const e = (seq, kind, stage, hours, data) => ({ seq, kind, stage, at: at(hours), ...(data ? { data } : {}) });
+  const hours = { idleGapHours: 3 };
+
+  eq(JSON.stringify(coverageGaps([e(1, "gate", "controller", 0), e(2, "gate", "controller", 0), e(3, "allowed", "implement", 0), e(4, "gate", "controller", 0)], [], hours)), JSON.stringify([{ kind: "silent-gates", from: 1, to: 2 }]), "coverageGaps lists silent gate pairs");
+  const line = (sha, sig, subject, stage, task) => [sha, sig, subject, stage, task].join("\x1f");
+  eq(JSON.stringify(coverageGaps([], [line("a1", "G", "P0-01: x", "implement", "P0-01"), line("b2", "G", "hand fix", "", ""), ""], hours)), JSON.stringify([{ kind: "untrailed-commit", sha: "b2", subject: "hand fix" }]), "coverageGaps lists untrailed commits");
+  eq(JSON.stringify(coverageGaps([e(1, "human", "controller", 0, { kind: "instruction" }), e(2, "human", "controller", 0, { kind: "intervention" })], [], hours)), JSON.stringify([{ kind: "intervention", seq: 2 }]), "coverageGaps lists interventions");
+  eq(JSON.stringify(coverageGaps([e(1, "allowed", "implement", 0), e(2, "allowed", "implement", 3), e(3, "allowed", "implement", 6.126)], [], hours)), JSON.stringify([{ kind: "idle", from: 2, to: 3, hours: 3.13 }]), "coverageGaps lists idle spans over idleGapHours within one stage (exactly the limit is not over it; hours round to two places)");
+  eq(JSON.stringify(coverageGaps([e(1, "allowed", "implement", 0), e(2, "allowed", "review", 9), e(3, "allowed", null, 20), e(4, "allowed", null, 40)], [], hours)), "[]", "coverageGaps lists idle spans not across stages, and not across null stages");
+  eq(JSON.stringify(coverageGaps([e(1, "allowed", "implement", 0), e(2, "allowed", "implement", 1)], [], { idleGapHours: 0.5 })), JSON.stringify([{ kind: "idle", from: 1, to: 2, hours: 1 }]), "coverageGaps takes the limit it is given");
+  eq(JSON.stringify(coverageGaps([], [line("c3", "N", "s", "implement", "P0-01"), line("d4", "B", "s", "implement", "P0-01"), line("e5", "G", "s", "implement", "P0-01"), line("f6", "U", "s", "implement", "P0-01"), line("g7", "E", "s", "implement", "P0-01")], hours)), JSON.stringify([{ kind: "unsigned-commit", sha: "c3" }, { kind: "unsigned-commit", sha: "d4" }]), "coverageGaps lists unsigned commits (N and B, and no other code)");
+  eq(JSON.stringify(coverageGaps([e(1, "gate", "c", 0), e(2, "gate", "c", 5), e(3, "human", "c", 5, { kind: "intervention" })], [line("h8", "N", "no trailer", "", "")], hours).map((g) => g.kind)), JSON.stringify(["silent-gates", "untrailed-commit", "intervention", "idle", "unsigned-commit"]), "coverageGaps orders the kinds as the manifest lists them");
+  let refused = null;
+  try { coverageGaps([], [], { idleGapHours: 0 }); } catch (x) { refused = x; }
+  ok(refused instanceof CleanroomError && /idleGapHours, a positive number/.test(refused.message), "coverageGaps refuses a limit that is not a positive number");
+  ok(KNOWN_LIMITS.length === 4 && KNOWN_LIMITS.every((l) => typeof l === "string" && l.endsWith(".")), "KNOWN_LIMITS is the four fixed strings");
 }
 
 finish();

@@ -815,6 +815,45 @@ function redirectTargets(tokens) {
   return targets;
 }
 
+// ---------------------------------------------------------------- coverage gaps
+
+/** What the guard cannot see, stated in every bundle's manifest as coverage.knownLimits (SPEC D-03). */
+export const KNOWN_LIMITS = [
+  "Interpreter escapes (python3 -c, node -e) are not parsed, so a path or word inside the quoted program is not seen.",
+  "Subprocesses of a make target are not individual tool calls, so what they read is not logged.",
+  "MCP server internals are not tool calls, so what a server reads on its own is not logged.",
+  "Hooks load at session start, so a session that writes the policy is not covered until the next one; the gate's liveness check catches a session with no hooks at all.",
+];
+
+/**
+ * The places the log does not vouch for the work, from the entries and the
+ * lines of commits.txt (<sha>\x1f<%G?>\x1f<subject>\x1f<stage>\x1f<task>). The
+ * kinds, shapes and order are the ones scripts/verify-attestation.mjs recomputes,
+ * which has its own copy of these definitions so a bundle can be checked alone.
+ */
+export function coverageGaps(entries, commitLines, { idleGapHours }) {
+  if (typeof idleGapHours !== "number" || !(idleGapHours > 0)) throw new CleanroomError("coverageGaps needs idleGapHours, a positive number of hours");
+  const commits = commitLines.filter(Boolean).map((line) => {
+    const [sha, signature, subject, stage] = line.split("\x1f");
+    return { sha, signature, subject, stage: stage ?? "" };
+  });
+  const gaps = [];
+  for (let i = 1; i < entries.length; i++) {
+    if (entries[i].kind === "gate" && entries[i - 1].kind === "gate") gaps.push({ kind: "silent-gates", from: entries[i - 1].seq, to: entries[i].seq });
+  }
+  for (const c of commits) if (c.stage === "") gaps.push({ kind: "untrailed-commit", sha: c.sha, subject: c.subject });
+  for (const e of entries) if (e.kind === "human" && e.data?.kind === "intervention") gaps.push({ kind: "intervention", seq: e.seq });
+  for (let i = 1; i < entries.length; i++) {
+    const a = entries[i - 1];
+    const b = entries[i];
+    if (a.stage === null || a.stage !== b.stage) continue;
+    const hours = (Date.parse(b.at) - Date.parse(a.at)) / 3600000;
+    if (hours > idleGapHours) gaps.push({ kind: "idle", from: a.seq, to: b.seq, hours: Math.round(hours * 100) / 100 });
+  }
+  for (const c of commits) if (c.signature === "N" || c.signature === "B") gaps.push({ kind: "unsigned-commit", sha: c.sha });
+  return gaps;
+}
+
 // ---------------------------------------------------------------- the lexical scorer: lexers
 
 export const LANGUAGES = ["rust", "c", "cpp", "go", "python", "javascript", "typescript", "java", "php"];

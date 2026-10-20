@@ -62,7 +62,7 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] P5-01 The verifier: manifest, signature, chain and checkpoints
 - [x] P5-02 The verifier: policy, guard, mode, denials, coverage and similarity
 - [x] P5-03 Pre-0.6.0 logs and the cleanflate fixture
-- [ ] P5-04 Coverage gaps and cleanroom.idleGapHours
+- [~] P5-04 Coverage gaps and cleanroom.idleGapHours
 - [ ] P5-05 Tune cleanroom.idleGapHours
 - [ ] P5-06 kukulu_attest
 - [ ] P5-07 Tamper tests over a real bundle; the archive moves it
