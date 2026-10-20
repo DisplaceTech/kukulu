@@ -63,7 +63,7 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] P5-02 The verifier: policy, guard, mode, denials, coverage and similarity
 - [x] P5-03 Pre-0.6.0 logs and the cleanflate fixture
 - [x] P5-04 Coverage gaps and cleanroom.idleGapHours
-- [~] P5-05 Tune cleanroom.idleGapHours
+- [x] P5-05 Tune cleanroom.idleGapHours
 - [ ] P5-06 kukulu_attest
 - [ ] P5-07 Tamper tests over a real bundle; the archive moves it
 - [ ] P5-08 Attestation docs and the summarize step
@@ -251,3 +251,6 @@ Fixture test/fixtures/foundry-tool-log.jsonl: cleanflate provenance/tool-log.sna
 
 ### P5-04 — 4c1edc4
 mcp/cleanroom.mjs: coverageGaps(entries, commitLines, {idleGapHours}) and KNOWN_LIMITS (4 strings, D-03). Same kinds/shapes/order as the verifier; identical output proven in attest. cleanroom.idleGapHours: validated positive finite number, default 3 (ASSUMPTION, only in cfgFrom, not yet tuned: P5-05), operations.md row, plugin loop assertion. Harness default idleGapHours is 4 for bundles (independent of the default).
+
+### P5-05 — 5b7837e
+docs/spikes/P5-05.md. Measurement: cleanroom.idleGapHours before 3 h (ASSUMPTION); after 3 h, unchanged. cleanflate snapshot at 85f2100 (3,314 entries): 3,164 consecutive same-stage gaps, median 5 s, p99 0.160 h, maximum 0.502 h (30.1 min), 0 over 3 h, 3 over 15 min (cleanflate SUMMARY treats >15 min as idle for active time, a different question). One continuous flight, so the data cannot place a real hand-over; first flight with an overnight pause or a person stepping in is the next measurement.
