@@ -897,6 +897,8 @@ export function evaluate(policy, hookInput, env) {
           if (!allowedFetch) return denied(`network command ${name} is denied`);
         }
       }
+      // An rsync operand that names a host (`host:path`, `user@host:path`, `rsync://...`) reaches the network.
+      if (policy.deny.network && word === "rsync" && rsyncParts(rest).operands.some((t) => /^rsync:\/\//i.test(t) || /^[^/]*:/.test(t))) return denied("network command rsync is denied");
       // 6b. any token under deny.paths or matching a pathPattern
       const pathTokens = rest.filter(isPathLike);
       for (const t of pathTokens) {
@@ -947,6 +949,42 @@ export function evaluate(policy, hookInput, env) {
       for (const t of recursiveOperands(word, rest) ?? []) {
         const v = reachVerdict(t, shellCwd, true);
         if (v) return v;
+      }
+      // 6d'. rsync and tar are not write-family as a whole: their sources and archives are only read, so each gets a rule of its own (SPEC A-04).
+      if (word === "rsync") {
+        const { operands, recursive } = rsyncParts(rest);
+        if (operands.length > 1) {
+          const dest = operands[operands.length - 1];
+          const landed = operands.slice(0, -1).map((src) => {
+            const trimmed = src.replace(/\/+$/, "");
+            const base = path.basename(trimmed);
+            return src.endsWith("/") || base === "." || base === ".." || base === "" ? dest : `${dest.replace(/\/+$/, "") || "/"}/${base}`;
+          });
+          for (const target of [dest, ...landed]) {
+            const forms = writeForms(tokenPath(target));
+            const f = forms.find((x) => protectedList.some((q) => underPrefix(x, q) || (recursive && target === dest && underPrefix(q, x))));
+            if (f) return denied(`protected path: ${f} (rsync writes it into ${dest})`);
+            const w = wildcardNames(forms, protectedList);
+            if (w) return denied(`protected path: ${w} (can be named by the wildcard ${target})`);
+          }
+        }
+      }
+      if (word === "tar") {
+        const { extract, writesArchive, dirs, file } = tarParts(rest);
+        if (extract) {
+          // The archive's contents cannot be known, so an extraction into a directory that holds or sits in a protected path is denied.
+          const dir = dirs.reduce((base, d) => canonicalPaths(tokenPath(d), { cwd: base, home })[0], shellCwd);
+          const forms = [dir, ...writeForms(dir)];
+          const hit = protectedList.find((q) => forms.some((x) => underPrefix(q, x) || underPrefix(x, q)));
+          if (hit) return denied(`protected path: ${hit} (tar extracts into ${dirs.length ? dirs[dirs.length - 1] : "."}; the archive's contents cannot be known)`);
+        }
+        if (writesArchive && file !== null && file !== "-") {
+          const forms = writeForms(tokenPath(file));
+          const f = forms.find((x) => protectedList.some((q) => underPrefix(x, q)));
+          if (f) return denied(`protected path: ${f}`);
+          const w = wildcardNames(forms, protectedList);
+          if (w) return denied(`protected path: ${w} (can be named by the wildcard ${file})`);
+        }
       }
       // 6d. write-family commands and redirections on protected paths
       const redirects = redirectTargets(segment).flatMap((t) => braceExpand(t));
@@ -1231,6 +1269,119 @@ function extractSubstitutions(command) {
     } else text += c;
   }
   return { text, inner };
+}
+
+// rsync options that take a value, so the next token is not an operand (`-e ssh`, `--exclude '*.o'`).
+const RSYNC_SPEC = {
+  short: new Set("eTfBM"),
+  long: new Set(
+    ("--rsh --rsync-path --temp-dir --backup-dir --files-from --exclude --exclude-from --include --include-from --filter --partial-dir " +
+      "--compare-dest --copy-dest --link-dest --log-file --password-file --out-format --block-size --remote-option --chmod --chown " +
+      "--usermap --groupmap --timeout --contimeout --port --address --sockopts --bwlimit --max-size --min-size --modify-window " +
+      "--compress-level --skip-compress --suffix --iconv --read-batch --write-batch --only-write-batch --info --debug --max-delete").split(" "),
+  ),
+};
+
+/** rsync's operands and whether the call is recursive (`-r`, `-a`, in a bundle such as `-av`, or `--recursive`/`--archive` by unique prefix). */
+function rsyncParts(rest) {
+  const operands = [];
+  let recursive = false;
+  for (let i = 0; i < rest.length; i++) {
+    const t = rest[i];
+    if (t === "--") {
+      operands.push(...rest.slice(i + 1));
+      break;
+    }
+    if (!t.startsWith("-") || t === "-") {
+      operands.push(t);
+      continue;
+    }
+    const opt = scanOption(t, RSYNC_SPEC);
+    if (t.startsWith("--")) {
+      const given = t.split("=")[0];
+      const hits = ["--recursive", "--archive"].filter((n) => n.startsWith(given));
+      if (given.length > 2 && hits.length === 1) recursive = true;
+    } else {
+      // Only the letters before the valued one are flags; the rest of the token is that option's value.
+      const flags = opt ? t.slice(1, t.indexOf(opt.name, 1)) : t.slice(1);
+      if (/[ra]/.test(flags)) recursive = true;
+    }
+    if (opt && opt.value === null) i++;
+  }
+  return { operands, recursive };
+}
+
+// tar's short options that take a value, and its long options (a unique prefix names one; tar accepts abbreviations).
+const TAR_SPEC = { short: new Set("fCTXbHKLNVg"), long: new Set() };
+const TAR_LONG_MODES = {
+  "--extract": "x", "--get": "x", "--create": "c", "--append": "r", "--update": "u", "--catenate": "A", "--concatenate": "A", "--delete": "D",
+  "--list": "t", "--diff": "d", "--compare": "d",
+};
+const TAR_LONG_VALUED = (
+  "--directory --file --files-from --exclude-from --exclude --transform --xform --blocking-factor --format --owner --group --mode " +
+  "--newer-mtime --newer --listed-incremental --index-file --label --volno-file --use-compress-program --rsh-command --suffix " +
+  "--to-command --strip-components --tape-length --record-size --occurrence"
+).split(" ");
+const TAR_LONG_FLAGS = (
+  "--absolute-names --acls --anchored --atime-preserve --auto-compress --backup --bzip2 --check-device --dereference --gzip --gunzip " +
+  "--hard-dereference --ignore-case --ignore-command-error --ignore-failed-read --ignore-zeros --keep-directory-symlink --keep-newer-files " +
+  "--keep-old-files --lzip --lzma --lzop --no-anchored --no-auto-compress --no-recursion --no-same-owner --no-same-permissions --null " +
+  "--numeric-owner --one-file-system --overwrite --overwrite-dir --preserve-permissions --remove-files --same-owner --show-defaults " +
+  "--skip-old-files --sparse --unlink-first --verbose --verify --version --wildcards --xz --zstd --help --usage --totals --checkpoint " +
+  "--one-top-level --recursion --same-permissions --read-full-records --touch --multi-volume --incremental --warning"
+).split(" ");
+
+/**
+ * What a tar command line does: whether it extracts, whether it writes an
+ * archive (create, append, update), the -C/--directory values in order, and the
+ * archive file. The first argument without a leading `-` is old style: its
+ * letters are options, and the values of the valued ones follow in letter order.
+ */
+function tarParts(rest) {
+  const modes = new Set();
+  const dirs = [];
+  let file = null;
+  const args = [...rest];
+  const take = (name, value) => {
+    if (name === "C" || name === "--directory") dirs.push(value);
+    else if (name === "f" || name === "--file") file = value;
+  };
+  if (args.length && !args[0].startsWith("-")) {
+    const letters = args.shift();
+    for (const l of letters) {
+      modes.add(l);
+      if (TAR_SPEC.short.has(l)) take(l, args.length ? args.shift() : null);
+    }
+  }
+  const longs = [...Object.keys(TAR_LONG_MODES), ...TAR_LONG_VALUED, ...TAR_LONG_FLAGS];
+  for (let i = 0; i < args.length; i++) {
+    const t = args[i];
+    if (t === "--") break;
+    if (!t.startsWith("-") || t === "-") continue;
+    if (t.startsWith("--")) {
+      const eq = t.indexOf("=");
+      const given = eq === -1 ? t : t.slice(0, eq);
+      const hits = longs.includes(given) ? [given] : longs.filter((n) => n.startsWith(given));
+      if (hits.length !== 1) continue;
+      const name = hits[0];
+      if (TAR_LONG_MODES[name]) modes.add(TAR_LONG_MODES[name]);
+      if (TAR_LONG_VALUED.includes(name)) take(name, eq === -1 ? (args[++i] ?? null) : t.slice(eq + 1));
+      continue;
+    }
+    for (let k = 1; k < t.length; k++) {
+      modes.add(t[k]);
+      if (TAR_SPEC.short.has(t[k])) {
+        take(t[k], k + 1 < t.length ? t.slice(k + 1) : (args[++i] ?? null));
+        break;
+      }
+    }
+  }
+  return {
+    extract: modes.has("x"),
+    writesArchive: ["c", "r", "u", "A", "D"].some((m) => modes.has(m)),
+    dirs: dirs.filter((d) => d !== null),
+    file,
+  };
 }
 
 // git subcommands whose operands are pathspecs: they write only .git/ or nothing.

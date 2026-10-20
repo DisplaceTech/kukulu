@@ -8,6 +8,7 @@ All notable changes to this plugin. Format follows
 
 ### Changed
 
+- `rsync` into a protected path, a recursive `rsync` into a directory that contains one, an `rsync` remote operand (under `deny.network`), a `tar` extraction into a directory that equals, contains or lies under a protected path (the repository root included), and `tar c|r|u` onto a protected archive path are now denied.
 - `git add docs/*`, `git add docs/cleanroom.json` and the other index-only git forms (`add`, `commit`, `diff`, `status`, `log`, `show`, `blame`, `ls-files`, `grep`) are now allowed; `git diff --output=<protected path>` is still denied.
 
 ### Fixed

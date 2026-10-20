@@ -912,6 +912,16 @@ async function genesisRepo(planOpts = {}) {
   ok(!fs.existsSync(LOG(repo)), "...but writes no log");
 }
 
+// ---------------------------------------------------------------- rsync and tar denials name what they hit
+
+{
+  const policy = loadPolicy(EXAMPLE);
+  const env = { root: "/p", home: "/h", policyPath: "/p/docs/cleanroom.json", pluginRoot: "/h/.claude/plugins/cache/kukulu", keyPath: "/h/.config/kukulu/cleanroom/ed25519.pem", planExists: true };
+  const run = (command) => evaluate(policy, { tool_name: "Bash", tool_input: { command }, cwd: "/p" }, env);
+  eq(run("tar xf evil.tar -C docs").reason, "protected path: /p/docs/cleanroom.json (tar extracts into docs; the archive's contents cannot be known)", "a tar extraction denial names the directory");
+  eq(run("rsync evil/cleanroom.json docs/").reason, "protected path: /p/docs/cleanroom.json (rsync writes it into docs/)", "an rsync denial names its destination");
+}
+
 // ---------------------------------------------------------------- self-protection
 
 {
