@@ -68,7 +68,7 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] P5-07 Tamper tests over a real bundle; the archive moves it
 - [x] P5-08 Attestation docs and the summarize step
 - [x] P5-09 Phase 5 end: push and record the manual check
-- [~] P6-01 Operations, architecture and writing-specs for 0.7.0
+- [x] P6-01 Operations, architecture and writing-specs for 0.7.0
 - [ ] P6-02 mcp-tools.md and README for 0.7.0
 - [ ] P6-03 CHANGELOG 0.7.0, the version and the feedback header
 - [ ] P6-04 Apply the approved copy, a solid clean-room diagram and check-site rule 16
@@ -266,3 +266,6 @@ docs/cleanroom.md: Reading a bundle (files, manifest fields, the five gap kinds)
 
 ### P5-09 — cdeb8be
 Empty commit cdeb8be; pushed build/2026-10-19 to origin (f25abdb..cdeb8be). Manual check: NOT VERIFIED (human): copy a bundle to a machine without this repository, run node verify.mjs . --key <fingerprint from kukulu_status>, and confirm PASS; change one byte of log.jsonl and confirm FAIL names the line.
+
+### P6-01 — 0ac72fd
+docs/architecture.md: pieces diagram gains cleanroom-guard, cleanroom-log, mcp/cleanroom.mjs and the log; new Clean-room mode section with the gate flowchart (no decision 4a). docs/writing-specs.md: Provenance logging replaced by Clean-room flights (policy, commit on base branch, lockdown task, controls, built-in trailers, record intervention/verdict). docs/operations.md: pre-0.6.0 sentence loses the old name (rows already present). plugin suite 556 assertions.
