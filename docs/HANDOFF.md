@@ -191,3 +191,12 @@ Branch build/2026-10-19; tasks R7-01 and R7-02 done, 0 blocked (95/95 done overa
 - Interpretation (R7-01): other cp long options take a value only with `=`.
 - Fixtures: 9 R7-01 and 8 R7-02 cases in test/fixtures/guard-cases.json; guard self-test is 433 cases. KNOWN_LIMITS unchanged.
 - Manual check: none.
+
+## Round 8
+
+Branch build/2026-10-19; task R8-01 done, 0 blocked (96/96 done overall).
+
+- R8-01 (6137334): cp, mv, ln and install each read their own valued options (COPY_SPECS in mcp/cleanroom.mjs). cp adds --sparse and --no-preserve (resolved via cpLong); install adds --strip-program; mv and ln read only -t -S and --target-directory --suffix.
+- Interpretation (R8-01): install -S is a suffix in GNU install and a flag in BSD install, so both readings are judged and either writing a protected path denies; the BSD reading also treats -B as valued.
+- Fixtures: 8 denied and 4 allowed R8-01 cases in test/fixtures/guard-cases.json; guard self-test is 445 cases. docs/cleanroom.md rule 6 updated. KNOWN_LIMITS unchanged.
+- Manual check: none.
