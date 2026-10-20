@@ -71,7 +71,7 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] P6-01 Operations, architecture and writing-specs for 0.7.0
 - [x] P6-02 mcp-tools.md and README for 0.7.0
 - [x] P6-03 CHANGELOG 0.7.0, the version and the feedback header
-- [ ] P6-04 Apply the approved copy, a solid clean-room diagram and check-site rule 16
+- [~] P6-04 Apply the approved copy, a solid clean-room diagram and check-site rule 16
 - [ ] P6-05 Phase 6 end: push and record the manual check
 
 ## Log
