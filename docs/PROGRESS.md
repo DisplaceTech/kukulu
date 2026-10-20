@@ -64,7 +64,7 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] P5-03 Pre-0.6.0 logs and the cleanflate fixture
 - [x] P5-04 Coverage gaps and cleanroom.idleGapHours
 - [x] P5-05 Tune cleanroom.idleGapHours
-- [~] P5-06 kukulu_attest
+- [x] P5-06 kukulu_attest
 - [ ] P5-07 Tamper tests over a real bundle; the archive moves it
 - [ ] P5-08 Attestation docs and the summarize step
 - [ ] P5-09 Phase 5 end: push and record the manual check
@@ -254,3 +254,6 @@ mcp/cleanroom.mjs: coverageGaps(entries, commitLines, {idleGapHours}) and KNOWN_
 
 ### P5-05 — 5b7837e
 docs/spikes/P5-05.md. Measurement: cleanroom.idleGapHours before 3 h (ASSUMPTION); after 3 h, unchanged. cleanflate snapshot at 85f2100 (3,314 entries): 3,164 consecutive same-stage gaps, median 5 s, p99 0.160 h, maximum 0.502 h (30.1 min), 0 over 3 h, 3 over 15 min (cleanflate SUMMARY treats >15 min as idle for active time, a different question). One continuous flight, so the data cannot place a real hand-over; first flight with an overnight pause or a person stepping in is the next measurement.
+
+### P5-06 — 9d41f96
+kukulu_attest (TOOLS after kukulu_similarity; 25 tools; summarizer tools line; mcp-tools.md section + first line; README row + count; CHANGELOG). attest({evidence}): refusals in order mode, summary, evidence shape/files, dirty tree, required docs, merge base, gate (all before any write but the gate entry). Writes docs/attestation/ (F-01 files, commits.txt via git log with comma-separated trailers, manifest signed by signBytes, verify.mjs byte copy), runs node verify.mjs <dir> --key <fp> --json inside withRollback, then appends attest entry + checkpoint(kukulu_attest) and commits chore: attestation bundle; push per policy. mcp/cleanroom.mjs gained summarizeEntries and signBytes. Test flight helper summarizedFlight() in test/attest.mjs (copyOf + KUKULU_CLEANROOM_KEY override). attest suite 180 assertions.
