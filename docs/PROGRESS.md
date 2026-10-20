@@ -6,7 +6,7 @@ Started: 2026-10-20T19:18:49.092Z
 ## Tasks
 
 - [x] P0-01 One list of known limits in the code and the docs
-- [ ] P0-02 Guard-finding triage in the review and summarize skills
+- [x] P0-02 Guard-finding triage in the review and summarize skills
 - [ ] P0-03 Bare and ./ read-family operands get the same decision
 - [ ] P0-04 git forms that write only the index are not write targets
 - [ ] P0-05 rsync and tar extraction into a protected path are denied
@@ -31,3 +31,7 @@ Started: 2026-10-20T19:18:49.092Z
 
 KNOWN_LIMITS now 8 entries (A-01 order); docs/cleanroom.md Known gaps bullets, tripwire paragraph with links, "When a guard gap is a defect" subsection; CHANGELOG Unreleased Fixed. Tests added in cleanroom.mjs and attest.mjs.
 Interpretation: docs/kukulu.json (planner-written) had literal macron letters failing check-names/lint/plugin test; rewrote as JSON \u escapes, parsed values identical.
+
+### P0-02 — 4f5352c
+
+Added Guard findings paragraph to review-build, Known-gap candidates sentence to summarize, two plugin tests, CHANGELOG Fixed line. No interpretation choices.
