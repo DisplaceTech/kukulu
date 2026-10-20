@@ -200,3 +200,12 @@ Branch build/2026-10-19; task R8-01 done, 0 blocked (96/96 done overall).
 - Interpretation (R8-01): install -S is a suffix in GNU install and a flag in BSD install, so both readings are judged and either writing a protected path denies; the BSD reading also treats -B as valued.
 - Fixtures: 8 denied and 4 allowed R8-01 cases in test/fixtures/guard-cases.json; guard self-test is 445 cases. docs/cleanroom.md rule 6 updated. KNOWN_LIMITS unchanged.
 - Manual check: none.
+
+## Round 9
+
+Branch build/2026-10-19; task R9-01 done, 0 blocked (97/97 done overall).
+
+- R9-01 (7d1d2f2): mv, ln and install resolve long options against their own full GNU coreutils 9.4 lists (OTHER_LONG, resolveLong in mcp/cleanroom.mjs), like cp. install's own `--strip` is now a flag; `--strip-program` stays valued only for install; an unresolved or ambiguous prefix takes no value.
+- Interpretation (R9-01): none. Both install readings (GNU and BSD) use install's list.
+- Fixtures: 10 denied and 2 allowed R9-01 cases; guard self-test is 457 cases. docs/cleanroom.md rule 6 updated.
+- Manual check: none.
