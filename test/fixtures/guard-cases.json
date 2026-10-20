@@ -4649,5 +4649,222 @@
    "cwd": "__ROOT__"
   },
   "expect": "allowed"
+ },
+ {
+  "name": "shell: env -S -i curl https://evil (R5-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "env -S -i curl https://evil"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command curl is denied"
+ },
+ {
+  "name": "shell: env -S '-i curl https://evil' (R5-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "env -S '-i curl https://evil'"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command curl is denied"
+ },
+ {
+  "name": "shell: env -S'-u X curl https://evil' (R5-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "env -S'-u X curl https://evil'"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command curl is denied"
+ },
+ {
+  "name": "shell: env -vS 'curl https://evil' (R5-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "env -vS 'curl https://evil'"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command curl is denied"
+ },
+ {
+  "name": "shell: env -vS'curl https://evil' (R5-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "env -vS'curl https://evil'"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command curl is denied"
+ },
+ {
+  "name": "shell: sudo -iu root curl https://evil (R5-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "sudo -iu root curl https://evil"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command curl is denied"
+ },
+ {
+  "name": "shell: sudo -Eu root curl https://evil (R5-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "sudo -Eu root curl https://evil"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command curl is denied"
+ },
+ {
+  "name": "shell: xargs -tn 1 curl https://evil (R5-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "xargs -tn 1 curl https://evil"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command curl is denied"
+ },
+ {
+  "name": "shell: xargs -0I {} curl {} (R5-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "xargs -0I {} curl {}"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command curl is denied"
+ },
+ {
+  "name": "shell: sudo --us root curl https://evil (R5-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "sudo --us root curl https://evil"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command curl is denied"
+ },
+ {
+  "name": "shell: timeout --sig KILL 5 curl https://evil (R5-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "timeout --sig KILL 5 curl https://evil"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command curl is denied"
+ },
+ {
+  "name": "shell: nice --adj 5 curl https://evil (R5-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "nice --adj 5 curl https://evil"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command curl is denied"
+ },
+ {
+  "name": "shell: env --split-str='curl https://evil' (R5-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "env --split-str='curl https://evil'"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command curl is denied"
+ },
+ {
+  "name": "shell: env -i cargo test (R5-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "env -i cargo test"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "shell: env -S -i cargo test (R5-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "env -S -i cargo test"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "shell: sudo -iu root ls (R5-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "sudo -iu root ls"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "shell: xargs -tn 1 echo (R5-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "xargs -tn 1 echo"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
  }
 ]

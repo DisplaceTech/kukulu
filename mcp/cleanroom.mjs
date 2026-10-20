@@ -547,6 +547,43 @@ const VALUED_OPTIONS = Object.fromEntries(
     time: "-o -f --output --format",
   }).map(([k, v]) => [k, new Set(v.split(" "))]),
 );
+// Per wrapper: the valued short letters and the valued long names, for scanOption.
+const VALUED_SPEC = Object.fromEntries(
+  Object.entries(VALUED_OPTIONS).map(([k, set]) => {
+    const names = [...set];
+    return [
+      k,
+      {
+        short: new Set(names.filter((n) => /^-[^-]$/.test(n)).map((n) => n[1])),
+        long: new Set(names.filter((n) => n.startsWith("--"))),
+      },
+    ];
+  }),
+);
+VALUED_SPEC.env.short.add("S");
+VALUED_SPEC.env.long.add("--split-string");
+
+/**
+ * Read one option token the way getopt does. `spec` is `{ short: Set of valued letters, long: Set of valued
+ * long names with their `--` }`. A short bundle `-abc` is scanned letter by letter: the first valued letter takes
+ * the rest of the token, or the next token when it is last. A long option is exact, `--name=value`, or any prefix
+ * that names exactly one valued long option. Returns null when the token takes no value, else `{ name, value }`
+ * with `name` the letter or the full long name and `value` null when the next token holds it.
+ */
+export function scanOption(token, spec) {
+  if (!spec || !token.startsWith("-") || token === "-" || token === "--") return null;
+  if (token.startsWith("--")) {
+    const eq = token.indexOf("=");
+    const given = eq === -1 ? token : token.slice(0, eq);
+    const full = spec.long.has(given) ? [given] : [...spec.long].filter((n) => n.startsWith(given));
+    if (full.length !== 1) return null;
+    return { name: full[0], value: eq === -1 ? null : token.slice(eq + 1) };
+  }
+  for (let k = 1; k < token.length; k++) {
+    if (spec.short.has(token[k])) return { name: token[k], value: k + 1 < token.length ? token.slice(k + 1) : null };
+  }
+  return null;
+}
 const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
 
 /**
@@ -567,23 +604,19 @@ export function commandWord(tokens) {
       i++;
       while (i < tokens.length && tokens[i].startsWith("-")) {
         const flag = tokens[i++];
-        // env -S / --split-string: GNU env splits the value into the command, so its words take the value's place.
-        if (base === "env") {
-          const split = flag === "-S" || flag === "--split-string";
-          const attached = flag.startsWith("--split-string=") ? flag.slice(15) : /^-S./.test(flag) ? flag.slice(2) : null;
-          if (split && i < tokens.length) {
-            tokens = [...tokens.slice(0, i - 1), ...shellWords(tokens[i]), ...tokens.slice(i + 1)];
-            i--;
-            break;
-          }
-          if (attached !== null) {
-            tokens = [...tokens.slice(0, i - 1), ...shellWords(attached), ...tokens.slice(i)];
-            i--;
-            break;
-          }
+        const opt = scanOption(flag, VALUED_SPEC[base]);
+        if (!opt) continue;
+        // env -S / --split-string: GNU env splits the value into words that are parsed as further arguments, so they take the flag's place.
+        if (base === "env" && (opt.name === "S" || opt.name === "--split-string")) {
+          const fromNext = opt.value === null;
+          if (fromNext && i >= tokens.length) continue;
+          const words = shellWords(fromNext ? tokens[i] : opt.value);
+          tokens = [...tokens.slice(0, i - 1), ...words, ...tokens.slice(fromNext ? i + 1 : i)];
+          i--;
+          continue;
         }
-        // The value after these options is not the command (`sudo -u root curl ...`); an `=` form is one token.
-        if (VALUED_OPTIONS[base]?.has(flag) && i < tokens.length) i++;
+        // The value of a valued option is not the command (`sudo -u root curl ...`); an attached value is part of the flag token.
+        if (opt.value === null && i < tokens.length) i++;
       }
       // timeout's first operand is its duration, not the command.
       if (base === "timeout" && i < tokens.length && /^\d+(?:\.\d+)?[smhd]?$/.test(tokens[i])) i++;
