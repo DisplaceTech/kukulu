@@ -59,7 +59,7 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] P4-07 kukulu_similarity
 - [x] P4-08 The summarize skill carries the contamination score
 - [x] P4-09 Phase 4 end: push and record the calibration check
-- [ ] P5-01 The verifier: manifest, signature, chain and checkpoints
+- [x] P5-01 The verifier: manifest, signature, chain and checkpoints
 - [ ] P5-02 The verifier: policy, guard, mode, denials, coverage and similarity
 - [ ] P5-03 Pre-0.6.0 logs and the cleanflate fixture
 - [ ] P5-04 Coverage gaps and cleanroom.idleGapHours
@@ -239,3 +239,6 @@ summarize skill gains the Contamination score paragraph (similarity once after s
 
 ### P4-09 — f25abdb
 Push: pushed build/2026-10-19. Manual check: NOT VERIFIED (human): run kukulu_similarity against the cleanflate-bench subjects at 7f50ce6 (reference pairs from d047d66) with cleanflate as the subject; record the identifier Jaccard for cleanflate vs C zlib, miniz_oxide vs C zlib and zlib-rs vs C zlib beside the canonical 0.021 / 0.019 / 0.095, and the comment Jaccard beside 0.0003 / 0.0010 / 0.032; the ordering must agree
+
+### P5-01 — 8d43d74
+scripts/verify-attestation.mjs: verifyBundle(dir,{key}) -> {ok, reasons:[{check,reason}], notes, checks}, exports verifyChain/verifyCheckpoint (duplicates of the module's, same wording), CLI (<dir> [--key] [--json], exit 0/1, usage errors exit 2). Checks 1-4 named manifest, signature, chain, checkpoints; P5-02 adds policy, guard, mode, denials, coverage, similarity. Harness: buildBundle(dir, {key, checkpointKey, policyText}), signBundleManifest, rewriteManifest. Suite attest registered; suite counts now thirteen (CONTRIBUTING, README). Lesson: in a quoted heredoc write single backslashes and unescaped backticks; double escaping bit three times.
