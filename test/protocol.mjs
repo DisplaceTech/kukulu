@@ -25,6 +25,7 @@ const EXPECTED_TOOLS = [
   "kukulu_review_submit",
   "kukulu_summary_commit",
   "kukulu_similarity",
+  "kukulu_attest",
   "kukulu_flight_archive",
   "kukulu_pr_finalize",
   "kukulu_agents_sync",

@@ -19,6 +19,7 @@ All notable changes to this plugin. Format follows
 - Clean-room mode, first pieces: `mcp/cleanroom.mjs` (policy loader, hash chain, signing key, checkpoint primitives), the guard and logger hook scripts registered in `hooks/hooks.json` (inert without a policy), and the genesis entry and sticky mode in `kukulu_next`.
 - `kukulu_cleanroom_record` and `human` chain entries: every prompt typed in a clean-room project, every operator record, and `kukulu_flight_options`, `kukulu_run_resume` and a re-signing `kukulu_pr_finalize`.
 - `kukulu_similarity` and the `cleanroom.similarity` key: a lexical contamination score against user-supplied control pairs, written to `docs/SIMILARITY.md`, with every byte read hashed into the chain in clean-room mode.
+- `kukulu_attest`, `scripts/verify-attestation.mjs` and the `cleanroom.idleGapHours` key: a signed bundle in `docs/attestation/` that a reader with only Node can check offline, and coverage gaps recomputed from the log and the commits.
 - A `site` CI workflow that runs the static and browser checks.
 
 ### Fixed

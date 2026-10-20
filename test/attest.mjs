@@ -4,9 +4,14 @@
 // the untampered bundle must pass with and without --key.
 
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { finish, ok, eq, like, ROOT, mkDir, buildBundle, rewriteManifest, signBundleManifest } from "./harness.mjs";
+import { createHash } from "node:crypto";
+import {
+  finish, ok, eq, like, isError, ROOT, mkDir, buildBundle, rewriteManifest, signBundleManifest,
+  cleanroomRepo, plannedRepo, addPlan, withServer, logCall, runHook, testKeyFor, setState, git, writeFile, readFile, hasFile,
+} from "./harness.mjs";
 import * as CR from "../mcp/cleanroom.mjs";
 import * as V from "../scripts/verify-attestation.mjs";
 
@@ -381,6 +386,215 @@ const logLines = (dir) => fs.readFileSync(path.join(dir, "log.jsonl"), "utf8").s
   eq(mixed.status, 2, "--legacy-log with a bundle directory is a usage error");
   const stray = spawnSync(process.execPath, [VERIFIER, fixture, "--words", "x"], { encoding: "utf8" });
   eq(stray.status, 2, "--words without --legacy-log is a usage error");
+}
+
+// ---------------------------------------------------------------- kukulu_attest
+
+const sha = (bytes) => createHash("sha256").update(bytes).digest("hex");
+const LOGPATH = (repo) => path.join(repo, ".kukulu", "cleanroom", "log.jsonl");
+const entriesOf = (repo) => CR.readEntries(LOGPATH(repo));
+const GUARD = path.join(ROOT, "scripts", "cleanroom-guard.mjs");
+const LOGGER = path.join(ROOT, "scripts", "cleanroom-log.mjs");
+
+/** A server over \`repo\` whose every call is preceded by a logged tool call, as a live session's hooks would leave. \`keyOf\` is the repo whose signing key to use (a copy keeps the original's). */
+const live = (repo, fn, keyOf = repo) => withServer(repo, async (server) => fn({ ...server, call: async (name, args) => { logCall(repo); return server.call(name, args); } }), { env: { KUKULU_CLEANROOM_KEY: testKeyFor(keyOf) } });
+const trailed = (repo, id, title, file) => {
+  writeFile(repo, file, "x\n");
+  git(repo, ["add", "--", file]);
+  git(repo, ["commit", "-qm", id + ": " + title + "\n\nKukulu-Stage: implement\nKukulu-Task: " + id, "--", file]);
+};
+const copyOf = (repo) => {
+  const dest = path.join(mkDir("kukulu-attest-copy-"), "repo");
+  fs.cpSync(repo, dest, { recursive: true });
+  return dest;
+};
+
+/** A clean-room flight taken to the end of the summary stage: a denial with a verdict, a prompt, two tasks, review, summary. */
+async function summarizedFlight() {
+  const repo = cleanroomRepo();
+  await live(repo, async ({ call }) => { await call("kukulu_next"); });
+  const tasks = [
+    { id: "P0-01", title: "Create hello", goal: "write hello.txt", files: "hello.txt" },
+    { id: "P0-02", title: "Create world", goal: "write world.txt", files: "world.txt", depends: ["P0-01"] },
+  ];
+  addPlan(repo, { tasks, config: { flight: "w1" } });
+  const env = { CLAUDE_PROJECT_DIR: repo, CLAUDE_PLUGIN_ROOT: ROOT };
+  runHook(LOGGER, { hook_event_name: "UserPromptSubmit", prompt: "Build it without looking anything up.", cwd: repo, session_id: "s1", model: "claude-test" }, env);
+  await live(repo, async ({ call }) => {
+    await call("kukulu_next");
+    await call("kukulu_run_start");
+    for (const t of tasks) {
+      await call("kukulu_task_next");
+      if (t.id === "P0-01") {
+        const denied = runHook(GUARD, { hook_event_name: "PreToolUse", tool_name: "Read", tool_input: { file_path: path.join(os.homedir(), ".cargo", "registry", "src", "index", "x.rs") }, cwd: repo, session_id: "s1", model: "claude-test" }, env);
+        eq(denied.status, 2, "(setup) the guard denies a Read under deny.paths");
+      }
+      trailed(repo, t.id, t.title, t.files);
+      await call("kukulu_task_done", { id: t.id, log: "wrote " + t.files });
+    }
+    const seq = entriesOf(repo).find((e) => e.kind === "denied").seq;
+    const rec = await call("kukulu_cleanroom_record", { text: "#" + seq + ": false positive — a registry path in a comment", kind: "verdict" });
+    ok(!rec.error, "(setup) the denial is classified");
+    writeFile(repo, "docs/HANDOFF.md", "# Handoff\n");
+    await call("kukulu_run_finish");
+    writeFile(repo, "docs/REVIEW.md", "# Review\nRound: 1\n**Verdict**: APPROVED\n");
+    await call("kukulu_review_submit", { verdict: "APPROVED" });
+    const sum = await call("kukulu_summary_commit", { content: "# Summary\nDone.\n" });
+    ok(!sum.error, "(setup) the summary is committed");
+  });
+  return repo;
+}
+
+{
+  // refusals that need no flight
+  const general = plannedRepo({ config: { flight: "w1" } });
+  setState(general, { implemented: true, reviewed: true, verdict: "APPROVED", summarized: true });
+  git(general, ["add", "-A"]);
+  git(general, ["commit", "-qm", "chore: approved"]);
+  await withServer(general, async ({ call }) => {
+    isError(await call("kukulu_attest"), /only works in clean-room mode/, "kukulu_attest refuses outside clean-room mode");
+    ok(!hasFile(general, "docs/attestation"), "...before any write");
+  });
+
+  const early = cleanroomRepo();
+  await live(early, async ({ call }) => { await call("kukulu_next"); });
+  addPlan(early, { config: { flight: "w1" } });
+  await live(early, async ({ call }) => {
+    isError(await call("kukulu_attest"), /the summary is not committed yet; call kukulu_summary_commit first/, "kukulu_attest refuses before the summary is committed");
+  });
+}
+
+{
+  const flight = await summarizedFlight();
+  eq(git(flight, ["status", "--porcelain", "--untracked-files=all"]).split("\n").filter((l) => l && !l.endsWith("log.jsonl")).join("\n"), "", "(setup) the finished flight's tree is clean");
+
+  // refusals on a finished flight
+  {
+    const repo = copyOf(flight);
+    fs.appendFileSync(path.join(repo, "CLAUDE.md"), "edited\n");
+    await live(repo, async ({ call }) => {
+      isError(await call("kukulu_attest"), /the working tree is not clean:\n.*CLAUDE\.md/, "kukulu_attest refuses on a dirty tree");
+      writeFile(repo, "notes.txt", "x\n");
+      isError(await call("kukulu_attest", { evidence: ["notes.txt"] }), /evidence path notes\.txt is not tracked by git/, "...an untracked evidence path");
+      isError(await call("kukulu_attest", { evidence: ["/etc/passwd"] }), /evidence path "\/etc\/passwd" must be repo-relative/, "...an evidence path outside the repo (absolute)");
+      isError(await call("kukulu_attest", { evidence: ["../outside.txt"] }), /must be repo-relative, with no '~' and no '\.\.' segment/, "...and with a .. segment");
+      isError(await call("kukulu_attest", { evidence: ["no/such/file.txt"] }), /does not exist or is not a file/, "...and a missing evidence path");
+      isError(await call("kukulu_attest", { evidence: "x" }), /evidence must be an array of repo-relative file paths/, "...and evidence that is not an array");
+      ok(!hasFile(repo, "docs/attestation"), "none of the refusals wrote a bundle");
+    }, flight);
+  }
+  {
+    const repo = copyOf(flight);
+    writeFile(repo, "docs/cleanroom.json", readFile(repo, "docs/cleanroom.json").replace('"WebSearch"', '"WebSearch", "Agent"'));
+    git(repo, ["add", "-A"]);
+    git(repo, ["commit", "-qm", "edit the policy"]);
+    await live(repo, async ({ call }) => {
+      isError(await call("kukulu_attest"), /^clean-room gate failed: policy: /, "kukulu_attest refuses when the gate fails");
+      ok(!hasFile(repo, "docs/attestation"), "...before any write");
+      eq(entriesOf(repo).at(-1).data.failed, "policy", "...recording the failure in the chain");
+    }, flight);
+  }
+
+  // the bundle
+  {
+    const repo = copyOf(flight);
+    writeFile(repo, "docs/conformance.txt", "all 41 vectors pass\n");
+    git(repo, ["add", "-A"]);
+    git(repo, ["commit", "-qm", "docs: conformance results\n\nKukulu-Stage: implement\nKukulu-Task: -"]);
+    const head = git(repo, ["rev-parse", "HEAD"]);
+    const before = entriesOf(repo).length;
+    await live(repo, async ({ call }) => {
+      const r = await call("kukulu_attest", { evidence: ["docs/conformance.txt"] });
+      ok(!r.error, "kukulu_attest runs on a finished clean-room flight" + (r.error ? ": " + r.error : ""));
+      const dir = path.join(repo, "docs", "attestation");
+      const names = fs.readdirSync(dir, { recursive: true, withFileTypes: true }).filter((d) => d.isFile()).map((d) => path.relative(dir, path.join(d.parentPath ?? d.path, d.name))).sort();
+      const want = ["PROGRESS.md", "REVIEW.md", "SUMMARY.md", "commits.txt", "evidence/docs/conformance.txt", "kukulu.json", "log.jsonl", "manifest.json", "manifest.sig", "policy.json", "publisher.pub", "similarity.json", "state.json", "verify.mjs"].filter((n) => n !== "similarity.json").sort();
+      eq(names.join(","), want.join(","), "the bundle holds every F-01 file (similarity.json only when a score ran)");
+      eq(r.files.join(","), names.join(","), "...and the result lists them");
+      const manifest = JSON.parse(fs.readFileSync(path.join(dir, "manifest.json"), "utf8"));
+      const listed = manifest.files.map((f) => f.path).sort();
+      eq(listed.join(","), names.filter((n) => !["manifest.json", "manifest.sig", "verify.mjs"].includes(n)).join(","), "manifest.files lists every file but manifest.json, manifest.sig and verify.mjs");
+      ok(manifest.files.every((f) => f.sha256 === sha(fs.readFileSync(path.join(dir, f.path))) && f.bytes === fs.statSync(path.join(dir, f.path)).size), "...with each file's SHA-256 and size");
+      const verifierBytes = fs.readFileSync(VERIFIER);
+      ok(fs.readFileSync(path.join(dir, "verify.mjs")).equals(verifierBytes) && manifest.plugin.verifierHash === sha(verifierBytes), "verify.mjs is a byte copy and its hash is plugin.verifierHash");
+      eq(r.manifest, sha(fs.readFileSync(path.join(dir, "manifest.json"))), "the result carries the SHA-256 of manifest.json");
+      eq(fs.readFileSync(path.join(dir, "evidence/docs/conformance.txt"), "utf8"), "all 41 vectors pass\n", "an evidence file is copied to evidence/<its path>");
+
+      const commits = fs.readFileSync(path.join(dir, "commits.txt"), "utf8").split("\n").filter(Boolean);
+      const count = Number(git(repo, ["rev-list", "--count", "main..HEAD~1"]));
+      const fields = commits.map((l) => l.split("\x1f"));
+      ok(commits.length === count && fields.every((f) => f.length === 5 && /^[0-9a-f]{40}$/.test(f[0]) && f[3] !== "" && f[4] !== ""), "commits.txt has one line per commit with both trailers (" + count + " commits)");
+      ok(fields.some((f) => f[2] === "P0-01: Create hello" && f[3] === "implement" && f[4] === "P0-01"), "...the task commits' subject and trailers as written");
+      eq(fields[0][2], "docs: conformance results", "...the newest first, as git log prints them");
+      ok(manifest.coverage.gaps.length === count && manifest.coverage.gaps.every((g) => g.kind === "unsigned-commit"), "the gaps are the unsigned commits of this unsigned test repository, and nothing else (" + count + ")");
+
+      ok(r.verify.ok === true && r.verify.reasons.length === 0, "the verifier's PASS is returned");
+      eq(Object.keys(r.verify.checks).join(","), "manifest,signature,chain,checkpoints,policy,guard,mode,denials,coverage,similarity", "...with all ten checks run");
+      eq(r.fingerprint, manifest.signer.fingerprint, "the result carries the signer's fingerprint");
+      const cli = spawnSync(process.execPath, [VERIFIER, dir, "--key", r.fingerprint], { encoding: "utf8" });
+      eq(cli.status, 0, "the CLI passes the committed bundle with the right --key");
+
+      const entries = entriesOf(repo);
+      const tail = entries.slice(-2);
+      eq(tail.map((e) => e.kind).join(",") + "|" + tail[1].data.event, "attest,checkpoint|kukulu_attest", "an attest entry and a checkpoint follow the bundle");
+      eq(tail[0].data.manifest, r.manifest, "...the attest entry holds the manifest's hash");
+      ok(CR.verifyCheckpoint(tail[1], CR.loadKey(testKeyFor(flight)).publicKey), "...and the checkpoint verifies");
+      eq(fs.readFileSync(path.join(dir, "log.jsonl"), "utf8").split("\n").filter(Boolean).length, entries.length - 2, "the bundle's log ends before those two entries");
+      eq(manifest.chain.entries, entries.length - 2, "...and manifest.chain counts it");
+      ok(entries.length > before, "(the chain grew)");
+
+      eq(git(repo, ["log", "-1", "--format=%s"]), "chore: attestation bundle", "the bundle is committed as chore: attestation bundle");
+      const committed = git(repo, ["show", "--name-only", "--format="]).split("\n").filter(Boolean).sort();
+      eq(committed.join(","), [...names.map((n) => "docs/attestation/" + n), ".kukulu/cleanroom/log.jsonl"].sort().join(","), "...with the bundle and the log");
+      eq(git(repo, ["log", "-1", "--format=%(trailers:key=Kukulu-Stage,valueonly)"]).trim(), "summarize", "...carrying the summarize trailer");
+      eq(r.push, "skipped: no origin remote", "no origin means the push is skipped");
+      eq(manifest.repo.head, head, "the manifest names the commit it was made at");
+      eq(manifest.denials.verdicts["false positive"] + "|" + manifest.denials.verdicts.unclassified + "|" + manifest.denials.total, "1|0|1", "the denial's verdict is counted");
+      eq(manifest.human.verdicts + "|" + (manifest.human.instructions >= 1), "1|true", "the human entries are counted, the prompt among them");
+      ok(manifest.coverage.knownLimits.length === 4 && manifest.coverage.idleGapHours === 3, "the coverage section carries the known limits and the idle threshold");
+      eq(manifest.selfTest.ok + "|" + manifest.selfTest.cases, "true|" + manifest.selfTest.cases, "the self-test result is recorded");
+      ok(manifest.selfTest.cases > 100, "...with its case count (" + manifest.selfTest.cases + ")");
+
+      // a second call replaces the bundle
+      const again = await call("kukulu_attest");
+      ok(!again.error && again.manifest !== r.manifest, "a second kukulu_attest replaces the bundle");
+      ok(!fs.existsSync(path.join(dir, "evidence")), "...without the evidence it was not given");
+    }, flight);
+  }
+
+  // a bundle the verifier rejects is never committed
+  {
+    const repo = copyOf(flight);
+    const key = CR.loadKey(testKeyFor(flight));
+    const stranger = CR.generateKey(path.join(mkDir("kukulu-stranger-"), "k.pem"));
+    const last = entriesOf(repo).findLast((e) => e.kind === "checkpoint").data;
+    const base = { git: last.git, policyHash: last.policyHash, guardHash: last.guardHash, loggerHash: last.loggerHash, hooksHash: last.hooksHash, keyFingerprint: last.keyFingerprint };
+    // The newest checkpoint is good, so the gate passes; the one before it is signed by another key.
+    CR.appendEntry(LOGPATH(repo), { kind: "checkpoint", stage: "summarize", role: "session", data: CR.signCheckpoint({ chainTip: "a".repeat(64), ...base, event: "forged" }, stranger.privateKey) });
+    CR.appendEntry(LOGPATH(repo), { kind: "checkpoint", stage: "summarize", role: "session", data: CR.signCheckpoint({ chainTip: "b".repeat(64), ...base, event: "honest" }, key.privateKey) });
+    const head = git(repo, ["rev-parse", "HEAD"]);
+    await live(repo, async ({ call }) => {
+      const r = await call("kukulu_attest");
+      isError(r, /the attestation bundle did not verify, so it was removed and nothing was committed:\n  checkpoints: entry \d+: the checkpoint does not verify with publisher\.pub/, "a bundle the verifier rejects is refused with the verifier's reasons");
+      ok(!hasFile(repo, "docs/attestation"), "...and removed");
+      eq(git(repo, ["rev-parse", "HEAD"]) + "|" + git(repo, ["diff", "--cached", "--name-only"]), head + "|", "...with no commit and nothing staged");
+      ok(!entriesOf(repo).some((e) => e.kind === "attest"), "...and no attest entry in the chain");
+    }, flight);
+  }
+
+  // a failed commit leaves the tree as it found it
+  {
+    const repo = copyOf(flight);
+    const hook = path.join(repo, ".git", "hooks", "commit-msg");
+    fs.writeFileSync(hook, "#!/bin/sh\nhead -1 \"$1\" | grep -q '^chore: attestation bundle' && { echo 'rejected by test hook' >&2; exit 1; }\nexit 0\n", { mode: 0o755 });
+    const head = git(repo, ["rev-parse", "HEAD"]);
+    await live(repo, async ({ call }) => {
+      isError(await call("kukulu_attest"), /git commit failed/, "a failing commit makes kukulu_attest refuse");
+      ok(!hasFile(repo, "docs/attestation"), "...leaving no bundle");
+      eq(git(repo, ["rev-parse", "HEAD"]) + "|" + git(repo, ["diff", "--cached", "--name-only"]), head + "|", "...HEAD unmoved and nothing staged");
+      ok(!entriesOf(repo).some((e) => e.kind === "attest") && entriesOf(repo).at(-1).kind === "gate", "...and the chain holds no attest entry or checkpoint from the call (only the gate's own)");
+    }, flight);
+  }
 }
 
 // ---------------------------------------------------------------- the verifier and the module agree

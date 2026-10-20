@@ -1,6 +1,6 @@
 # MCP tool reference
 
-Twenty-four tools, served over stdio by `mcp/server.mjs` with no dependencies. The server is launched by Claude Code from [`.mcp.json`](../.mcp.json) with `KUKULU_PROJECT_DIR` set to the project root; every path below is relative to that root.
+Twenty-five tools, served over stdio by `mcp/server.mjs` with no dependencies. The server is launched by Claude Code from [`.mcp.json`](../.mcp.json) with `KUKULU_PROJECT_DIR` set to the project root; every path below is relative to that root.
 
 Three of them are read-only: `kukulu_status`, `kukulu_next` and `kukulu_config_show`. The flight controller may call those three and four more. `kukulu_agents_sync` writes only the generated agent files, the MCP allow rule and a `.git/info/exclude` line, never a task or a verdict. It may call `kukulu_run_halt` itself when it cannot even spawn a stage, so the next flight sees a clean halt instead of retrying blindly. `kukulu_flight_options` applies the operator's own go-flight options to the review-loop bounds (and, with `resume`, lifts a round-cap halt). `kukulu_pr_finalize` is allowed for the human-initiated re-sign only (`resign: true`, when the operator says signing is unlocked). Everything else changes project state and belongs to a stage agent. (`kukulu_mutate` changes a source file only for the length of one call and always restores it, and a stream's tools work in that stream's own worktree.)
 
@@ -464,6 +464,22 @@ Score how close the built code is to the prior art the operator named, inside th
 **Returns:** `{ verdict, rows, files, skipped, limits, commit }`. `files` counts the distinct files read and `skipped` the distinct files left unread; `similarity.json` lists a file once for every pair side it appears in. A row is `{ pair, role, metric, score, c, band }`; `c` and `band` are `null` for the controls.
 
 **Refuses when** (in this order, before any write): `cleanroom.similarity` is absent; the implement lock exists; the flight is not reviewed `APPROVED`; a pair directory is missing or empty, or no file in it has a mapped extension; `identExclusions` names a file that does not exist; or, in clean-room mode, the gate fails.
+
+---
+
+## `kukulu_attest`
+
+Write the signed attestation bundle for a finished clean-room flight, check it with the verifier that ships inside it, and commit it only if that passes. For the summarizer, after `kukulu_summary_commit` (and after `kukulu_similarity`, so the score is in the bundle) and before `kukulu_flight_archive`.
+
+**Arguments:** `{ evidence? }`. `evidence` is an array of repo-relative paths of extra files (conformance results, fuzz logs). Each must be a tracked regular file inside the repository, with no `..` segment, no `~` and not under `docs/attestation/`.
+
+**Does:** writes `docs/attestation/` with `manifest.json`, `manifest.sig`, `log.jsonl` (the whole chain as it stands), `policy.json` (the current policy), `similarity.json` when `kukulu_similarity` ran, `SUMMARY.md`, `REVIEW.md`, `PROGRESS.md`, `kukulu.json`, `state.json`, `commits.txt`, `evidence/<path>` for every evidence file, `publisher.pub` and `verify.mjs`, a byte copy of `scripts/verify-attestation.mjs`. `commits.txt` has one line per commit in `<base>..HEAD`: the sha, the `%G?` signature code, the subject, the `Kukulu-Stage` trailer and the `Kukulu-Task` trailer, separated by the unit separator (U+001F); the trailers of a commit that has several are joined with a comma. The manifest is signed with the checkpoint key (an Ed25519 signature, in base64, over `manifest.json`'s exact bytes). It records the plugin hashes and `verifierHash`, the base and head, the genesis entry, the policy hashes seen in the checkpoints, the chain's first and tip hashes, every checkpoint with whether it verifies, the denials with the operator's verdicts, the calls by tool and stage, the human entries, a guard self-test run now, the coverage gaps with `coverage.knownLimits` and `coverage.idleGapHours`, the similarity hash, and every file but `manifest.json`, `manifest.sig` and `verify.mjs` with its SHA-256 and size. It then runs `node docs/attestation/verify.mjs docs/attestation --key <fingerprint> --json`. Only when that passes does it append an `attest` entry (`data: { manifest: <sha256 of manifest.json> }`) and a checkpoint (event `kukulu_attest`) to the log and commit `docs/attestation/` and the log as `chore: attestation bundle`. The bundle's `log.jsonl` therefore ends before those two entries. The push follows `policies.push`. A second call replaces the bundle.
+
+**Returns:** `{ dir, files, manifest, fingerprint, commit, verify, push }`. `files` lists every file in the bundle, `manifest` is the SHA-256 of `manifest.json`, `verify` is the verifier's own `--json` result (`{ ok, reasons, notes, checks }`), and `push` is `pushed`, `skipped: policy`, `skipped: no origin remote` or `failed: <first line>`.
+
+**Refuses when** (in this order, before any write): the flight is not in clean-room mode; the summary is not committed; `evidence` is not an array of strings, or a path in it is absolute, has `..`, is missing, is untracked, resolves outside the repository or lies inside `docs/attestation/`; the working tree is dirty (apart from `preexistingUntracked` and the log); `SUMMARY.md`, `REVIEW.md`, `PROGRESS.md`, `kukulu.json` or `state.json` is missing; there is no merge base with `baseBranch`; the gate fails; the log does not verify; the guard self-test fails. A bundle the verifier rejects is removed and the call refused with the verifier's reasons, leaving the log with the gate's entry and nothing else new. A failed commit puts every file back.
+
+**Clean-room mode.** The call is the only way a bundle is made; general mode refuses it.
 
 ---
 

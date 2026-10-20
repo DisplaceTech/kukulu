@@ -17,7 +17,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import {
-  CleanroomError, loadPolicy, policyHash, appendEntry, readEntries, logPathFor, generateKey, loadKey, signCheckpoint, verifyCheckpoint, verifyChain, evaluate, lockdownActive, ZERO_HASH, scorePair, position, verdictOf, LIMITS,
+  CleanroomError, loadPolicy, policyHash, appendEntry, readEntries, logPathFor, generateKey, loadKey, signCheckpoint, verifyCheckpoint, verifyChain, evaluate, lockdownActive, ZERO_HASH, scorePair, position, verdictOf, LIMITS, coverageGaps, KNOWN_LIMITS, summarizeEntries, signBytes,
 } from "./cleanroom.mjs";
 
 /**
@@ -3229,6 +3229,149 @@ function cleanroomRecord({ text, kind = "instruction" } = {}) {
   });
 }
 
+// ---------------------------------------------------------------- kukulu_attest (SPEC F-01)
+
+const ATTEST_DIR = "docs/attestation";
+
+/** The repo-relative, tracked, regular files an operator names as extra evidence. Refuses before anything is written. */
+function checkEvidence(evidence) {
+  if (evidence === undefined) return [];
+  if (!Array.isArray(evidence) || evidence.some((p) => typeof p !== "string" || !p)) throw new ToolError("evidence must be an array of repo-relative file paths (strings)");
+  const root = fs.realpathSync(ROOT);
+  const out = [];
+  for (const p of evidence) {
+    if (path.isAbsolute(p) || p.startsWith("~") || p.split(/[\\/]/).includes("..")) {
+      throw new ToolError("evidence path " + JSON.stringify(p) + " must be repo-relative, with no '~' and no '..' segment; name a file inside the repository, such as docs/conformance.txt");
+    }
+    const abs = path.join(ROOT, p);
+    if (!exists(abs) || !fs.statSync(abs).isFile()) throw new ToolError("evidence path " + p + " does not exist or is not a file; commit the file first, or leave it out");
+    const real = fs.realpathSync(abs);
+    if (real !== root && !real.startsWith(root + path.sep)) throw new ToolError("evidence path " + p + " resolves outside the repository; copy the file into the repository and commit it");
+    if (!git(["ls-files", "--error-unmatch", "--", p], { allowFail: true }).ok) throw new ToolError("evidence path " + p + " is not tracked by git; commit it first, so the bundle names a file the history holds");
+    const norm = path.posix.normalize(p.replaceAll("\\", "/"));
+    if (norm === ATTEST_DIR || norm.startsWith(ATTEST_DIR + "/")) throw new ToolError("evidence path " + p + " is inside " + ATTEST_DIR + ", which this tool rewrites; name a file outside it");
+    if (!out.includes(norm)) out.push(norm);
+  }
+  return out;
+}
+
+/**
+ * Write the signed attestation bundle for a finished clean-room flight (SPEC F-01),
+ * run the verifier that ships in it, and commit it only when that passes.
+ * Everything that can be refused is refused before the first write; the one
+ * sanctioned write before a refusal is the gate's own entry.
+ */
+function attest({ evidence } = {}) {
+  const cc = cfg();
+  const st = loadState();
+  if (!st.cleanroom?.genesis) throw new ToolError("kukulu_attest only works in clean-room mode, after genesis: this project has no clean-room flight in progress, so there is no log to attest");
+  if (!st.summarized) throw new ToolError("the summary is not committed yet; call kukulu_summary_commit first, then kukulu_attest");
+  const extra = checkEvidence(evidence);
+  const dirty = porcelainExcludingPreexisting(st.preexistingUntracked);
+  if (dirty.length) throw new ToolError("the working tree is not clean:\n" + dirty.join("\n") + "\nCommit or discard these before attesting; the bundle names the commit it was made at.");
+  const docs = [["SUMMARY.md", P.summary], ["REVIEW.md", P.review], ["PROGRESS.md", P.progress], ["kukulu.json", P.config], ["state.json", P.state]];
+  for (const [name, abs] of docs) {
+    if (!exists(abs)) throw new ToolError(rel(abs) + " does not exist, so the bundle cannot hold " + name + "; attest before kukulu_flight_archive moves the flight's documents");
+  }
+  const base = git(["merge-base", cc.baseBranch, "HEAD"], { allowFail: true }).out;
+  if (!base) throw new ToolError("cannot find a merge base with baseBranch '" + cc.baseBranch + "'; check out the build branch, or fix baseBranch in docs/kukulu.json");
+  requireGate("summarize");
+
+  const logPath = cleanroomLogPath();
+  const logBytes = fs.readFileSync(logPath);
+  const chain = verifyChain(logBytes.toString("utf8").split("\n").filter(Boolean));
+  if (!chain.ok) throw new ToolError("the clean-room log does not verify (entry " + (chain.firstBad.seq ?? chain.firstBad.line) + ": " + chain.firstBad.reason + "); nothing was written");
+  const entries = chain.entries;
+  const genesis = entries.find((e) => e.kind === "genesis");
+  if (!genesis) throw new ToolError("the clean-room log has no genesis entry; nothing was written");
+  const key = loadKey(cc.cleanroom.signingKey);
+  const policyPath = cleanroomPolicyPath(cc);
+  const policyBytes = fs.readFileSync(policyPath);
+  const selfTest = runShell("node " + shellQuote(path.join(PLUGIN_ROOT, "scripts", "cleanroom-guard.mjs")) + " --self-test " + shellQuote(policyPath), GATE_SELF_TEST_MS);
+  if (!selfTest.ok) throw new ToolError("the guard self-test fails, so nothing was attested: " + (selfTest.stderrTail || selfTest.stdoutTail || "exit " + selfTest.exitCode).split("\n")[0]);
+  const gl = spawnSync("git", ["log", "--format=%H%x1f%G?%x1f%s%x1f%(trailers:key=Kukulu-Stage,valueonly,separator=%x2C)%x1f%(trailers:key=Kukulu-Task,valueonly,separator=%x2C)", base + "..HEAD"], { cwd: ROOT, encoding: "utf8" });
+  if (gl.status !== 0) throw new ToolError("git log " + base + "..HEAD failed: " + (gl.stderr || "").trim());
+  const verifierBytes = fs.readFileSync(path.join(PLUGIN_ROOT, "scripts", "verify-attestation.mjs"));
+  const hashes = pluginHashes();
+  const head = git(["rev-parse", "HEAD"]).out;
+  const similarityFile = path.join(P.stateDir, "cleanroom", "similarity.json");
+
+  const files = new Map();
+  files.set("log.jsonl", logBytes);
+  files.set("policy.json", policyBytes);
+  if (exists(similarityFile)) files.set("similarity.json", fs.readFileSync(similarityFile));
+  for (const [name, abs] of docs) files.set(name, fs.readFileSync(abs));
+  files.set("commits.txt", Buffer.from(gl.stdout, "utf8"));
+  for (const p of extra) files.set("evidence/" + p, fs.readFileSync(path.join(ROOT, p)));
+  files.set("publisher.pub", Buffer.from(key.publicKey.export({ type: "spki", format: "pem" })));
+
+  const checkpoints = entries.filter((e) => e.kind === "checkpoint");
+  const counts = summarizeEntries(entries);
+  const policyHashes = [];
+  for (const e of checkpoints) if (!policyHashes.includes(e.data.policyHash)) policyHashes.push(e.data.policyHash);
+  const idleGapHours = cc.cleanroom.idleGapHours;
+  const manifest = {
+    version: 1,
+    flight: cc.flight ?? gitFacts().branch,
+    plugin: { version: VERSION, ...hashes, verifierHash: sha256Hex(verifierBytes) },
+    repo: { baseBranch: cc.baseBranch, base, head, branch: gitFacts().branch },
+    mode: "clean-room",
+    genesis,
+    policy: { path: cc.cleanroom.policy, hashes: policyHashes, current: policyHash(policyBytes) },
+    chain: { entries: entries.length, first: entries[0].hash, tip: entries[entries.length - 1].hash },
+    checkpoints: checkpoints.map((e) => ({ seq: e.seq, event: e.data.event, git: e.data.git, signature: e.data.signature, ok: verifyCheckpoint(e, key.publicKey) })),
+    denials: counts.denials,
+    calls: counts.calls,
+    human: counts.human,
+    selfTest: { ok: true, cases: Number(/\((\d+) cases\)/.exec(selfTest.stdoutTail || "")?.[1] ?? 0), at: new Date().toISOString() },
+    coverage: { gaps: coverageGaps(entries, gl.stdout.split("\n"), { idleGapHours }), knownLimits: KNOWN_LIMITS, idleGapHours },
+    similarity: files.has("similarity.json") ? { sha256: sha256Hex(files.get("similarity.json")) } : null,
+    files: [...files].map(([name, bytes]) => ({ path: name, sha256: sha256Hex(bytes), bytes: bytes.length })),
+    signer: { fingerprint: key.fingerprint, publicKey: "publisher.pub" },
+    at: new Date().toISOString(),
+  };
+  const manifestBytes = Buffer.from(JSON.stringify(manifest, null, 2) + "\n", "utf8");
+  files.set("verify.mjs", verifierBytes);
+  files.set("manifest.json", manifestBytes);
+  files.set("manifest.sig", Buffer.from(signBytes(manifestBytes, key.privateKey) + "\n", "utf8"));
+
+  const dir = path.join(ROOT, ATTEST_DIR);
+  const existed = exists(dir);
+  const old = existed ? walkFiles(dir) : [];
+  const written = [...files.keys()].map((n) => path.join(dir, n));
+  const crPaths = cleanroomPaths(st);
+  let result;
+  try {
+    result = withRollback([...new Set([...old, ...written, ...crPaths])], () => {
+      fs.rmSync(dir, { recursive: true, force: true });
+      for (const [name, bytes] of files) {
+        fs.mkdirSync(path.dirname(path.join(dir, name)), { recursive: true });
+        fs.writeFileSync(path.join(dir, name), bytes);
+      }
+      // The verifier that ships in the bundle checks the bundle before anything is committed.
+      const run = spawnSync(process.execPath, [path.join(dir, "verify.mjs"), dir, "--key", key.fingerprint, "--json"], { encoding: "utf8", timeout: GATE_SELF_TEST_MS });
+      let verdict;
+      try {
+        verdict = JSON.parse(run.stdout);
+      } catch {
+        throw new ToolError("the bundle's verifier produced no result (" + ((run.stderr || "").trim().split("\n")[0] || "exit " + run.status) + "); nothing was committed");
+      }
+      if (run.status !== 0 || !verdict.ok) {
+        throw new ToolError("the attestation bundle did not verify, so it was removed and nothing was committed:\n" + verdict.reasons.map((x) => "  " + x.check + ": " + x.reason).join("\n"));
+      }
+      appendEntry(logPath, { kind: "attest", stage: "summarize", role: "session", data: { manifest: sha256Hex(manifestBytes) } });
+      checkpoint("kukulu_attest", "summarize", st);
+      const commit = gitCommitIfChanged([dir, ...crPaths], "chore: attestation bundle", { stage: "summarize" });
+      return { verdict, commit };
+    });
+  } catch (e) {
+    if (!existed) fs.rmSync(dir, { recursive: true, force: true });
+    throw e;
+  }
+  const push = pushBranch(gitFacts().branch, st.policies.push);
+  return { dir: ATTEST_DIR, files: [...files.keys()].sort(), manifest: sha256Hex(manifestBytes), fingerprint: key.fingerprint, commit: result.commit, verify: result.verdict, push };
+}
+
 function flightOptions(args = {}) {
   if (args.resume !== undefined && typeof args.resume !== "boolean") throw new ToolError("resume must be a boolean");
   const given = FLIGHT_OPTION_KEYS.filter((k) => args[k] !== undefined);
@@ -4189,6 +4332,12 @@ const TOOLS = [
     description: "Score the configured contamination pairs inside the server (the agents get numbers, never the prior art's text): writes .kukulu/cleanroom/similarity.json and docs/SIMILARITY.md, and in clean-room mode hashes every file it read into the chain with a score entry and a checkpoint, then commits 'chore: similarity scored'. Refuses without cleanroom.similarity, while an implementation run is armed, before an APPROVED review, for a missing or empty pair directory, and when the clean-room gate fails. For the summarizer, after kukulu_summary_commit.",
     inputSchema: S({}),
     fn: similarity,
+  },
+  {
+    name: "kukulu_attest",
+    description: "Write the signed attestation bundle for a finished clean-room flight into docs/attestation/ (the whole chain, the policy, the summary, review, progress, config and state, the commits since the base with their trailers, any evidence files, the signer's public key, the verifier as verify.mjs, and a manifest signed with the checkpoint key), run the bundle's own verifier on it, and commit it as 'chore: attestation bundle' only when it passes; push per policy. Clean-room mode only, after kukulu_summary_commit and before kukulu_flight_archive. Returns { dir, files, manifest, fingerprint, commit, verify, push }.",
+    inputSchema: S({ evidence: { type: "array", items: { type: "string" }, description: "repo-relative paths of tracked files to include as evidence (conformance results, fuzz logs); each is copied to evidence/<path> in the bundle" } }),
+    fn: attest,
   },
   { name: "kukulu_flight_archive", description: "Archive a summarized flight so the repository can run its next flight: move PLAN, PROGRESS, HANDOFF, REVIEW, SUMMARY, kukulu.json, .kukulu/state.json and .kukulu/feedback.jsonl into docs/flights/<slug>/ (copying SPEC.md, which stays), write a fresh state.json, commit 'chore: archive flight <slug>' and push per policy. slug defaults to the 'flight' key in docs/kukulu.json. Refused unless the flight is summarized, no run is armed, and the tree is clean. All-or-nothing. Returns { slug, dir, moved, copied, commit, push }.", inputSchema: S({ slug: { type: "string", description: "lowercase letters, digits and - (at most 40 characters); defaults to docs/kukulu.json's flight" } }), fn: flightArchive },
   { name: "kukulu_pr_finalize", description: "End a flight. Checks that every commit since the merge base with baseBranch is signed (judged from the commits, not from state): if so, marks the draft PR ready and, unless breaking is true, enables auto-merge (gh pr merge --auto, never an immediate merge), per policies.finalize and policies.mergeMethod. If any commit is unsigned the PR stays a draft, state.awaitingSigning is recorded, the steps are appended to SUMMARY.md, and kukulu_next reports done until it is resolved. breaking is required on the first call. Returns { signed, unsigned, ready, merge, breaking, awaitingSigning, resigned, push, pr, next? }; merge is enabled, skipped: breaking, skipped: policy, skipped: no pull request, skipped: awaiting signing or unavailable: <why>.", inputSchema: S({ breaking: { type: "boolean", description: "whether this flight is a breaking change, so its PR must not auto-merge; required on the first call, remembered after" }, resign: { type: "boolean", description: "HUMAN-INITIATED ONLY: never pass this on your own. Re-sign every commit of the branch (git rebase -f --rebase-merges --gpg-sign), force-push with lease, then finalize. For an operator who has unlocked the signing agent after an awaiting-signing result" } }), fn: prFinalize },

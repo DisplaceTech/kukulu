@@ -854,6 +854,61 @@ export function coverageGaps(entries, commitLines, { idleGapHours }) {
   return gaps;
 }
 
+// ---------------------------------------------------------------- what an attestation counts
+
+/** The tools whose calls can read something, for the manifest's readCapable count. */
+export const READ_CAPABLE_TOOLS = ["Read", "Glob", "Grep", "Bash", "WebFetch"];
+export const VERDICT_CLASSES = ["prior-art attempt", "false positive", "offline test"];
+
+/**
+ * The counts a manifest carries, from the log's entries alone: the denials with
+ * the operator's verdicts on them, the calls the guard decided, and the human
+ * entries. A verdict counts when it names a denied entry's seq; the latest
+ * one for a denial wins. scripts/verify-attestation.mjs recounts all of it.
+ */
+export function summarizeEntries(entries) {
+  const denied = entries.filter((e) => e.kind === "denied");
+  const byReason = {};
+  for (const e of denied) {
+    const reason = e.reason ?? "(no reason)";
+    byReason[reason] = (byReason[reason] ?? 0) + 1;
+  }
+  const verdictOf = new Map();
+  for (const e of entries) {
+    const m = e.kind === "human" && e.data?.kind === "verdict" ? /^#(\d+): (prior-art attempt|false positive|offline test)\b/.exec(e.target ?? "") : null;
+    if (m && denied.some((d) => d.seq === Number(m[1]))) verdictOf.set(Number(m[1]), m[2]);
+  }
+  const verdicts = Object.fromEntries(VERDICT_CLASSES.map((c) => [c, 0]));
+  for (const c of verdictOf.values()) verdicts[c] += 1;
+  verdicts.unclassified = denied.filter((d) => !verdictOf.has(d.seq)).length;
+
+  const calls = entries.filter((e) => e.kind === "allowed" || e.kind === "denied");
+  const count = (list, key) => {
+    const out = {};
+    for (const e of list) {
+      const k = e[key] ?? "(none)";
+      out[k] = (out[k] ?? 0) + 1;
+    }
+    return out;
+  };
+  const humans = entries.filter((e) => e.kind === "human");
+  return {
+    denials: { total: denied.length, byReason, verdicts },
+    calls: { total: calls.length, byTool: count(calls, "tool"), byStage: count(calls, "stage"), readCapable: calls.filter((e) => READ_CAPABLE_TOOLS.includes(e.tool)).length },
+    // A prompt the hook logged carries no data; a record carries its kind.
+    human: {
+      instructions: humans.filter((e) => !e.data || e.data.kind === "instruction").length,
+      interventions: humans.filter((e) => e.data?.kind === "intervention").length,
+      verdicts: humans.filter((e) => e.data?.kind === "verdict").length,
+    },
+  };
+}
+
+/** Base64 Ed25519 signature over exactly these bytes: the manifest's. */
+export function signBytes(bytes, privateKey) {
+  return sign(null, bytes, privateKey).toString("base64");
+}
+
 // ---------------------------------------------------------------- the lexical scorer: lexers
 
 export const LANGUAGES = ["rust", "c", "cpp", "go", "python", "javascript", "typescript", "java", "php"];
