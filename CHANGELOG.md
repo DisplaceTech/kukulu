@@ -4,30 +4,59 @@ All notable changes to this plugin. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.7.0] — 2026-10-19
+
+### Summary
+
+Ends the compatibility period for the pre-0.6.0 names, closes the friction logged against 0.6.x, and adds clean-room mode: an opt-in policy that checks and records every tool call, scores the result against prior art, and ships a signed bundle that anyone with Node can verify offline.
 
 ### Added
 
+- Clean-room mode, on when `docs/cleanroom.json` exists (a `cleanroom` object in `docs/kukulu.json` moves the path; `templates/cleanroom.example.json` is a starting policy). `mcp/cleanroom.mjs` holds the pure functions: the policy loader, the SHA-256 hash chain, Ed25519 keys and signed checkpoints, the Bash splitter and path canonicalizer, the guard's rules, the lexical scorer and the coverage-gap definitions. `scripts/cleanroom-guard.mjs` (a `PreToolUse` hook, with a `--self-test`) denies a call the policy forbids; `scripts/cleanroom-log.mjs` (`PostToolUse` and `UserPromptSubmit`) appends every allowed call and every prompt to `.kukulu/cleanroom/log.jsonl`. Both are inert without a policy and are registered in `hooks/hooks.json`.
+- Genesis and sticky mode: the first `kukulu_next` in a clean-room project writes the genesis entry and pins the policy and hook hashes; changing the policy, the hooks or the mode afterwards is a gate failure. Every bookkeeping tool appends a signed checkpoint and commits the log with its own files. The key is created by `kukulu_run_start` at `cleanroom.signingKey` (or `KUKULU_CLEANROOM_KEY`).
+- The gate: before a stage starts, seven checks (mode, policy, guard, self-test, lockdown, chain, liveness) prove the machinery is the one the flight began with. A failing gate writes its own entry and halts. `kukulu_next` reports it as `gate`, and `kukulu_status` reports `cleanroom`.
+- Every commit the server makes in clean-room mode ends with `Kukulu-Stage` and `Kukulu-Task` trailers, added by the commit helper and not by a git hook.
+- `kukulu_cleanroom_record` and `human` chain entries: every prompt typed in a clean-room project, every operator record (an instruction, an intervention or a verdict on a denial), and `kukulu_flight_options`, `kukulu_run_resume` and a re-signing `kukulu_pr_finalize`.
+- `kukulu_similarity` and the `cleanroom.similarity` key: a lexical contamination score against user-supplied control pairs, in nine languages, written to `docs/SIMILARITY.md`, with every byte read hashed into the chain.
+- `kukulu_attest`, `scripts/verify-attestation.mjs` and the `cleanroom.idleGapHours` key: a signed bundle in `docs/attestation/` with a copy of the verifier inside it. The verifier runs ten checks with only `node:` modules, recomputes the denial counts and the coverage gaps from the log, and reads pre-0.6.0 tool logs with `--legacy-log`. `kukulu_flight_archive` moves the bundle with the rest of the flight.
+- `kukulu_run_resume({ reason })` clears a halt that is not a round-cap halt with a `chore: run resumed` commit, so no operator edits `.kukulu/state.json` by hand.
+- `kukulu_status` reports the pull request's CI checks as `prChecks`, and the review-build skill reads them from round 2 on.
+- `kukulu_mutate` runs the active constraints over the mutated tree and reports them as `constraints`.
+- The `review.mutationFixRounds` key, and a `source` on every review fix task.
+- `kukulu_plan_commit` returns `notes`.
+- `scripts/check-names.mjs` reads the gitignored `docs/feedback/.private-names` and fails on any listed project name in a file outside `docs/feedback/` and `test/fixtures/`, citing the entry's number and never the name.
 - The kukulu.tech landing page in `site/`, with the hosted `marketplace.json` that `claude plugin marketplace add https://kukulu.tech/marketplace.json` reads.
 - `scripts/check-site.mjs`, `scripts/check-site-browser.mjs` and `scripts/serve-site.mjs`, with the `check:site`, `check:site:browser` and `site:serve` npm scripts.
-- `kukulu_run_resume({ reason })` clears a halt that is not a round-cap halt with a `chore: run resumed` commit, so no operator edits `.kukulu/state.json` by hand.
-- `kukulu_mutate` runs the active constraints over the mutated tree, reports them as `constraints`, and counts a rule with hits as a kill (`killed: constraint <id> caught the mutation`).
-- `kukulu_status` reports the pull request's CI checks as `prChecks`, and the review-build skill reads them from round 2 on.
-- `kukulu_review_submit` requires every fix task to name its `source` (`review`, `mutation` or `blocked`) and refuses a `mutation` task once the round is past the new `review.mutationFixRounds` key, so a mutation-only review loop converges. `state.rounds` records the counts.
-- `scripts/check-names.mjs` reads the gitignored `docs/feedback/.private-names` and fails on any listed project name in a file outside `docs/feedback/` and `test/fixtures/`, citing the entry's number and never the name.
-- A `cleanroom` object in `docs/kukulu.json` (`policy`, `signingKey`), validated with an unknown-key refusal, and the `KUKULU_CLEANROOM_KEY` environment variable.
-- Clean-room mode, first pieces: `mcp/cleanroom.mjs` (policy loader, hash chain, signing key, checkpoint primitives), the guard and logger hook scripts registered in `hooks/hooks.json` (inert without a policy), and the genesis entry and sticky mode in `kukulu_next`.
-- `kukulu_cleanroom_record` and `human` chain entries: every prompt typed in a clean-room project, every operator record, and `kukulu_flight_options`, `kukulu_run_resume` and a re-signing `kukulu_pr_finalize`.
-- `kukulu_similarity` and the `cleanroom.similarity` key: a lexical contamination score against user-supplied control pairs, written to `docs/SIMILARITY.md`, with every byte read hashed into the chain in clean-room mode.
-- `kukulu_attest`, `scripts/verify-attestation.mjs` and the `cleanroom.idleGapHours` key: a signed bundle in `docs/attestation/` that a reader with only Node can check offline, and coverage gaps recomputed from the log and the commits.
 - A `site` CI workflow that runs the static and browser checks.
+- Two test suites, `cleanroom` and `attest`, making thirteen.
+
+### Changed
+
+- `kukulu_flight_archive` also moves `docs/SIMILARITY.md`, the clean-room log and `docs/attestation/` into the flight's directory.
+- The global config path is read on every call and never cached (Appendix A item 4).
+- The archive tests compute the hashes of an archived flight at test start instead of pinning them, so a redaction in an archive does not break a test (Appendix A item 7).
+- The `merge: "unavailable: …"` message of `kukulu_pr_finalize` ends with how to stop asking: set `policies.finalize` to `"ready"` (Appendix A item 8).
+- The summarize skill calls `kukulu_attest` after `kukulu_similarity` and before `kukulu_flight_archive`, and the summary gains `## Attestation`.
+- `docs/writing-specs.md` replaces its commit-msg hook advice with a "Clean-room flights" section.
+- Halts are documented around `kukulu_run_resume`, and go-flight maps "resume: …" to it.
 
 ### Fixed
 
-- `kukulu_plan_commit` refuses a plan committed on a branch that is neither `baseBranch` nor a `branchPrefix` branch, and `kukulu_run_start`'s foreign-branch refusal names both ways out.
+- Every heading the server writes into `docs/PROGRESS.md` and `docs/PLAN.md` is followed by a blank line (kukulu-tech F-01).
+- `**Depends on:**` is matched only at the start of a line, so the literal inside a task's prose is not a dependency (kukulu-tech F-02).
+- The review reads the pull request's CI checks, and a failing check is a finding (kukulu-tech F-03 and F-04).
+- `kukulu_mutate` no longer skips the constraint scan: a rule with hits counts as a kill (kukulu-tech F-05).
+- A halt that is not a round-cap halt is cleared by `kukulu_run_resume`, not a hand edit of `state.json` (kukulu-tech F-07, Appendix A item 2).
+- `kukulu_plan_commit` refuses a plan committed on a branch that is neither `baseBranch` nor a `branchPrefix` branch, and `kukulu_run_start`'s foreign-branch refusal names both ways out (Appendix A item 1).
+- A mutation-only review loop converges: `kukulu_review_submit` refuses a `mutation` fix task once the round is past `review.mutationFixRounds` (Appendix A item 3).
+- The pull-feedback skill never commits the file it writes, and no longer links an untracked README (Appendix A item 5).
+- The documentation link and orphan checks read `git ls-files`, so a gitignored file can no longer make a broken link pass (Appendix A item 6).
+- The plan-build skill derives the flight slug from the spec's title without a trailing `specification` or `spec`, and `kukulu_plan_commit` notes a configured slug that still ends in one (Appendix A item 9).
 
 ### Breaking changes
 
+- `kukulu_review_submit` requires a `source` (`review`, `mutation` or `blocked`) on every fix task.
+- `kukulu_plan_commit` refuses a plan committed on a branch that is neither `baseBranch` nor a `branchPrefix*` branch.
 - The `FOUNDRY_*` environment variables and the `foundry/` global config directory are no longer read; use `KUKULU_*` and `kukulu/config.json`.
 - `kukulu_migrate` is removed, and a project on the pre-0.6.0 Foundry layout is refused. Migrate by hand: move `.foundry/state.json` and `.foundry/feedback.jsonl` to `.kukulu/`, `docs/foundry.json` to `docs/kukulu.json`, and the `.foundry/` lines of `.gitignore` to `.kukulu/`, then commit.
 - The docs and skills no longer describe the old names or layout, except that archives of flights from before 0.6.0 keep `foundry.json`.
