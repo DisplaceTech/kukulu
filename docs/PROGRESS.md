@@ -101,7 +101,7 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] R7-01 Guard: cp long options are resolved against cp's own option list, and -T is read in a valued bundle
 - [x] R7-02 Guard: xargs --process-slot-var and BSD xargs -J/-R/-S are valued
 - [x] R8-01 Guard: cp, mv, ln and install each read their own valued options (cp --sparse/--no-preserve, install --strip-program, BSD install -S)
-- [ ] R9-01 Guard: mv, ln and install resolve long options against their own full lists (install --strip is a flag)
+- [x] R9-01 Guard: mv, ln and install resolve long options against their own full lists (install --strip is a flag)
 
 ## Log
 
@@ -411,3 +411,6 @@ Per-command valued option sets (COPY_SPECS) in mcp/cleanroom.mjs: cp -t -S --tar
 Interpretation: install -S judged under GNU (valued) and BSD (flag; -B valued) readings, deny if either writes a protected path.
 Tests: 12 R8-01 fixtures in guard-cases.json (8 denied, 4 allowed); guard self-test 445 ok; full npm test 165/165.
 docs/cleanroom.md rule 6 updated.
+
+### R9-01 — 7d1d2f2
+Added resolveLong and OTHER_LONG (GNU 9.4 lists for mv, ln, install) in mcp/cleanroom.mjs; destinationPathsFor resolves those commands' long options against them, valued only when the resolved name is in COPY_SPECS. cp unchanged. 12 fixtures added (10 denied, 2 allowed); docs/cleanroom.md rule 6 updated. Interpretation: none. Verify green.
