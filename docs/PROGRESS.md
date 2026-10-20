@@ -67,7 +67,7 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] P5-06 kukulu_attest
 - [x] P5-07 Tamper tests over a real bundle; the archive moves it
 - [x] P5-08 Attestation docs and the summarize step
-- [ ] P5-09 Phase 5 end: push and record the manual check
+- [x] P5-09 Phase 5 end: push and record the manual check
 - [ ] P6-01 Operations, architecture and writing-specs for 0.7.0
 - [ ] P6-02 mcp-tools.md and README for 0.7.0
 - [ ] P6-03 CHANGELOG 0.7.0, the version and the feedback header
@@ -263,3 +263,6 @@ test/attest.mjs: tamper matrix over a real kukulu_attest bundle (file, manifest,
 
 ### P5-08 — 08f6d6d
 docs/cleanroom.md: Reading a bundle (files, manifest fields, the five gap kinds) and Verifying offline (command lines with --key/--json, the ten checks, sample PASS/FAIL, the --legacy-log reader and its fixture output). skills/summarize: Attestation paragraph (non-null cleanroom status; after kukulu_similarity, before kukulu_flight_archive; ## Attestation then a further kukulu_summary_commit({content})). plugin suite asserts all of it plus CONTRIBUTING rows. No server change.
+
+### P5-09 — cdeb8be
+Empty commit cdeb8be; pushed build/2026-10-19 to origin (f25abdb..cdeb8be). Manual check: NOT VERIFIED (human): copy a bundle to a machine without this repository, run node verify.mjs . --key <fingerprint from kukulu_status>, and confirm PASS; change one byte of log.jsonl and confirm FAIL names the line.
