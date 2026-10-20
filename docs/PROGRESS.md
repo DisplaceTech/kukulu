@@ -18,7 +18,7 @@ Started: 2026-10-20T19:18:49.092Z
 - [x] P1-03 policies.syncBase merges the base branch into the build branch
 - [x] P1-04 The hard cap's documentation says what reviewSubmit does
 - [x] P1-05 The bundle's SUMMARY.md is the summary as attested
-- [ ] P1-06 Phase 1 end: push and record the manual check
+- [x] P1-06 Phase 1 end: push and record the manual check
 - [ ] P2-01 README calls the guard a tripwire
 - [ ] P2-02 CHANGELOG 0.7.1, the version and the feedback header
 - [ ] P2-03 Phase 2 end: push and record the release check
@@ -79,3 +79,7 @@ Text-only: schema description, mcp-tools, operations (3 places), architecture (3
 ### P1-05 — 4b1ca00
 
 One sentence added after the bundle file table in docs/cleanroom.md; CHANGELOG line. Cited skills/summarize/SKILL.md line 30 (Attestation paragraph) as already covering the manifest hash. Ran lint, pre-commit and plugin test (docs-only), not the full verify.
+
+### P1-06 — f953a3f
+
+Push: pushed build/2026-10-20 to origin. Manual check: NOT VERIFIED (human): on a throwaway flight run with the working-tree plugin, commit to the base branch after the build branch is cut, then call kukulu_task_next and see the chore: merge commit
