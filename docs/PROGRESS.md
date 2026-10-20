@@ -73,6 +73,13 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] P6-03 CHANGELOG 0.7.0, the version and the feedback header
 - [x] P6-04 Apply the approved copy, a solid clean-room diagram and check-site rule 16
 - [x] P6-05 Phase 6 end: push and record the manual check
+- [ ] R1-01 Guard: close the self-protection bypasses in Bash write rules
+- [ ] R1-02 Guard: network rule and deny.paths reach through git options, Glob patterns, $HOME and substitutions
+- [ ] R1-03 Guard: allow cleanflate's four remaining false positives by classifying pattern operands
+- [ ] R1-04 Test verifyChain's prev linkage and seq density in mcp/cleanroom.mjs
+- [ ] R1-05 Test the verifier's prev linkage and add the rehashed edit to the both-copies-agree fixtures
+- [ ] R1-06 Test the gate's liveness kind, genesis match and the trailer's default task
+- [ ] R1-07 Bound every gh call in prChecks; report mutationFixRounds where the reviewer can read it
 
 ## Log
 
