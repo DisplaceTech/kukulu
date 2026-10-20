@@ -1,6 +1,6 @@
 # MCP tool reference
 
-Twenty-three tools, served over stdio by `mcp/server.mjs` with no dependencies. The server is launched by Claude Code from [`.mcp.json`](../.mcp.json) with `KUKULU_PROJECT_DIR` set to the project root; every path below is relative to that root.
+Twenty-four tools, served over stdio by `mcp/server.mjs` with no dependencies. The server is launched by Claude Code from [`.mcp.json`](../.mcp.json) with `KUKULU_PROJECT_DIR` set to the project root; every path below is relative to that root.
 
 Three of them are read-only: `kukulu_status`, `kukulu_next` and `kukulu_config_show`. The flight controller may call those three and four more. `kukulu_agents_sync` writes only the generated agent files, the MCP allow rule and a `.git/info/exclude` line, never a task or a verdict. It may call `kukulu_run_halt` itself when it cannot even spawn a stage, so the next flight sees a clean halt instead of retrying blindly. `kukulu_flight_options` applies the operator's own go-flight options to the review-loop bounds (and, with `resume`, lifts a round-cap halt). `kukulu_pr_finalize` is allowed for the human-initiated re-sign only (`resign: true`, when the operator says signing is unlocked). Everything else changes project state and belongs to a stage agent. (`kukulu_mutate` changes a source file only for the length of one call and always restores it, and a stream's tools work in that stream's own worktree.)
 
@@ -453,13 +453,27 @@ Record a verdict. Call it exactly once per review. It is all-or-nothing: if its 
 
 ---
 
+## `kukulu_similarity`
+
+Score how close the built code is to the prior art the operator named, inside the server. The agents never receive prior-art text through this tool, only numbers, and the scorer is refused while an implementer run is armed, so no implement-stage call can trigger a read of the comparison corpus. For the summarizer, after `kukulu_summary_commit`, when `cleanroom.similarity` is configured.
+
+**Arguments:** none.
+
+**Does:** reads every file of every pair side (recursively, skipping `.git` and `node_modules`; `subject` is the `subject` list, `~` the home directory, a relative path the project), maps extensions through `languages` and counts unmapped or binary files as skipped, scores each pair with the lexical metrics (`ngram_jaccard@n` and `ngram_containment@n` for each `n`, `ident_jaccard`, `ident_match_rate_left`, `comment_jaccard`), positions each test pair between the negative and the positive control per metric, and computes the verdict. It writes `.kukulu/cleanroom/similarity.json` (`{ config, files: [{ pair, side, path, sha256, bytes, language }], rows, verdict, limits, at }`) and `docs/SIMILARITY.md` (the statement, one line per metric, the verdict, the raw scores, the limits; no timestamp, so the same inputs give the same bytes), and commits both as `chore: similarity scored`. In clean-room mode it first appends a `score` entry (`data: { reads, sha256 }`: the number of files read and the SHA-256 of `similarity.json`) and a checkpoint (event `kukulu_similarity`), and commits the log with them. `kukulu_flight_archive` moves `docs/SIMILARITY.md` and `similarity.json` with the other artifacts.
+
+**Returns:** `{ verdict, rows, files, skipped, limits, commit }`. `files` counts the distinct files read and `skipped` the distinct files left unread; `similarity.json` lists a file once for every pair side it appears in. A row is `{ pair, role, metric, score, c, band }`; `c` and `band` are `null` for the controls.
+
+**Refuses when** (in this order, before any write): `cleanroom.similarity` is absent; the implement lock exists; the flight is not reviewed `APPROVED`; a pair directory is missing or empty, or no file in it has a mapped extension; `identExclusions` names a file that does not exist; or, in clean-room mode, the gate fails.
+
+---
+
 ## `kukulu_flight_archive`
 
 Archive a summarized flight so the repository can run its next one.
 
 **Arguments:** `{ slug? }`, lowercase letters, digits and `-`, at most 40 characters. It defaults to the `flight` key in `docs/kukulu.json`; with neither, the tool refuses.
 
-**Does:** moves `docs/PLAN.md`, `docs/PROGRESS.md`, `docs/HANDOFF.md`, `docs/REVIEW.md`, `docs/SUMMARY.md`, `docs/kukulu.json`, `.kukulu/state.json` and `.kukulu/feedback.jsonl` (each one that exists) into `docs/flights/<slug>/` (`git mv` for a tracked file, a plain rename for an untracked one), copies `docs/SPEC.md` there (the live spec stays), writes a fresh `.kukulu/state.json` that records `archived: { slug, dir, at }` and carries `signingOverride` over, commits everything as `chore: archive flight <slug>`, and pushes the branch per the push policy. If the commit fails, every file is put back and the empty archive directory removed.
+**Does:** moves `docs/PLAN.md`, `docs/PROGRESS.md`, `docs/HANDOFF.md`, `docs/REVIEW.md`, `docs/SUMMARY.md`, `docs/SIMILARITY.md`, `docs/kukulu.json`, `.kukulu/state.json` and `.kukulu/feedback.jsonl` (each one that exists) into `docs/flights/<slug>/` (`git mv` for a tracked file, a plain rename for an untracked one), copies `docs/SPEC.md` there (the live spec stays), writes a fresh `.kukulu/state.json` that records `archived: { slug, dir, at }` and carries `signingOverride` over, commits everything as `chore: archive flight <slug>`, and pushes the branch per the push policy. If the commit fails, every file is put back and the empty archive directory removed.
 
 After it, `kukulu_next` reports `done` until `docs/SPEC.md` is edited, then `plan`.
 

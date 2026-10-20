@@ -1346,4 +1346,149 @@ eq(LANGUAGES.join(","), "rust,c,cpp,go,python,javascript,typescript,java,php", "
   ok(cross["ngram_jaccard@5"] < pos["ngram_jaccard@5"], "(and the cross-language pair scores below the derived pair on n-grams)");
 }
 
+// ---------------------------------------------------------------- kukulu_similarity
+
+{
+  const FIX = (d) => path.join(ROOT, "test", "fixtures", "similarity", d);
+  const SIM = (extra = {}) => ({
+    subject: [FIX("a")],
+    pairs: [
+      { id: "independent", role: "negative", left: FIX("a"), right: FIX("b") },
+      { id: "derived", role: "positive", left: FIX("b"), right: FIX("b-derived") },
+      { id: "vs-c", role: "test", left: "subject", right: FIX("c") },
+    ],
+    languages: { ".rs": "rust", ".c": "c", ".h": "c" },
+    ...extra,
+  });
+  const approved = (repo) => setState(repo, { implemented: true, reviewed: true, verdict: "APPROVED", summarized: true });
+  const generalRepo = (similarity = SIM(), config = {}) => {
+    const repo = plannedRepo({ config: { flight: "w1", ...config, cleanroom: { similarity } } });
+    approved(repo);
+    git(repo, ["add", "-A"]);
+    git(repo, ["commit", "-qm", "chore: approved"]);
+    return repo;
+  };
+
+  // refusals
+  {
+    const bare = plannedRepo();
+    await withServer(bare, async ({ call }) => {
+      isError(await call("kukulu_similarity"), /cleanroom\.similarity is not set in docs\/kukulu\.json/, "kukulu_similarity refuses without cleanroom.similarity");
+    });
+    const locked = generalRepo();
+    writeFile(locked, ".kukulu/implement.lock", '{"count":0}');
+    await withServer(locked, async ({ call }) => {
+      isError(await call("kukulu_similarity"), /an implementation run is armed/, "...while the implement lock exists");
+    });
+    const early = generalRepo();
+    setState(early, { verdict: null, reviewed: false });
+    await withServer(early, async ({ call }) => {
+      isError(await call("kukulu_similarity"), /not reviewed APPROVED yet/, "...before an APPROVED review");
+    });
+    const missing = generalRepo(SIM({ pairs: SIM().pairs.map((p) => (p.role === "test" ? { ...p, right: "/no/such/directory" } : p)) }));
+    await withServer(missing, async ({ call }) => {
+      isError(await call("kukulu_similarity"), /\/no\/such\/directory .* does not exist or is not a directory/, "...for a missing pair directory");
+      ok(!hasFile(missing, "docs/SIMILARITY.md"), "...before any write");
+    });
+    const emptyDir = mkDir("kukulu-empty-");
+    const empty = generalRepo(SIM({ pairs: SIM().pairs.map((p) => (p.role === "test" ? { ...p, right: emptyDir } : p)) }));
+    await withServer(empty, async ({ call }) => {
+      isError(await call("kukulu_similarity"), /is empty; a pair needs files to compare/, "...for an empty pair directory");
+    });
+    const unmapped = mkDir("kukulu-unmapped-");
+    writeFile(unmapped, "notes.txt", "x");
+    const none = generalRepo(SIM({ pairs: SIM().pairs.map((p) => (p.role === "test" ? { ...p, right: unmapped } : p)) }));
+    await withServer(none, async ({ call }) => {
+      isError(await call("kukulu_similarity"), /has an extension in cleanroom\.similarity\.languages/, "...and for a side with no mapped extension");
+    });
+    const noList = generalRepo(SIM({ identExclusions: "docs/idents.txt" }));
+    await withServer(noList, async ({ call }) => {
+      isError(await call("kukulu_similarity"), /identExclusions names docs\/idents\.txt, which does not exist/, "...for a missing exclusion list");
+    });
+  }
+
+  // general mode: files, determinism, commit, archive
+  {
+    const repo = generalRepo(SIM(), {});
+    writeFile(repo, "docs/idents.txt", "CHECKSUM_SEED\n");
+    git(repo, ["add", "-A"]);
+    git(repo, ["commit", "-qm", "chore: exclusions"]);
+    await withServer(repo, async ({ call }) => {
+      const r = await call("kukulu_similarity");
+      eq(typeof r.verdict + "|" + r.files + "|" + r.skipped + "|" + r.limits.length + "|" + r.rows.length, "string|8|1|5|21", "kukulu_similarity returns the verdict, the distinct files read, those skipped, the limits and a row per pair and metric");
+      ok(hasFile(repo, ".kukulu/cleanroom/similarity.json") && hasFile(repo, "docs/SIMILARITY.md"), "it writes similarity.json and docs/SIMILARITY.md");
+      eq(subject(repo), "chore: similarity scored", "...committing chore: similarity scored");
+      eq(touched(repo).sort().join(","), ".kukulu/cleanroom/similarity.json,docs/SIMILARITY.md", "...with both files and no chain in general mode");
+      ok(!hasFile(repo, ".kukulu/cleanroom/log.jsonl"), "general mode writes no log");
+      const json = JSON.parse(readFile(repo, ".kukulu/cleanroom/similarity.json"));
+      eq(json.config.ngram.join(",") + "|" + json.config.minIdentLen + "|" + json.config.commentNgram + "|" + json.config.near + "|" + json.config.separationMargin, "5,10|6|5|0.25|0", "a valid similarity block resolves with its defaults");
+      eq(Object.keys(json).join(","), "config,files,rows,verdict,limits,at", "...and similarity.json has the documented shape");
+      ok(json.files.every((f) => /^[0-9a-f]{64}$/.test(f.sha256) && f.bytes > 0 && ["rust", "c"].includes(f.language)), "...listing every file read with its SHA-256, size and language");
+      const test = json.rows.filter((x) => x.role === "test");
+      ok(test.length === 7 && test.every((x) => BANDS.includes(x.band)), "...and the test pair has a banded row for every metric");
+      const doc = readFile(repo, "docs/SIMILARITY.md");
+      like(doc, /^# Contamination score\n\n.*negative control \(independent\).*positive control \(derived\)/s, "docs/SIMILARITY.md opens with the statement");
+      like(doc, /## Verdict\n\n(independence|no metric)/, "...then the verdict");
+      ok(doc.includes("## Raw scores") && doc.includes("## Limits") && !/\d{4}-\d\d-\d\dT/.test(doc), "...the raw scores and the limits, with no timestamp");
+      const again = await call("kukulu_similarity");
+      eq(readFile(repo, "docs/SIMILARITY.md"), doc, "docs/SIMILARITY.md is byte-identical on a second run");
+      eq(again.verdict, r.verdict, "...with the same verdict");
+      const withList = await call("kukulu_similarity");
+      ok(!withList.error, "(the exclusion list is read when configured)");
+    });
+    // archive moves the statement
+    const arch = generalRepo(SIM(), {});
+    await withServer(arch, async ({ call }) => {
+      await call("kukulu_similarity");
+      const a = await call("kukulu_flight_archive");
+      ok(!a.error && hasFile(arch, "docs/flights/w1/SIMILARITY.md") && !hasFile(arch, "docs/SIMILARITY.md"), "the archive moves docs/SIMILARITY.md");
+      ok(hasFile(arch, "docs/flights/w1/cleanroom/similarity.json"), "...and similarity.json, into cleanroom/");
+    });
+  }
+  {
+    const repo = generalRepo(SIM({ identExclusions: "docs/idents.txt" }));
+    writeFile(repo, "docs/idents.txt", "CHECKSUM_SEED\nUnrelated\n");
+    git(repo, ["add", "-A"]);
+    git(repo, ["commit", "-qm", "chore: exclusions"]);
+    await withServer(repo, async ({ call }) => {
+      const r = await call("kukulu_similarity");
+      const plain = generalRepo(SIM());
+      let base;
+      await withServer(plain, async ({ call: call2 }) => { base = await call2("kukulu_similarity"); });
+      const neg = (res) => res.rows.find((x) => x.pair === "independent" && x.metric === "ident_jaccard").score;
+      ok(neg(r) < neg(base), "an exclusion list removes the planted identifier from the scores");
+    });
+  }
+
+  // clean-room mode: score entry, checkpoint, gate
+  {
+    const cr = cleanroomRepo();
+    await live(cr, async ({ call }) => { await call("kukulu_next"); });
+    addPlan(cr, { config: { flight: "w1", cleanroom: { similarity: SIM() } } });
+    setState(cr, { implemented: true, reviewed: true, verdict: "APPROVED", summarized: true });
+    git(cr, ["add", "-A"]);
+    git(cr, ["commit", "-qm", "chore: approved"]);
+    await live(cr, async ({ call }) => {
+      const r = await call("kukulu_similarity");
+      ok(!r.error, "kukulu_similarity runs in clean-room mode");
+      const entries = readEntries(LOG(cr));
+      const si = entries.findLastIndex((e) => e.kind === "score");
+      const score = entries[si];
+      const json = fs.readFileSync(path.join(cr, ".kukulu", "cleanroom", "similarity.json"));
+      eq(score.data.reads + "|" + score.data.sha256, `${r.files}|${createHash("sha256").update(json).digest("hex")}`, "the score entry records reads and the sha256 of similarity.json");
+      eq(entries[si + 1].kind + "|" + entries[si + 1].data.event, "checkpoint|kukulu_similarity", "...followed by a checkpoint");
+      ok(verifyCheckpoint(entries[si + 1], loadKey(testKeyFor(cr)).publicKey), "...that verifies");
+      eq(touched(cr).sort().join(","), ".kukulu/cleanroom/log.jsonl,.kukulu/cleanroom/similarity.json,docs/SIMILARITY.md", "...and the commit holds both files and the log");
+      eq(verifyChain(linesOf(LOG(cr))).ok, true, "the chain still verifies");
+    });
+    // the gate refuses
+    writeFile(cr, "docs/cleanroom.json", EXAMPLE.replace('"WebSearch"', '"WebSearch", "Agent"'));
+    git(cr, ["add", "-A"]);
+    git(cr, ["commit", "-qm", "edit the policy"]);
+    await live(cr, async ({ call }) => {
+      isError(await call("kukulu_similarity"), /^clean-room gate failed: policy: /, "kukulu_similarity refuses when the gate fails");
+    });
+  }
+}
+
 finish();

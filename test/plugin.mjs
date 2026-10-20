@@ -278,7 +278,7 @@ const goFlight = read("skills/go-flight/SKILL.md");
 const fmGo = frontmatter(goFlight);
 const allowed = String(fmGo["allowed-tools"]).split(",").map((s) => s.trim());
 const toolNames = Array.from(serverSrc.matchAll(/name: "(kukulu_[a-z_]+)"/g), (m) => m[1]);
-eq(toolNames.length, 23, "the server defines twenty-three tools");
+eq(toolNames.length, 24, "the server defines twenty-four tools");
 
 const COUNT_WORDS = { 18: "Eighteen", 19: "Nineteen", 20: "Twenty", 21: "Twenty-one", 22: "Twenty-two", 23: "Twenty-three", 24: "Twenty-four", 25: "Twenty-five" };
 like(read("docs/mcp-tools.md").split("\n")[2], new RegExp(`^${COUNT_WORDS[toolNames.length]} tools,`), "docs/mcp-tools.md states the tool count in words");
@@ -438,6 +438,8 @@ like(read("skills/review-build/SKILL.md"), /A denial that was worked around[^.]*
 ok(read("README.md").includes("(./docs/cleanroom.md)") && exists("docs/cleanroom.md"), "docs/cleanroom.md is linked from the README");
 
 like(read("skills/plan-build/SKILL.md"), /Write the deliverables in the order 3, 1, 2, 4: `docs\/kukulu\.json` first/, "plan-build writes docs/kukulu.json first in clean-room mode");
+
+like(read("agents/summarizer.md"), /mcp__plugin_kukulu_kukulu__kukulu_similarity/, "agents/summarizer names kukulu_similarity");
 
 let unknownTool = null;
 let retiredMention = null;

@@ -15,8 +15,9 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { createHash } from "node:crypto";
 import {
-  CleanroomError, loadPolicy, policyHash, appendEntry, readEntries, logPathFor, generateKey, loadKey, signCheckpoint, verifyCheckpoint, verifyChain, evaluate, lockdownActive, ZERO_HASH,
+  CleanroomError, loadPolicy, policyHash, appendEntry, readEntries, logPathFor, generateKey, loadKey, signCheckpoint, verifyCheckpoint, verifyChain, evaluate, lockdownActive, ZERO_HASH, scorePair, position, verdictOf, LIMITS,
 } from "./cleanroom.mjs";
 
 /**
@@ -38,6 +39,7 @@ function layoutFor(stateName, configName) {
     handoff: path.join(ROOT, "docs", "HANDOFF.md"),
     review: path.join(ROOT, "docs", "REVIEW.md"),
     summary: path.join(ROOT, "docs", "SUMMARY.md"),
+    similarityDoc: path.join(ROOT, "docs", "SIMILARITY.md"),
     config: path.join(ROOT, "docs", configName),
     stateDir,
     state: path.join(stateDir, "state.json"),
@@ -3037,6 +3039,157 @@ const FLIGHT_OPTION_KEYS = ["maxRounds", "maxRoundsHard"];
  * else is the planner's to decide from SPEC. Refused before the plan stage
  * has written docs/kukulu.json.
  */
+// ---------------------------------------------------------------- contamination scoring (SPEC E-03)
+
+const SIMILARITY_SKIP_DIRS = new Set([".git", "node_modules"]);
+const sha256Hex = (bytes) => createHash("sha256").update(bytes).digest("hex");
+const fixed = (x) => (x === null || x === undefined ? "n/a" : x.toFixed(4));
+
+/** A configured pair side as absolute directories: `subject` is the subject list, `~` the home directory, a relative path the project. */
+function similarityDirs(side, sim) {
+  const list = side === "subject" ? sim.subject : [side];
+  return list.map((p) => (p === "~" || p.startsWith("~/") ? path.join(os.homedir(), p.slice(1)) : path.resolve(ROOT, p)));
+}
+
+/** Every regular file under `dir`, sorted, skipping .git and node_modules. */
+function walkFiles(dir) {
+  const out = [];
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : 1))) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      if (!SIMILARITY_SKIP_DIRS.has(entry.name)) out.push(...walkFiles(full));
+    } else if (entry.isFile()) out.push(full);
+  }
+  return out;
+}
+
+/**
+ * Score the configured pairs (SPEC E-03). Runs only inside the server: no agent
+ * tool ever reads the comparison corpus, the agents get numbers back, and every
+ * byte the scorer read is hashed into the chain (E-03a). Refused while an
+ * implementer run is armed, so no implement-stage call can trigger a read.
+ */
+function similarity() {
+  const cc = cfg();
+  const sim = cc.cleanroom.similarity;
+  if (!sim) throw new ToolError("cleanroom.similarity is not set in docs/kukulu.json; configure the subject, the controls and the test pairs before scoring (see operations.md)");
+  if (exists(P.lock)) throw new ToolError(`an implementation run is armed (${rel(P.lock)} exists); kukulu_similarity is a summarize-stage tool, so run it after kukulu_run_finish`);
+  const st = loadState();
+  if (st.verdict !== "APPROVED") throw new ToolError("the flight is not reviewed APPROVED yet; score contamination after the review approves the build");
+
+  // Resolve and read every side once.
+  const sides = new Map();
+  const unmapped = new Set(); // distinct files skipped (a side can be named twice, as itself and as the subject)
+  const readPaths = new Set(); // distinct files read
+  const readSide = (name) => {
+    if (sides.has(name)) return sides.get(name);
+    const dirs = similarityDirs(name, sim);
+    const files = [];
+    for (const dir of dirs) {
+      if (!exists(dir) || !fs.statSync(dir).isDirectory()) throw new ToolError(`the directory ${dir} (${name === "subject" ? "cleanroom.similarity.subject" : name}) does not exist or is not a directory`);
+      const all = walkFiles(dir);
+      if (!all.length) throw new ToolError(`the directory ${dir} is empty; a pair needs files to compare`);
+      for (const file of all) {
+        const language = sim.languages[path.extname(file)];
+        const bytes = fs.readFileSync(file);
+        if (!language || bytes.includes(0)) {
+          unmapped.add(file);
+          continue;
+        }
+        readPaths.add(file);
+        files.push({ path: file, text: bytes.toString("utf8"), language, sha256: sha256Hex(bytes), bytes: bytes.length });
+      }
+    }
+    if (!files.length) throw new ToolError(`no file under ${dirs.join(", ")} has an extension in cleanroom.similarity.languages; map the extensions of the code you want compared`);
+    const side = { files };
+    sides.set(name, side);
+    return side;
+  };
+  for (const p of sim.pairs) {
+    readSide(p.left);
+    readSide(p.right);
+  }
+  let exclusions = new Set();
+  if (sim.identExclusions) {
+    const file = path.resolve(ROOT, sim.identExclusions);
+    if (!exists(file)) throw new ToolError(`cleanroom.similarity.identExclusions names ${sim.identExclusions}, which does not exist; create it (one identifier per line) or remove the key`);
+    exclusions = new Set(read(file).split("\n").map((l) => l.trim()).filter(Boolean));
+  }
+  const crPaths = cleanroomPaths(st);
+  if (crPaths.length) requireGate("summarize");
+
+  // Score every pair, then position each test pair against the controls, metric by metric.
+  const opts = { ngram: sim.ngram, minIdentLen: sim.minIdentLen, commentNgram: sim.commentNgram, exclusions };
+  const scores = new Map(sim.pairs.map((p) => [p.id, scorePair(readSide(p.left).files, readSide(p.right).files, opts)]));
+  const negative = sim.pairs.find((p) => p.role === "negative");
+  const positive = sim.pairs.find((p) => p.role === "positive");
+  const metrics = Object.keys(scores.get(negative.id));
+  const rows = [];
+  for (const p of sim.pairs) {
+    for (const metric of metrics) {
+      const score = scores.get(p.id)[metric];
+      const where = p.role === "test" ? position(score, scores.get(negative.id)[metric], scores.get(positive.id)[metric], sim) : { c: null, band: null };
+      rows.push({ pair: p.id, role: p.role, metric, score, c: where.c, band: where.band });
+    }
+  }
+  const verdict = verdictOf(rows.filter((r) => r.role === "test"));
+
+  const files = [];
+  const seen = new Set();
+  for (const p of sim.pairs) {
+    for (const which of ["left", "right"]) {
+      for (const f of readSide(p[which]).files) {
+        const key = `${p.id}\0${which}\0${f.path}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        files.push({ pair: p.id, side: which, path: f.path, sha256: f.sha256, bytes: f.bytes, language: f.language });
+      }
+    }
+  }
+  const skipped = unmapped.size;
+  const json = `${JSON.stringify({ config: sim, files, rows, verdict, limits: LIMITS, at: new Date().toISOString() }, null, 2)}\n`;
+  const jsonPath = path.join(P.stateDir, "cleanroom", "similarity.json");
+
+  // docs/SIMILARITY.md carries no timestamp, so the same inputs give the same bytes.
+  const testPairs = sim.pairs.filter((p) => p.role === "test");
+  const doc = [
+    "# Contamination score",
+    "",
+    `The subject (${sim.subject.length ? sim.subject.join(", ") : "none"}) was compared with ${testPairs.length} test pair${testPairs.length === 1 ? "" : "s"} (${testPairs.map((p) => p.id).join(", ")}) and placed between a negative control (${negative.id}) and a positive control (${positive.id}). A test pair at or below the negative control on a metric that separates the controls shows no similarity beyond independent work.`,
+    "",
+    "## Positioning",
+    "",
+    ...rows.filter((r) => r.role === "test").map((r) => `- ${r.pair}, ${r.metric}: ${fixed(r.score)} (c = ${fixed(r.c)}, ${r.band})`),
+    "",
+    "## Verdict",
+    "",
+    verdict,
+    "",
+    "## Raw scores",
+    "",
+    `| pair | role | ${metrics.join(" | ")} |`,
+    `|---|---|${metrics.map(() => "---:").join("|")}|`,
+    ...sim.pairs.map((p) => `| ${p.id} | ${p.role} | ${metrics.map((m) => fixed(scores.get(p.id)[m])).join(" | ")} |`),
+    "",
+    "## Limits",
+    "",
+    ...LIMITS.map((l) => `- ${l}`),
+    "",
+  ].join("\n");
+
+  const paths = [P.similarityDoc, jsonPath, ...crPaths];
+  const commit = withRollback(paths, () => {
+    write(jsonPath, json);
+    write(P.similarityDoc, doc);
+    if (crPaths.length) {
+      appendEntry(cleanroomLogPath(), { kind: "score", stage: "summarize", role: "session", data: { reads: readPaths.size, sha256: sha256Hex(Buffer.from(json, "utf8")) } });
+      checkpoint("kukulu_similarity", "summarize", st);
+    }
+    return gitCommitIfChanged(paths, "chore: similarity scored", { stage: "summarize" });
+  });
+  return { verdict, rows, files: readPaths.size, skipped, limits: LIMITS, commit };
+}
+
 const RECORD_KINDS = ["instruction", "intervention", "verdict"];
 const VERDICT_TEXT = /^#(\d+): (prior-art attempt|false positive|offline test) — .+/;
 
@@ -3601,12 +3754,12 @@ function prFinalize({ breaking, resign } = {}) {
 
 /** The clean-room files an archive moves: the log, and the similarity record when there is one. Empty outside clean-room mode. */
 function cleanroomMovables(st) {
-  if (!st.cleanroom?.genesis) return [];
-  return [cleanroomLogPath(), path.join(P.stateDir, "cleanroom", "similarity.json")].filter((abs) => !path.relative(ROOT, abs).startsWith("..") && exists(abs));
+  const similarityJson = path.join(P.stateDir, "cleanroom", "similarity.json");
+  return [...(st.cleanroom?.genesis ? [cleanroomLogPath()] : []), similarityJson].filter((abs) => !path.relative(ROOT, abs).startsWith("..") && exists(abs));
 }
 
 /** The files an archive moves, as [absolute path, repo-relative name]; a move keeps each file's name. */
-const archivedFiles = () => [P.plan, P.progress, P.handoff, P.review, P.summary, P.config, P.state, P.feedback].map((abs) => [abs, rel(abs)]);
+const archivedFiles = () => [P.plan, P.progress, P.handoff, P.review, P.summary, P.similarityDoc, P.config, P.state, P.feedback].map((abs) => [abs, rel(abs)]);
 
 /**
  * Move a summarized flight's artifacts into docs/flights/<slug>/ so the
@@ -4025,6 +4178,12 @@ const TOOLS = [
     fn: reviewSubmit,
   },
   { name: "kukulu_summary_commit", description: "Write docs/SUMMARY.md from `content` (preferred) or commit the file already on disk, and mark the flight complete. Only valid after an APPROVED review. Returns { commit, branch, base, head, reviews, fixRounds, push, pr, archive }; archive is the policies.archive setting (true means call kukulu_flight_archive next); pr is the branch's pull request ({ url, state, draft, base }) or \"none\", \"skipped: policy\" or \"unknown: <why>\".", inputSchema: S({ content: { type: "string", description: "the full text of docs/SUMMARY.md; the tool writes the file itself, so never Write it yourself" } }), fn: summaryCommit },
+  {
+    name: "kukulu_similarity",
+    description: "Score the configured contamination pairs inside the server (the agents get numbers, never the prior art's text): writes .kukulu/cleanroom/similarity.json and docs/SIMILARITY.md, and in clean-room mode hashes every file it read into the chain with a score entry and a checkpoint, then commits 'chore: similarity scored'. Refuses without cleanroom.similarity, while an implementation run is armed, before an APPROVED review, for a missing or empty pair directory, and when the clean-room gate fails. For the summarizer, after kukulu_summary_commit.",
+    inputSchema: S({}),
+    fn: similarity,
+  },
   { name: "kukulu_flight_archive", description: "Archive a summarized flight so the repository can run its next flight: move PLAN, PROGRESS, HANDOFF, REVIEW, SUMMARY, kukulu.json, .kukulu/state.json and .kukulu/feedback.jsonl into docs/flights/<slug>/ (copying SPEC.md, which stays), write a fresh state.json, commit 'chore: archive flight <slug>' and push per policy. slug defaults to the 'flight' key in docs/kukulu.json. Refused unless the flight is summarized, no run is armed, and the tree is clean. All-or-nothing. Returns { slug, dir, moved, copied, commit, push }.", inputSchema: S({ slug: { type: "string", description: "lowercase letters, digits and - (at most 40 characters); defaults to docs/kukulu.json's flight" } }), fn: flightArchive },
   { name: "kukulu_pr_finalize", description: "End a flight. Checks that every commit since the merge base with baseBranch is signed (judged from the commits, not from state): if so, marks the draft PR ready and, unless breaking is true, enables auto-merge (gh pr merge --auto, never an immediate merge), per policies.finalize and policies.mergeMethod. If any commit is unsigned the PR stays a draft, state.awaitingSigning is recorded, the steps are appended to SUMMARY.md, and kukulu_next reports done until it is resolved. breaking is required on the first call. Returns { signed, unsigned, ready, merge, breaking, awaitingSigning, resigned, push, pr, next? }; merge is enabled, skipped: breaking, skipped: policy, skipped: no pull request, skipped: awaiting signing or unavailable: <why>.", inputSchema: S({ breaking: { type: "boolean", description: "whether this flight is a breaking change, so its PR must not auto-merge; required on the first call, remembered after" }, resign: { type: "boolean", description: "HUMAN-INITIATED ONLY: never pass this on your own. Re-sign every commit of the branch (git rebase -f --rebase-merges --gpg-sign), force-push with lease, then finalize. For an operator who has unlocked the signing agent after an awaiting-signing result" } }), fn: prFinalize },
   {
