@@ -75,7 +75,7 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] P6-05 Phase 6 end: push and record the manual check
 - [x] R1-01 Guard: close the self-protection bypasses in Bash write rules
 - [x] R1-02 Guard: network rule and deny.paths reach through git options, Glob patterns, $HOME and substitutions
-- [ ] R1-03 Guard: allow cleanflate's four remaining false positives by classifying pattern operands
+- [x] R1-03 Guard: allow cleanflate's four remaining false positives by classifying pattern operands
 - [ ] R1-04 Test verifyChain's prev linkage and seq density in mcp/cleanroom.mjs
 - [ ] R1-05 Test the verifier's prev linkage and add the rehashed edit to the both-copies-agree fixtures
 - [ ] R1-06 Test the gate's liveness kind, genesis match and the trailer's default task
@@ -298,3 +298,8 @@ docs/cleanroom.md rule 6 updated. Self-test 178 cases.
 13 new guard fixtures; self-test 191 cases. bashVerdict(command, depth) now recursive over $()/backtick/<()/sh -c/eval bodies (depth cap 4), $HOME expansion, gitSubcommand skips global options, absolute/~ Glob patterns checked via pathVerdict.
 Interpretation: added a fifth KNOWN_LIMITS entry (variables other than HOME, run-time-built strings); updated counts in test/cleanroom.mjs and test/attest.mjs (outside listed files, required). Single-quoted $( stays literal.
 docs/cleanroom.md rules 5, 6 and known gaps updated.
+
+### R1-03 — cde4ddf
+patternOperands(word, rest) classifies grep-family first operand/-e values, sed script/-e values, awk program, find -name/-path/-regex values as non-path in rule 6c. Self-test 194 cases.
+Now allowed by: FP1 (sed -i script + bare files, cwd in repo -> outside clause false), FP6 (grep pattern with slashes; path operand 'crates' in repo), FP7 and FP8 (grep -E/awk patterns; operands in repo). Prior-art find / -path still denied (/ outside repo).
+Interpretation: rule 6b still checks all tokens against deny.paths; shellCwd not used in read rules.
