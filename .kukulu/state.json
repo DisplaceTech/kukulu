@@ -50,5 +50,6 @@
   },
   "cleanroom": {
     "mode": "general"
-  }
+  },
+  "breaking": true
 }
