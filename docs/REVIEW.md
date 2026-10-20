@@ -1,59 +1,66 @@
 <!-- Kūkulu review, build/2026-10-20 -->
-Round: 1
+Round: 2
 
 # Review: Kūkulu 0.7.1 build
 
-**Verdict:** CHANGES REQUESTED
+**Verdict:** APPROVED
 
-Base `870405426ff3` (main), head `428bd99`, 17 tasks, all done, none blocked or skipped. I ran `kukulu_verify` myself and it is green. All 28 constraints pass with no hits and no fixture failures. `npm run lint`, `pre-commit run --all-files` and `npm test` (3695 assertions) pass. I also ran the guard self-test (`guard self-test: ok (501 cases)`) and `npm run check:site` by hand, and both pass. `docs/kukulu.json` parses identically to the base. Its constraints match `docs/flights/v0-7-0/kukulu.json` except for the dropped `no-foundry-names` `from` (a PLAN decision) and the added `progress-no-bare-macron`, so principle 7 holds. `git diff 870405426ff3..HEAD -- test/fixtures/guard-cases.json` only adds lines: no existing fixture changed, so principle 6 holds.
+Base `870405426ff3` (main), head `cee1ee1` at the start of this review. There are 19 tasks: the 17 planned and the two round-1 fixes (R1-01, R1-02). All are done, and none are blocked or skipped. Round 1 reviewed the whole branch. Since `lastReviewCommit` (`02b0bb0`), the fix round changed only `test/implement.mjs`, `test/streams.mjs` and `test/fixtures/guard-cases.json`, plus the pipeline's own state, PROGRESS and HANDOFF. Neither commit touches the server, the guard or any docs.
 
-I mutation-sampled every changed module with targeted suites:
+I ran `kukulu_verify` myself, with the three changed files as `files`, and it is green:
 
-| File | Mutant | Result |
-|---|---|---|
-| `mcp/cleanroom.mjs` | rsync recursive containment removed | killed |
-| `mcp/cleanroom.mjs` | tar `writesArchive` reduced to `c` only | **survived** |
-| `mcp/cleanroom.mjs` | `--get` removed from `TAR_LONG_MODES` | **survived** |
-| `mcp/cleanroom.mjs` | tar archive-file wildcard check removed | **survived** |
-| `mcp/cleanroom.mjs` | rsync target wildcard check removed | **survived** |
-| `mcp/cleanroom.mjs` | `e` removed from `RSYNC_SPEC.short` | **survived** |
-| `mcp/server.mjs` | `git merge --abort` removed from syncBase's failed-commit catch | **survived** |
-| `mcp/server.mjs` | the no-streams condition removed from taskNext's sync | **survived** |
-| `mcp/server.mjs` | the signing-fallback retry given `-- <paths>` again during the merge | **survived** |
-| `mcp/server.mjs` | `covers(c.exclude)` removed from refuseProgressText | killed |
-| `mcp/server.mjs` | run_start's alreadyStarted result without `baseSynced` | killed |
-| `mcp/server.mjs` | flightNotesRange never ends at the next level-2 heading | killed |
-| `mcp/server.mjs` | gate `unpinned` always empty | killed |
-| `scripts/verify-attestation.mjs` | the cleanroomHash mismatch failure disabled | killed |
+- All 28 constraints pass, with no hits and no fixture failures.
+- `npm run lint`, `pre-commit run --all-files` and `npm test` pass (3715 assertions).
+- The guard self-test passes (`guard self-test: ok (509 cases)`).
+
+Two more checks found nothing:
+
+- `git diff --numstat 870405426ff3..HEAD -- test/fixtures/guard-cases.json` reads `519 0`. The file only gained lines, so no existing fixture changed and principle 6 holds.
+- No file under `docs/SPEC.md`, `docs/plans/`, `docs/flights/`, `docs/site/`, `.github/`, `.gitignore` or `.gitattributes` changed on the branch.
+
+## CI
+
+`kukulu_status`'s `prChecks` read `unknown: unknown flag: --json`, because the local `gh` 2.45.0 has no `gh pr checks --json`. This is not a finding. I logged it as pipeline feedback and read CI by hand instead. PR #3 is a draft from `build/2026-10-20`. On commit `cee1ee1`, all twelve check runs succeed:
+
+- Cloudflare Pages
+- actionlint and actionlint (workflow syntax)
+- gitleaks
+- mermaid (diagrams parse)
+- pre-commit
+- site checks
+- test on node 22, 24 and 26, on macOS, and with no gh on PATH
+
+## Mutation checks on the fix round
+
+The round-2 files are tests and fixtures. So I re-ran every round-1 survivor against the mechanic those tests cover, and each one is now killed:
+
+- The `mcp/server.mjs` mutants ran with the targeted suite and `confirmKill`. Each re-run on the unmutated tree passed.
+- The `mcp/cleanroom.mjs` mutants also ran with the guard self-test alone. That showed which fixture catches each one, because the `cleanroom` suite only names the gate's self-test failure (test 159).
+
+| File | Mutant | Result | Caught by |
+|---|---|---|---|
+| `mcp/server.mjs` | `git merge --abort` removed from syncBase's failed-commit catch | killed | implement: "...the tree is clean", "...and the base's file is absent" (R1-01) |
+| `mcp/server.mjs` | signing-fallback retry given `-- <paths>` during the merge | killed | implement: "a base sync whose signing fails under signing auto is retried unsigned and lands the merge commit" (R1-01) |
+| `mcp/server.mjs` | the no-streams condition removed from taskNext's sync | killed | streams: "a serial task_next in a plan with streams never merges the base" (R1-01) |
+| `mcp/cleanroom.mjs` | tar `writesArchive` reduced to `c` | killed | four tar append/update fixtures (R1-02) |
+| `mcp/cleanroom.mjs` | `--get` removed from the tar long modes | killed | `tar --get -f a.tar -C docs (R1-02)` |
+| `mcp/cleanroom.mjs` | `e` removed from `RSYNC_SPEC.short` | killed | `rsync evil/cleanroom.json docs -e ssh (R1-02)` |
+| `mcp/cleanroom.mjs` | rsync target wildcard check removed | killed | `rsync evil/x docs/cleanroom.js?? (R1-02)` |
+| `mcp/cleanroom.mjs` | tar archive-file wildcard check removed | killed | `tar cf docs/cleanroom.js?? src (R1-02)` |
 
 ## Findings
 
-### 1. Category 3: B-03's failure, signing and parallel-plan paths are untested (P1-03)
+None.
 
-`mcp/server.mjs` `syncBase` (around lines 2166–2200), `commitStaged`'s `pathspec` retry (around line 451), and `taskNext`'s sync condition (around line 2415). Three mechanics have no test that fails without them:
-
-- **A failed merge commit.** The `catch` that runs `git merge --abort` after `commitStaged` throws can be deleted and every suite still passes. That breaks SPEC §3 principle 4 and CLAUDE.md principle 3 ("a tool whose final commit fails leaves the tree as it found it"), and CLAUDE.md's Commit-failure tests protocol. Without the abort, a rejected `chore: merge` commit leaves `MERGE_HEAD` and a staged merge behind, and the next tool call commits it under some other subject.
-- **The signing fallback during the merge.** If the unsigned retry goes back to `git commit -- <paths>`, git refuses that during a merge, so a flight on `signing: auto` with a dead signer cannot sync. SPEC B-03 step 1 requires that "signing … behave like any other server commit". No test covers it.
-- **A serial `kukulu_task_next` in a plan that declares streams.** If the `!parseProgress().tasks.some((t) => t.stream)` condition is removed, nothing fails. SPEC B-03 says "A parallel flight syncs only at `kukulu_run_start`".
-
-Minimal fix: tests only, unless one exposes a bug. See R1-01.
-
-### 2. Category 3: some A-04 spellings and the new wildcard checks have no fixture (P0-05)
-
-`mcp/cleanroom.mjs` `tarParts` / `RSYNC_SPEC` / the 6d' block (around lines 953–990 and 1275–1380). These mutants survive both `test/cleanroom.mjs` (which runs every fixture) and the guard self-test:
-
-- Reducing `writesArchive` to create mode only. SPEC A-04 names append and update (`-r`, `-u` and their long forms), and no fixture uses them.
-- Dropping `--get` as an extraction. SPEC A-04 names `--get`.
-- Treating rsync's `-e` as a flag. SPEC A-04 names `-e|--rsh` as taking a value. The only fixture, `rsync -e ssh -a src/ build/`, is allowed either way, so it proves nothing.
-- Deleting the wildcard check on rsync's targets, or on tar's archive file.
-
-The behavior is right today (I probed each form against `evaluate`). A later edit could remove any of these without a failing test. Minimal fix: fixtures only. See R1-02.
-
-No other findings. No category 1 or 2 issue. No `.gitignore`, CI or editor-config edit. Every task's diff stays within its listed files, apart from P0-07's `test/harness.mjs` helper option, which its `Interpretation:` line declares. I read each HANDOFF interpretation choice against SPEC. The tar "lies under a protected path" extension and the `A`/`--delete` modes fail closed and are documented. Running the sync in review-fix `run_start` is what B-03's "on an existing build branch" says. `run_halt`'s reason check follows PLAN's recorded spec issue. Running every base fixture against the new code shows no regression of a denied form, since the self-test passes with no fixture changed.
+- **Categories 1 and 2:** no constraint or boundary issue.
+- **Category 3:** each R1-01 test drives the mechanic through the tool and asserts the observable state: HEAD, the index, the tree and the merge's parents. Each test fails without its mechanic. The R1-02 fixtures follow the file's naming, policy and indentation conventions.
+- **Interpretations and blocked tasks:** the round-1 HANDOFF section lists no new interpretation choices, and there are no blocked tasks.
 
 ## Spec issues
 
-- §1 "Why a patch version" says the guard denies "two command forms it allowed before (A-04)". The build also newly denies A-02's bare read-family operand (`cat zlib.txt`), the rsync remote operand, and a tar extraction at the repository root. Both of the last two follow from A-04 as PLAN resolved it. The sentence undercounts.
+These carry over from round 1, and nothing in the fix round changes them:
+
+- §1 "Why a patch version" says the guard denies "two command forms it allowed before (A-04)". The build also newly denies three more kinds of command: A-02's bare read-family operand (`cat zlib.txt`), the rsync remote operand, and a tar extraction at the repository root. The last two follow from A-04 as PLAN resolved it. The sentence undercounts.
 - A-04's "a remote operand … is already a network command under `deny.network`" was false at the base. PLAN's spec issue records this, and P0-05 made it true.
 
 ### Known-gap candidates
@@ -63,15 +70,17 @@ No other findings. No category 1 or 2 issue. No `.gitignore`, CI or editor-confi
 
 ## Manual checks still owed
 
-- Phase 0: in a live clean-room session with the working-tree plugin (`claude --plugin-dir .`), `git add docs/*` is allowed and `rsync evil/cleanroom.json docs/` is denied; CI is green on the pushed branch.
-- Phase 1: on a throwaway flight with the working-tree plugin, commit to the base branch after the build branch is cut, then call `kukulu_task_next` and see the `chore: merge` commit.
-- Phase 2: the draft PR targets `main`, and its ci, lint and site checks are green.
+- Phase 0: in a live clean-room session with the working-tree plugin (`claude --plugin-dir .`), check that `git add docs/*` is allowed and `rsync evil/cleanroom.json docs/` is denied. Check that CI is green on the pushed branch (it is green on `cee1ee1`, see CI above).
+- Phase 1: on a throwaway flight with the working-tree plugin, commit to the base branch after the build branch is cut. Then call `kukulu_task_next` and check for the `chore: merge` commit.
+- Phase 2: check that the draft PR targets `main` and that its ci, lint and site checks are green.
 - Before merging, run `npm test` once on a machine with the signing agent the project uses.
 
 ## Notes
 
-- `mcp/server.mjs` around line 2667: P1-02 inserted `constraintTests`, `constraintFixtureFailure` and `refuseProgressText` beneath `checkConstraints`'s doc comment, which ends "Line-based only; no multi-line patterns". That comment now sits above `const constraintTests` instead of the function it describes.
-- `mcp/cleanroom.mjs` `KNOWN_LIMITS`'s doc comment still cites "SPEC D-03". P0-01's design constraint asked it to name SPEC A-01.
-- The recursive rsync denial reason quotes the destination form, not the protected path. For example, `cd docs && rsync -a ../evil/ .` gives `protected path: /p/docs (rsync writes it into .)`. This matches the existing recursive `cp` message, so it is consistent, but it reads oddly.
-- `kukulu_status`'s `prChecks` reads `unknown: unknown flag: --json`: the local `gh` does not support `gh pr checks --json`. A round-2 reviewer on this machine will not get a CI signal from it.
-- `docs/kukulu.json` has `maxRounds: 6`, while PLAN's Decisions says it keeps the default 3.
+- Mutating `mcp/cleanroom.mjs` under the targeted `cleanroom` suite always fails at "the first kukulu_next in a clean-room project goes on to the plan stage". The reason is that gate check 4 runs the guard self-test against the mutated module. After that the suite crashes on an unrelated `git checkout` (around `test/cleanroom.mjs:539`), so the fixture names never reach the failure tail. The kill is real, but to see which fixture caught a guard mutant, run the guard self-test command.
+- In R1-01's failed-commit test, the "...no merge is left in progress" assertion still passes without `git merge --abort`, because commitStaged's own reset clears `MERGE_HEAD`. The tree and `base.txt` assertions in the same test do catch the missing abort.
+- These round-1 notes still stand, and none of them blocks anything:
+  - In `mcp/server.mjs`, `checkConstraints`'s doc comment now sits above `const constraintTests`.
+  - `KNOWN_LIMITS`'s doc comment cites SPEC D-03 instead of A-01.
+  - The recursive rsync denial quotes the destination form rather than the protected path.
+  - `docs/kukulu.json` has `maxRounds: 6`, while PLAN's Decisions says it keeps the default 3.
