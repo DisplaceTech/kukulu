@@ -70,7 +70,7 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] P5-09 Phase 5 end: push and record the manual check
 - [x] P6-01 Operations, architecture and writing-specs for 0.7.0
 - [x] P6-02 mcp-tools.md and README for 0.7.0
-- [~] P6-03 CHANGELOG 0.7.0, the version and the feedback header
+- [x] P6-03 CHANGELOG 0.7.0, the version and the feedback header
 - [ ] P6-04 Apply the approved copy, a solid clean-room diagram and check-site rule 16
 - [ ] P6-05 Phase 6 end: push and record the manual check
 
@@ -272,3 +272,6 @@ docs/architecture.md: pieces diagram gains cleanroom-guard, cleanroom-log, mcp/c
 
 ### P6-02 — 4ffc136
 README: Clean-room mode in the feature list, the attestation sentence with a link to Verifying offline, and an 'Upgrading to 0.7.0' section (manual move of the old layout, FOUNDRY_* no longer read, kukulu_migrate was 0.6.x). docs/mcp-tools.md needed no new text (all sections/fields were added with their tools); plugin suite now asserts them: 563 assertions.
+
+### P6-03 — 1862012
+CHANGELOG [0.7.0] — 2026-10-19 with Summary, Added, Changed, Fixed (each cites kukulu-tech F-nn or Appendix A item n), Breaking changes (foundry removal, source required, plan_commit branch check, deprecations removed); version 0.7.0 in package.json, plugin.json, VERSION and the README badge. docs/feedback/2026-10-19-kukulu-tech.md (gitignored, local) got the line 'Addressed in: docs/SPEC.md v0.7.0 (flight v0-7-0)'. Plugin suite 563 assertions.
