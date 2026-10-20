@@ -923,6 +923,15 @@ export function evaluate(policy, hookInput, env) {
           if (w) writeDenied = denied(`protected path: ${w} (can be named by the wildcard ${t})`);
         });
         if (writeDenied) return writeDenied;
+        // cp, mv, ln and install into a directory write `<directory>/<basename of source>`, a path no operand names.
+        const landed = destinationPaths(word, rest);
+        for (const { target } of landed.targets) {
+          const forms = writeForms(target);
+          const f = forms.find((x) => protectedList.some((p) => underPrefix(x, p) || (landed.recursive && underPrefix(p, x))));
+          if (f) return denied(`protected path: ${f} (${word} writes it into ${landed.dir})`);
+          const w = wildcardNames(forms, protectedList);
+          if (w) return denied(`protected path: ${w} (can be named by the wildcard ${target})`);
+        }
         // A destructive form also destroys everything under the operand, so a protected path below it counts.
         for (const t of destructiveOperands(word, rest)) {
           const f = writeForms(tokenPath(t), gitCwd).find((x) => protectedList.some((p) => underPrefix(p, x)));
@@ -965,6 +974,44 @@ export function evaluate(policy, hookInput, env) {
     }
     return NO_ISSUES;
   }
+}
+
+/**
+ * Where cp, mv, ln and install put their sources: the -t/--target-directory
+ * value, else the last operand, is the destination directory, and each source
+ * lands at `<directory>/<basename>`. A source whose basename is `.` or `..`, or
+ * that ends in `/`, stands for the directory itself. `recursive` is a cp -r/-R/-a.
+ */
+function destinationPaths(word, rest) {
+  const none = { dir: null, recursive: false, targets: [] };
+  if (!["cp", "mv", "ln", "install"].includes(word)) return none;
+  let dir = null;
+  const operands = [];
+  let recursive = false;
+  for (let i = 0; i < rest.length; i++) {
+    const t = rest[i];
+    if (t === "--") {
+      operands.push(...rest.slice(i + 1));
+      break;
+    }
+    if (t === "-t" || t === "--target-directory") dir = rest[++i] ?? dir;
+    else if (t.startsWith("--target-directory=")) dir = t.slice(19);
+    else if (/^-t./.test(t) && !t.startsWith("--")) dir = t.slice(2);
+    else if (/^(?:-S|-m|-o|-g|--suffix|--mode|--owner|--group)$/.test(t)) i++;
+    else if (t.startsWith("-") && t.length > 1) {
+      if (word === "cp" && (/^-[A-Za-z]*[rRa][A-Za-z]*$/.test(t) || t === "--recursive" || t === "--archive")) recursive = true;
+    } else operands.push(t);
+  }
+  const sources = dir === null ? operands.slice(0, -1) : operands;
+  if (dir === null) dir = operands.length > 1 ? operands[operands.length - 1] : null;
+  if (dir === null) return none;
+  const targets = sources.map((src) => {
+    const trimmed = src.replace(/\/+$/, "");
+    const base = path.basename(trimmed);
+    const standsForDir = src.endsWith("/") || base === "." || base === ".." || base === "";
+    return { target: standsForDir ? dir : `${dir.replace(/\/+$/, "") || "/"}/${base}`, standsForDir };
+  });
+  return { dir, recursive, targets };
 }
 
 /**
