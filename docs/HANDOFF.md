@@ -209,3 +209,11 @@ Branch build/2026-10-19; task R9-01 done, 0 blocked (97/97 done overall).
 - Interpretation (R9-01): none. Both install readings (GNU and BSD) use install's list.
 - Fixtures: 10 denied and 2 allowed R9-01 cases; guard self-test is 457 cases. docs/cleanroom.md rule 6 updated.
 - Manual check: none.
+
+## Round 10
+
+Branch build/2026-10-19; task R10-01 done, 0 blocked (98/98 done overall).
+
+- R10-01 (6abb464): fixtures only in test/fixtures/guard-cases.json, 9 denied and 3 allowed, names end with (R10-01). They pin the attached `--name=value` branch and the ambiguous-prefix rule (`ln --s`, `cp --s`) for mv, ln, install. Guard self-test is 469 cases. No guard code changed.
+- Interpretation (R10-01): none.
+- Manual check: none. The reviewer should re-run the two round-10 mutants with kukulu_mutate.
