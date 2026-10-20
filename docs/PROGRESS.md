@@ -92,7 +92,7 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] R3-03 Guard: a bare cd moves to HOME, wrapper option values are skipped, and case arms and function bodies are judged
 - [x] R4-01 Guard: env -S's value is the command again, and long-form and xargs/stdbuf/time option values no longer hide the command word
 - [x] R4-02 Guard: compact function headers and arms without a space are stripped, and a cd operand without a slash is judged by rule 6b
-- [ ] R4-03 Guard: a cp, mv, ln or install into a directory is judged at the path it writes, so a protected file cannot be replaced without being named
+- [x] R4-03 Guard: a cp, mv, ln or install into a directory is judged at the path it writes, so a protected file cannot be replaced without being named
 
 ## Log
 
@@ -370,3 +370,6 @@ VALUED_OPTIONS table replaces if-chain; env -S/--split-string/-S<v> value re-spl
 
 ### R4-02 — f41a21c
 Header lookahead accepts `{`; arm pattern allows optional leading `(` and no trailing space; bare cd/pushd/read-family operands judged by pathVerdict. Interpretation: bare check placed after 6c to keep existing reasons (cd /usr/include && cat zlib.h expects forbidden word). 10 fixtures.
+
+### R4-03 — a653575
+destinationPaths() builds <dir>/<basename> for cp/mv/ln/install (-t, --target-directory, last operand; valued -S -m -o -g skipped); judged by literal and wildcardNames checks; recursive cp denies a landing path containing a protected path. 16 fixtures. Interpretation: containment check applies to every landing path of a recursive cp.
