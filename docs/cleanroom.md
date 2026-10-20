@@ -196,10 +196,10 @@ A check that cannot run because an earlier one broke its input says `not checked
 The tool log that earlier clean-room work kept has no hash chain and no signatures, so it cannot be verified, only read:
 
 ```text
-node scripts/verify-attestation.mjs --legacy-log <file> [--roots <a,b>] [--words <a,b>] [--repo <path>] [--json]
+node scripts/verify-attestation.mjs --legacy-log <file> --roots <a,b> --words <a,b> [--repo <path>] [--json]
 ```
 
-It parses every line (a line it cannot parse is counted and named, never dropped, and the exit status is 1), then prints the calls by tool and stage, the denials with their reasons, the number of read-capable calls, and the forbidden-read candidates: a read-capable call with a path-like token under a root, or naming a word while outside `--repo`. The defaults are the ones the first clean-room build used (the Cargo registry, the system `zlib.h`, and the compression-library names); pass your own. It always ends with `legacy log: no hash chain or signatures; integrity rests on the git history that holds it`, which is the honest limit: the log is only as good as the commits that hold it. For the 20-line excerpt of that build's log kept under `test/fixtures/`:
+It parses every line (a line it cannot parse is counted and named, never dropped, and the exit status is 1), then prints the calls by tool and stage, the denials with their reasons, the number of read-capable calls, and the forbidden-read candidates: a read-capable call with a path-like token under a root, or naming a word while outside `--repo`. There are no defaults: `--roots` and `--words` are the paths and names that belong to the project whose log you read, and leaving either out is a usage error. `--repo` defaults to the git repository the log file sits in, and is required when it sits in none. It always ends with `legacy log: no hash chain or signatures; integrity rests on the git history that holds it`, which is the honest limit: the log is only as good as the commits that hold it. For the 20-line excerpt of that build's log kept under `test/fixtures/`, read with the roots, words and repository root that build used:
 
 ```text
 legacy log: test/fixtures/<excerpt>.jsonl

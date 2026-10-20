@@ -5,7 +5,7 @@
 // be checkable by someone who does not trust, or even have, the plugin.
 //
 //   node verify-attestation.mjs <bundle-dir> [--key sha256:<hex>] [--json]
-//   node verify-attestation.mjs --legacy-log <file> [--roots a,b] [--words a,b] [--repo path] [--json]
+//   node verify-attestation.mjs --legacy-log <file> --roots a,b --words a,b [--repo path] [--json]
 
 import { createHash, createPublicKey, verify } from "node:crypto";
 import fs from "node:fs";
@@ -303,10 +303,6 @@ export function verifyBundle(dir, { key = null } = {}) {
 const LEGACY_STAGE_KEY = "foun" + "dry_stage";
 const READ_CAPABLE = ["Read", "Glob", "Grep", "Bash", "WebFetch"];
 const LEGACY_NOTE = "legacy log: no hash chain or signatures; integrity rests on the git history that holds it";
-// Cleanflate's own: where a clean-room build must not have looked, and the words it must not have named.
-const LEGACY_ROOTS = ["~/.cargo/registry/", "~/.cargo/git/", "/usr/include/zlib.h"];
-const LEGACY_WORDS = ["zlib", "miniz", "flate2", "libdeflate", "libz-sys", "libz_sys", "zopfli"];
-const LEGACY_REPO = "/media/ericmann/Data/Projects/cleanflate";
 
 const expandHome = (p) => (p === "~" || p.startsWith("~/") ? path.join(os.homedir(), p.slice(1)) : p);
 
@@ -333,11 +329,27 @@ function legacyTokens(target) {
 }
 
 /**
+ * The repository a log file sits in: the nearest ancestor holding `.git`, found
+ * without running git (SPEC F-03), or null outside any repository.
+ */
+export function repoRootOf(file) {
+  let dir = path.dirname(path.resolve(file));
+  for (;;) {
+    if (fs.existsSync(path.join(dir, ".git"))) return dir;
+    const up = path.dirname(dir);
+    if (up === dir) return null;
+    dir = up;
+  }
+}
+
+/**
  * Read a pre-0.6.0 tool log: one JSON object per line. Every line is parsed or
  * reported failed, never dropped. Forbidden-read candidates are read-capable
  * calls with a path-like token under a root, or naming a word outside the repository.
  */
-export function readLegacyLog(text, { roots = LEGACY_ROOTS, words = LEGACY_WORDS, repo = LEGACY_REPO } = {}) {
+// Roots, words and repo have no defaults: they belong to the project whose log is read, never to this reader.
+export function readLegacyLog(text, { roots, words, repo } = {}) {
+  if (!Array.isArray(roots) || !Array.isArray(words) || typeof repo !== "string") throw new TypeError("readLegacyLog needs roots and words (arrays) and repo (a path); pass the ones the logged project used");
   const rootPaths = roots.map(expandHome);
   const repoPath = path.resolve(expandHome(repo));
   const lines = text.split("\n");
@@ -398,7 +410,7 @@ function printLegacy(file, r) {
 
 function main(argv) {
   const args = argv.slice(2);
-  const usage = "usage: node verify-attestation.mjs <bundle-dir> [--key sha256:<hex>] [--json]\n       node verify-attestation.mjs --legacy-log <file> [--roots <a,b>] [--words <a,b>] [--repo <path>] [--json]\n";
+  const usage = "usage: node verify-attestation.mjs <bundle-dir> [--key sha256:<hex>] [--json]\n       node verify-attestation.mjs --legacy-log <file> --roots <a,b> --words <a,b> [--repo <path>] [--json]\n";
   let json = false;
   let key = null;
   let legacy = null;
@@ -427,9 +439,17 @@ function main(argv) {
       process.stderr.write("verify-attestation: --legacy-log takes a log file and no bundle directory or --key\n" + usage);
       return 2;
     }
-    if (given.roots) legacyOpts.roots = given.roots.split(",").filter(Boolean);
-    if (given.words) legacyOpts.words = given.words.split(",").filter(Boolean);
-    if (given.repo) legacyOpts.repo = given.repo;
+    if (!given.roots || !given.words) {
+      process.stderr.write("verify-attestation: --legacy-log needs --roots and --words: the paths the logged build must not have read and the names it must not have looked for; there are no defaults\n" + usage);
+      return 2;
+    }
+    legacyOpts.roots = given.roots.split(",").filter(Boolean);
+    legacyOpts.words = given.words.split(",").filter(Boolean);
+    legacyOpts.repo = given.repo ?? repoRootOf(legacy);
+    if (!legacyOpts.repo) {
+      process.stderr.write("verify-attestation: " + legacy + " is not inside a git repository; pass --repo <path> with the root the logged build ran in\n" + usage);
+      return 2;
+    }
     let text;
     try {
       text = fs.readFileSync(legacy, "utf8");
