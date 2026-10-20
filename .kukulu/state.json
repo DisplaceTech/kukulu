@@ -109,5 +109,6 @@
     "slug": "kukulu-tech",
     "dir": "docs/flights/kukulu-tech",
     "at": "2026-10-19T19:03:35.359Z"
-  }
+  },
+  "breaking": true
 }
