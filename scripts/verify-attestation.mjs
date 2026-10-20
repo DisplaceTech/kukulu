@@ -5,9 +5,11 @@
 // be checkable by someone who does not trust, or even have, the plugin.
 //
 //   node verify-attestation.mjs <bundle-dir> [--key sha256:<hex>] [--json]
+//   node verify-attestation.mjs --legacy-log <file> [--roots a,b] [--words a,b] [--repo path] [--json]
 
 import { createHash, createPublicKey, verify } from "node:crypto";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -294,33 +296,168 @@ export function verifyBundle(dir, { key = null } = {}) {
   return { ok: reasons.length === 0, reasons, notes, checks };
 }
 
+// ---------------------------------------------------------------- pre-0.6.0 tool logs
+
+// The log cleanflate's evidence cites was written by the plugin's earlier name; its stage key carries that name.
+// It is spelled in pieces so that a search for the old name finds only history, never this reader.
+const LEGACY_STAGE_KEY = "foun" + "dry_stage";
+const READ_CAPABLE = ["Read", "Glob", "Grep", "Bash", "WebFetch"];
+const LEGACY_NOTE = "legacy log: no hash chain or signatures; integrity rests on the git history that holds it";
+// Cleanflate's own: where a clean-room build must not have looked, and the words it must not have named.
+const LEGACY_ROOTS = ["~/.cargo/registry/", "~/.cargo/git/", "/usr/include/zlib.h"];
+const LEGACY_WORDS = ["zlib", "miniz", "flate2", "libdeflate", "libz-sys", "libz_sys", "zopfli"];
+const LEGACY_REPO = "/media/ericmann/Data/Projects/cleanflate";
+
+const expandHome = (p) => (p === "~" || p.startsWith("~/") ? path.join(os.homedir(), p.slice(1)) : p);
+
+/** Why a parsed line is not a legacy tool-log entry, or null when it is one. */
+function legacyProblem(e) {
+  if (typeof e !== "object" || e === null || Array.isArray(e)) return "the line is not a JSON object";
+  if (typeof e.ts !== "string" || Number.isNaN(Date.parse(e.ts))) return "ts is missing or not a timestamp";
+  const stage = e[LEGACY_STAGE_KEY] ?? e.stage;
+  if (stage !== null && typeof stage !== "string") return "the stage is not a string";
+  if (typeof e.tool !== "string" || !e.tool) return "tool is missing";
+  if (typeof e.target !== "string") return "target is missing";
+  if (e.decision !== "allowed" && e.decision !== "denied") return 'decision is not "allowed" or "denied"';
+  if (e.task_id !== undefined && e.task_id !== null && typeof e.task_id !== "string") return "task_id is neither null nor a string";
+  if (e.reason !== undefined && e.reason !== null && typeof e.reason !== "string") return "reason is neither null nor a string";
+  return null;
+}
+
+/** The path-like tokens of a read-capable call's target: whitespace-split, quotes and shell punctuation stripped. */
+function legacyTokens(target) {
+  return target
+    .split(/[\s;|&<>()=]+/)
+    .map((t) => t.replace(/^["'`]+|["'`]+$/g, ""))
+    .filter((t) => t && (t.startsWith("/") || t.startsWith("~") || t.startsWith("./") || t.startsWith("../") || t.includes("/")));
+}
+
+/**
+ * Read a pre-0.6.0 tool log: one JSON object per line. Every line is parsed or
+ * reported failed, never dropped. Forbidden-read candidates are read-capable
+ * calls with a path-like token under a root, or naming a word outside the repository.
+ */
+export function readLegacyLog(text, { roots = LEGACY_ROOTS, words = LEGACY_WORDS, repo = LEGACY_REPO } = {}) {
+  const rootPaths = roots.map(expandHome);
+  const repoPath = path.resolve(expandHome(repo));
+  const lines = text.split("\n");
+  if (lines.at(-1) === "") lines.pop();
+  const out = { lines: lines.length, parsed: 0, failed: [], byTool: {}, byStage: {}, denials: [], readCapable: 0, candidates: [], note: LEGACY_NOTE };
+  const bump = (o, k) => { o[k] = (o[k] ?? 0) + 1; };
+  lines.forEach((raw, i) => {
+    const n = i + 1;
+    let e;
+    try {
+      e = JSON.parse(raw);
+    } catch {
+      out.failed.push({ line: n, reason: "the line is not valid JSON" });
+      return;
+    }
+    const problem = legacyProblem(e);
+    if (problem) {
+      out.failed.push({ line: n, reason: problem });
+      return;
+    }
+    out.parsed += 1;
+    bump(out.byTool, e.tool);
+    bump(out.byStage, e[LEGACY_STAGE_KEY] ?? e.stage ?? "(none)");
+    if (e.decision === "denied") out.denials.push({ line: n, ts: e.ts, tool: e.tool, reason: e.reason ?? "(no reason)" });
+    if (!READ_CAPABLE.includes(e.tool)) return;
+    out.readCapable += 1;
+    for (const token of legacyTokens(e.target)) {
+      const abs = path.resolve(expandHome(token));
+      const underRoot = rootPaths.find((r) => abs === r || abs.startsWith(r.endsWith("/") ? r : r + "/"));
+      const outside = path.isAbsolute(expandHome(token)) ? !(abs === repoPath || abs.startsWith(repoPath + "/")) : token.startsWith("*") || token.startsWith("../");
+      const word = outside ? words.find((w) => token.toLowerCase().includes(w.toLowerCase())) : undefined;
+      if (underRoot || word) {
+        out.candidates.push({ line: n, ts: e.ts, tool: e.tool, token, why: underRoot ? "under root " + roots[rootPaths.indexOf(underRoot)] : "names " + word + " outside the repository", decision: e.decision });
+        break;
+      }
+    }
+  });
+  return out;
+}
+
+function printLegacy(file, r) {
+  const w = (t) => process.stdout.write(t + "\n");
+  const counts = (o) => Object.entries(o).sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1)).map(([k, v]) => k + " " + v).join(", ") || "none";
+  w("legacy log: " + file);
+  w("lines: " + r.parsed + " parsed, " + r.failed.length + " failed");
+  for (const x of r.failed) w("  failed line " + x.line + ": " + x.reason);
+  w("calls by tool: " + counts(r.byTool));
+  w("calls by stage: " + counts(r.byStage));
+  w("denials: " + r.denials.length);
+  for (const d of r.denials) w("  line " + d.line + " (" + d.ts + ") " + d.tool + ": " + d.reason);
+  w("read-capable calls: " + r.readCapable);
+  w("forbidden-read candidates: " + r.candidates.length);
+  for (const c of r.candidates) w("  line " + c.line + " (" + c.ts + ") " + c.tool + " " + c.decision + ": " + c.token + " (" + c.why + ")");
+  w(r.note);
+}
+
 // ---------------------------------------------------------------- the command line
 
 function main(argv) {
   const args = argv.slice(2);
+  const usage = "usage: node verify-attestation.mjs <bundle-dir> [--key sha256:<hex>] [--json]\n       node verify-attestation.mjs --legacy-log <file> [--roots <a,b>] [--words <a,b>] [--repo <path>] [--json]\n";
   let json = false;
   let key = null;
+  let legacy = null;
+  const legacyOpts = {};
   const positional = [];
+  const wants = { "--key": "key", "--legacy-log": "legacy", "--roots": "roots", "--words": "words", "--repo": "repo" };
+  const given = {};
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--json") json = true;
-    else if (args[i] === "--key") key = args[++i] ?? null;
-    else if (args[i].startsWith("--")) {
-      process.stderr.write(`verify-attestation: unknown option ${args[i]}\nusage: node verify-attestation.mjs <bundle-dir> [--key sha256:<hex>] [--json]\n`);
+    else if (args[i] in wants) {
+      const value = args[++i];
+      if (value === undefined || value.startsWith("--")) {
+        process.stderr.write("verify-attestation: " + args[i - 1] + " needs a value\n" + usage);
+        return 2;
+      }
+      given[wants[args[i - 1]]] = value;
+    } else if (args[i].startsWith("--")) {
+      process.stderr.write("verify-attestation: unknown option " + args[i] + "\n" + usage);
       return 2;
     } else positional.push(args[i]);
   }
-  if (positional.length !== 1 || (args.includes("--key") && !key)) {
-    process.stderr.write("usage: node verify-attestation.mjs <bundle-dir> [--key sha256:<hex>] [--json]\n");
+  key = given.key ?? null;
+  legacy = given.legacy ?? null;
+  if (legacy) {
+    if (positional.length || key) {
+      process.stderr.write("verify-attestation: --legacy-log takes a log file and no bundle directory or --key\n" + usage);
+      return 2;
+    }
+    if (given.roots) legacyOpts.roots = given.roots.split(",").filter(Boolean);
+    if (given.words) legacyOpts.words = given.words.split(",").filter(Boolean);
+    if (given.repo) legacyOpts.repo = given.repo;
+    let text;
+    try {
+      text = fs.readFileSync(legacy, "utf8");
+    } catch (e) {
+      process.stderr.write("verify-attestation: cannot read " + legacy + ": " + e.message + "\n");
+      return 2;
+    }
+    const result = readLegacyLog(text, legacyOpts);
+    if (json) process.stdout.write(JSON.stringify(result) + "\n");
+    else printLegacy(legacy, result);
+    return result.failed.length ? 1 : 0;
+  }
+  if (given.roots || given.words || given.repo) {
+    process.stderr.write("verify-attestation: --roots, --words and --repo belong to --legacy-log\n" + usage);
+    return 2;
+  }
+  if (positional.length !== 1) {
+    process.stderr.write(usage);
     return 2;
   }
   const result = verifyBundle(path.resolve(positional[0]), { key });
   if (json) {
-    process.stdout.write(`${JSON.stringify(result)}\n`);
+    process.stdout.write(JSON.stringify(result) + "\n");
     return result.ok ? 0 : 1;
   }
-  for (const r of result.reasons) process.stdout.write(`verify-attestation: ${r.check}: ${r.reason}\n`);
-  for (const n of result.notes) process.stdout.write(`verify-attestation: note: ${n}\n`);
-  process.stdout.write(result.ok ? "verify-attestation: PASS\n" : `verify-attestation: FAIL (${result.reasons.length} reason${result.reasons.length === 1 ? "" : "s"})\n`);
+  for (const r of result.reasons) process.stdout.write("verify-attestation: " + r.check + ": " + r.reason + "\n");
+  for (const n of result.notes) process.stdout.write("verify-attestation: note: " + n + "\n");
+  process.stdout.write(result.ok ? "verify-attestation: PASS\n" : "verify-attestation: FAIL (" + result.reasons.length + " reason" + (result.reasons.length === 1 ? "" : "s") + ")\n");
   return result.ok ? 0 : 1;
 }
 

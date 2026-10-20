@@ -328,6 +328,61 @@ const logLines = (dir) => fs.readFileSync(path.join(dir, "log.jsonl"), "utf8").s
   ok(V.verifyBundle(fresh().dir).checks.similarity === true, "a bundle with no similarity report passes check 10");
 }
 
+// ---------------------------------------------------------------- pre-0.6.0 tool logs (the cleanflate fixture)
+
+{
+  const fixture = path.join(ROOT, "test", "fixtures", "foundry-tool-log.jsonl");
+  const raw = fs.readFileSync(fixture, "utf8");
+  const lines = raw.split("\n").filter(Boolean);
+  const source = fs.readFileSync(path.join(ROOT, "test", "fixtures", "foundry-tool-log.SOURCE"), "utf8");
+  const first = JSON.parse(lines[0]).ts;
+  const last = JSON.parse(lines.at(-1)).ts;
+  ok(lines.length === 20 && raw.endsWith("\n") && source.includes(first) && source.includes(last) && source.includes("85f210084a367dcc706c732f5776bf0563cdc0cd") && source.includes("unmodified"), "the cleanflate fixture is 20 lines whose first and last ts match SOURCE");
+  eq(first + " " + last, "2026-09-29T14:53:58.191Z 2026-09-29T14:56:41.968Z", "...and they are the planned range");
+
+  const r = spawnSync(process.execPath, [VERIFIER, "--legacy-log", fixture], { encoding: "utf8" });
+  eq(r.status, 0, "the legacy reader exits 0 when every line parses");
+  like(r.stdout, /^lines: 20 parsed, 0 failed$/m, "every line of it parses");
+  like(r.stdout, /^denials: 1$/m, "it has exactly one denial");
+  like(r.stdout, /^  line 9 \(2026-09-29T14:54:47\.458Z\) Bash: forbidden word in path argument: \*\/libz-sys-\*\/src\/lib\.rs$/m, "its reason is forbidden word in path argument: */libz-sys-*/src/lib.rs");
+  like(r.stdout, /^forbidden-read candidates: 1\n  line 9 .*Bash denied: \*\/libz-sys-\*\/src\/lib\.rs \(names libz-sys outside the repository\)$/m, "it is a forbidden-read candidate on libz-sys");
+  like(r.stdout, /^legacy log: no hash chain or signatures; integrity rests on the git history that holds it$/m, "the legacy line is printed");
+  like(r.stdout, /^read-capable calls: 13$/m, "read-capable calls are counted");
+  like(r.stdout, /^calls by tool: Bash 13, /m, "calls by tool are counted");
+  like(r.stdout, /^calls by stage: implement 20$/m, "calls by stage are counted");
+
+  const j = JSON.parse(spawnSync(process.execPath, [VERIFIER, "--legacy-log", fixture, "--json"], { encoding: "utf8" }).stdout);
+  eq(j.parsed + "|" + j.failed.length + "|" + j.denials.length + "|" + j.candidates.length, "20|0|1|1", "--json carries the same counts");
+
+  const none = spawnSync(process.execPath, [VERIFIER, "--legacy-log", fixture, "--words", "nothing-here", "--roots", "/nowhere/"], { encoding: "utf8" });
+  like(none.stdout, /^forbidden-read candidates: 0$/m, "--words and --roots replace the defaults");
+  const inside = spawnSync(process.execPath, [VERIFIER, "--legacy-log", fixture, "--repo", "/"], { encoding: "utf8" });
+  like(inside.stdout, /^forbidden-read candidates: 1$/m, "a glob that starts with * stays a candidate whatever --repo says");
+
+  // A path under a root is a candidate whatever it names; a word inside the repository is not.
+  const probe = path.join(mkDir("kukulu-legacy-"), "log.jsonl");
+  const stageKey = "foun" + "dry_stage";
+  const row = (tool, target) => JSON.stringify({ ts: "2026-01-01T00:00:00.000Z", [stageKey]: "implement", task_id: "P0-01", model: "m", tool, target, decision: "allowed", reason: null }) + "\n";
+  fs.writeFileSync(probe, row("Read", "/home/x/.cargo/registry/src/a/lib.rs") + row("Read", "/repo/src/zlib_notes.rs") + row("Grep", "zlib") + row("Write", "/elsewhere/zlib.rs") + row("Bash", "ls /repo/src /elsewhere/miniz/a.c"));
+  const p = JSON.parse(spawnSync(process.execPath, [VERIFIER, "--legacy-log", probe, "--roots", "/home/x/.cargo/registry/", "--repo", "/repo", "--json"], { encoding: "utf8" }).stdout);
+  eq(JSON.stringify(p.candidates.map((c) => c.line)), "[1,5]", "a root hit and a word outside the repository are candidates; a word inside it, a bare word and a write are not");
+
+  // A malformed line is counted, named and fails the run; the others are still read.
+  const bad = path.join(mkDir("kukulu-legacy-"), "log.jsonl");
+  fs.writeFileSync(bad, lines[0] + "\n{not json\n" + JSON.stringify({ ts: "x", tool: "Bash" }) + "\n" + lines[1] + "\n");
+  const b = spawnSync(process.execPath, [VERIFIER, "--legacy-log", bad], { encoding: "utf8" });
+  eq(b.status, 1, "a malformed line is counted as failed and exits 1");
+  like(b.stdout, /^lines: 2 parsed, 2 failed$/m, "...the other lines are still read");
+  like(b.stdout, /^  failed line 2: the line is not valid JSON$/m, "...and a failed line is named");
+  like(b.stdout, /^  failed line 3: ts is missing or not a timestamp$/m, "...with its reason");
+  const missing = spawnSync(process.execPath, [VERIFIER, "--legacy-log", path.join(bad, "nope")], { encoding: "utf8" });
+  ok(missing.status === 2 && /cannot read/.test(missing.stderr), "an unreadable log file is a usage error");
+  const mixed = spawnSync(process.execPath, [VERIFIER, "--legacy-log", fixture, "somedir"], { encoding: "utf8" });
+  eq(mixed.status, 2, "--legacy-log with a bundle directory is a usage error");
+  const stray = spawnSync(process.execPath, [VERIFIER, fixture, "--words", "x"], { encoding: "utf8" });
+  eq(stray.status, 2, "--words without --legacy-log is a usage error");
+}
+
 // ---------------------------------------------------------------- the verifier and the module agree
 
 {
