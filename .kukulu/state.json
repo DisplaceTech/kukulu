@@ -1,10 +1,10 @@
 {
-  "round": 4,
-  "implemented": true,
-  "reviewed": false,
-  "verdict": null,
+  "round": 5,
+  "implemented": false,
+  "reviewed": true,
+  "verdict": "CHANGES REQUESTED",
   "summarized": false,
-  "halted": null,
+  "halted": "round 5 is non-converging (findings per round: 7 → 7 → 3 → 3 → 3), the 3rd non-converging round, reaching maxRounds=3; a human must decide whether to continue: call kukulu_flight_options({ maxRounds: 4, resume: true })",
   "preexistingUntracked": [],
   "policies": {
     "signing": "auto",
@@ -48,11 +48,24 @@
       "verdict": "CHANGES REQUESTED",
       "nonConverging": true,
       "at": "2026-10-20T05:06:51.835Z"
+    },
+    {
+      "round": 5,
+      "fixTasks": 3,
+      "unblocked": 0,
+      "verdict": "CHANGES REQUESTED",
+      "nonConverging": true,
+      "at": "2026-10-20T05:44:11.506Z"
     }
   ],
   "archived": {
     "slug": "kukulu-tech",
     "dir": "docs/flights/kukulu-tech",
     "at": "2026-10-19T19:03:35.359Z"
+  },
+  "haltCap": {
+    "cap": "maxRounds",
+    "round": 5,
+    "nonConverging": 3
   }
 }

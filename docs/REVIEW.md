@@ -1,5 +1,5 @@
 <!-- Kūkulu review, build/2026-10-19 -->
-Round: 4
+Round: 5
 
 # Review: Kūkulu 0.7.0 build (build/2026-10-19)
 
@@ -9,24 +9,24 @@ CHANGES REQUESTED
 
 What I checked:
 
-- All 85 tasks are done. None are blocked or skipped.
-- At `050cb9f`, `kukulu_verify` passes.
+- All 88 tasks are done. None are blocked or skipped.
+- At `7b199c0`, `kukulu_verify` passes.
   - All 27 `docs/kukulu.json` constraints are clean, and their fixture self-test passes.
   - `npm run lint` and `pre-commit run --all-files` pass.
-  - The 13 suites pass: 3,407 assertions.
-  - The guard self-test passes: 310 cases.
-- **PR #1's CI is all green at `050cb9f`, `test (macos)` included** (7m9s; `gh pr checks`, because the installed 0.6.1 `kukulu_status` has no `prChecks`). So round 3's F1 is fixed, and R3-01's owed manual check is done.
-- Round 3 changed only `mcp/cleanroom.mjs`, `test/cleanroom.mjs`, `test/fixtures/guard-cases.json`, `docs/cleanroom.md` and the pipeline files (`git diff --name-only 42a0c08..HEAD`).
+  - The 13 suites pass: 3,450 assertions.
+- Round 4 changed only `mcp/cleanroom.mjs`, `test/fixtures/guard-cases.json`, `docs/cleanroom.md` and the pipeline files (`git diff --name-only 2d0cfba..HEAD`).
   - It did not touch `docs/SPEC.md`, `docs/plans/`, `docs/flights/`, `docs/site/`, `.gitignore`, `.gitattributes` or CI config.
-  - The only existing fixture line that changed is R3-01's Glob-climb pattern. The other 42 fixtures were added.
-- Every acceptance fixture that R3-02 and R3-03 name is in `guard-cases.json`, with the expected decision and reason. I also ran every round-3 probe (REVIEW round 3, F2 and F3) through `evaluate()` again. Each one is now denied, and every "stays allowed" form is still allowed.
+  - No existing fixture line changed. Round 4 only added fixtures, 349 cases in all.
+  - Each task updated rule 6 in `docs/cleanroom.md`.
+- Every acceptance fixture that R4-01, R4-02 and R4-03 name is in `guard-cases.json`, with the expected decision and reason. I ran every round-4 probe (REVIEW round 4, F1 to F4) through `evaluate()` again. Each one is now denied, and every "stays allowed" form is still allowed.
 
-Round 3's fixes hold for the forms round 3 named. Four problems remain, each a spelling the round-3 mechanics do not cover:
+Round 4's fixes hold for the forms round 4 named. Three problems remain:
 
-- **R3-03 made one form looser (F1).** `env -S curl https://evil` was denied at `43afd66` and is allowed at HEAD.
-- **Gaps in R3-03's own mechanic (F2).** The compact function header `f(){`, a case arm with no space after `)`, the long-option spellings of the valued wrapper options, and the valued options of `xargs`, `stdbuf` and `time` all still hide the command.
-- **Gap in the `cd` tracking from R2-01 and R3-03 (F3).** A `cd` operand without a `/` moves the shell without being judged, so `cd ~/.cargo && cd registry && cat x` reads the registry.
-- **A gap in rule 6d since P3 that no round named (F4).** A write-family command whose destination is a directory overwrites a protected file without naming it. `cp x/cleanroom.json docs/` and `cp x/state.json .kukulu/` replace both the policy and the hash the gate pins it to.
+- **R4-01 made one form looser again (F1).** `env -S -i curl https://evil` was denied at `2d0cfba` and is allowed at HEAD.
+- **Option bundling and long-option abbreviation (F2).** The new `VALUED_OPTIONS` table and `destinationPaths` match only whole tokens, so `-iu`, `-tn`, `-vt` and `--target` still hide the command or the destination. The `-vt` form replaces the policy (D-10).
+- **A bare glob operand (F3).** R4-02's new check judges a bare operand as a literal path only, so `cd ~/.cargo && cd r* && cat x` and `cd ~/.cargo && ls regis*` reach the registry.
+
+I verified every bypass below against the real tools on this machine (GNU coreutils 9.4, findutils 4.9.0, sudo), using `echo` in place of `curl`. Each form ran its command.
 
 ## Findings
 
@@ -34,122 +34,104 @@ Most severe first. Every probe ran `evaluate()` with these settings:
 
 - policy: `templates/cleanroom.example.json`
 - root `/tmp/proj`, home `/home/u`, cwd `/tmp/proj`, `planExists: true`
-- D-10's protected set from `protectedPaths()`: policy path, plugin root, key path
+- D-10's protected set from `protectedPaths()`
 
-The "at `43afd66`" column comes from `git show 43afd66:mcp/cleanroom.mjs`, run with the same inputs.
+The "at `2d0cfba`" column comes from `git show 2d0cfba:mcp/cleanroom.mjs`, run with the same inputs. That is the round-4 base.
 
-### F1: R3-03 skips `env -S`'s value, but that value *is* the command, so `env -S curl https://evil` became allowed (category 5, regression; SPEC D-03 canonicalization, rule 6a; task R3-03)
+### F1: After it splits `env -S`'s value, `commandWord` stops parsing options, so a split value that starts with an option hides the command (category 5, regression; SPEC D-03 canonicalization, rule 6a; task R4-01)
 
-`mcp/cleanroom.mjs:562` reads:
+`mcp/cleanroom.mjs:572-583`: after the split words are put in place of the `-S` token, both branches `break` out of the option loop. The outer loop then takes the first split word as the command word, even when it is an option. GNU env parses the words of a split string as further arguments, options included: `env -S -i echo hi` prints `hi`.
 
-```js
-if (base === "env" && /^-[uCS]$/.test(flag) && i < tokens.length) i++;
-```
-
-- GNU `env -S STRING` (`--split-string`) splits STRING into words and runs them as the command, followed by the remaining arguments.
-- So in `env -S curl https://evil`, the word `curl` is the command. The guard skips it as a flag value and takes `https://evil` as the command word.
-
-| Command | at `43afd66` | at HEAD |
+| Command | at `2d0cfba` | at HEAD |
 |---|---|---|
-| `env -S curl https://evil` | denied (network) | **allowed** |
-| `env -S 'curl https://evil'` | allowed | allowed |
-| `env --split-string='curl https://evil'` | allowed | allowed |
+| `env -S -i curl https://evil` | denied (network) | **allowed** |
+| `env -S '-i curl https://evil'` | allowed | allowed |
+| `env -S'-u X curl https://evil'` | allowed | allowed |
 
-Round 3's own F3 fix text listed `-S` among the values to skip. That was the review's mistake, and the implementer followed it exactly.
+At `2d0cfba`, round 3 skipped `-S`'s value (`-i`), and `curl` became the command. R4-01 now splits the value, but `break` makes `-i` the command word.
 
-What breaks: one word in front of any network command gets past the network ban again. A fix round made the guard looser than it was before.
+What breaks: one option in front of a network command gets past the network ban, and a fix round has made the guard looser for the second round running.
 
-Minimal fix:
+Minimal fix: after the split, put `i` back on the first split word and keep running the option loop (`continue`, not `break`). A leading `-i`, `-u X` or `-C dir` is then parsed as env's option, and the first non-option word ends the loop as usual.
 
-- Do not skip `-S`/`--split-string`'s value. Split it with `shellWords`, put the words back in its place, and keep judging, so the first of them becomes the command word.
-- Alternatively, judge `<value> <rest…>` as a further command line, the way the `sh -c` string is judged.
+### F2: A short-option bundle or a long-option abbreviation still hides a valued option's value, both in `commandWord` and in `destinationPaths`'s `-t` (category 5; SPEC D-10 self-protection, D-03 rules 6a and 6d; tasks R4-01, R4-03)
 
-### F2: The function header `f(){`, an arm `x)cmd`, the long-option spellings of the valued wrapper options, and the valued options of `xargs`, `stdbuf` and `time` still hide the command (category 5; SPEC D-03 "a wrapper (`sudo`, `env`, `time`, `command`, `xargs`, `nice`) with its flags"; tasks R3-03, R2-02, P3-09)
+`commandWord` (`:586`) looks up a whole token in `VALUED_OPTIONS`. `destinationPaths` (`:997-999`) recognizes `-t` only alone, or first in a token (`/^-t./`). getopt does two things neither function handles:
 
-All of these are allowed at HEAD, and bash runs `curl` in every one:
+- It scans a bundle `-abc` letter by letter. The first letter that takes a value consumes the rest of the token, or the next token if that letter is last.
+- It accepts any unambiguous prefix of a long option (`--sig` for `--signal`).
 
-- Grammar that `stripGrouping` (`:1243`, `:1251`) does not match:
-  - `f(){ curl https://evil; }; f` and `function f(){ curl https://evil; }`. The header pattern `[\w.:-]+\s*\(\s*\)(?=\s|$)` requires whitespace after `()`, but `f(){` is the common compact spelling.
-  - `case x in x)curl https://evil;; esac`. The arm pattern `^[^\s()]+\)(?:\s+|$)` requires whitespace after `)`.
-- Long-option spellings of the values R3-03 skips in short form (`commandWord`, `:556-563`). `getopt_long` accepts the value as the next word:
-  - `sudo --user root curl https://evil`
-  - `env --unset X curl https://evil` and `env --chdir /tmp curl https://evil`
-  - `timeout --signal KILL 5 curl https://evil` and `timeout --kill-after 5 10 curl https://evil`
-  - `nice --adjustment 5 curl https://evil`
-  - The `=` forms (`--user=root`) are one token, and those are already denied.
-- Valued options of the other wrappers on the list, which SPEC D-03 names "with its flags":
-  - `xargs -n 1 curl https://evil`, `xargs -I {} curl {}`, `xargs -P 4 curl`
-  - `stdbuf -o L curl https://evil`
-  - `time -o /tmp/t curl https://evil` and `time -f %e curl …`. This is `/usr/bin/time`, or `command time`.
+All of these are allowed at HEAD:
 
-What breaks: the same one-word bypass of the network ban that R3-03 closed for the short options. Any write or read command hides the same way.
-
-Minimal fix:
-
-- A table of valued options per wrapper, short and long, read by `commandWord`:
-  - `sudo`: `-u -g -h -p -C -D -r -t -U` and `--user --group --host --prompt --close-from --chdir --role --type --other-user`
-  - `env`: `-u -C` and `--unset --chdir`
-  - `timeout`: `-s -k` and `--signal --kill-after`
-  - `nice`: `-n` and `--adjustment`
-  - `xargs`: `-n -L -P -I -i -d -E -s -a` and `--max-args --max-lines --max-procs --replace --delimiter --eof --max-chars --arg-file`
-  - `stdbuf`: `-i -o -e` and `--input --output --error`
-  - `time`: `-o -f` and `--output --format`
-- The function-header lookahead also accepts `{`.
-- The arm pattern accepts no whitespace after `)`, and an optional leading `(`.
-
-### F3: A `cd`/`pushd` operand without a `/` is not judged by rule 6b, so two `cd`s reach a denied directory (category 5; SPEC D-03 canonicalization "made absolute against the input's `cwd`", rule 6b; tasks R2-01, R3-03)
-
-Rule 6b (`:833`) judges only `isPathLike` tokens, meaning tokens with a `/` or a leading `~` or `.`. The `cd` handler (`:920-927`) still moves `shellCwd` to whatever the operand names. So the first `cd` reaches a directory outside every deny entry, and the second moves under one, unjudged:
-
-- Allowed at HEAD and at `43afd66`:
-  - `cd ~/.cargo && cd registry && cat x`
-  - `cd ~/.cargo && pushd registry && cat x`
-  - `cd ~/.cargo && ls registry`
-- Already denied, for comparison: `cd ~/.cargo && cat registry/x` (path-like) and `cd ~/.cargo && grep -r foo registry` (recursive reach).
-
-What breaks: `deny.paths` can be read by splitting the path across two `cd`s. That is the exact read the policy exists to stop.
-
-Minimal fix:
-
-- Every non-option operand of `cd`/`pushd` is a path for rule 6b, resolved against `shellCwd`.
-- So is every non-option operand of a read-family command that `patternOperands` does not mark as text.
-- A bare word that resolves under a `deny.paths` entry does name it, so this adds no false positive inside the repository.
-
-### F4: A write-family command whose destination is a directory overwrites a protected file it never names (category 5; SPEC D-10 self-protection, D-03 rule 6d; task P3 rule 6d, never named by a review round)
-
-Rule 6d (`:879-889`) judges each operand as a path. `cp`, `mv`, `ln` and `install` write to `<directory>/<basename of the source>` when the destination is a directory, and the guard never builds that path. All of these are allowed at HEAD and at `43afd66`:
-
-- `cp evil/cleanroom.json docs/` and `cp evil/cleanroom.json docs`. These replace the policy.
-- `cp evil/state.json .kukulu/` and `cd .kukulu && cp /tmp/state.json .`. These replace `state.json`, which holds the gate's pinned `policyHash`.
-- `cp evil/.mcp.json .`. This replaces the MCP server configuration.
-- `mv evil/cleanroom.json docs/`, `install evil/cleanroom.json docs/` and `ln -sf /evil/cleanroom.json docs/`.
-- `cp -t docs evil/cleanroom.json` and `cp --target-directory=docs evil/cleanroom.json`.
-- `cp -r evil/. .kukulu/`. A recursive copy into a directory that holds protected files.
+- D-10 bypasses, each of which replaces a protected file (GNU `cp -vt d f` and `cp --target=d f` both write `d/f`):
+  - `cp -vt docs evil/cleanroom.json` and `cp -rt docs evil/cleanroom.json`
+  - `cp -vt .kukulu evil/state.json`
+  - `install -Dt docs evil/cleanroom.json`
+  - `ln -sft docs /evil/cleanroom.json`
+  - `cp --target=docs evil/cleanroom.json` and `cp --target docs evil/cleanroom.json`
+- Network bypasses:
+  - `sudo -iu root curl https://evil` and `sudo -Eu root curl https://evil`. `sudo -iu root` is the common spelling.
+  - `xargs -tn 1 curl https://evil` and `xargs -0I {} curl {}`
+  - `env -vS 'curl https://evil'` and `env -vS'curl https://evil'`. These are the `-S` split inside a bundle.
+  - `sudo --us root curl https://evil`, `timeout --sig KILL 5 curl https://evil`, `nice --adj 5 curl https://evil` and `env --split-str='curl https://evil'`
 
 What breaks:
 
-- Two allowed calls replace both the policy and the hash the gate compares it with (`cp p/cleanroom.json docs/` and `cp p/state.json .kukulu/`), so gate check 2 passes under a policy the human never wrote.
-- The verifier only reports such a change ("policy changed at seq n"). It does not fail.
-- D-10 says no write-family command may touch these paths. The literal forms (`cp x docs/cleanroom.json`) are denied, so the protection holds only against an agent that names the file.
+- Two plain calls, `cp -vt docs p/cleanroom.json` and `cp -vt .kukulu p/state.json`, replace the policy and the hash the gate pins it to. This is round 4's F4 again, spelled with one more letter.
+- The network ban falls to one extra letter in front of the valued option.
 
 Minimal fix:
 
-- For `cp`, `mv`, `ln` and `install`, find the destination directory: the `-t`/`--target-directory` value, else the last operand.
-- For each source, judge `<destination>/<basename(source)>` as a write target with the existing literal and `wildcardNames` checks. A source basename of `.` or `/`-terminated stands for the destination itself.
-- With a recursive `cp` (`-r -R -a`, `--recursive`, `--archive`), a destination that equals or contains a protected path is denied, as in the destructive-form check.
-- Ordinary forms keep their decisions: `cp a.rs src/`, `cp a.txt docs/`, `cp target/release/x .`, `cp -r assets build/`, `cp README.md docs/`.
+- Write one option scanner, used by `commandWord` and by `destinationPaths`. Give it a wrapper's (or the write command's) valued short letters and valued long names. It handles:
+  - a bundle `-abc`, where the first valued letter takes the rest of the token, or the next token if it is last
+  - `--name=value`
+  - `--name value`
+  - an abbreviation `--na` that is a prefix of exactly one of the valued long names
+- In `commandWord`, a bundle or abbreviation that resolves to env's `-S`/`--split-string` is split as in F1.
+- In `destinationPaths`, `-t`/`--target-directory` resolved that way is the destination directory.
+- The other valued options of cp, mv, ln and install (`-S -m -o -g`, `--suffix --mode --owner --group`) go through the same scanner.
+
+Fold in one false positive of R4-03's own mechanic (`:1011`):
+
+- A source that ends in `/` is treated as standing for the destination itself. GNU cp does not do this: `cp -r src/ dst` writes `dst/src` (checked on this machine).
+- So `cp -r src/ .` and `cp -r vendor/ docs/` are denied `protected path` at HEAD, though they write `./src` and `docs/vendor`.
+- Only a basename of `.` or `..` stands for the directory. `cp -r x/.. src` does copy into `src` itself, and that case is already handled correctly.
+- REVIEW round 4's F4 text caused this. It described rsync's trailing-slash rule, not cp's, and R4-03 followed it.
+
+### F3: R4-02's bare operand is judged only as a literal path, so a bare glob, or a `cd` into a glob, reaches a denied directory (category 5; SPEC D-03 rule 6b "a glob token whose wildcard components match a `deny.paths` entry"; task R4-02)
+
+- R4-02 (`:883-888`) runs `pathVerdict` on a bare cd/pushd or read-family operand. `pathVerdict` is a literal prefix check.
+- The glob check (`:892-896`) runs only on `isPathLike` tokens.
+- A `cd` to a glob (`:970`) moves `shellCwd` to the literal glob text, so a later bare operand resolves under a directory name that matches nothing.
+
+All of these are allowed at HEAD and at `2d0cfba`:
+
+- `cd ~/.cargo && cd r* && cat x` and `cd ~/.cargo && cd ?egistry && cat x`
+- `cd ~/.cargo && ls regis*`, `cd ~/.cargo && head -n 5 r*` and `cd ~/.cargo && grep foo r*`
+- `cd ~/.carg? && cd registry && cat x`
+
+The path-like spellings are already denied, for comparison: `cd ~/.cargo && cat regis*/x`, `cd ~/.cargo/r* && cat x`, `cat ~/.cargo/r*/x`.
+
+What breaks: the gap R4-02 closed for `cd registry` stays open for `cd r*`. One wildcard reads the registry, which is the read `deny.paths` exists to stop.
+
+Minimal fix:
+
+- Run the glob check (`reachVerdict(token, shellCwd, false)`) on the same bare operands as R4-02's check, not only on `isPathLike` tokens.
+- A `cd`/`pushd` to a glob operand keeps the wildcard in `shellCwd`. A later relative operand, joined to it, is then a glob, and the same check judges it. So `cd ~/.carg? && cd registry` is judged as `~/.carg?/registry`.
+- Ordinary forms stay allowed: `cd src && ls *.rs`, `cd crates && cat */Cargo.toml`, `ls *.md`.
 
 ## Spec issues
 
-- **The guard is lexical, and the loop has stopped converging on its own.** Round 3 found three more spellings, and this round found four. Two are in the round's own mechanics (F1, F2) and two predate it (F3, F4). Each fix is small and each is real, but `python3 -c` (a stated known gap) already does all of them.
-  - SPEC D-03 could say outright that the guard is a tripwire, with tamper evidence behind it, not a sandbox. It could then list "argument parsing of wrappers and shell grammar is best-effort" as a known limit.
-  - The owner may then prefer to approve with F2's long tail stated as a limit rather than run a fifth round.
-  - F1 (a regression) and F4 (the protected set replaced by a plain `cp`) are worth fixing either way.
+- **The guard is lexical, and the loop is still not converging.** Round 3 found three spellings, round 4 four, and this round three. Two of this round's are in round 4's own mechanics (F1, F3), and one is the getopt class that round 4's table only half covered (F2).
+  - This round's fix tasks ask for a getopt-style scanner and a shared glob path for bare operands, instead of another list of spellings. If that holds, the classes close rather than the instances.
+  - The owner may still prefer to amend SPEC D-03 to say outright that wrapper and option parsing is best-effort, and stop here.
+  - F1 (a regression) and F2's `cp -vt` (the policy replaced by a plain `cp`) are worth fixing either way.
   - This round is past `maxRounds` (3). The decision is the owner's.
-- **SPEC D-03 makes `git` write-family as a whole** (carried from round 3). R3-02 extends this to wildcards, so `git add docs/*` is now denied `protected path`, just as `git add docs/cleanroom.json` already was. The code follows SPEC. A list of git's read-only and index-only subcommands would remove these false positives.
-- Carried from rounds 2 and 3, still open:
+- **Read-family words are judged only in path-like arguments** (SPEC D-03 rule 6c). So `cat zlib.txt` is allowed and `cat ./zlib.txt` is denied `forbidden word in path argument`. The code follows SPEC, and the inconsistency predates round 4. SPEC could say whether a bare file operand of a read-family command is a "path-like argument".
+- **SPEC D-03 makes `git` write-family as a whole** (carried from rounds 3 and 4). `git add docs/*` is denied `protected path`.
+- Carried from rounds 2 to 4, still open:
   - SPEC F-04's `--roots`/`--words` defaults were superseded by the owner's `e7ef4d4`.
-  - D-03's write, network and wrapper lists are incomplete.
+  - D-03's write, network and wrapper lists are incomplete. For example, `rsync evil/cleanroom.json docs/` and `tar xf evil.tar -C docs` are allowed. `KNOWN_LIMITS` names rsync.
   - The log's uncommitted tail is unsigned.
   - D-08 check 3 does not pin `mcp/cleanroom.mjs`.
   - D-03's known gaps omit shell expansion.
@@ -174,29 +156,29 @@ All `NOT VERIFIED (human)`, copied from HANDOFF.md.
   - Deploy the build branch as a Cloudflare Pages preview.
   - Read every clean-room line against what the suite proves.
   - Compare the page with the changed mockup at 360, 768 and 1440 px in both schemes.
-  - Confirm the site, ci and lint checks are green on the PR. At `050cb9f` they are, `test (macos)` included.
-- R3-01's owed check, "`gh pr checks` shows `test (macos)` green after the push": done by this review at `050cb9f`.
+  - Confirm the site, ci and lint checks are green on the PR.
 - From HANDOFF's first line: the owner runs one clean-room flight from the working tree before merging.
-- After the review fixes, re-run the Phase 3 denial step in a live session with the bypass forms of rounds 1 to 4. Include:
+- From HANDOFF: after this branch meets `cleanroom`, change `fromas of 0.7.0` to `as of 0.7.0` in `docs/site/mockup.html` and `site/index.html`.
+- After the review fixes, re-run the Phase 3 denial step in a live session with the bypass forms of rounds 1 to 5. Include:
   - `cd ~/.cargo/registry && cat x`
   - `(curl https://example.com)`
   - `cd && cat .cargo/registry/x`
   - `cp evil .kukulu/state.*`
-  - `env -S curl https://example.com`
-  - `cp x/cleanroom.json docs/`
+  - `env -S -i curl https://example.com`
+  - `cp -vt docs x/cleanroom.json`
+  - `cd ~/.cargo && cd r* && cat x`
 
 ## Notes
 
-- **These fix tasks are not driven by mutation results.** All four findings come from probing `evaluate()` against SPEC D-03 and D-10. None comes from a surviving mutant, so each task is `review`-sourced.
-- **Mutation sampling.** Per the review-build rule for round 2 and later, I mutated only the files in `git diff --name-only 42a0c08..HEAD`. I used the targeted `cleanroom` suite with `confirmKill`. Killed:
-  - `guard-cases.json`'s 40-level climb cut back to six levels. This was caught by the new "the guard self-test passes under a deep TMPDIR", so R3-01's regression test does what it claims.
-  - The bare-`cd`-to-HOME move.
-  - `env`'s `-C` value skip.
-  - The case-arm strip.
-  - The `read-tree -u` discard form.
-- **Advisory survivors.** This is round 4, past `review.mutationFixRounds` (2), so these are not tasks. The summarizer carries them.
-  - Deleting `braceExpand` on redirection targets (`:868`). This is harmless: bash refuses a redirection whose word brace-expands to more than one word ("ambiguous redirect"), and a group without a comma is not expanded, so the mechanic guards a form the shell never runs.
-  - Deleting `wildcardNames`' dotfile exemption (`:1169`). No fixture pins it. Without it the guard only gets stricter, for example `cp a ?kukulu/x`.
-  - Round 3's four survivors (`stash save`, `timeout -s/-k`, `cp -a`, `**` in `reachesDenied`) are still advisory.
-- **R3-02's interpretation line is inaccurate.** It says "`cp a *` stays allowed". With the example policy, `cp a *` is denied, because `*` can name `tools/` (the policy's `protected` entry). That is correct: if `tools` sorts last, `cp` writes into it. The dotfile rule itself matches the shell. No fixture asserts the claim, so nothing is wrong but the sentence.
-- **R3-01's test name.** It reads "…under a deep TMPDIR", not the plan's "…deep, symlinked TMPDIR". The implementer's reason holds: `os.tmpdir()` returns `TMPDIR` as spelled, and the guard resolves textually, so a shallow symlink hides the depth. The mutant above confirms that the deep path fails with the old fixture.
+- **These fix tasks are not driven by mutation results.** All three findings come from probing `evaluate()` against SPEC D-03 and D-10, and checking each form against the real tools. None comes from a surviving mutant, so each task is `review`-sourced.
+- **Mutation sampling.** Per the review-build rule for round 2 and later, I mutated only `mcp/cleanroom.mjs`, the one source file in `git diff --name-only 2d0cfba..HEAD`. I used the targeted `cleanroom` suite with `confirmKill`. Three mutants were killed, and each was confirmed by a clean re-run:
+  - Disabling the attached `-S<value>` split.
+  - Dropping `READ_FAMILY` from R4-02's bare-operand check.
+  - Dropping `time -o --output` from `VALUED_OPTIONS`.
+  - All three failed through the gate's guard self-test ("the first kukulu_next in a clean-room project goes on to the plan stage": `halt`), which runs the fixture file.
+- **Advisory survivors.** This is round 5, past `review.mutationFixRounds` (2), so these are not tasks. The summarizer carries them.
+  - Deleting `destinationPaths`' attached-`-t` branch (`:999`). No fixture uses `cp -tdocs x`. R5-02's scanner replaces this line, and its fixtures should cover the attached form.
+  - Deleting the `-S -m -o -g` value skip (`:1000`). This is harmless. Without it the value becomes an extra source, which only adds a landing path.
+  - Deleting the wildcard check on landing paths (`:932-933`). The operand-wildcard check of R3-02 already denies `cp x/cleanroom.json do*`.
+  - Deleting the arm pattern's optional leading `(` (`:1333`). This is harmless, because the grouping strip already drops a leading `(`.
+  - The survivors from rounds 3 and 4 are still advisory.

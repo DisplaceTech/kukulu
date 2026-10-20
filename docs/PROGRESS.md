@@ -93,6 +93,9 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] R4-01 Guard: env -S's value is the command again, and long-form and xargs/stdbuf/time option values no longer hide the command word
 - [x] R4-02 Guard: compact function headers and arms without a space are stripped, and a cd operand without a slash is judged by rule 6b
 - [x] R4-03 Guard: a cp, mv, ln or install into a directory is judged at the path it writes, so a protected file cannot be replaced without being named
+- [ ] R5-01 Guard: env -S's split words are parsed as env options, and one getopt-style scanner reads wrapper option bundles and long-option abbreviations
+- [ ] R5-02 Guard: cp, mv, ln and install read -t through the option scanner, and a source ending in / no longer stands for the destination
+- [ ] R5-03 Guard: a bare glob operand and a cd into a glob are judged by rule 6b's glob check
 
 ## Log
 
