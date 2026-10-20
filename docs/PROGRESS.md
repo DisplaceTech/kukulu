@@ -62,7 +62,7 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] P5-01 The verifier: manifest, signature, chain and checkpoints
 - [x] P5-02 The verifier: policy, guard, mode, denials, coverage and similarity
 - [x] P5-03 Pre-0.6.0 logs and the cleanflate fixture
-- [~] P5-04 Coverage gaps and cleanroom.idleGapHours
+- [x] P5-04 Coverage gaps and cleanroom.idleGapHours
 - [ ] P5-05 Tune cleanroom.idleGapHours
 - [ ] P5-06 kukulu_attest
 - [ ] P5-07 Tamper tests over a real bundle; the archive moves it
@@ -248,3 +248,6 @@ Verifier checks 5-10 named policy, guard, mode, denials, coverage, similarity; c
 
 ### P5-03 — 6dc5f82
 Fixture test/fixtures/foundry-tool-log.jsonl: cleanflate provenance/tool-log.snapshot.jsonl at 85f210084a367dcc706c732f5776bf0563cdc0cd (tag v0.3.0-cleanroom, sibling checkout ../cleanflate), lines 109-128, first ts 2026-09-29T14:53:58.191Z, last ts 2026-09-29T14:56:41.968Z, unmodified (cmp-verified against git show); SOURCE file beside it. verify-attestation.mjs --legacy-log <file> [--roots] [--words] [--repo] [--json]: parsed/failed counts, calls by tool/stage, denials, read-capable calls (13 in the fixture), forbidden-read candidates (the denied libz-sys find), the legacy integrity line. Legacy stage key spelled in pieces in the verifier. attest suite 118 assertions.
+
+### P5-04 — 4c1edc4
+mcp/cleanroom.mjs: coverageGaps(entries, commitLines, {idleGapHours}) and KNOWN_LIMITS (4 strings, D-03). Same kinds/shapes/order as the verifier; identical output proven in attest. cleanroom.idleGapHours: validated positive finite number, default 3 (ASSUMPTION, only in cfgFrom, not yet tuned: P5-05), operations.md row, plugin loop assertion. Harness default idleGapHours is 4 for bundles (independent of the default).
