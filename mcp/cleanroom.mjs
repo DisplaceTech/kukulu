@@ -876,6 +876,17 @@ export function evaluate(policy, hookInput, env) {
           }
         }
       }
+      // A cd/pushd operand and a read-family path operand count as paths with or without a `/`: they resolve against the directory an earlier `cd` moved to.
+      // Judged after 6c so a forbidden word keeps its own reason.
+      {
+        const textOperands = patternOperands(word, rest);
+        const bare = word === "cd" || word === "pushd" || READ_FAMILY.has(word);
+        for (let i = 0; bare && i < rest.length; i++) {
+          if (isPathLike(rest[i]) || textOperands.has(i) || rest[i].startsWith("-")) continue;
+          const v = pathVerdict(rest[i]);
+          if (v) return v;
+        }
+      }
       // A glob token, and the operands of a recursive form, reach more than the path they name.
       const textual = patternOperands(word, rest);
       for (let i = 0; i < rest.length; i++) {
@@ -1264,7 +1275,7 @@ function stripGrouping(raw, inCase = false) {
   let entersCase = false;
   let leavesCase = false;
   for (;;) {
-    const m = /^(?:\(|\{(?=\s|$)|!(?=\s)|(?:if|then|elif|else|while|until|do)(?=\s|$)|function\s+[\w.:-]+(?:\s*\(\s*\))?(?=\s|$)|[\w.:-]+\s*\(\s*\)(?=\s|$)|case\s+\S+\s+in(?=\s|$)|esac(?=\s|$))\s*/.exec(segment);
+    const m = /^(?:\(|\{(?=\s|$)|!(?=\s)|(?:if|then|elif|else|while|until|do)(?=\s|$)|function\s+[\w.:-]+(?:\s*\(\s*\))?(?=\s|\{|$)|[\w.:-]+\s*\(\s*\)(?=\s|\{|$)|case\s+\S+\s+in(?=\s|$)|esac(?=\s|$))\s*/.exec(segment);
     if (m) {
       if (m[0].startsWith("(")) opens++;
       if (m[0].startsWith("case")) entersCase = true;
@@ -1272,7 +1283,7 @@ function stripGrouping(raw, inCase = false) {
       segment = segment.slice(m[0].length);
       continue;
     }
-    const arm = inCase || entersCase ? /^[^\s()]+\)(?:\s+|$)/.exec(segment) : null;
+    const arm = inCase || entersCase ? /^\(?[^\s()]+\)\s*/.exec(segment) : null;
     if (!arm) break;
     segment = segment.slice(arm[0].length);
   }
