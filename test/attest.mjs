@@ -117,6 +117,20 @@ const logLines = (dir) => fs.readFileSync(path.join(dir, "log.jsonl"), "utf8").s
   ok(r.some((x) => /^chain: entry 3 \(line 3\): the hash does not match the entry's content; the entry was edited$/.test(x)), "a tampered log line fails check 3 naming its seq");
   ok(r.some((x) => /^manifest: log\.jsonl: the SHA-256 differs/.test(x)), "...and check 1 sees the changed file too");
 
+  // The editor recomputes the edited entry's hash and refreshes the manifest, so only the link to the next entry gives it away.
+  const rehashed = fresh();
+  const rl = logLines(rehashed.dir);
+  const { hash: _old, ...bare } = JSON.parse(rl[2].replace('"target":"/p/a.rs"', '"target":"/p/evil.rs"'));
+  rl[2] = JSON.stringify({ ...bare, hash: CR.entryHash(bare.prev, bare) });
+  fs.writeFileSync(path.join(rehashed.dir, "log.jsonl"), rl.join("\n") + "\n");
+  rewriteManifest(rehashed.dir, rehashed.key, (m) => {
+    const bytes = fs.readFileSync(path.join(rehashed.dir, "log.jsonl"));
+    const file = m.files.find((x) => x.path === "log.jsonl");
+    file.sha256 = createHash("sha256").update(bytes).digest("hex");
+    file.bytes = bytes.length;
+  });
+  ok(reasons(rehashed.dir).some((x) => /^chain: entry 4 \(line 4\): prev does not match/.test(x)), "a rehashed log edit fails check 3 on the broken link");
+
   const dropped = fresh();
   const dl = logLines(dropped.dir);
   dl.splice(3, 1);
@@ -789,6 +803,11 @@ async function summarizedFlight() {
   const d = lines.slice();
   d.splice(1, 1);
   same(d, "a chain with a dropped line");
+  const h = lines.slice();
+  const { hash: _was, ...hb } = JSON.parse(h[2].replace('"decision":"denied"', '"decision":"allowed"').replace(/"target":"[^"]*"/, '"target":"/p/evil.rs"'));
+  h[2] = JSON.stringify({ ...hb, hash: CR.entryHash(hb.prev, hb) });
+  same(h, "a rehashed edit");
+  eq(V.verifyChain(h).firstBad?.line, 4, "...which both name at the next line");
   same(["{nope"], "a line that is not JSON");
   same([], "an empty chain");
   const entries = CR.readEntries(path.join(b.dir, "log.jsonl"));
