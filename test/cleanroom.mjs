@@ -4,6 +4,7 @@
 // it are exercised through the real server and the real hook scripts.
 
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import {
@@ -833,6 +834,19 @@ async function genesisRepo(planOpts = {}) {
   writeFile(repo, "ok-policy.json", JSON.stringify(broken));
   const okRun = run(path.join(repo, "ok-policy.json"), repo);
   eq(okRun.status, 0, "a policy whose patterns agree with their fixtures passes the self-test");
+}
+
+{
+  // The guard resolves paths textually, so the depth that matters is the spelled one (a symlink would hide it). macOS temp directories sit seven levels deep; a fixture that climbs a fixed number of levels passes only on shallow ones.
+  const outer = fs.mkdtempSync(path.join(os.tmpdir(), "kukulu-deeptmp-"));
+  try {
+    const deep = path.join(outer, ...Array.from({ length: 12 }, (_, i) => `d${i}`));
+    fs.mkdirSync(deep, { recursive: true });
+    const r = spawnSync(process.execPath, [GUARD, "--self-test", path.join(ROOT, "templates", "cleanroom.example.json")], { cwd: ROOT, encoding: "utf8", env: { PATH: process.env.PATH, HOME: process.env.HOME, TMPDIR: deep } });
+    ok(r.status === 0 && /guard self-test: ok/.test(r.stdout), "the guard self-test passes under a deep TMPDIR");
+  } finally {
+    fs.rmSync(outer, { recursive: true, force: true });
+  }
 }
 
 // ---------------------------------------------------------------- the logger hook
