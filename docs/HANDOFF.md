@@ -170,3 +170,14 @@ Branch build/2026-10-19; 91 tasks done, 0 blocked, 0 skipped. Tasks R5-01 to R5-
 - R5-03: the glob check also covers bare cd/pushd/read-family operands and any such operand after a `cd` into a glob.
 - Fixtures: 17 + 12 + 9 new cases; guard self-test is 391 cases, test/cleanroom.mjs 935 assertions. KNOWN_LIMITS unchanged. No new config keys or assumptions.
 - Interpretation: none. Manual check: none.
+
+## Round 6
+
+Branch build/2026-10-19; tasks R6-01 and R6-02 done, 0 blocked (93/93 done overall).
+
+- R6-01 (fc939a0): scanOption has a third set, optional-argument options (attached value only): xargs -i -l -e, --replace --max-lines --eof. env -S replaces `\_` with a space before splitting. Added sudo -R/-T/--chroot/--command-timeout and env -P.
+- R6-02 (558c7fe): destinationPaths reads cp -T (bundle) and --no-target-directory, and --recursive/--archive, by unique prefix of cp's long options.
+- Interpretation (R6-01): shellWords now keeps a backslash inside double quotes unless it precedes `$`, a backtick, `"`, `\` or a newline (bash semantics); needed so `env -S"curl\_x"` reaches the env -S split. Any double-quoted word containing `\x` now keeps the backslash.
+- Interpretation (R6-02): -T in a short bundle applies to mv, ln and install as well; long-prefix reading is cp only.
+- Fixtures: 14 R6-01 and 11 R6-02 cases in test/fixtures/guard-cases.json; guard self-test is 416 cases. KNOWN_LIMITS unchanged.
+- Manual check: none.
