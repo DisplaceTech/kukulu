@@ -109,6 +109,111 @@ A failing gate appends its own entry first, so the refusal is in the chain, and 
 
 Every prompt typed into a session, and every `kukulu_flight_options`, `kukulu_run_resume` and re-signing `kukulu_pr_finalize`, is logged as a `human` entry too.
 
+## Reading a bundle
+
+`kukulu_attest` writes `docs/attestation/` at the end of a clean-room flight, after the summary (and the contamination score, when configured) and before the archive moves the flight. Everything in it is a plain file, and a person with only Node can check it. `manifest.json` is the index; the other files are the evidence it names.
+
+| File | What it is |
+|---|---|
+| `manifest.json`, `manifest.sig` | the index, and a base64 Ed25519 signature over its exact bytes |
+| `publisher.pub` | the public key that signed the manifest and every checkpoint |
+| `log.jsonl` | the whole chain, as it stood when the bundle was made |
+| `policy.json` | the policy in force at the end |
+| `similarity.json` | the contamination score, when one was run |
+| `SUMMARY.md`, `REVIEW.md`, `PROGRESS.md`, `kukulu.json`, `state.json` | the flight's documents and configuration |
+| `commits.txt` | one line per commit since the base: sha, signature code (`%G?`), subject, `Kukulu-Stage` and `Kukulu-Task`, separated by U+001F |
+| `evidence/<path>` | any extra files the operator named, at their own paths |
+| `verify.mjs` | a byte copy of `scripts/verify-attestation.mjs` |
+
+The manifest's fields, in the order it writes them:
+
+- `version` (1), `flight`, `mode` (`clean-room`) and `at`.
+- `plugin`: the plugin `version` and the hashes of the guard, the logger, `hooks.json` and the verifier.
+- `repo`: `baseBranch`, `base`, `head` and `branch`.
+- `genesis`: the first log entry, repeated.
+- `policy`: its `path`, every distinct `hashes` value seen in the checkpoints in order, and the `current` one.
+- `chain`: the number of `entries`, the `first` hash and the `tip`.
+- `checkpoints`: each one's `seq`, `event`, `git`, `signature` and whether it verifies (`ok`).
+- `denials`: the `total`, the count `byReason`, and the `verdicts` you recorded (`prior-art attempt`, `false positive`, `offline test`, and `unclassified` for the rest).
+- `calls`: the `total`, counts `byTool` and `byStage`, and how many could read something (`readCapable`: `Read`, `Glob`, `Grep`, `Bash`, `WebFetch`).
+- `human`: how many instructions, interventions and verdicts you recorded; prompts count as instructions.
+- `selfTest`: whether the guard's self-test passed when the bundle was made, with its case count.
+- `coverage`: the `gaps`, the `knownLimits` and the `idleGapHours` used.
+- `similarity`: the SHA-256 of `similarity.json`, or `null`.
+- `files`: every file but `manifest.json`, `manifest.sig` and `verify.mjs`, each with its SHA-256 and size.
+- `signer`: the key's `fingerprint` and the file that holds it.
+
+**Coverage gaps** are the places where the log does not vouch for the work. They are recomputed by the verifier from `log.jsonl` and `commits.txt`, so a manifest cannot leave one out. Each is printed, and none is a failure:
+
+- `silent-gates`: two gate entries with nothing logged between them, so the hooks may not have been running.
+- `untrailed-commit`: a commit without a `Kukulu-Stage` trailer, which is work done outside the pipeline.
+- `intervention`: a `human` entry you recorded as something done by hand.
+- `idle`: two consecutive entries of one stage more than `cleanroom.idleGapHours` apart.
+- `unsigned-commit`: a commit whose signature code is `N` (none) or `B` (bad).
+
+`coverage.knownLimits` is the fixed list under [Known gaps](#known-gaps): what no log of tool calls can show.
+
+## Verifying offline
+
+```text
+node docs/attestation/verify.mjs docs/attestation --key sha256:<fingerprint>
+```
+
+`--key` is the signer's fingerprint, which you got from the publisher by some other route than the bundle (the bundle can carry any key it likes). Without it the bundle is only self-consistent, and the report says so with `verify-attestation: note: signer: self-consistent, fingerprint not checked against an out-of-band value`. `--json` prints the result as one object (`ok`, `reasons`, `notes`, `checks`) instead of text. Exit status is 0 for a pass, 1 for a failure and 2 for a usage error. The verifier needs Node 22 or later, nothing else: no network, no git, no packages. The copy in the bundle and `scripts/verify-attestation.mjs` are the same file.
+
+It runs ten checks in order and reports every failure, not only the first:
+
+1. `manifest`: `manifest.json` parses, its `version` is 1, and every listed file exists with the listed SHA-256 and size.
+2. `signature`: `manifest.sig` verifies over `manifest.json` with `publisher.pub`, and the key's fingerprint is the one you asked for.
+3. `chain`: the log's sequence numbers are dense, each `prev` is the previous hash, every hash recomputes, and the manifest's count, first hash and tip match.
+4. `checkpoints`: every checkpoint verifies with `publisher.pub`, those the manifest names exist with that signature, and the genesis equals `manifest.genesis`.
+5. `policy`: every checkpoint's policy hash is in `policy.hashes`, `policy.json` hashes to `policy.current`, and a change of policy between checkpoints is reported as `policy changed at seq <n>` (a note, not a failure).
+6. `guard`: every checkpoint saw the guard, logger and hooks that the manifest names.
+7. `mode`: the genesis is `clean-room` and no gate failed the mode check.
+8. `denials`: the denial and verdict counts, recounted from the log.
+9. `coverage`: the gaps, recomputed and printed.
+10. `similarity`: `similarity.json` hashes to the manifest's value, when there is one.
+
+A passing bundle prints its notes and then one line:
+
+```text
+verify-attestation: note: coverage gap: {"kind":"unsigned-commit","sha":"4d922369b48a4587da974db1d3758521e2f1ffe8"}
+verify-attestation: PASS
+```
+
+A failing one names the check, the entry or file, and what to do about it:
+
+```text
+verify-attestation: manifest: SUMMARY.md: the SHA-256 differs from the manifest's; the file was changed
+verify-attestation: chain: entry 3 (line 3): the hash does not match the entry's content; the entry was edited
+verify-attestation: FAIL (2 reasons)
+```
+
+A check that cannot run because an earlier one broke its input says `not checked` and why. A failing check never makes a later one pass.
+
+### Logs from before 0.6.0
+
+The tool log that earlier clean-room work kept has no hash chain and no signatures, so it cannot be verified, only read:
+
+```text
+node scripts/verify-attestation.mjs --legacy-log <file> [--roots <a,b>] [--words <a,b>] [--repo <path>] [--json]
+```
+
+It parses every line (a line it cannot parse is counted and named, never dropped, and the exit status is 1), then prints the calls by tool and stage, the denials with their reasons, the number of read-capable calls, and the forbidden-read candidates: a read-capable call with a path-like token under a root, or naming a word while outside `--repo`. The defaults are the ones the first clean-room build used (the Cargo registry, the system `zlib.h`, and the compression-library names); pass your own. It always ends with `legacy log: no hash chain or signatures; integrity rests on the git history that holds it`, which is the honest limit: the log is only as good as the commits that hold it. For the 20-line excerpt of that build's log kept under `test/fixtures/`:
+
+```text
+legacy log: test/fixtures/<excerpt>.jsonl
+lines: 20 parsed, 0 failed
+calls by tool: Bash 13, Write 2, Edit 1, ...
+calls by stage: implement 20
+denials: 1
+  line 9 (2026-09-29T14:54:47.458Z) Bash: forbidden word in path argument: */libz-sys-*/src/lib.rs
+read-capable calls: 13
+forbidden-read candidates: 1
+  line 9 (2026-09-29T14:54:47.458Z) Bash denied: */libz-sys-*/src/lib.rs (names libz-sys outside the repository)
+legacy log: no hash chain or signatures; integrity rests on the git history that holds it
+```
+
 ## Known gaps
 
 The guard sees tool calls, not what a command does. Interpreter escapes (`python3 -c`, `node -e`) are not parsed; the subprocesses of a `make` target are not individual tool calls; the insides of an MCP server are not tool calls; and hooks load at session start, so a session that writes the policy is not covered until the next one. Each is a limit of the method, not a bug.

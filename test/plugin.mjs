@@ -441,11 +441,22 @@ like(read("skills/plan-build/SKILL.md"), /Write the deliverables in the order 3,
 
 like(read("agents/summarizer.md"), /mcp__plugin_kukulu_kukulu__kukulu_similarity/, "agents/summarizer names kukulu_similarity");
 like(read("agents/summarizer.md"), /mcp__plugin_kukulu_kukulu__kukulu_attest/, "agents/summarizer names kukulu_attest");
+{
+  const cleanroomDoc = read("docs/cleanroom.md");
+  ok(cleanroomDoc.includes("## Reading a bundle") && cleanroomDoc.includes("## Verifying offline"), "docs/cleanroom.md has Reading a bundle and Verifying offline");
+  ok(/node docs\/attestation\/verify\.mjs docs\/attestation --key sha256:<fingerprint>/.test(cleanroomDoc) && cleanroomDoc.includes("`--json`") && cleanroomDoc.includes("--legacy-log"), "docs/cleanroom.md documents verify-attestation.mjs with --key, --json and --legacy-log");
+  ok(cleanroomDoc.includes("verify-attestation: PASS") && /verify-attestation: FAIL \(\d+ reasons?\)/.test(cleanroomDoc), "...with sample PASS and FAIL output");
+  const contributing = read("CONTRIBUTING.md");
+  ok(/^\| `cleanroom` \|/m.test(contributing) && /^\| `attest` \|/m.test(contributing), "CONTRIBUTING's suite table lists cleanroom and attest");
+}
 
 {
   const summarize = read("skills/summarize/SKILL.md");
   like(summarize, /When `docs\/kukulu\.json` configures `cleanroom\.similarity`, call `kukulu_similarity` once, after `kukulu_summary_commit`/, "summarize calls kukulu_similarity when cleanroom.similarity is configured");
   like(summarize, /`## Contamination score` section[\s\S]*`kukulu_summary_commit\(\{ content \}\)` a second time/, "...under ## Contamination score, committed with a second summary_commit");
+  like(summarize, /call `kukulu_attest` once, after `kukulu_similarity`[^.]*and before `kukulu_flight_archive`/, "summarize calls kukulu_attest before kukulu_flight_archive");
+  like(summarize, /`## Attestation` section to your summary text: the directory, the manifest hash[^.]*fingerprint[^.]*verifier's result line/, "...adds ## Attestation");
+  ok(summarize.indexOf("kukulu_attest") < summarize.indexOf("call `kukulu_flight_archive`"), "...and the attestation paragraph comes first in the skill");
 }
 
 let unknownTool = null;
