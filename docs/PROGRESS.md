@@ -9,7 +9,7 @@ Started: 2026-10-20T19:18:49.092Z
 - [x] P0-02 Guard-finding triage in the review and summarize skills
 - [x] P0-03 Bare and ./ read-family operands get the same decision
 - [x] P0-04 git forms that write only the index are not write targets
-- [ ] P0-05 rsync and tar extraction into a protected path are denied
+- [x] P0-05 rsync and tar extraction into a protected path are denied
 - [ ] P0-06 install's BSD-only denial names its directory
 - [ ] P0-07 The gate, the genesis and the manifest pin mcp/cleanroom.mjs
 - [ ] P0-08 Phase 0 end: push and record the manual check
@@ -43,3 +43,7 @@ Word clause in rule 6c now covers every non-dash, non-pattern operand. 6 fixture
 ### P0-04 — fad3e7e
 
 INDEX_ONLY_GIT set + gitOutputValues in cleanroom.mjs; nine fixtures; docs and CHANGELOG. --output abbreviations --outp/--outpu also stay targets. No existing fixture changed decision.
+
+### P0-05 — 5581206
+
+rsyncParts/tarParts helpers + own rule block before 6d; rsync remote operand denied under deny.network. 14 fixtures, 2 exact-message tests. Interpretation: tar A/--delete count as archive-writing; extraction into a dir under a protected path also denied; rsync/tar not added to WRITE_FAMILY (exported set unchanged).
