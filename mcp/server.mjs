@@ -1882,6 +1882,7 @@ function status() {
     signing: st.signing,
     feedbackCount: countFeedback(),
     longestCommandTimeoutMs: longestCommandTimeoutMs(),
+    review: { mutationFixRounds: cfg().review.mutationFixRounds },
     reviewRoundsInPlan: reviewRoundCount(),
     branch: null,
     started: null,
@@ -3666,8 +3667,10 @@ const CHECKS_TIMEOUT_MS = 30000;
  */
 function prChecks() {
   if (!gitFacts().hasOrigin) return null;
-  if (spawnSync("gh", ["--version"], { encoding: "utf8" }).status !== 0) return null;
-  const view = spawnSync("gh", ["pr", "view", "--json", "url"], { cwd: ROOT, encoding: "utf8" });
+  // A hung gh would hang this synchronous server, so every call is bounded; a timed-out --version reads as no gh.
+  if (spawnSync("gh", ["--version"], { encoding: "utf8", timeout: CHECKS_TIMEOUT_MS }).status !== 0) return null;
+  const view = spawnSync("gh", ["pr", "view", "--json", "url"], { cwd: ROOT, encoding: "utf8", timeout: CHECKS_TIMEOUT_MS });
+  if (view.error) return `unknown: gh pr view failed: ${view.error.code === "ETIMEDOUT" ? `timed out after ${CHECKS_TIMEOUT_MS} ms` : view.error.message}`;
   if (view.status !== 0) {
     const why = (view.stderr || view.stdout || "").trim().split("\n")[0];
     return /no (open )?pull requests? found/i.test(why) ? null : `unknown: ${why || "gh pr view failed"}`;
@@ -4241,7 +4244,7 @@ const S = (props, required = []) => ({
   additionalProperties: false,
 });
 const TOOLS = [
-  { name: "kukulu_status", description: "Everything the pipeline knows from disk: which docs exist, task counts by state, branch/base/head, lock, round, review verdict, and the pull request's CI checks as prChecks. Read-only.", inputSchema: S({}), fn: () => ({ ...status(), prChecks: prChecks() }) },
+  { name: "kukulu_status", description: "Everything the pipeline knows from disk: which docs exist, task counts by state, branch/base/head, lock, round, review verdict, review.mutationFixRounds, and the pull request's CI checks as prChecks (every gh call bounded to 30 s). Read-only.", inputSchema: S({}), fn: () => ({ ...status(), prChecks: prChecks() }) },
   { name: "kukulu_next", description: "Deterministic stage selection: returns { stage, agent, agentFallback, fallbackAgent, restartRequired, model, agentModel, agentModelExact, round, reason, prompt, streams? }. stage is plan | implement | review | summarize | done | halt. agentModel is the value to pass as the Agent tool's model when agentFallback is true (an alias, or null to pass none); agentModelExact is false when a full claude-* id was mapped to its family alias. restartRequired is true only when the routed model cannot be reached without relaunching the session. Read-only, except that when a parallel wave's partition is invalid it records once (state, one feedback entry, one commit, only on a build branch) that the wave runs serially. When streams is present, spawn one implementer per entry, all at once, and wait for all of them.", inputSchema: S({}), fn: next },
   { name: "kukulu_plan_commit", description: "Validate the plan as a whole and commit it: docs/PLAN.md, docs/PROGRESS.md, docs/kukulu.json and CLAUDE.md must exist and agree (task headings, numbering, dependencies, streams, config, from references). Every problem is listed at once, as numbered lines and as structuredContent.problems [{ check, id?, message }]; nothing is committed while any remain. With renumber: true (only before any run has started) it first renumbers split ids everywhere. On success it commits 'plan: derive build plan from SPEC' and returns { commit, tasks, phases, waves, renumbered }. For the planner, as its last step.", inputSchema: S({ renumber: { type: "boolean", description: "rewrite split or out-of-sequence task ids (such as P1-02a) to a clean P<n>-01.. sequence everywhere they appear, then validate and commit; refused once a run has started" } }), fn: planCommit },
   { name: "kukulu_run_start", description: "Begin (or resume) an implementation run: create/reuse the build branch, arm the implement guard lock, stamp Branch/Started in PROGRESS.md, commit. Idempotent. With stream, also create (or resume) that stream's git worktree for a parallel wave, run parallel.setup in it, and return its cwd: do all of that stream's work inside cwd.", inputSchema: S({ stream: { type: "string", description: "a stream of the current parallel wave, when kukulu_next handed you one" } }), fn: runStart },

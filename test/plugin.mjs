@@ -449,6 +449,14 @@ like(goFlight, /"resume: <reason>".*kukulu_run_resume\(\{ reason \}\)/, "go-flig
 
 like(read("skills/review-build/SKILL.md"), /Capping mutation-only rounds[\s\S]*review\.mutationFixRounds/, "review-build caps mutation-only rounds at mutationFixRounds");
 like(read("skills/review-build/SKILL.md"), /Round 2 and later\*\*: read `prChecks`/, "review-build reads prChecks from round 2");
+{
+  const skill = read("skills/review-build/SKILL.md");
+  const cap = skill.slice(skill.indexOf("Capping mutation-only rounds"));
+  ok(/read it from `kukulu_status`'s `review\.mutationFixRounds`/.test(cap) && !cap.split("\n")[0].includes("kukulu_config_show"), "the review-build skill reads mutationFixRounds from kukulu_status");
+  const reviewerTools = read("agents/reviewer.md").match(/^tools:.*$/m)[0];
+  const missing = [...new Set(skill.match(/\bkukulu_[a-z_]+/g))].filter((t) => !reviewerTools.includes(`mcp__plugin_kukulu_kukulu__${t}`));
+  eq(missing.join(","), "", "...and every kukulu_* tool the skill names is in agents/reviewer.md's tools");
+}
 
 {
   const planSkill = read("skills/plan-build/SKILL.md");

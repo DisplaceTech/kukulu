@@ -556,6 +556,27 @@ for (const [config, re, label] of [
   eq(JSON.stringify(await checks(withOrigin(), ghEnv(ghWith([])))), JSON.stringify({ state: "none", failing: [] }), "...none for an empty list");
   like(await checks(withOrigin(), ghEnv(ghWith("no checks reported", 1))), /^unknown: /, "...unknown when gh pr checks prints no JSON");
 
+  {
+    // A gh that never answers `pr view` must not hang the synchronous server: the 30 s bound turns it into unknown.
+    const hung = mkDir("kukulu-hung-gh-");
+    writeFile(hung, "gh", '#!/bin/sh\ncase "$1" in --version) echo gh version 0;; pr) exec sleep 120;; esac\n');
+    fs.chmodSync(path.join(hung, "gh"), 0o755);
+    const started = Date.now();
+    const out = await checks(withOrigin(), ghEnv(hung));
+    like(out, /^unknown: .*timed out/, "prChecks is unknown when gh pr view hangs");
+    ok(Date.now() - started < 60000, "...and kukulu_status returned within the bound");
+  }
+
+  {
+    const statusReview = async (config) => {
+      let out;
+      await withServer(plannedRepo(config ? { config } : {}), async ({ call }) => { out = (await call("kukulu_status")).review; });
+      return out;
+    };
+    eq(JSON.stringify(await statusReview()), JSON.stringify({ mutationFixRounds: 2 }), "kukulu_status reports review.mutationFixRounds (the default)");
+    eq(JSON.stringify(await statusReview({ review: { mutationFixRounds: 5 } })), JSON.stringify({ mutationFixRounds: 5 }), "...and a configured value");
+  }
+
   const repo = withOrigin();
   const dir = ghWith([{ name: "t", state: "FAILURE", link: "u" }]);
   await withServer(repo, async ({ call }) => {
