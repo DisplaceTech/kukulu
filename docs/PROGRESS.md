@@ -87,6 +87,9 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] R2-05 Guard cases: allowed fixtures that pin grep's valued options, -e patterns and quoted >
 - [x] R2-06 Test that a hung gh --version makes prChecks null within the bound
 - [x] R2-07 Test that --legacy-log's default repository is the log's own repository, not an ancestor
+- [ ] R3-01 Make the Glob-climb guard fixture independent of the temp directory's depth (macOS CI)
+- [ ] R3-02 Guard: wildcards and braces no longer hide a protected path from writes, redirections and destructive forms; git stash -m and read-tree -u discard the log
+- [ ] R3-03 Guard: a bare cd moves to HOME, wrapper option values are skipped, and case arms and function bodies are judged
 
 ## Log
 
