@@ -2734,5 +2734,299 @@
    "cwd": "__ROOT__"
   },
   "expect": "allowed"
+ },
+ {
+  "name": "grouping: (curl https://evil)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "(curl https://evil)"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command curl"
+ },
+ {
+  "name": "grouping: ( curl https://evil )",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "( curl https://evil )"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command curl"
+ },
+ {
+  "name": "grouping: { curl https://evil; }",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "{ curl https://evil; }"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command curl"
+ },
+ {
+  "name": "grouping: if true; then curl https://evil; fi",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "if true; then curl https://evil; fi"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command curl"
+ },
+ {
+  "name": "grouping: while true; do curl https://evil; done",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "while true; do curl https://evil; done"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command curl"
+ },
+ {
+  "name": "grouping: ! curl https://evil",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "! curl https://evil"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command curl"
+ },
+ {
+  "name": "grouping: timeout 5 curl https://evil",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "timeout 5 curl https://evil"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command curl"
+ },
+ {
+  "name": "grouping: nohup curl https://evil",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "nohup curl https://evil"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command curl"
+ },
+ {
+  "name": "grouping: exec curl https://evil",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "exec curl https://evil"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command curl"
+ },
+ {
+  "name": "grouping: (rm -rf .kukulu)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "(rm -rf .kukulu)"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "grouping: { rm -rf .kukulu; }",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "{ rm -rf .kukulu; }"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "grouping: (echo hi > .kukulu/state.json)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "(echo hi > .kukulu/state.json)"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "grouping: (cd docs && rm cleanroom.json)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "(cd docs && rm cleanroom.json)"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "grouping: (cd sub) && rm docs/cleanroom.json",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "(cd sub) && rm docs/cleanroom.json"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "grouping: echo x >| .kukulu/state.json",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "echo x >| .kukulu/state.json"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "grouping: echo x 2>|.kukulu/state.json",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "echo x 2>|.kukulu/state.json"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "grouping: git -C docs rm cleanroom.json",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "git -C docs rm cleanroom.json"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "grouping: git -C .kukulu clean -fdx",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "git -C .kukulu clean -fdx"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "grouping: echo a | grep a",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "echo a | grep a"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "grouping: (cd src && ls)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "(cd src && ls)"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "grouping: if [ -f a ]; then cat a; fi",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "if [ -f a ]; then cat a; fi"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "grouping: timeout 5 cargo test",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "timeout 5 cargo test"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "grouping: git -C sub status",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "git -C sub status"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
  }
 ]

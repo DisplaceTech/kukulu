@@ -582,7 +582,7 @@ async function summarizedFlight() {
       eq(manifest.repo.head, head, "the manifest names the commit it was made at");
       eq(manifest.denials.verdicts["false positive"] + "|" + manifest.denials.verdicts.unclassified + "|" + manifest.denials.total, "1|0|1", "the denial's verdict is counted");
       eq(manifest.human.verdicts + "|" + (manifest.human.instructions >= 1), "1|true", "the human entries are counted, the prompt among them");
-      ok(manifest.coverage.knownLimits.length === 5 && manifest.coverage.idleGapHours === 3, "the coverage section carries the known limits and the idle threshold");
+      ok(manifest.coverage.knownLimits.length === 6 && manifest.coverage.idleGapHours === 3, "the coverage section carries the known limits and the idle threshold");
       eq(manifest.selfTest.ok + "|" + manifest.selfTest.cases, "true|" + manifest.selfTest.cases, "the self-test result is recorded");
       ok(manifest.selfTest.cases > 100, "...with its case count (" + manifest.selfTest.cases + ")");
 

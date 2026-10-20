@@ -1582,7 +1582,7 @@ eq(LANGUAGES.join(","), "rust,c,cpp,go,python,javascript,typescript,java,php", "
   let refused = null;
   try { coverageGaps([], [], { idleGapHours: 0 }); } catch (x) { refused = x; }
   ok(refused instanceof CleanroomError && /idleGapHours, a positive number/.test(refused.message), "coverageGaps refuses a limit that is not a positive number");
-  ok(KNOWN_LIMITS.length === 5 && KNOWN_LIMITS.every((l) => typeof l === "string" && l.endsWith(".")), "KNOWN_LIMITS is the five fixed strings");
+  ok(KNOWN_LIMITS.length === 6 && KNOWN_LIMITS.every((l) => typeof l === "string" && l.endsWith(".")), "KNOWN_LIMITS is the six fixed strings");
 }
 
 finish();

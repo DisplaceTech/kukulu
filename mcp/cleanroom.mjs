@@ -488,8 +488,12 @@ export function splitSegments(command) {
         cut();
       }
     } else if (c === "|") {
-      if (command[i + 1] === "|") i++;
-      cut();
+      // `>|` is a clobbering redirection (`echo x >| file`), not a pipe.
+      if (current.endsWith(">")) current += c;
+      else {
+        if (command[i + 1] === "|") i++;
+        cut();
+      }
     } else current += c;
   }
   segments.push(current);
@@ -530,12 +534,12 @@ export function shellWords(segment) {
   return words;
 }
 
-const WRAPPERS = new Set(["sudo", "env", "time", "command", "xargs", "nice"]);
+const WRAPPERS = new Set(["sudo", "env", "time", "command", "xargs", "nice", "exec", "nohup", "timeout", "stdbuf", "setsid"]);
 const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
 
 /**
  * The command a segment runs: the first token that is neither a `NAME=value`
- * assignment nor a wrapper (`sudo env time command xargs nice`) with its flags.
+ * assignment nor a wrapper (`sudo env time command xargs nice exec nohup timeout stdbuf setsid`) with its flags.
  * `word` is the command's base name; `args` are the tokens after it.
  */
 export function commandWord(tokens) {
@@ -552,7 +556,10 @@ export function commandWord(tokens) {
       while (i < tokens.length && tokens[i].startsWith("-")) {
         const flag = tokens[i++];
         if (base === "nice" && flag === "-n" && i < tokens.length) i++;
+        if (base === "timeout" && /^-[sk]$/.test(flag) && i < tokens.length) i++;
       }
+      // timeout's first operand is its duration, not the command.
+      if (base === "timeout" && i < tokens.length && /^\d+(?:\.\d+)?[smhd]?$/.test(tokens[i])) i++;
       continue;
     }
     return { word: base, raw: t, args: tokens.slice(i + 1) };
@@ -678,7 +685,7 @@ export function evaluate(policy, hookInput, env) {
   const cwd = typeof input.cwd === "string" && input.cwd ? input.cwd : root;
   // Where a `cd` earlier in the command has moved the shell; every relative token and the "outside the repository" clause resolve against it.
   let shellCwd = cwd;
-  const writeForms = (p) => canonicalPaths(p, { cwd: shellCwd, home });
+  const writeForms = (p, base = shellCwd) => canonicalPaths(p, { cwd: base, home });
   const lockdown = lockdownActive(policy, env.progressText);
   const prefixes = (list) => list.map((e) => resolvePrefix(e, root, home));
   // The signing key is read-denied like a deny.paths entry; its public half and every other protected file stay readable.
@@ -763,10 +770,20 @@ export function evaluate(policy, hookInput, env) {
       const v = bashVerdict(sub, depth + 1);
       if (v.decision === "denied") return v;
     }
-    for (const segment of splitSegments(text)) {
+    const subshells = [];
+    for (const raw of splitSegments(text)) {
+      const { segment, opens, closes } = stripGrouping(raw);
+      // A `(` starts a subshell: a `cd` inside it does not outlive its `)`.
+      for (let k = 0; k < opens; k++) subshells.push(shellCwd);
+      const settle = () => {
+        for (let k = 0; k < closes && subshells.length; k++) shellCwd = subshells.pop();
+      };
       const tokens = shellWords(segment).map((t) => (home ? t.replaceAll("${HOME}", home).replace(/\$HOME(?![A-Za-z0-9_])/g, () => home) : t));
       const { word, args: rest } = commandWord(tokens);
-      if (word === null) continue;
+      if (word === null) {
+        settle();
+        continue;
+      }
       // A string handed to a shell or to eval is a command line of its own.
       const shellString = /^(?:ba|z|da|k)?sh$/.test(word) ? rest[rest.findIndex((t) => /^-[A-Za-z]*c[A-Za-z]*$/.test(t)) + 1] : word === "eval" ? rest.join(" ") : undefined;
       if (typeof shellString === "string" && (word === "eval" || rest.some((t) => /^-[A-Za-z]*c[A-Za-z]*$/.test(t)))) {
@@ -809,17 +826,23 @@ export function evaluate(policy, hookInput, env) {
       }
       // 6d. write-family commands and redirections on protected paths
       const redirects = redirectTargets(segment);
+      let writeDenied = null;
       if (WRITE_FAMILY.has(word)) {
         if (word === "git" && rest[0] === "config" && rest.some((t) => /core\.hookspath/i.test(t))) return denied("protected path: git config core.hooksPath");
         // Every non-option operand of a write-family command is a path, with or without a `/`.
-        const operands = rest.filter((t) => !t.startsWith("-") || isPathLike(t));
-        for (const t of operands) {
-          const f = writeForms(tokenPath(t)).find((x) => protectedList.some((p) => underPrefix(x, p)));
-          if (f) return denied(`protected path: ${f}`);
-        }
+        // git's `-C dir` moves the operands that follow its subcommand.
+        const git = word === "git" ? gitParts(rest) : null;
+        const gitCwd = git ? git.dirs.reduce((base, d) => canonicalPaths(tokenPath(d), { cwd: base, home })[0], shellCwd) : shellCwd;
+        rest.forEach((t, i) => {
+          if (writeDenied) return;
+          if (!(!t.startsWith("-") || isPathLike(t))) return;
+          const f = writeForms(tokenPath(t), git && i > git.subIndex ? gitCwd : shellCwd).find((x) => protectedList.some((p) => underPrefix(x, p)));
+          if (f) writeDenied = denied(`protected path: ${f}`);
+        });
+        if (writeDenied) return writeDenied;
         // A destructive form also destroys everything under the operand, so a protected path below it counts.
         for (const t of destructiveOperands(word, rest)) {
-          const f = writeForms(tokenPath(t)).find((x) => protectedList.some((p) => underPrefix(p, x)));
+          const f = writeForms(tokenPath(t), gitCwd).find((x) => protectedList.some((p) => underPrefix(p, x)));
           if (f) return denied(`protected path: ${f} (contains a protected path)`);
         }
       }
@@ -835,6 +858,7 @@ export function evaluate(policy, hookInput, env) {
         const dir = rest.find((t) => !t.startsWith("-"));
         if (dir && dir !== "-" && !/^[<>]/.test(dir)) shellCwd = canonicalPaths(tokenPath(dir), { cwd: shellCwd, home })[0];
       }
+      settle();
     }
     return NO_ISSUES;
   }
@@ -926,12 +950,45 @@ function extractSubstitutions(command) {
 
 /** The first git argument that is not one of git's global options (`-C dir`, `-c k=v`, `--git-dir=...`), i.e. its subcommand. */
 function gitSubcommand(rest) {
+  return gitParts(rest).sub;
+}
+
+/** The subcommand of a git argument list, where it sits, and the `-C` directories before it. */
+function gitParts(rest) {
+  const dirs = [];
   for (let i = 0; i < rest.length; i++) {
     const t = rest[i];
-    if (!t.startsWith("-")) return t;
-    if (["-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path", "--super-prefix"].includes(t)) i++;
+    if (!t.startsWith("-")) return { sub: t, subIndex: i, dirs };
+    if (["-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path", "--super-prefix"].includes(t)) {
+      if (t === "-C" && i + 1 < rest.length) dirs.push(rest[i + 1]);
+      i++;
+    }
   }
-  return undefined;
+  return { sub: undefined, subIndex: rest.length, dirs };
+}
+
+/**
+ * A segment without the shell grammar around its command: leading `(`, `{`,
+ * `!` and the reserved words if/then/elif/else/while/until/do, and trailing
+ * `)`. `opens` and `closes` count the subshell parentheses removed.
+ */
+function stripGrouping(raw) {
+  let segment = raw.trim();
+  let opens = 0;
+  let closes = 0;
+  for (;;) {
+    const m = /^(?:\(|\{(?=\s|$)|!(?=\s)|(?:if|then|elif|else|while|until|do)(?=\s|$))\s*/.exec(segment);
+    if (!m) break;
+    if (m[0].startsWith("(")) opens++;
+    segment = segment.slice(m[0].length);
+  }
+  for (;;) {
+    const m = /\s*\)\s*$/.exec(segment);
+    if (!m || /\\$/.test(segment.slice(0, m.index))) break;
+    closes++;
+    segment = segment.slice(0, m.index);
+  }
+  return { segment, opens, closes };
 }
 
 /**
@@ -945,9 +1002,11 @@ function destructiveOperands(word, rest) {
   if (word === "mv") return operands(rest).slice(0, -1);
   if ((word === "chmod" || word === "chown") && rest.some((t) => /^-[A-Za-z]*R|^--recursive$/.test(t))) return operands(rest);
   if (word === "git") {
-    const sub = rest.find((t) => !t.startsWith("-"));
+    const { sub, subIndex, dirs } = gitParts(rest);
     if (["rm", "mv", "checkout", "restore", "clean"].includes(sub)) {
-      const list = operands(rest.slice(rest.indexOf(sub) + 1));
+      const list = operands(rest.slice(subIndex + 1));
+      // `git -C dir clean -fdx` rewrites the whole of dir.
+      if (!list.length && dirs.length) return ["."];
       return sub === "mv" ? list.slice(0, -1) : list;
     }
   }
@@ -996,6 +1055,7 @@ export const KNOWN_LIMITS = [
   "Subprocesses of a make target are not individual tool calls, so what they read is not logged.",
   "MCP server internals are not tool calls, so what a server reads on its own is not logged.",
   "Hooks load at session start, so a session that writes the policy is not covered until the next one; the gate's liveness check catches a session with no hooks at all.",
+  "Commands that run a command from their arguments (find -exec, watch, parallel, busybox) and programs outside the fixed network and write lists (unlink, shred, perl -i, cargo fetch, rsync) are not recognized.",
 ];
 
 /**
