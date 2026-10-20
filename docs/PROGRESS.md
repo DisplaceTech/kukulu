@@ -61,7 +61,7 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] P4-09 Phase 4 end: push and record the calibration check
 - [x] P5-01 The verifier: manifest, signature, chain and checkpoints
 - [x] P5-02 The verifier: policy, guard, mode, denials, coverage and similarity
-- [~] P5-03 Pre-0.6.0 logs and the cleanflate fixture
+- [x] P5-03 Pre-0.6.0 logs and the cleanflate fixture
 - [ ] P5-04 Coverage gaps and cleanroom.idleGapHours
 - [ ] P5-05 Tune cleanroom.idleGapHours
 - [ ] P5-06 kukulu_attest
@@ -245,3 +245,6 @@ scripts/verify-attestation.mjs: verifyBundle(dir,{key}) -> {ok, reasons:[{check,
 
 ### P5-02 — 4f7ef0a
 Verifier checks 5-10 named policy, guard, mode, denials, coverage, similarity; checks 5-9 say 'not checked' when the chain fails. Gaps recomputed in the spec order and printed as notes 'coverage gap: <json>'; manifest.coverage.idleGapHours is read from the manifest. A verdict counts only when it names a denied seq; mode failure = gate data.failed 'mode'. Harness buildBundle options: clock, extra(log), commits, gaps, idleGapHours, similarity, mode; manifest denials counted independently from entries. attest suite 96 assertions.
+
+### P5-03 — 6dc5f82
+Fixture test/fixtures/foundry-tool-log.jsonl: cleanflate provenance/tool-log.snapshot.jsonl at 85f210084a367dcc706c732f5776bf0563cdc0cd (tag v0.3.0-cleanroom, sibling checkout ../cleanflate), lines 109-128, first ts 2026-09-29T14:53:58.191Z, last ts 2026-09-29T14:56:41.968Z, unmodified (cmp-verified against git show); SOURCE file beside it. verify-attestation.mjs --legacy-log <file> [--roots] [--words] [--repo] [--json]: parsed/failed counts, calls by tool/stage, denials, read-capable calls (13 in the fixture), forbidden-read candidates (the denied libz-sys find), the legacy integrity line. Legacy stage key spelled in pieces in the verifier. attest suite 118 assertions.
