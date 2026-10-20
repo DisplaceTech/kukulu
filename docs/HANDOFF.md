@@ -150,3 +150,13 @@ Head after round 3: see `git log`. Three fix tasks, all done, none blocked: R3-0
 - R3-03: bare `cd`/`cd --` goes to HOME and `cd -` returns to the previous directory; sudo and env flag values are skipped; function headers, `case ... in`, arm patterns and `esac` are stripped. 16 fixtures (guard self-test now 310 cases). Interpretation: arm patterns are recognized only inside a case.
 - Manual check: NOT VERIFIED (human): `gh pr checks` shows `test (macos)` green after the push.
 - Codebase note: the guard resolves paths with `path.resolve` and never `realpath`, so the spelled depth of a path is what matters; a fixture that climbs a fixed number of `..` is depth-dependent.
+
+## Round 4
+
+Branch build/2026-10-19; 88 tasks done, 0 blocked, 0 skipped. Tasks R4-01 to R4-03 (commits 56d7874, f41a21c, a653575), all in mcp/cleanroom.mjs, test/fixtures/guard-cases.json and docs/cleanroom.md.
+
+- R4-01: one VALUED_OPTIONS table (short and long) replaces the wrapper if-chain; env -S, --split-string and attached -S<value> are re-split into command words. Interpretation: the attached form is also split.
+- R4-02: function headers accept `{` directly after `()`; case arms accept an optional leading `(` and no space after `)`; bare cd/pushd operands and non-pattern read-family operands are judged as paths against shellCwd. Interpretation: that check runs after rule 6c so existing forbidden-word reasons are unchanged.
+- R4-03: cp/mv/ln/install judge `<destination>/<basename>` (destinationPaths); a recursive cp is denied when any landing path contains a protected path. Interpretation: the containment check covers every landing path, not only sources standing for the directory.
+- Fixtures: 17 + 10 + 16 new cases; guard self-test now 353 cases, test/cleanroom.mjs 897 assertions. KNOWN_LIMITS unchanged. No new config keys or assumptions.
+- Manual check: none.
