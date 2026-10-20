@@ -45,3 +45,13 @@ None added or tuned. `policies.syncBase` (default `true`) is an owner decision, 
 - The guard changes (P0-03 to P0-06) follow SPEC principle 1: a guard finding becomes a fix task only for a regression, a protected-path write or denied read with a spelling already named, or a missing command word. Other unmodelled spellings belong under Known-gap candidates.
 - `checkpoint()` passes only the three `CHECKPOINT_KEYS` hashes; `cleanroomHash` is in genesis, state, gate check 3 and the manifest, never in a signed checkpoint.
 - Gate check 3 skips the `mcp/cleanroom.mjs` comparison when a flight began on 0.7.0 and records `unpinned` in the passing gate entry.
+
+## Round 1
+
+Review-fix round 1: 2 tasks, both done (19 of 19 tasks done overall, 0 blocked). Tests and fixtures only; no server or guard change.
+
+- R1-01: three new tests. A failed base-sync merge commit leaves HEAD, tree and index unchanged; a failing signer under signing auto is retried unsigned and lands the merge; a serial `kukulu_task_next` in a plan with streams never merges the base, while a serial `kukulu_run_start` does.
+- R1-02: eight denied fixtures named `(R1-02)` in `test/fixtures/guard-cases.json` (tar -r/-u/--append/--update/--get, rsync with `-e`, rsync and tar wildcard targets). The guard self-test now runs 509 cases.
+- Interpretation: none.
+- Not run: the mutation checks the tasks name (`kukulu_mutate`) are not available to the implementer; the reviewer should run them.
+- `kukulu_verify` green: 3715 assertions.
