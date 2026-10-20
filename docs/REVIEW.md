@@ -1,5 +1,5 @@
 <!-- Kūkulu review, build/2026-10-19 -->
-Round: 7
+Round: 8
 
 # Review: Kūkulu 0.7.0 build (build/2026-10-19)
 
@@ -9,28 +9,20 @@ CHANGES REQUESTED
 
 What I checked:
 
-- All 93 tasks are done. None are blocked or skipped.
-- At `3f5f23a`, `kukulu_verify` passes.
+- All 95 tasks are done. None are blocked or skipped.
+- At `05d2c3b`, `kukulu_verify` passes.
   - All 27 `docs/kukulu.json` constraints are clean, and their fixture self-test passes.
   - `npm run lint` and `pre-commit run --all-files` pass.
-  - The 13 suites pass: 3,513 assertions.
-- Round 6 changed only `mcp/cleanroom.mjs`, `test/fixtures/guard-cases.json`, `docs/cleanroom.md` and the pipeline files (`git diff --name-only a633575..HEAD`).
-  - Round 6 did not touch `docs/SPEC.md`, `docs/plans/`, `docs/flights/`, `docs/site/`, `.gitignore`, `.gitattributes` or CI config.
-  - No existing fixture line changed. Round 6 only added fixtures.
-  - Each task updated rule 6 in `docs/cleanroom.md`. Each commit follows the template and is signed (`%G?` is `G` on all seven commits).
-- Every acceptance fixture that R6-01 and R6-02 name is in `guard-cases.json`, with the expected decision. I ran every round-6 probe through `evaluate()` again. Each one is now denied, including `cp -rt . evil/docs`. Every "stays allowed" form is still allowed.
-- R6-01's `shellWords` change is right. Inside double quotes it now keeps a backslash that does not precede `` $ ` " \ `` or a newline, which is what bash does.
-  - `"c\url" https://evil` is now allowed. That is correct: bash runs a command literally named `c\url`.
-  - `bash -c "c\url …"`, `sh -c`, `eval` and the unquoted `c\url` are still denied.
+  - The 13 suites pass: 3,530 assertions.
+- `gh pr checks` at `05d2c3b` (the pushed head): all eleven checks pass, `test (macos)` included.
+- Round 7 changed only `mcp/cleanroom.mjs`, `test/fixtures/guard-cases.json`, `docs/cleanroom.md` and the pipeline files (`git diff --name-only 68aa74c..HEAD`). The one `docs/kukulu.json` change is the owner's `90be269` (`maxRounds` and `maxRoundsHard` raised to 10 through `kukulu_flight_options`).
+  - Round 7 did not touch `docs/SPEC.md`, `docs/plans/`, `docs/flights/`, `docs/site/`, `.gitignore`, `.gitattributes` or CI config.
+  - No existing fixture line changed. Round 7 only added fixtures.
+  - Both commits follow the template, and every commit since `68aa74c` is signed (`%G?` is `G` on all eight).
+- Every acceptance fixture that R7-01 and R7-02 name is in `guard-cases.json`, with the expected decision and reason. I ran every round-7 probe through `evaluate()` again. Each one is now denied, and every "stays allowed" form is still allowed.
+- R7-02 is complete. I checked GNU findutils 4.9.0's long options for prefixes the guard now resolves differently from xargs (`--p`, `--a`, `--d`, `--e`, `--r`, `--s`, `--m`, `--i`) and found none.
 
-Round 6's fixes hold for every form round 6 named. Two problems remain:
-
-- **F1 (cp option parsing).** One gap is a regression from R5-02; the other is a spelling R6-02's own fix left out.
-- **F2 (xargs).** Valued options are missing from the table.
-
-I checked both bypasses against the real tools on this machine: GNU coreutils 9.4 and findutils 4.9.0. I used `echo` in place of `curl` and a scratch directory in place of the project. Each form ran its command or replaced the file.
-
-The flight is now past `maxRoundsHard` (6), so this submission halts it for the owner (see Spec issues).
+R7-01 fixed the forms round 7 named. But its stated interpretation, that every other cp long option "takes a value only with `=`", is wrong for two of cp's options. Install has a third.
 
 ## Findings
 
@@ -40,87 +32,59 @@ Most severe first. Every probe ran `evaluate()` with these settings:
 - root `/tmp/proj`, home `/home/u`, cwd `/tmp/proj`, `planExists: true`
 - D-10's protected set from `protectedPaths()`
 
-The "at `b68996b`" and "at `b6846fe`" columns come from `git show <rev>:mcp/cleanroom.mjs`, run with the same inputs.
+### F1: destinationPaths has no entry for cp's `--sparse` and `--no-preserve` or install's `--strip-program`, all of which take a required value, so a valued option after the destination turns its value into the destination (category 5, with the category-6 interpretation behind it; SPEC D-10 self-protection, D-03 rule 6d; task R7-01)
 
-### F1: destinationPaths reads cp's long options against install's valued set, and ignores `-T` in a valued bundle, so a recursive copy that replaces the policy passes (category 5, partly a regression; SPEC D-10 self-protection, D-03 rule 6d; tasks R5-02, R6-02)
+The cause:
 
-**Gap 1: `--o` is read as `--owner`.**
+- `destinationPaths` (`mcp/cleanroom.mjs:1064-1071`) values a cp long option only when `cpLong` resolves it to `--target-directory` or `--suffix`.
+- `COPY_SPEC.long` (`:1027`) is install's set without `--strip-program`.
+- `cp --help` (GNU coreutils 9.4) lists `--sparse=WHEN` and `--no-preserve=ATTR_LIST`. Both are required arguments, unlike the optional `--backup[=CONTROL]`, `--preserve[=ATTR_LIST]`, `--reflink[=WHEN]`, `--update[=UPDATE]` and `--context[=CTX]`.
+- `install --help` lists `--strip-program=PROGRAM` the same way.
+- getopt takes a required argument's value from the next token, and GNU getopt permutes options. So `cp SRC DIR --sparse always` is cp copying `SRC` into `DIR`.
+- The guard reads `always` as a third operand, and so as the destination. `docs/cleanroom.json` is never judged.
 
-- `destinationPaths` (`mcp/cleanroom.mjs:1064`) runs `scanOption(t, COPY_SPEC)` on every option token before it looks at `CP_LONG`.
-- `COPY_SPEC.long` (`:1027`) is the valued set shared by cp, mv, ln and install: `--target-directory --suffix --mode --owner --group`.
-- So for cp, `--o` is read as install's `--owner`, and it swallows the next token as its value.
-- GNU cp has no `--owner`. To cp, `--o` is the unique prefix of `--one-file-system`, which takes no value.
-- With the source swallowed, one operand is left. `destinationPaths` returns no targets, and nothing is judged.
-
-**Gap 2: `-T` in a valued bundle.**
-
-- In the valued-bundle branch (`:1068`), the letters before the valued letter are checked for recursion only, never for `-T`.
-- So in `cp -rTS .bak evil docs`, the `T` is lost. The source is judged at `docs/evil`, not at `docs`.
-- R6-02's task was to "read -T from a short bundle". It reads it only from bundles that have no valued letter.
-
-| Command | at `b68996b` | at `b6846fe` | at HEAD |
+| Command | at `b68996b` | at `68aa74c` | at HEAD |
 |---|---|---|---|
-| `cp -r --o evil/. docs` | denied | **allowed** | **allowed** |
-| `cp -rT --o evil docs` | allowed | allowed | **allowed** |
-| `cp --o -rT evil docs` | allowed | allowed | **allowed** |
-| `cp -rTS .bak evil docs` | allowed | allowed | **allowed** |
-| `cp -TrS.bak evil docs` | allowed | allowed | **allowed** |
-| `cp -aTS~ evil .kukulu` | allowed | allowed | **allowed** |
+| `cp evil/cleanroom.json docs --sparse always` | allowed | allowed | **allowed** |
+| `cp evil/cleanroom.json docs --no-preserve mode` | allowed | allowed | **allowed** |
+| `cp -r evil/. docs --sparse always` | allowed | allowed | **allowed** |
+| `cp -rT evil docs --no-preserve all` | allowed | allowed | **allowed** |
+| `cp evil/cleanroom.json docs --sp always` | allowed | allowed | **allowed** |
+| `cp evil/state.json .kukulu --sparse never` | allowed | allowed | **allowed** |
+| `install evil/cleanroom.json docs --strip-program strip` | allowed | allowed | **allowed** |
 
-On this machine, `cp -r --o evil/. docs`, `cp -rT --o evil docs` and `cp -rTS .bak evil docs` each replaced `docs/cleanroom.json` with `evil/cleanroom.json`. With `-S`, cp also left the old policy behind as `docs/cleanroom.json.bak`.
+The attached forms (`--sparse=always`) and the valued option before the operands (`cp --sparse always evil/cleanroom.json docs`) are denied, as is `cp evil/cleanroom.json docs --suffix .bak`.
 
-What breaks: one plain `cp` replaces the policy, or the state file that pins its hash. This is the fifth round in a row that finds this hole. `cp -r --o evil/. docs` is a fix round loosening the guard: R5-02 made it allowed, and round 6 missed it.
+I checked these against the real tools on this machine (GNU coreutils 9.4) in a scratch directory. `cp evil/cleanroom.json docs --sparse always`, `cp evil/cleanroom.json docs --no-preserve mode`, `cp -r evil/. docs --sparse auto` and `install evil/cleanroom.json docs --strip-program strip` each replaced `docs/cleanroom.json`. Install only warned that it was ignoring `--strip-program`.
 
-Minimal fix:
+**Same mechanic, BSD.** BSD and macOS install has a `-S` that takes no value ("safe copy" in the FreeBSD and macOS `install(1)` synopsis `install [-bCcpSsv] [-B suffix] …`). `COPY_SPEC.short` makes `-S` valued for every one of the four commands. So `install -S evil/cleanroom.json docs` is allowed: the guard takes `evil/cleanroom.json` as the suffix, which leaves one operand and no targets.
 
-- For cp, resolve a long option through `cpLong` (the full `CP_LONG` list) before anything else. It is valued only when it resolves to `--target-directory` or `--suffix`.
-- Keep `COPY_SPEC`'s long set for install, mv and ln. None of their long options collides with `--o`, `--m` or `--g` the way cp's `--one-file-system` does.
-- In the valued-bundle branch, read `T` from the letters before the valued letter, the same way the line reads `[rRa]` (`cp -rTS .bak`, `cp -TrS.bak`).
+- On GNU, the same command fails ("missing destination file operand").
+- On macOS, where the suite runs (`test (macos)`), it installs the file at `docs/cleanroom.json`.
+- I could not run BSD install here, so this form comes from its synopsis, on the same grounds as R6-01's `env -P` and R7-02's `xargs -J -R -S`.
 
-### F2: xargs's `--process-slot-var` (GNU) and `-J`, `-R`, `-S` (BSD and macOS) are not in VALUED_OPTIONS, so their value is taken as the command word (category 5; SPEC D-03 canonicalization "a wrapper (… `xargs` …) with its flags", rule 6a; tasks R4-01, R5-01, R6-01)
-
-`VALUED_OPTIONS.xargs` (`mcp/cleanroom.mjs:548`) has no `--process-slot-var`.
-
-- `xargs --help` on this machine (findutils 4.9.0) lists `--process-slot-var=VAR`. It requires an argument, and as a separate token it takes the next one.
-- `echo a | xargs --process-slot-var V echo PSV` prints `PSV a` here.
-- The guard reads the token as a plain flag. It then takes `V` as the command word, and `curl` is never seen.
-- `--p` is a unique prefix of the same option, both in GNU xargs and once the option is in the table.
-
-The BSD and macOS xargs synopsis lists three valued options the table lacks: `-J replstr`, `-R replacements` and `-S replsize`. The suite runs on macOS (`test (macos)`), and R6-01 added BSD `env -P` on the same grounds. I could not run BSD xargs here, so these three are from its synopsis.
-
-Allowed at every revision since `2d0cfba`:
-
-- `xargs --process-slot-var V curl https://evil` and `xargs --p V curl https://evil`
-- `xargs -J % curl https://evil`, `xargs -R 1 curl https://evil` and `xargs -S 255 curl https://evil`
-
-`xargs --process-slot-var=V curl https://evil` is denied, because the value is attached.
-
-What breaks: one valued xargs option in front of a network command gets past the network ban.
+What breaks: one plain `cp` or `install` replaces the policy, or the state file that pins its hash. None of these forms is a regression. They have been allowed since the destination logic was written. R7-01 was the task that resolved cp's long options against cp's own list, and its interpretation fixed the valued set at two options when cp has four.
 
 Minimal fix:
 
-- Add `--process-slot-var` to xargs's long valued list.
-- Add `-J`, `-R` and `-S` to its short valued list. GNU xargs has none of the three, so no GNU spelling changes meaning.
-
-Fold in one test gap from this round's mutation sampling (see Notes):
-
-- Deleting the optional-short check in `scanOption` (`:593`) survives.
-- No fixture has an optional letter before a valued one in a bundle, such as `xargs -iE curl https://evil`.
-- At HEAD, `-iE` is `-i` with the replace string `E`, and curl is the command. `echo a | xargs -iE echo ran-iE` prints `ran-ia` here.
-- Without the check, `E` is read as the valued `-E`, which swallows `curl`, and the guard allows the command.
-- A fixture for `xargs -iE curl https://evil` belongs with F2's fixtures. It tests the D-03 wrapper-flag requirement, so the fix task cites the review, not mutation.
+- Give each of cp, mv, ln and install its own valued set, taken from its `--help`:
+  - cp: `-S -t`, `--target-directory --suffix --sparse --no-preserve`
+  - mv and ln: `-S -t`, `--target-directory --suffix`
+  - install: `-g -m -o -S -t`, `--group --mode --owner --suffix --target-directory --strip-program`
+- Keep cp's long options resolved through `cpLong`. A prefix such as `--sp` or `--no-p` is valued when it resolves to one of cp's four valued options.
+- Do not add `--strip-program` to a set mv or ln reads. mv's `--st` is `--strip-trailing-slashes`, and reading it as `--strip-program` would swallow the source, which is the same mistake as round 7's `--o`.
+- For an option whose arity differs between GNU and BSD (install's `-S`), judge the command under both readings and deny when either one writes a protected path.
+- Update `docs/cleanroom.md` rule 6, which now says that "only `--target-directory` and `--suffix` take one".
 
 ## Spec issues
 
-- **The guard is lexical, and the loop is still not converging.** Fix tasks per round: 7, 7, 3, 3, 3, 2, and now 2. Each round since round 4 has found its holes in the option scanning of the round before.
-  - F1's `cp -r --o` is the fourth round running in which a fix round made the guard looser (R4-01, R5-01, R5-02).
-  - This round is past `maxRoundsHard` (6), so `kukulu_review_submit` halts the flight.
-  - The owner may prefer to amend SPEC D-03 instead. It could say that wrapper and write-command option parsing is best-effort, add that to `KNOWN_LIMITS`, and stop the loop here.
-  - F1 is worth fixing either way. It is a plain `cp` that replaces the policy, and one of its forms was denied before round 5.
-  - The decision is the owner's: lift the cap with `kukulu_flight_options({ maxRoundsHard: 7, resume: true })`, or amend the spec.
-- **Read-family words are judged only in path-like arguments** (SPEC D-03 rule 6c), carried from rounds 5 and 6. So `cat zlib.txt` is allowed and `cat ./zlib.txt` is denied `forbidden word in path argument`.
-- **SPEC D-03 makes `git` write-family as a whole** (carried from rounds 3 to 6). `git add docs/*` is denied `protected path`.
-- Carried from rounds 2 to 6, still open:
+- **The guard is lexical, and the loop still has not converged.** Fix tasks per round: 7, 7, 3, 3, 3, 2, 2, and now 1.
+  - This round's finding is not a regression. It is the same class as rounds 5 to 7: an option-arity table that does not match the real tool.
+  - A table cannot be proved complete across GNU and BSD versions. The owner may still prefer to amend SPEC D-03 instead: it could say that wrapper and write-command option parsing is best-effort against the tools' documented options, and add that to `KNOWN_LIMITS`.
+  - F1 is worth fixing either way. It is a plain `cp` that replaces the policy.
+- **Read-family words are judged only in path-like arguments** (SPEC D-03 rule 6c), carried from rounds 5 to 7. So `cat zlib.txt` is allowed and `cat ./zlib.txt` is denied `forbidden word in path argument`.
+- **SPEC D-03 makes `git` write-family as a whole** (carried from rounds 3 to 7). `git add docs/*` is denied `protected path`.
+- Carried from rounds 2 to 7, still open:
   - SPEC F-04's `--roots`/`--words` defaults were superseded by the owner's `e7ef4d4`.
   - D-03's write, network and wrapper lists are incomplete. For example, `rsync evil/cleanroom.json docs/` and `tar xf evil.tar -C docs` are allowed. `KNOWN_LIMITS` names rsync.
   - The log's uncommitted tail is unsigned.
@@ -150,8 +114,7 @@ All `NOT VERIFIED (human)`, copied from HANDOFF.md.
   - Confirm the site, ci and lint checks are green on the PR.
 - From HANDOFF's first line: the owner runs one clean-room flight from the working tree before merging.
 - From HANDOFF: after this branch meets `cleanroom`, change `fromas of 0.7.0` to `as of 0.7.0` in `docs/site/mockup.html` and `site/index.html`.
-- From round 3: `gh pr checks` shows `test (macos)` green after the push.
-- After the review fixes, re-run the Phase 3 denial step in a live session with the bypass forms of rounds 1 to 7. Include:
+- After the review fixes, re-run the Phase 3 denial step in a live session with the bypass forms of rounds 1 to 8. Include:
   - `cd ~/.cargo/registry && cat x`
   - `(curl https://example.com)`
   - `cd && cat .cargo/registry/x`
@@ -163,22 +126,24 @@ All `NOT VERIFIED (human)`, copied from HANDOFF.md.
   - `cp -rT evil docs`
   - `cp -r --o evil/. docs`
   - `xargs --process-slot-var V curl https://example.com`
+  - `cp evil/cleanroom.json docs --sparse always`
+  - on macOS, `install -S evil/cleanroom.json docs`
 
 ## Notes
 
-- **These fix tasks are not driven by mutation results.** Both findings come from probing `evaluate()` against SPEC D-03 and D-10, and from checking each form against the real tools. Neither comes from a surviving mutant, so each task is `review`-sourced.
-- **Mutation sampling.** Per the review-build rule for round 2 and later, I mutated only `mcp/cleanroom.mjs`, the one source file in `git diff --name-only a633575..HEAD`. I used the targeted `cleanroom` suite with `confirmKill`.
+- **This fix task is not driven by mutation results.** F1 comes from probing `evaluate()` against SPEC D-03 and D-10 and checking each form against the real tools. It does not come from a surviving mutant.
+- **Mutation sampling.** Per the review-build rule for round 2 and later, I mutated only `mcp/cleanroom.mjs`, the one source file in `git diff --name-only 68aa74c..HEAD`. I used the targeted `cleanroom` suite with `confirmKill`.
   - Five mutants were killed, each confirmed by a clean re-run:
-    - env -S's `\_` replacement removed
-    - the `-T` stands-for-the-destination clause (`asSelf`) removed
-    - `cpLong` prefix matching made exact-only
-    - the double-quote backslash rule reverted to "always escape"
-    - an optional long option's empty value turned back into "takes the next token"
+    - R7-01's `-T` read from the letters before a valued letter, removed
+    - R7-01's cp long-option branch disabled, so cp falls back to `COPY_SPEC`
+    - R7-01's attached `=` value replaced by "always attached"
+    - R7-02's `-S` removed from xargs's valued list
+    - `scanOption`'s optional-short check deleted (round 7's survivor)
   - All five failed through the gate's guard self-test ("the first kukulu_next in a clean-room project goes on to the plan stage": `halt`), which runs the fixture file.
-- **One survivor.** Deleting `scanOption`'s optional-short check (`:593`) survives.
-  - It changes a decision only for a bundle with an optional letter before a valued one (`xargs -iE curl …`).
-  - This round is past `review.mutationFixRounds` (2), so the survivor alone is not a task.
-  - It points at an untested D-03 wrapper-flag form, so F2's task adds the `-iE` fixture.
-- The advisory survivors from rounds 3 to 6 are still open.
-- The running MCP server is the installed 0.6.1. Its `kukulu_review_submit` takes no `source` field, and its `kukulu_status` reports no `review.mutationFixRounds`. I applied the working-tree review-build rule (cap 2, the default in `cfg()`) by hand, as round 6 did.
+  - Round 7's survivor is now killed, by R7-02's `xargs -iE curl https://evil` fixture.
+- No survivors this round. The advisory survivors from rounds 3 to 6 are still open.
+- The running MCP server is the installed 0.6.1:
+  - Its `kukulu_review_submit` takes no `source` field.
+  - Its `kukulu_status` reports neither `prChecks` nor `review.mutationFixRounds`.
+  - So I read CI with `gh pr checks` directly, and applied the working-tree review-build rule (cap 2) by hand, as rounds 6 and 7 did.
 - The project is in general mode (no `docs/cleanroom.json`), so there are no `denied` entries since `lastReviewCommit` to check.

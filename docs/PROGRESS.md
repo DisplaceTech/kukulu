@@ -100,6 +100,7 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] R6-02 Guard: cp -T and abbreviated --recursive/--archive are read, so a recursive copy onto a protected directory is judged at the directory
 - [x] R7-01 Guard: cp long options are resolved against cp's own option list, and -T is read in a valued bundle
 - [x] R7-02 Guard: xargs --process-slot-var and BSD xargs -J/-R/-S are valued
+- [ ] R8-01 Guard: cp, mv, ln and install each read their own valued options (cp --sparse/--no-preserve, install --strip-program, BSD install -S)
 
 ## Log
 
