@@ -160,3 +160,13 @@ Branch build/2026-10-19; 88 tasks done, 0 blocked, 0 skipped. Tasks R4-01 to R4-
 - R4-03: cp/mv/ln/install judge `<destination>/<basename>` (destinationPaths); a recursive cp is denied when any landing path contains a protected path. Interpretation: the containment check covers every landing path, not only sources standing for the directory.
 - Fixtures: 17 + 10 + 16 new cases; guard self-test now 353 cases, test/cleanroom.mjs 897 assertions. KNOWN_LIMITS unchanged. No new config keys or assumptions.
 - Manual check: none.
+
+## Round 5
+
+Branch build/2026-10-19; 91 tasks done, 0 blocked, 0 skipped. Tasks R5-01 to R5-03 (commits 28f8cbb, b037814, 28dc670), all in mcp/cleanroom.mjs, test/fixtures/guard-cases.json and docs/cleanroom.md.
+
+- R5-01: exported `scanOption(token, {short, long})` reads wrapper options like getopt (bundles, `--name=value`, unique-prefix long names); `VALUED_SPEC` derives from `VALUED_OPTIONS`. After env -S splits its value, the words are parsed as further env options (`env -S -i curl` is denied again).
+- R5-02: `destinationPaths` uses `scanOption` for -t/--target-directory and -S -m -o -g (so `cp -vt docs x`, `--target docs` are judged). Only a source whose basename is `.` or `..` stands for the destination; `cp -r src/ .` is allowed.
+- R5-03: the glob check also covers bare cd/pushd/read-family operands and any such operand after a `cd` into a glob.
+- Fixtures: 17 + 12 + 9 new cases; guard self-test is 391 cases, test/cleanroom.mjs 935 assertions. KNOWN_LIMITS unchanged. No new config keys or assumptions.
+- Interpretation: none. Manual check: none.
