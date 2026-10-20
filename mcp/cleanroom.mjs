@@ -513,8 +513,11 @@ export function shellWords(segment) {
       else current += c;
     } else if (quote === '"') {
       if (c === '"') quote = null;
-      else if (c === "\\" && i + 1 < segment.length) current += segment[++i];
-      else current += c;
+      else if (c === "\\" && i + 1 < segment.length) {
+        // Inside double quotes a backslash only escapes $ ` " \ and newline; before anything else it stays (env -S needs `\_`).
+        if ('$`"\\\n'.includes(segment[i + 1])) current += segment[++i];
+        else current += c;
+      } else current += c;
     } else if (c === "'" || c === '"') {
       quote = c;
       started = true;
@@ -538,11 +541,11 @@ const WRAPPERS = new Set(["sudo", "env", "time", "command", "xargs", "nice", "ex
 // Options whose value is the next token, per wrapper, short and long.
 const VALUED_OPTIONS = Object.fromEntries(
   Object.entries({
-    sudo: "-u -g -h -p -C -D -r -t -U --user --group --host --prompt --close-from --chdir --role --type --other-user",
-    env: "-u -C --unset --chdir",
+    sudo: "-u -g -h -p -C -D -r -t -U -R -T --chroot --command-timeout --user --group --host --prompt --close-from --chdir --role --type --other-user",
+    env: "-u -C -P --unset --chdir",
     timeout: "-s -k --signal --kill-after",
     nice: "-n --adjustment",
-    xargs: "-n -L -P -I -i -d -E -s -a --max-args --max-lines --max-procs --replace --delimiter --eof --max-chars --arg-file",
+    xargs: "-n -L -P -I -d -E -s -a --max-args --max-procs --delimiter --max-chars --arg-file",
     stdbuf: "-i -o -e --input --output --error",
     time: "-o -f --output --format",
   }).map(([k, v]) => [k, new Set(v.split(" "))]),
@@ -556,12 +559,17 @@ const VALUED_SPEC = Object.fromEntries(
       {
         short: new Set(names.filter((n) => /^-[^-]$/.test(n)).map((n) => n[1])),
         long: new Set(names.filter((n) => n.startsWith("--"))),
+        optShort: new Set(),
+        optLong: new Set(),
       },
     ];
   }),
 );
 VALUED_SPEC.env.short.add("S");
 VALUED_SPEC.env.long.add("--split-string");
+// GNU xargs gives these an OPTIONAL argument that is only ever attached (-i[str], --replace[=str]); the next token is the command.
+for (const l of "ile") VALUED_SPEC.xargs.optShort.add(l);
+for (const n of ["--replace", "--max-lines", "--eof"]) VALUED_SPEC.xargs.optLong.add(n);
 
 /**
  * Read one option token the way getopt does. `spec` is `{ short: Set of valued letters, long: Set of valued
@@ -575,11 +583,14 @@ export function scanOption(token, spec) {
   if (token.startsWith("--")) {
     const eq = token.indexOf("=");
     const given = eq === -1 ? token : token.slice(0, eq);
-    const full = spec.long.has(given) ? [given] : [...spec.long].filter((n) => n.startsWith(given));
+    const all = [...spec.long, ...(spec.optLong || [])];
+    const full = all.includes(given) ? [given] : all.filter((n) => n.startsWith(given));
     if (full.length !== 1) return null;
-    return { name: full[0], value: eq === -1 ? null : token.slice(eq + 1) };
+    const optional = spec.optLong && spec.optLong.has(full[0]);
+    return { name: full[0], value: eq === -1 ? (optional ? "" : null) : token.slice(eq + 1) };
   }
   for (let k = 1; k < token.length; k++) {
+    if (spec.optShort && spec.optShort.has(token[k])) return { name: token[k], value: token.slice(k + 1) };
     if (spec.short.has(token[k])) return { name: token[k], value: k + 1 < token.length ? token.slice(k + 1) : null };
   }
   return null;
@@ -610,7 +621,7 @@ export function commandWord(tokens) {
         if (base === "env" && (opt.name === "S" || opt.name === "--split-string")) {
           const fromNext = opt.value === null;
           if (fromNext && i >= tokens.length) continue;
-          const words = shellWords(fromNext ? tokens[i] : opt.value);
+          const words = shellWords((fromNext ? tokens[i] : opt.value).replaceAll("\\_", " "));
           tokens = [...tokens.slice(0, i - 1), ...words, ...tokens.slice(fromNext ? i + 1 : i)];
           i--;
           continue;
