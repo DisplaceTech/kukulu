@@ -89,7 +89,7 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] R2-07 Test that --legacy-log's default repository is the log's own repository, not an ancestor
 - [x] R3-01 Make the Glob-climb guard fixture independent of the temp directory's depth (macOS CI)
 - [x] R3-02 Guard: wildcards and braces no longer hide a protected path from writes, redirections and destructive forms; git stash -m and read-tree -u discard the log
-- [ ] R3-03 Guard: a bare cd moves to HOME, wrapper option values are skipped, and case arms and function bodies are judged
+- [x] R3-03 Guard: a bare cd moves to HOME, wrapper option values are skipped, and case arms and function bodies are judged
 
 ## Log
 
@@ -357,3 +357,7 @@ Manual check: NOT VERIFIED (human): macOS CI job green after push.
 ### R3-02 — 3a7bcdb
 New braceExpand and wildcardNames helpers in mcp/cleanroom.mjs; rule 6d uses expanded operands/redirects; stash -m value skipped; read-tree -u added. 26 fixtures (294 cases total). docs/cleanroom.md rule 6 updated. KNOWN_LIMITS unchanged.
 Interpretation: leading wildcard does not match dotfiles (shell rule); read-tree -u requires --reset or -m.
+
+### R3-03 — 87b8a02
+previousCwd tracking, bare cd -> HOME, sudo/env flag values skipped in commandWord, stripGrouping drops function headers, case/esac and (inside a case) arm patterns. 16 fixtures (310 cases). docs/cleanroom.md rule 6 updated.
+Interpretation: arm patterns only recognized inside a case, to keep `(cd x; ls)` working.
