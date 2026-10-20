@@ -707,7 +707,7 @@ for (const [slug, expectNote, label] of [
 }
 
 /** A spec-only repo with an uncommitted plan whose P1-02 was split into P1-02a. */
-function splitPlanRepo(progressPatch = (t) => t) {
+function splitPlanRepo(progressPatch = (t) => t, { claude = "# rules\n", flight } = {}) {
   const repo = specRepo();
   const tasks = [
     { id: "P1-01", title: "One" },
@@ -717,8 +717,8 @@ function splitPlanRepo(progressPatch = (t) => t) {
   ];
   writeFile(repo, "docs/PLAN.md", planDoc(tasks));
   writeFile(repo, "docs/PROGRESS.md", progressPatch(progressDoc(tasks)));
-  writeFile(repo, "docs/kukulu.json", JSON.stringify({ verify: ["true"], constraints: [{ id: "c", paths: ["src/"], pattern: "x", shouldMatch: ["x"], shouldNotMatch: ["y"], from: "P1-03" }] }, null, 2) + "\n");
-  writeFile(repo, "CLAUDE.md", "# rules\n");
+  writeFile(repo, "docs/kukulu.json", JSON.stringify({ ...(flight ? { flight } : {}), verify: ["true"], constraints: [{ id: "c", paths: ["src/"], pattern: "x", shouldMatch: ["x"], shouldNotMatch: ["y"], from: "P1-03" }] }, null, 2) + "\n");
+  writeFile(repo, "CLAUDE.md", claude);
   return repo;
 }
 
@@ -736,6 +736,61 @@ function splitPlanRepo(progressPatch = (t) => t) {
     like(readFile(repo, "docs/kukulu.json"), /"from": "P1-04"/, "...and the from value follows its task");
     eq(subject(repo), "plan: derive build plan from SPEC", "...in the plan commit");
     ok(plan.includes("### P1-02: Two"), "...P1-02 keeps its heading");
+  });
+}
+
+{
+  // CLAUDE.md: only the flight's own notes section is rewritten.
+  const claude = [
+    "# rules", "", "Top of the file cites P1-03 and P1-02a as history.", "",
+    "## Flight old-flight notes", "", "An earlier flight used P1-03 too.", "",
+    "## Flight my-flight notes", "", "- P1-02a is split; P1-03 follows it.", "",
+    "### A subsection", "", "Still the notes: P1-03.", "",
+    "## Commit template", "", "Tail section cites P1-03 and P1-02a.", "",
+  ].join("\n");
+  const repo = splitPlanRepo((t) => t, { claude, flight: "my-flight" });
+  await withServer(repo, async ({ call }) => {
+    const r = await call("kukulu_plan_commit", { renumber: true });
+    eq(JSON.stringify(r.notes), "[]", "(setup) renumber with the notes section present adds no note");
+    const out = readFile(repo, "CLAUDE.md");
+    like(out, /- P1-03 is split; P1-04 follows it\./, "renumber rewrites a split id inside the flight's CLAUDE.md notes");
+    like(out, /### A subsection\n\nStill the notes: P1-04\./, "...a subsection of the notes is still the notes");
+    like(out, /Top of the file cites P1-03 and P1-02a as history\./, "renumber leaves the same id outside the notes section unchanged: the top of the file");
+    like(out, /An earlier flight used P1-03 too\./, "...and an earlier flight's section");
+    like(out, /Tail section cites P1-03 and P1-02a\./, "the notes section ends at the next level-2 heading");
+    eq(git(repo, ["show", "--name-only", "--format=", "HEAD"]).split("\n").includes("CLAUDE.md"), true, "...and CLAUDE.md is in the plan commit");
+  });
+}
+
+{
+  const claude = "# rules\n\nCites P1-02a here.\n";
+  const repo = splitPlanRepo((t) => t, { claude, flight: "my-flight" });
+  await withServer(repo, async ({ call }) => {
+    const r = await call("kukulu_plan_commit", { renumber: true });
+    eq(JSON.stringify(r.notes), JSON.stringify(['CLAUDE.md has no "## Flight my-flight notes" section; ids there were not renumbered']), "renumber notes a CLAUDE.md without the flight's notes section");
+    eq(readFile(repo, "CLAUDE.md"), claude, "...and leaves CLAUDE.md byte-identical");
+  });
+  const noSlug = splitPlanRepo((t) => t, { claude });
+  await withServer(noSlug, async ({ call }) => {
+    const r = await call("kukulu_plan_commit", { renumber: true });
+    eq(JSON.stringify(r.notes), JSON.stringify(["docs/kukulu.json has no flight slug; ids in CLAUDE.md were not renumbered"]), "renumber notes a config with no flight slug");
+  });
+}
+
+{
+  const claude = "# rules\n\n## Flight my-flight notes\n\nP1-02a then P1-03.\n";
+  const repo = splitPlanRepo((t) => t, { claude, flight: "my-flight" });
+  const hook = path.join(repo, ".git", "hooks", "commit-msg");
+  fs.mkdirSync(path.dirname(hook), { recursive: true });
+  fs.writeFileSync(hook, `#!/bin/sh\nif head -n1 "$1" | grep -q '^plan:'; then echo rejected >&2; exit 1; fi\n`);
+  fs.chmodSync(hook, 0o755);
+  const before = ["docs/PLAN.md", "docs/PROGRESS.md", "docs/kukulu.json", "CLAUDE.md"].map((f) => readFile(repo, f));
+  const head = git(repo, ["rev-parse", "HEAD"]);
+  await withServer(repo, async ({ call }) => {
+    ok((await call("kukulu_plan_commit", { renumber: true })).error, "a failed renumber commit is an error");
+    ["docs/PLAN.md", "docs/PROGRESS.md", "docs/kukulu.json", "CLAUDE.md"].forEach((f, i) => eq(readFile(repo, f), before[i], `a failed renumber commit leaves ${f} byte-identical`));
+    eq(git(repo, ["diff", "--cached", "--name-only"]), "", "...nothing is staged");
+    eq(git(repo, ["rev-parse", "HEAD"]), head, "...HEAD did not move");
   });
 }
 

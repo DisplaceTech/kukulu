@@ -13,6 +13,7 @@ All notable changes to this plugin. Format follows
 
 ### Fixed
 
+- `kukulu_plan_commit` with `renumber: true` now also rewrites the renumbered ids inside CLAUDE.md's `## Flight <slug> notes` section, and only there; a missing section or flight slug is reported in `notes` (kukulu F-01).
 - Gate check 3 now pins `mcp/cleanroom.mjs`: genesis records its hash as `cleanroomHash`, the manifest carries `plugin.cleanroomHash`, and the verifier compares it with genesis. A flight started on 0.7.0 passes with `unpinned` in its gate entry (0.7.0 REVIEW spec issue "D-08 check 3 does not pin `mcp/cleanroom.mjs`").
 - The denial for `install -S` landing a source on a protected path under its BSD-only reading named `null` as its directory; it now names the directory it was given (0.7.0 REVIEW Notes).
 - The guard judges a bare read-family operand by the word clause like the same operand written `./x`: `cat zlib.txt` is now denied like `cat ./zlib.txt` (0.7.0 REVIEW spec issue).

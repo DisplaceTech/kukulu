@@ -4169,12 +4169,40 @@ function renumberMap(planText) {
   return map;
 }
 
+/** The [start, end) character range of CLAUDE.md's `## Flight <slug> notes` section, up to the next `## ` heading or the end, or null. */
+function flightNotesRange(text, slug) {
+  const lines = text.split("\n");
+  const start = lines.findIndex((l) => l.trimEnd() === `## Flight ${slug} notes`);
+  if (start < 0) return null;
+  let end = lines.findIndex((l, i) => i > start && l.startsWith("## "));
+  if (end < 0) end = lines.length;
+  const offset = (n) => lines.slice(0, n).reduce((sum, l) => sum + l.length + 1, 0);
+  return [offset(start), Math.min(offset(end), text.length)];
+}
+
+/** `swap` applied to the flight's notes section of CLAUDE.md and to nothing else; the text is returned as it was when the flight has no slug or no section. */
+function swapFlightNotes(claudeText, configText, swap) {
+  let slug = null;
+  try {
+    slug = JSON.parse(configText ?? "null")?.flight;
+  } catch {
+    return claudeText;
+  }
+  if (typeof slug !== "string" || !slug) return claudeText;
+  const range = flightNotesRange(claudeText, slug);
+  if (!range) return claudeText;
+  return claudeText.slice(0, range[0]) + swap(claudeText.slice(range[0], range[1])) + claudeText.slice(range[1]);
+}
+
 function planCommit({ renumber } = {}) {
   if (renumber !== undefined && typeof renumber !== "boolean") throw new ToolError("renumber must be a boolean");
   const readOrNull = (p) => (exists(p) ? read(p) : null);
   let planText = readOrNull(P.plan);
   let progressText = readOrNull(P.progress);
   let configText = readOrNull(P.config);
+  const claudePath = path.join(ROOT, "CLAUDE.md");
+  const claudeText = readOrNull(claudePath);
+  let claudeNew = claudeText;
   let map = {};
   if (renumber === true && planText != null && progressText != null) {
     const started = (progressText.match(/^Started:\s*(.*)$/m) || [])[1];
@@ -4188,6 +4216,8 @@ function planCommit({ renumber } = {}) {
     planText = swap(planText);
     progressText = swap(progressText);
     if (configText != null) configText = configText.replace(/("from"\s*:\s*")([^"]+)(")/g, (_, a, id, b) => `${a}${map[id] || id}${b}`);
+    // CLAUDE.md cites ids too, but only the flight's own notes section is rewritten: earlier flights' sections are history.
+    claudeNew = claudeText != null ? swapFlightNotes(claudeText, configText, swap) : claudeText;
   }
   let configRaw = null;
   let configError = null;
@@ -4198,7 +4228,6 @@ function planCommit({ renumber } = {}) {
       configError = `docs/kukulu.json is not valid JSON: ${e.message}`;
     }
   }
-  const claudePath = path.join(ROOT, "CLAUDE.md");
   const inRepo = git(["rev-parse", "--is-inside-work-tree"], { allowFail: true }).ok;
   const branch = inRepo ? git(["rev-parse", "--abbrev-ref", "HEAD"], { allowFail: true }).out || null : null;
   const problems = validatePlanTexts({ planText, progressText, configRaw, configError, claudeExists: exists(claudePath), branch });
@@ -4212,6 +4241,7 @@ function planCommit({ renumber } = {}) {
       write(P.plan, planText);
       write(P.progress, progressText);
       if (configText != null) write(P.config, configText);
+      if (claudeNew !== claudeText) write(claudePath, claudeNew);
     }
     return gitCommitIfChanged(paths, "plan: derive build plan from SPEC", { stage: "plan" });
   });
@@ -4224,6 +4254,10 @@ function planCommit({ renumber } = {}) {
   // A slug ending in a spec suffix means the title's dash was not honoured; say so, but never refuse.
   const notes = [];
   const slug = configRaw?.flight;
+  if (Object.keys(map).length) {
+    if (typeof slug !== "string" || !slug) notes.push("docs/kukulu.json has no flight slug; ids in CLAUDE.md were not renumbered");
+    else if (flightNotesRange(claudeText ?? "", slug) === null) notes.push(`CLAUDE.md has no "## Flight ${slug} notes" section; ids there were not renumbered`);
+  }
   if (typeof slug === "string" && /-spec(ification)?$/.test(slug)) {
     notes.push(`flight '${slug}' ends in a spec suffix; derive it from the text before the title's dash (plan-build), e.g. '${slug.replace(/-spec(ification)?$/, "")}'`);
   }
