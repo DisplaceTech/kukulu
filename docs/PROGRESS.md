@@ -102,7 +102,7 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] R7-02 Guard: xargs --process-slot-var and BSD xargs -J/-R/-S are valued
 - [x] R8-01 Guard: cp, mv, ln and install each read their own valued options (cp --sparse/--no-preserve, install --strip-program, BSD install -S)
 - [x] R9-01 Guard: mv, ln and install resolve long options against their own full lists (install --strip is a flag)
-- [ ] R10-01 Guard: pin attached --name=value and ambiguous-prefix long options for mv, ln and install with fixtures
+- [x] R10-01 Guard: pin attached --name=value and ambiguous-prefix long options for mv, ln and install with fixtures
 
 ## Log
 
@@ -415,3 +415,6 @@ docs/cleanroom.md rule 6 updated.
 
 ### R9-01 — 7d1d2f2
 Added resolveLong and OTHER_LONG (GNU 9.4 lists for mv, ln, install) in mcp/cleanroom.mjs; destinationPathsFor resolves those commands' long options against them, valued only when the resolved name is in COPY_SPECS. cp unchanged. 12 fixtures added (10 denied, 2 allowed); docs/cleanroom.md rule 6 updated. Interpretation: none. Verify green.
+
+### R10-01 — 6abb464
+Added 12 fixtures (9 denied, 3 allowed) to test/fixtures/guard-cases.json, all suffixed (R10-01). Guard self-test now 481 cases; test/cleanroom.mjs and npm test pass. No guard code changed; every fixture got the stated decision at HEAD. Mutants not re-run by me (reviewer runs kukulu_mutate).
