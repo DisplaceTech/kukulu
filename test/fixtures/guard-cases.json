@@ -3535,5 +3535,41 @@
    "cwd": "__ROOT__"
   },
   "expect": "allowed"
+ },
+ {
+  "name": "allowed pin: grep -A 3 'src/zlib' src",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "grep -A 3 'src/zlib' src"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "allowed pin: grep -n -e 'src/zlib' src",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "grep -n -e 'src/zlib' src"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "allowed pin: echo \"a > .kukulu/state.json\"",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "echo \"a > .kukulu/state.json\""
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
  }
 ]
