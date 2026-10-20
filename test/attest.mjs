@@ -595,6 +595,152 @@ async function summarizedFlight() {
       ok(!entriesOf(repo).some((e) => e.kind === "attest") && entriesOf(repo).at(-1).kind === "gate", "...and the chain holds no attest entry or checkpoint from the call (only the gate's own)");
     }, flight);
   }
+
+  // tampering with a bundle kukulu_attest built
+  {
+    const built = copyOf(flight);
+    let fingerprint = null;
+    await live(built, async ({ call }) => {
+      const r = await call("kukulu_attest");
+      ok(!r.error, "(setup) a real bundle is built for the tamper cases");
+      fingerprint = r.fingerprint;
+    }, flight);
+    const real = path.join(built, "docs", "attestation");
+    const signer = CR.loadKey(testKeyFor(flight));
+    const stranger = CR.generateKey(path.join(mkDir("kukulu-tamper-key-"), "k.pem"));
+    const tamper = (fn) => {
+      const dir = path.join(mkDir("kukulu-tamper-"), "bundle");
+      fs.cpSync(real, dir, { recursive: true });
+      fn(dir);
+      return dir;
+    };
+    // Make the manifest agree with a changed file, so the change is judged by the check that owns it and not only by check 1.
+    const refile = (dir, name, key = signer) => rewriteManifest(dir, key, (m) => {
+      const f = m.files.find((x) => x.path === name);
+      const bytes = fs.readFileSync(path.join(dir, name));
+      f.sha256 = sha(bytes);
+      f.bytes = bytes.length;
+    });
+    const has = (dir, re, opts) => reasons(dir, opts).some((x) => re.test(x));
+    const cli = (dir, ...extra) => spawnSync(process.execPath, [VERIFIER, dir, ...extra], { encoding: "utf8" });
+
+    eq(cli(real).status + "|" + cli(real, "--key", fingerprint).status, "0|0", "the untampered bundle passes with and without --key");
+    ok(V.verifyBundle(real, { key: fingerprint }).notes.every((n) => !n.startsWith("signer:")), "...and with --key there is no unchecked-signer note");
+
+    const file = tamper((d) => fs.appendFileSync(path.join(d, "SUMMARY.md"), "x"));
+    eq(JSON.stringify(reasons(file)), JSON.stringify(["manifest: SUMMARY.md: the SHA-256 differs from the manifest's; the file was changed"]), "a tampered file fails");
+
+    const manifest = tamper((d) => {
+      const m = JSON.parse(fs.readFileSync(path.join(d, "manifest.json"), "utf8"));
+      m.chain.entries += 1;
+      fs.writeFileSync(path.join(d, "manifest.json"), JSON.stringify(m, null, 2) + "\n");
+    });
+    ok(has(manifest, /^signature: manifest\.sig does not verify over manifest\.json/), "a tampered manifest fails (the signature no longer covers it)");
+    ok(has(manifest, /^chain: the manifest says \d+ entries/), "...and its count disagrees with the log");
+
+    const sig = tamper((d) => {
+      const raw = Buffer.from(fs.readFileSync(path.join(d, "manifest.sig"), "utf8").trim(), "base64");
+      raw[0] ^= 1;
+      fs.writeFileSync(path.join(d, "manifest.sig"), raw.toString("base64") + "\n");
+    });
+    eq(JSON.stringify(reasons(sig)), JSON.stringify(["signature: manifest.sig does not verify over manifest.json with publisher.pub"]), "a tampered signature fails");
+
+    const line = tamper((d) => {
+      const f = path.join(d, "log.jsonl");
+      fs.writeFileSync(f, fs.readFileSync(f, "utf8").replace('"decision":"allowed"', '"decision":"denied"'));
+    });
+    ok(has(line, /^chain: entry \d+ \(line \d+\): the hash does not match the entry's content; the entry was edited$/), "a tampered log line fails");
+    ok(has(line, /^manifest: log\.jsonl: the SHA-256 differs/), "...and so does the file's hash");
+
+    // A checkpoint edited, the chain rehashed from there, the manifest refreshed and signed again: only the checkpoint's own signature gives it away.
+    const checkpoint = tamper((d) => {
+      const f = path.join(d, "log.jsonl");
+      const entries = fs.readFileSync(f, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
+      const at = entries.findIndex((e) => e.kind === "checkpoint");
+      entries[at].data.git = "c".repeat(40);
+      let prev = at === 0 ? CR.ZERO_HASH : entries[at - 1].hash;
+      for (let i = at; i < entries.length; i++) {
+        const { hash, ...rest } = entries[i];
+        rest.prev = prev;
+        entries[i] = { ...rest, hash: CR.entryHash(prev, rest) };
+        prev = entries[i].hash;
+      }
+      fs.writeFileSync(f, entries.map((e) => JSON.stringify(e)).join("\n") + "\n");
+      rewriteManifest(d, signer, (m) => {
+        const bytes = fs.readFileSync(f);
+        const file = m.files.find((x) => x.path === "log.jsonl");
+        file.sha256 = sha(bytes);
+        file.bytes = bytes.length;
+        m.chain.tip = entries.at(-1).hash;
+      });
+    });
+    const cp = reasons(checkpoint);
+    ok(cp.some((x) => /^checkpoints: entry \d+: the checkpoint does not verify with publisher\.pub$/.test(x)) && !cp.some((x) => x.startsWith("chain:") || x.startsWith("signature:") || x.startsWith("manifest:")), "a tampered checkpoint fails (and only the checkpoint check)");
+
+    const policyFile = tamper((d) => fs.appendFileSync(path.join(d, "policy.json"), " "));
+    ok(has(policyFile, /^manifest: policy\.json: the SHA-256 differs/), "a tampered policy fails the file's hash");
+    const policy = tamper((d) => {
+      fs.appendFileSync(path.join(d, "policy.json"), " ");
+      refile(d, "policy.json");
+    });
+    eq(JSON.stringify(reasons(policy)), JSON.stringify(["policy: policy.json does not hash to the manifest's policy.current"]), "...and, with the manifest refreshed, check 5 (a tampered policy fails)");
+
+    const pub = tamper((d) => fs.writeFileSync(path.join(d, "publisher.pub"), stranger.publicKey.export({ type: "spki", format: "pem" })));
+    ok(has(pub, /^signature: manifest\.sig does not verify/) && has(pub, /^manifest: publisher\.pub:/), "a swapped public key fails");
+    const taken = tamper((d) => {
+      fs.writeFileSync(path.join(d, "publisher.pub"), stranger.publicKey.export({ type: "spki", format: "pem" }));
+      refile(d, "publisher.pub", stranger);
+    });
+    ok(has(taken, /^checkpoints: entry \d+: the checkpoint does not verify with publisher\.pub$/) && !has(taken, /^signature:/), "...and a bundle re-signed by its forger still fails on the checkpoints");
+    ok(has(taken, /^signature: the signer's fingerprint is sha256:[0-9a-f]{64}, not the /, { key: fingerprint }), "...and on the fingerprint asked for out of band");
+
+    const trailer = tamper((d) => {
+      const f = path.join(d, "commits.txt");
+      const lines = fs.readFileSync(f, "utf8").split("\n");
+      const fields = lines[0].split("\x1f");
+      fields[3] = "";
+      lines[0] = fields.join("\x1f");
+      fs.writeFileSync(f, lines.join("\n"));
+    });
+    ok(has(trailer, /^manifest: commits\.txt: the SHA-256 differs/), "a tampered commit trailer fails the file's hash");
+    const trailer2 = tamper((d) => {
+      const f = path.join(d, "commits.txt");
+      const lines = fs.readFileSync(f, "utf8").split("\n");
+      const fields = lines[0].split("\x1f");
+      fields[3] = "";
+      lines[0] = fields.join("\x1f");
+      fs.writeFileSync(f, lines.join("\n"));
+      refile(d, "commits.txt");
+    });
+    ok(has(trailer2, /^coverage: the log shows a gap the manifest omits: \{"kind":"untrailed-commit","sha":"[0-9a-f]{40}","subject":"/), "...and, with the manifest refreshed, check 9 (a tampered commit trailer fails)");
+
+    // Everything the verifier needs is in the bundle: delete the repository and run its own copy.
+    const away = mkDir("kukulu-away-");
+    const kept = path.join(away, "bundle");
+    fs.cpSync(real, kept, { recursive: true });
+    fs.rmSync(built, { recursive: true, force: true });
+    const alone = spawnSync(process.execPath, ["verify.mjs", "."], { cwd: kept, encoding: "utf8", env: { PATH: process.env.PATH } });
+    eq(alone.status, 0, "the bundle's verify.mjs runs alone with the repo deleted");
+    like(alone.stdout, /verify-attestation: PASS\n$/, "...and prints PASS");
+    const aloneKey = spawnSync(process.execPath, ["verify.mjs", ".", "--key", fingerprint], { cwd: kept, encoding: "utf8", env: { PATH: process.env.PATH } });
+    eq(aloneKey.status, 0, "...also with --key");
+  }
+
+  // the archive moves the bundle
+  {
+    const repo = copyOf(flight);
+    await live(repo, async ({ call }) => {
+      const a = await call("kukulu_attest");
+      ok(!a.error, "(setup) a bundle exists to archive");
+      const moved = await call("kukulu_flight_archive");
+      ok(!moved.error, "kukulu_flight_archive runs on an attested flight" + (moved.error ? ": " + moved.error : ""));
+      ok(!hasFile(repo, "docs/attestation") && hasFile(repo, "docs/flights/w1/attestation/manifest.json") && hasFile(repo, "docs/flights/w1/attestation/verify.mjs"), "the archive moves docs/attestation/ into the flight's directory");
+      ok(moved.moved.includes("docs/attestation"), "...and reports it among the files moved");
+      eq(git(repo, ["status", "--porcelain", "--untracked-files=all"]).split("\n").filter((l) => l && !l.endsWith("log.jsonl")).join("\n"), "", "...leaving a clean tree");
+      eq(git(repo, ["log", "-1", "--format=%s"]), "chore: archive flight w1", "...in the archive commit");
+      ok(V.verifyBundle(path.join(repo, "docs", "flights", "w1", "attestation")).ok, "...and the moved bundle still verifies");
+    }, flight);
+  }
 }
 
 // ---------------------------------------------------------------- the verifier and the module agree

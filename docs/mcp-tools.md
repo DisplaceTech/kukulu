@@ -489,11 +489,11 @@ Archive a summarized flight so the repository can run its next one.
 
 **Arguments:** `{ slug? }`, lowercase letters, digits and `-`, at most 40 characters. It defaults to the `flight` key in `docs/kukulu.json`; with neither, the tool refuses.
 
-**Does:** moves `docs/PLAN.md`, `docs/PROGRESS.md`, `docs/HANDOFF.md`, `docs/REVIEW.md`, `docs/SUMMARY.md`, `docs/SIMILARITY.md`, `docs/kukulu.json`, `.kukulu/state.json` and `.kukulu/feedback.jsonl` (each one that exists) into `docs/flights/<slug>/` (`git mv` for a tracked file, a plain rename for an untracked one), copies `docs/SPEC.md` there (the live spec stays), writes a fresh `.kukulu/state.json` that records `archived: { slug, dir, at }` and carries `signingOverride` over, commits everything as `chore: archive flight <slug>`, and pushes the branch per the push policy. If the commit fails, every file is put back and the empty archive directory removed.
+**Does:** moves `docs/PLAN.md`, `docs/PROGRESS.md`, `docs/HANDOFF.md`, `docs/REVIEW.md`, `docs/SUMMARY.md`, `docs/SIMILARITY.md`, `docs/kukulu.json`, `.kukulu/state.json` and `.kukulu/feedback.jsonl` (each one that exists) into `docs/flights/<slug>/` (`git mv` for a tracked file, a plain rename for an untracked one), moves `docs/attestation/` (when `kukulu_attest` made a bundle) to `docs/flights/<slug>/attestation/` with its layout kept, copies `docs/SPEC.md` there (the live spec stays), writes a fresh `.kukulu/state.json` that records `archived: { slug, dir, at }` and carries `signingOverride` over, commits everything as `chore: archive flight <slug>`, and pushes the branch per the push policy. If the commit fails, every file is put back and the empty archive directory removed.
 
 After it, `kukulu_next` reports `done` until `docs/SPEC.md` is edited, then `plan`.
 
-**Returns:** `{ slug, dir, moved, copied, commit, push }`.
+**Returns:** `{ slug, dir, moved, copied, commit, push }`. `moved` ends with `docs/attestation` when a bundle moved.
 
 **Refuses when** (in this order, before anything moves): there is no slug; the slug is malformed; the flight is not summarized; the implement lock is armed; the working tree is dirty (apart from files that were untracked before the run started); or `docs/flights/<slug>/` already exists.
 

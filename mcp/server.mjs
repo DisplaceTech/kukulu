@@ -3936,7 +3936,11 @@ function flightArchive({ slug } = {}) {
   // The clean-room log (and the similarity record) go to docs/flights/<slug>/cleanroom/, so the next flight's genesis is entry 1.
   const crDir = path.join(dir, "cleanroom");
   const crSources = cleanroomMovables(old);
-  const touched = [...sources.map(([abs]) => abs), ...sources.map(([abs]) => path.join(dir, path.basename(abs))), copyDest, P.state, P.feedback, ...crSources, ...crSources.map((abs) => path.join(crDir, path.basename(abs)))];
+  // The attestation bundle keeps its layout: docs/attestation/<file> becomes docs/flights/<slug>/attestation/<file>.
+  const attDir = path.join(ROOT, ATTEST_DIR);
+  const attSources = exists(attDir) ? walkFiles(attDir) : [];
+  const attDest = (abs) => path.join(dir, "attestation", path.relative(attDir, abs));
+  const touched = [...sources.map(([abs]) => abs), ...sources.map(([abs]) => path.join(dir, path.basename(abs))), copyDest, P.state, P.feedback, ...crSources, ...crSources.map((abs) => path.join(crDir, path.basename(abs))), ...attSources, ...attSources.map(attDest)];
   const all = [...new Set(touched)];
   const flightsDirExisted = exists(path.join(ROOT, "docs", "flights"));
   let commit;
@@ -3950,6 +3954,13 @@ function flightArchive({ slug } = {}) {
         if (git(["ls-files", "--error-unmatch", "--", rel(abs)], { allowFail: true }).ok) git(["mv", rel(abs), rel(dest)]);
         else fs.renameSync(abs, dest);
       }
+      for (const abs of attSources) {
+        const dest = attDest(abs);
+        fs.mkdirSync(path.dirname(dest), { recursive: true });
+        if (git(["ls-files", "--error-unmatch", "--", rel(abs)], { allowFail: true }).ok) git(["mv", rel(abs), rel(dest)]);
+        else fs.renameSync(abs, dest);
+      }
+      if (attSources.length) fs.rmSync(attDir, { recursive: true, force: true });
       for (const [abs] of sources) {
         const dest = path.join(dir, path.basename(abs));
         const tracked = git(["ls-files", "--error-unmatch", "--", rel(abs)], { allowFail: true }).ok;
@@ -3974,7 +3985,7 @@ function flightArchive({ slug } = {}) {
     throw e;
   }
   const push = pushBranch(gitFacts().branch, pushAllowed);
-  return { slug, dir: relDir, moved: sources.map(([, r]) => r), copied: ["docs/SPEC.md"], commit, push };
+  return { slug, dir: relDir, moved: [...sources.map(([, r]) => r), ...(attSources.length ? [ATTEST_DIR] : [])], copied: ["docs/SPEC.md"], commit, push };
 }
 
 // ---------------------------------------------------------------- plan validation and commit (S-06)
@@ -4339,7 +4350,7 @@ const TOOLS = [
     inputSchema: S({ evidence: { type: "array", items: { type: "string" }, description: "repo-relative paths of tracked files to include as evidence (conformance results, fuzz logs); each is copied to evidence/<path> in the bundle" } }),
     fn: attest,
   },
-  { name: "kukulu_flight_archive", description: "Archive a summarized flight so the repository can run its next flight: move PLAN, PROGRESS, HANDOFF, REVIEW, SUMMARY, kukulu.json, .kukulu/state.json and .kukulu/feedback.jsonl into docs/flights/<slug>/ (copying SPEC.md, which stays), write a fresh state.json, commit 'chore: archive flight <slug>' and push per policy. slug defaults to the 'flight' key in docs/kukulu.json. Refused unless the flight is summarized, no run is armed, and the tree is clean. All-or-nothing. Returns { slug, dir, moved, copied, commit, push }.", inputSchema: S({ slug: { type: "string", description: "lowercase letters, digits and - (at most 40 characters); defaults to docs/kukulu.json's flight" } }), fn: flightArchive },
+  { name: "kukulu_flight_archive", description: "Archive a summarized flight so the repository can run its next flight: move PLAN, PROGRESS, HANDOFF, REVIEW, SUMMARY, kukulu.json, .kukulu/state.json and .kukulu/feedback.jsonl into docs/flights/<slug>/ and docs/attestation/ into docs/flights/<slug>/attestation/ (copying SPEC.md, which stays), write a fresh state.json, commit 'chore: archive flight <slug>' and push per policy. slug defaults to the 'flight' key in docs/kukulu.json. Refused unless the flight is summarized, no run is armed, and the tree is clean. All-or-nothing. Returns { slug, dir, moved, copied, commit, push }.", inputSchema: S({ slug: { type: "string", description: "lowercase letters, digits and - (at most 40 characters); defaults to docs/kukulu.json's flight" } }), fn: flightArchive },
   { name: "kukulu_pr_finalize", description: "End a flight. Checks that every commit since the merge base with baseBranch is signed (judged from the commits, not from state): if so, marks the draft PR ready and, unless breaking is true, enables auto-merge (gh pr merge --auto, never an immediate merge), per policies.finalize and policies.mergeMethod. If any commit is unsigned the PR stays a draft, state.awaitingSigning is recorded, the steps are appended to SUMMARY.md, and kukulu_next reports done until it is resolved. breaking is required on the first call. Returns { signed, unsigned, ready, merge, breaking, awaitingSigning, resigned, push, pr, next? }; merge is enabled, skipped: breaking, skipped: policy, skipped: no pull request, skipped: awaiting signing or unavailable: <why>.", inputSchema: S({ breaking: { type: "boolean", description: "whether this flight is a breaking change, so its PR must not auto-merge; required on the first call, remembered after" }, resign: { type: "boolean", description: "HUMAN-INITIATED ONLY: never pass this on your own. Re-sign every commit of the branch (git rebase -f --rebase-merges --gpg-sign), force-push with lease, then finalize. For an operator who has unlocked the signing agent after an awaiting-signing result" } }), fn: prFinalize },
   {
     name: "kukulu_agents_sync",

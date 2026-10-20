@@ -65,7 +65,7 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] P5-04 Coverage gaps and cleanroom.idleGapHours
 - [x] P5-05 Tune cleanroom.idleGapHours
 - [x] P5-06 kukulu_attest
-- [ ] P5-07 Tamper tests over a real bundle; the archive moves it
+- [~] P5-07 Tamper tests over a real bundle; the archive moves it
 - [ ] P5-08 Attestation docs and the summarize step
 - [ ] P5-09 Phase 5 end: push and record the manual check
 - [ ] P6-01 Operations, architecture and writing-specs for 0.7.0
