@@ -181,3 +181,13 @@ Branch build/2026-10-19; tasks R6-01 and R6-02 done, 0 blocked (93/93 done overa
 - Interpretation (R6-02): -T in a short bundle applies to mv, ln and install as well; long-prefix reading is cp only.
 - Fixtures: 14 R6-01 and 11 R6-02 cases in test/fixtures/guard-cases.json; guard self-test is 416 cases. KNOWN_LIMITS unchanged.
 - Manual check: none.
+
+## Round 7
+
+Branch build/2026-10-19; tasks R7-01 and R7-02 done, 0 blocked (95/95 done overall).
+
+- R7-01 (414e166): cp long options are resolved against cp's own list first (`--o` is --one-file-system); only --target-directory and --suffix are valued for cp. -T is read from the letters before the valued letter in a bundle (`cp -rTS .bak evil docs`).
+- R7-02 (59baf7a): xargs valued options gain --process-slot-var and BSD -J, -R, -S.
+- Interpretation (R7-01): other cp long options take a value only with `=`.
+- Fixtures: 9 R7-01 and 8 R7-02 cases in test/fixtures/guard-cases.json; guard self-test is 433 cases. KNOWN_LIMITS unchanged.
+- Manual check: none.
