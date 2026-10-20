@@ -557,6 +557,9 @@ export function commandWord(tokens) {
         const flag = tokens[i++];
         if (base === "nice" && flag === "-n" && i < tokens.length) i++;
         if (base === "timeout" && /^-[sk]$/.test(flag) && i < tokens.length) i++;
+        // The value after these flags is not the command (`sudo -u root curl ...`, `env -C /tmp curl ...`).
+        if (base === "sudo" && /^-[ughpCDrtU]$/.test(flag) && i < tokens.length) i++;
+        if (base === "env" && /^-[uCS]$/.test(flag) && i < tokens.length) i++;
       }
       // timeout's first operand is its duration, not the command.
       if (base === "timeout" && i < tokens.length && /^\d+(?:\.\d+)?[smhd]?$/.test(tokens[i])) i++;
@@ -685,6 +688,8 @@ export function evaluate(policy, hookInput, env) {
   const cwd = typeof input.cwd === "string" && input.cwd ? input.cwd : root;
   // Where a `cd` earlier in the command has moved the shell; every relative token and the "outside the repository" clause resolve against it.
   let shellCwd = cwd;
+  // `cd -` returns here: the directory before the last `cd`.
+  let previousCwd = cwd;
   const writeForms = (p, base = shellCwd) => canonicalPaths(p, { cwd: base, home });
   const lockdown = lockdownActive(policy, env.progressText);
   const prefixes = (list) => list.map((e) => resolvePrefix(e, root, home));
@@ -790,8 +795,12 @@ export function evaluate(policy, hookInput, env) {
       if (v.decision === "denied") return v;
     }
     const subshells = [];
+    // Nesting of `case ... in`, inside which a leading `pattern)` is an arm and not a command.
+    let caseDepth = 0;
     for (const raw of splitSegments(text)) {
-      const { segment, opens, closes } = stripGrouping(raw);
+      const { segment, opens, closes, entersCase, leavesCase } = stripGrouping(raw, caseDepth > 0);
+      if (entersCase) caseDepth++;
+      if (leavesCase && caseDepth > 0) caseDepth--;
       // A `(` starts a subshell: a `cd` inside it does not outlive its `)`.
       for (let k = 0; k < opens; k++) subshells.push(shellCwd);
       const settle = () => {
@@ -909,8 +918,13 @@ export function evaluate(policy, hookInput, env) {
       if (hit) return denied(`commandPatterns ${hit.id}`);
       // A `cd` or `pushd` moves every later relative operand (`cd docs && rm cleanroom.json`, `cd ~/.cargo && cat registry/x`).
       if (word === "cd" || word === "pushd") {
-        const dir = rest.find((t) => !t.startsWith("-"));
-        if (dir && dir !== "-" && !/^[<>]/.test(dir)) shellCwd = canonicalPaths(tokenPath(dir), { cwd: shellCwd, home })[0];
+        const dir = rest.find((t) => !t.startsWith("-") || t === "-");
+        const before = shellCwd;
+        if (dir === "-") shellCwd = previousCwd;
+        // A bare `cd` or `cd --` goes to HOME.
+        else if (dir === undefined) shellCwd = home ?? shellCwd;
+        else if (!/^[<>]/.test(dir)) shellCwd = canonicalPaths(tokenPath(dir), { cwd: shellCwd, home })[0];
+        previousCwd = before;
       }
       settle();
     }
@@ -1213,18 +1227,30 @@ function worktreeDiscard({ sub, subIndex }, rest) {
 
 /**
  * A segment without the shell grammar around its command: leading `(`, `{`,
- * `!` and the reserved words if/then/elif/else/while/until/do, and trailing
- * `)`. `opens` and `closes` count the subshell parentheses removed.
+ * `!` and the reserved words if/then/elif/else/while/until/do, a function
+ * header (`f()`, `function f`), `case <word> in`, a case arm's `pattern)` (only
+ * `inCase`) and `esac`, and trailing `)`. `opens` and `closes` count the
+ * subshell parentheses removed; `entersCase` and `leavesCase` report the case
+ * keywords.
  */
-function stripGrouping(raw) {
+function stripGrouping(raw, inCase = false) {
   let segment = raw.trim();
   let opens = 0;
   let closes = 0;
+  let entersCase = false;
+  let leavesCase = false;
   for (;;) {
-    const m = /^(?:\(|\{(?=\s|$)|!(?=\s)|(?:if|then|elif|else|while|until|do)(?=\s|$))\s*/.exec(segment);
-    if (!m) break;
-    if (m[0].startsWith("(")) opens++;
-    segment = segment.slice(m[0].length);
+    const m = /^(?:\(|\{(?=\s|$)|!(?=\s)|(?:if|then|elif|else|while|until|do)(?=\s|$)|function\s+[\w.:-]+(?:\s*\(\s*\))?(?=\s|$)|[\w.:-]+\s*\(\s*\)(?=\s|$)|case\s+\S+\s+in(?=\s|$)|esac(?=\s|$))\s*/.exec(segment);
+    if (m) {
+      if (m[0].startsWith("(")) opens++;
+      if (m[0].startsWith("case")) entersCase = true;
+      if (m[0].startsWith("esac")) leavesCase = true;
+      segment = segment.slice(m[0].length);
+      continue;
+    }
+    const arm = inCase || entersCase ? /^[^\s()]+\)(?:\s+|$)/.exec(segment) : null;
+    if (!arm) break;
+    segment = segment.slice(arm[0].length);
   }
   for (;;) {
     const m = /\s*\)\s*$/.exec(segment);
@@ -1232,7 +1258,7 @@ function stripGrouping(raw) {
     closes++;
     segment = segment.slice(0, m.index);
   }
-  return { segment, opens, closes };
+  return { segment, opens, closes, entersCase, leavesCase };
 }
 
 /**
