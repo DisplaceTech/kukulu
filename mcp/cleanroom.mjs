@@ -844,6 +844,19 @@ export function evaluate(policy, hookInput, env) {
         for (const t of destructiveOperands(word, rest)) {
           const f = writeForms(tokenPath(t), gitCwd).find((x) => protectedList.some((p) => underPrefix(p, x)));
           if (f) return denied(`protected path: ${f} (contains a protected path)`);
+          const g = globHit(writeForms(tokenPath(t), gitCwd), protectedList);
+          if (g) return denied(`protected path: ${g} (matched by the glob ${t})`);
+        }
+        // The hooks append to the log on every call, so a form that restores the worktree to the last commit erases the denied entries since.
+        if (git) {
+          const hit = worktreeDiscard(git, rest);
+          if (hit) {
+            const logPath = protectedList.find((p) => path.basename(p) === "cleanroom" && path.basename(path.dirname(p)) === ".kukulu");
+            const f = hit.pathspecs.length
+              ? hit.pathspecs.flatMap((t) => writeForms(tokenPath(t), gitCwd)).find((x) => protectedList.some((p) => underPrefix(x, p) || underPrefix(p, x)))
+              : logPath ?? protectedList[0];
+            if (f) return denied(`protected path: ${f} (git ${hit.form} discards uncommitted changes, among them the log's entries)`);
+          }
         }
       }
       for (const t of redirects) {
@@ -968,6 +981,58 @@ function gitParts(rest) {
 }
 
 /**
+ * A glob operand's verdict: the protected path whose next component, below the
+ * glob's literal directory, the glob's first wildcard component matches, or null.
+ */
+function globHit(forms, protectedList) {
+  for (const f of forms) {
+    const parts = f.split("/");
+    const at = parts.findIndex((c) => /[*?[]/.test(c));
+    if (at === -1) continue;
+    const dir = parts.slice(0, at).join("/") || "/";
+    // [..] passes through as a character class; every other regex metacharacter is literal.
+    const re = new RegExp(`^${parts[at].replace(/[.+^$(){}|\\]/g, "\\$&").replace(/\*/g, "[^/]*").replace(/\?/g, "[^/]")}$`);
+    for (const p of protectedList) {
+      if (p === dir || !underPrefix(p, dir)) continue;
+      const next = p.slice(dir === "/" ? 1 : dir.length + 1).split("/")[0];
+      if (re.test(next)) return p;
+    }
+  }
+  return null;
+}
+
+/**
+ * A git form that restores the worktree to the last commit (stash, reset
+ * --hard|--merge|--keep, checkout -f, switch -f|--discard-changes): its name
+ * and the pathspecs it is limited to, or null.
+ */
+function worktreeDiscard({ sub, subIndex }, rest) {
+  const args = rest.slice(subIndex + 1);
+  const flags = args.filter((t) => t.startsWith("-"));
+  const dd = args.indexOf("--");
+  const afterDashes = dd === -1 ? [] : args.slice(dd + 1);
+  if (sub === "stash") {
+    const first = args.find((t) => !t.startsWith("-"));
+    if (first !== undefined && first !== "push" && first !== "save") return null;
+    if (first === "save") return { form: "stash", pathspecs: [] };
+    const operands = [];
+    for (let i = first === "push" ? args.indexOf("push") + 1 : 0; i < args.length; i++) {
+      if (args[i] === "--") {
+        operands.push(...args.slice(i + 1));
+        break;
+      }
+      if (/^(?:-m|--message)$/.test(args[i])) i++;
+      else if (!args[i].startsWith("-")) operands.push(args[i]);
+    }
+    return { form: "stash", pathspecs: operands };
+  }
+  if (sub === "reset" && flags.some((t) => /^--(?:hard|merge|keep)$/.test(t))) return { form: "reset --hard", pathspecs: afterDashes };
+  if (sub === "checkout" && flags.some((t) => t === "--force" || /^-[A-Za-z]*f[A-Za-z]*$/.test(t))) return { form: "checkout -f", pathspecs: afterDashes };
+  if (sub === "switch" && flags.some((t) => t === "--force" || t === "--discard-changes" || /^-[A-Za-z]*f[A-Za-z]*$/.test(t))) return { form: "switch -f", pathspecs: [] };
+  return null;
+}
+
+/**
  * A segment without the shell grammar around its command: leading `(`, `{`,
  * `!` and the reserved words if/then/elif/else/while/until/do, and trailing
  * `)`. `opens` and `closes` count the subshell parentheses removed.
@@ -1000,7 +1065,8 @@ function destructiveOperands(word, rest) {
   const operands = (list) => list.filter((t) => !t.startsWith("-"));
   if (word === "rm") return operands(rest);
   if (word === "mv") return operands(rest).slice(0, -1);
-  if ((word === "chmod" || word === "chown") && rest.some((t) => /^-[A-Za-z]*R|^--recursive$/.test(t))) return operands(rest);
+  // Not only recursively: `chmod 000 docs` hides docs/cleanroom.json from the guard's own existence check.
+  if (word === "chmod" || word === "chown") return operands(rest);
   if (word === "git") {
     const { sub, subIndex, dirs } = gitParts(rest);
     if (["rm", "mv", "checkout", "restore", "clean"].includes(sub)) {
