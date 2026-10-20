@@ -1131,4 +1131,91 @@ function rejectCommitsStarting(repo, prefix) {
   });
 }
 
+// ---------------------------------------------------------------- PROGRESS.md constraints on task and halt text
+
+const todoRule = (extra = {}) => ({ id: "no-todo", description: "no TODO in the progress log", paths: ["docs/PROGRESS.md"], pattern: "\\bTODO\\b", shouldMatch: ["TODO fix"], shouldNotMatch: ["all done"], ...extra });
+const refusal = (field, tool, line) => new RegExp(`^${field} would break constraint no-todo \\(no TODO in the progress log\\) in docs/PROGRESS\\.md at "${line}"; rewrite it without that text and call ${tool} again$`);
+
+{
+  const repo = plannedRepo({ config: { constraints: [todoRule()] } });
+  await withServer(repo, async ({ call }) => {
+    await call("kukulu_run_start");
+    await call("kukulu_task_next");
+    commitTask(repo, "P0-01", "Create hello", { "hello.txt": "hi\n" });
+    const before = readFile(repo, "docs/PROGRESS.md");
+    const head = git(repo, ["rev-parse", "HEAD"]);
+    isError(await call("kukulu_task_done", { id: "P0-01", log: "Added hello.\nleave a TODO for later" }), refusal("log", "kukulu_task_done", "leave a TODO for later"), "task_done refuses a log that breaks a PROGRESS.md constraint");
+    eq(readFile(repo, "docs/PROGRESS.md"), before, "...docs/PROGRESS.md is byte-identical");
+    eq(git(repo, ["rev-parse", "HEAD"]), head, "...and HEAD did not move");
+    ok((await call("kukulu_task_done", { id: "P0-01", log: "Added hello." })).counts.done === 1, "(the same task is done with a clean log)");
+  });
+}
+
+{
+  const repo = plannedRepo({ config: { constraints: [todoRule()] } });
+  await withServer(repo, async ({ call }) => {
+    await call("kukulu_run_start");
+    await call("kukulu_task_next");
+    writeFile(repo, "attempt.txt", "half done\n");
+    const before = readFile(repo, "docs/PROGRESS.md");
+    const head = git(repo, ["rev-parse", "HEAD"]);
+    isError(await call("kukulu_task_block", { id: "P0-01", reason: "needs a TODO list" }), refusal("reason", "kukulu_task_block", "BLOCKED: needs a TODO list"), "task_block refuses a reason that breaks a PROGRESS.md constraint");
+    eq(readFile(repo, "docs/PROGRESS.md"), before, "...docs/PROGRESS.md is byte-identical");
+    eq(git(repo, ["rev-parse", "HEAD"]), head, "...and HEAD did not move");
+    ok(hasFile(repo, "attempt.txt"), "...and the attempt's uncommitted file is still there, so no reset ran");
+  });
+}
+
+{
+  const repo = plannedRepo({ config: { constraints: [todoRule()] } });
+  await withServer(repo, async ({ call }) => {
+    await call("kukulu_run_start");
+    await call("kukulu_task_next");
+    await call("kukulu_task_block", { id: "P0-01", reason: "missing file" });
+    const before = readFile(repo, "docs/PROGRESS.md");
+    const head = git(repo, ["rev-parse", "HEAD"]);
+    isError(await call("kukulu_task_reopen", { id: "P0-01", reason: "now a TODO" }), refusal("reason", "kukulu_task_reopen", "REOPENED: now a TODO"), "task_reopen refuses a reason that breaks a PROGRESS.md constraint");
+    eq(readFile(repo, "docs/PROGRESS.md"), before, "...docs/PROGRESS.md is byte-identical");
+    eq(git(repo, ["rev-parse", "HEAD"]), head, "...and HEAD did not move");
+  });
+}
+
+{
+  const repo = plannedRepo({ config: { constraints: [todoRule()] } });
+  await withServer(repo, async ({ call }) => {
+    await call("kukulu_run_start");
+    const before = readFile(repo, "docs/PROGRESS.md");
+    const head = git(repo, ["rev-parse", "HEAD"]);
+    isError(await call("kukulu_run_halt", { reason: "disk full, TODO clean up" }), refusal("reason", "kukulu_run_halt", "disk full, TODO clean up"), "run_halt refuses a reason that breaks a PROGRESS.md constraint");
+    eq(readFile(repo, "docs/PROGRESS.md"), before, "...docs/PROGRESS.md is byte-identical");
+    eq(git(repo, ["rev-parse", "HEAD"]), head, "...and HEAD did not move");
+  });
+}
+
+for (const [label, rule] of [
+  ["an inactive constraint", todoRule({ from: "P0-02" })],
+  ["a constraint scoped to other paths", todoRule({ paths: ["src/"] })],
+  ["a constraint excluded from PROGRESS.md", todoRule({ paths: ["docs/"], exclude: ["docs/PROGRESS.md"] })],
+  ["a constraint whose fixtures fail", todoRule({ shouldMatch: ["no such line"] })],
+]) {
+  const repo = plannedRepo({ config: { constraints: [rule] } });
+  await withServer(repo, async ({ call }) => {
+    await call("kukulu_run_start");
+    await call("kukulu_task_next");
+    commitTask(repo, "P0-01", "Create hello", { "hello.txt": "hi\n" });
+    ok((await call("kukulu_task_done", { id: "P0-01", log: "a TODO in the log" })).counts.done === 1, `${label} does not refuse a task log`);
+  });
+}
+
+{
+  // A directory entry covers the file too.
+  const repo = plannedRepo({ config: { constraints: [todoRule({ paths: ["docs"] })] } });
+  await withServer(repo, async ({ call }) => {
+    await call("kukulu_run_start");
+    await call("kukulu_task_next");
+    commitTask(repo, "P0-01", "Create hello", { "hello.txt": "hi\n" });
+    isError(await call("kukulu_task_done", { id: "P0-01", log: "a TODO in the log" }), /^log would break constraint no-todo/, "a constraint on the directory docs covers docs/PROGRESS.md");
+  });
+}
+
 finish();

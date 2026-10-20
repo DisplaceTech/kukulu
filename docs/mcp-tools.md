@@ -196,7 +196,7 @@ Mark a task complete and write its log entry.
 
 **Returns:** `{ id, taskCommit, progressCommit, counts, guardReset: true }`.
 
-**Refuses when:** the id is unknown; the task is not `[~]` (nobody selected it); HEAD's commit subject does not start with `<ID>:`; or anything other than `docs/PROGRESS.md` is uncommitted (a path already recorded as `preexistingUntracked` at `kukulu_run_start` never counts). The last two checks matter most: a task is done when there is a commit, not when a model says so.
+**Refuses when:** the id is unknown; the task is not `[~]` (nobody selected it); HEAD's commit subject does not start with `<ID>:`; or anything other than `docs/PROGRESS.md` is uncommitted (a path already recorded as `preexistingUntracked` at `kukulu_run_start` never counts). The last two checks matter most: a task is done when there is a commit, not when a model says so. It also refuses when the `log` would break an active constraint that covers `docs/PROGRESS.md`, naming the constraint and the offending line (`log would break constraint <id> (<description>) in docs/PROGRESS.md at "<excerpt>"; rewrite it without that text and call <tool> again`); a constraint whose fixtures fail, or that still waits on its `from` task, is not enforced. Nothing is written or reset first.
 
 **Clean-room mode.** After genesis, this tool appends a signed `checkpoint` entry (event `kukulu_task_done`) to `.kukulu/cleanroom/log.jsonl` before its final commit and commits the log with its own files; a failed commit restores the log byte for byte. General mode writes none. Uncommitted appends to the log never count as a dirty tree, because the hooks write to it after every tool call.
 
@@ -212,7 +212,7 @@ Give up on a task without ending the run.
 
 **Returns:** `{ id, progressCommit, counts }`.
 
-**Refuses when:** the id is unknown, or either argument is missing.
+**Refuses when:** the id is unknown, or either argument is missing. It also refuses when the `reason` would break an active constraint that covers `docs/PROGRESS.md`, naming the constraint and the offending line (`reason would break constraint <id> (<description>) in docs/PROGRESS.md at "<excerpt>"; rewrite it without that text and call <tool> again`); a constraint whose fixtures fail, or that still waits on its `from` task, is not enforced. Nothing is written or reset first.
 
 **Clean-room mode.** After genesis, this tool appends a signed `checkpoint` entry (event `kukulu_task_block`; its hard reset keeps the hooks' uncommitted log entries) to `.kukulu/cleanroom/log.jsonl` before its final commit and commits the log with its own files; a failed commit restores the log byte for byte. General mode writes none. Uncommitted appends to the log never count as a dirty tree, because the hooks write to it after every tool call.
 
@@ -228,7 +228,7 @@ Reopen a blocked or skipped task once whatever stopped it is resolved: an operat
 
 **Returns:** `{ id, reopenedDependents, commit, counts }`.
 
-**Refuses when:** either argument is missing; the id is unknown; the task is neither blocked nor skipped; the flight is already summarized; or a stream worktree still exists.
+**Refuses when:** either argument is missing; the id is unknown; the task is neither blocked nor skipped; the flight is already summarized; or a stream worktree still exists. It also refuses when the `reason` would break an active constraint that covers `docs/PROGRESS.md`, naming the constraint and the offending line (`reason would break constraint <id> (<description>) in docs/PROGRESS.md at "<excerpt>"; rewrite it without that text and call <tool> again`); a constraint whose fixtures fail, or that still waits on its `from` task, is not enforced. Nothing is written or reset first.
 
 ---
 
@@ -332,7 +332,7 @@ Stop the flight for an operator-level reason the implementer cannot resolve itse
 
 **Returns:** `{ halted, branch, head, commit, dirty, next }`. `next` is the instruction to call `kukulu_run_resume` once the cause is fixed. `dirty` is true when anything is left uncommitted, which after a halt is expected, not an error.
 
-**Refuses when:** `reason` is missing.
+**Refuses when:** `reason` is missing. It also refuses when the `reason` would break an active constraint that covers `docs/PROGRESS.md`, naming the constraint and the offending line (`reason would break constraint <id> (<description>) in docs/PROGRESS.md at "<excerpt>"; rewrite it without that text and call <tool> again`); a constraint whose fixtures fail, or that still waits on its `from` task, is not enforced. Nothing is written or reset first.
 
 The next `kukulu_next` call returns `{ stage: "halt", reason }` with the same reason. Once the cause is fixed, clear it with [`kukulu_run_resume`](#kukulu_run_resume); the `halt` reason from `kukulu_next` ends with that instruction. See [operations.md](./operations.md#halts).
 

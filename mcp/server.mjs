@@ -2459,6 +2459,7 @@ function taskDone({ stream, id, log }) {
   const t = pr.tasks.find((x) => x.id === id);
   if (!t) throw new ToolError(`task ${id} not in docs/PROGRESS.md`);
   if (t.state !== "~") throw new ToolError(`task ${id} is '${STATE_NAMES[t.state]}', not in progress; call kukulu_task_next first`);
+  refuseProgressText("log", log, "kukulu_task_done");
   let cwd = ROOT;
   let ignore = loadState().preexistingUntracked;
   if (stream !== undefined) ({ cwd, ignore } = streamTaskContext(stream, pr, t));
@@ -2492,6 +2493,7 @@ function taskBlock({ stream, id, reason }) {
   let pr = parseProgress();
   const t = pr.tasks.find((x) => x.id === id);
   if (!t) throw new ToolError(`task ${id} not in docs/PROGRESS.md`);
+  refuseProgressText("reason", `BLOCKED: ${reason}`, "kukulu_task_block");
   let cwd = ROOT;
   let ignore = loadState().preexistingUntracked;
   if (stream !== undefined) ({ cwd, ignore } = streamTaskContext(stream, pr, t));
@@ -2576,6 +2578,7 @@ function taskReopen({ id, reason } = {}) {
   const t = pr.tasks.find((x) => x.id === id);
   if (!t) throw new ToolError(`task ${id} not in docs/PROGRESS.md`);
   if (t.state !== "!" && t.state !== "-") throw new ToolError(`task ${id} is '${STATE_NAMES[t.state]}'; only a blocked or skipped task can be reopened`);
+  refuseProgressText("reason", `REOPENED: ${reason}`, "kukulu_task_reopen");
   let dependents;
   const commit = withRollback([P.progress], () => {
     dependents = reopenWithDependents(pr, [id], "reopened", `REOPENED: ${reason}`);
@@ -2668,17 +2671,51 @@ const pathUnder = (file, p) => file === p || file.startsWith(p.endsWith("/") ? p
  * before its commit (F-26 of the 2026-09-30 cleanflate feedback). Ignored
  * files never are. Line-based only; no multi-line patterns.
  */
+const constraintTests = (c, line) => new RegExp(c.pattern, c.flags || "").test(line);
+
+/** Why a rule's own fixtures do not hold (`shouldMatch` line unmatched, `shouldNotMatch` line matched), or null. A rule with a failing fixture is never trusted to scan anything (F-14). */
+function constraintFixtureFailure(c) {
+  for (const line of c.shouldMatch) {
+    if (!constraintTests(c, line)) return `shouldMatch ${JSON.stringify(line)} did not match`;
+  }
+  for (const line of c.shouldNotMatch) {
+    if (constraintTests(c, line)) return `shouldNotMatch ${JSON.stringify(line)} matched`;
+  }
+  return null;
+}
+
+/**
+ * Refuse text that is about to be written into docs/PROGRESS.md (or, for a halt,
+ * stands for it) when it would break an active constraint that covers that file,
+ * before anything is written (SPEC B-02). A rule with failing fixtures or one
+ * that is still waiting on its `from` task is not enforced here, as in checkConstraints.
+ */
+function refuseProgressText(field, text, tool) {
+  const progressRel = path.relative(ROOT, P.progress).split(path.sep).join("/");
+  const covers = (list) => (list || []).some((p) => p === "." || p === "./" || pathUnder(progressRel, p.replace(/^\.\//, "")));
+  const progress = exists(P.progress) ? parseProgress() : null;
+  const lines = String(text).replace(/\s+$/, "").split("\n");
+  for (const c of cfg().constraints) {
+    if (!covers(c.paths) || covers(c.exclude)) continue;
+    if (constraintFixtureFailure(c) || inactiveUntil(c.from, progress)) continue;
+    for (const line of lines) {
+      const m = new RegExp(c.pattern, c.flags || "").exec(line);
+      if (!m) continue;
+      const start = Math.max(0, m.index - 40);
+      throw new ToolError(
+        `${field} would break constraint ${c.id} (${c.description || "no description"}) in ${progressRel} at "${line.slice(start, start + 80)}"; rewrite it without that text and call ${tool} again`,
+      );
+    }
+  }
+}
+
 function checkConstraints(constraints, cwd = ROOT, ignore = []) {
   const skip = new Set(ignore);
   const progress = exists(P.progress) ? parseProgress() : null;
-  const testLine = (c, line) => new RegExp(c.pattern, c.flags || "").test(line);
+  const testLine = constraintTests;
   const results = constraints.map((c) => {
-    for (const line of c.shouldMatch) {
-      if (!testLine(c, line)) return { id: c.id, ok: false, fixture: `shouldMatch ${JSON.stringify(line)} did not match`, hits: [] };
-    }
-    for (const line of c.shouldNotMatch) {
-      if (testLine(c, line)) return { id: c.id, ok: false, fixture: `shouldNotMatch ${JSON.stringify(line)} matched`, hits: [] };
-    }
+    const failure = constraintFixtureFailure(c);
+    if (failure) return { id: c.id, ok: false, fixture: failure, hits: [] };
     const waiting = inactiveUntil(c.from, progress);
     if (waiting) return { id: c.id, ok: true, inactive: `until ${waiting}`, fixture: null, hits: [] };
     const listed = git(["ls-files", "--cached", "--others", "--exclude-standard", "--", ...c.paths], { allowFail: true, cwd });
@@ -3426,6 +3463,7 @@ function flightOptions(args = {}) {
  */
 function runHalt({ reason }) {
   if (!reason) throw new ToolError("reason is required");
+  refuseProgressText("reason", reason, "kukulu_run_halt");
   const st = loadState();
   st.halted = reason;
   delete st.haltCap; // only a round-cap halt is resumable through kukulu_flight_options
