@@ -19,7 +19,7 @@ Started: 2026-10-20T19:18:49.092Z
 - [x] P1-04 The hard cap's documentation says what reviewSubmit does
 - [x] P1-05 The bundle's SUMMARY.md is the summary as attested
 - [x] P1-06 Phase 1 end: push and record the manual check
-- [ ] P2-01 README calls the guard a tripwire
+- [x] P2-01 README calls the guard a tripwire
 - [ ] P2-02 CHANGELOG 0.7.1, the version and the feedback header
 - [ ] P2-03 Phase 2 end: push and record the release check
 
@@ -83,3 +83,7 @@ One sentence added after the bundle file table in docs/cleanroom.md; CHANGELOG l
 ### P1-06 — f953a3f
 
 Push: pushed build/2026-10-20 to origin. Manual check: NOT VERIFIED (human): on a throwaway flight run with the working-tree plugin, commit to the base branch after the build branch is cut, then call kukulu_task_next and see the chore: merge commit
+
+### P2-01 — 4462297
+
+README line 71 only: guard described as a tripwire, not a sandbox, whose bypasses the chain and the gate make visible. plugin test and markdownlint pass.
