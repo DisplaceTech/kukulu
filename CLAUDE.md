@@ -17,7 +17,7 @@ Kūkulu is a Claude Code plugin: a dependency-free MCP server (`mcp/server.mjs`)
 
 - `npm run lint`: syntax and manifest lint (check-names and check-site included), under 3 s.
 - `pre-commit run --all-files`: hygiene, markdownlint, shellcheck, yamllint, gitleaks, about 4 s.
-- `npm test`: every suite registered in `test/run.mjs` (eleven, then `cleanroom` and `attest` as 0.7.0 adds them), about 100 s.
+- `npm test`: every suite registered in `test/run.mjs` (thirteen), about 100 s.
 - `npm test -- state review`: named suites only; `node test/review.mjs`: one suite directly; `KEEP_REPO=1 npm test -- drive`: keep the temp repos.
 - `npm run check:site`: `node scripts/check-site.mjs --self-test && node scripts/check-site.mjs`, the static site rules (SPEC §3 rules 1–14); `node scripts/check-site.mjs --report` prints measured sizes and contrast against `docs/site/checks.json`.
 - `npm run check:site:browser`: rule 15 in headless Chrome (needs Chrome or Chromium; `CHROME_PATH` overrides discovery; binds `servePort`, so one at a time); `--shots` writes `.site-shots/<width>-<scheme>.png`.
@@ -50,7 +50,7 @@ Kūkulu is a Claude Code plugin: a dependency-free MCP server (`mcp/server.mjs`)
 
 ## Constraints
 
-Mechanical rules are in the `constraints` of a flight's `docs/kukulu.json`, which the planner writes and the archive moves to `docs/flights/<slug>/` when the flight ends (the last archived set is `docs/flights/kukulu-tech/kukulu.json`). They run on every `kukulu_verify`:
+Mechanical rules are in the `constraints` of a flight's `docs/kukulu.json`, which the planner writes and the archive moves to `docs/flights/<slug>/` when the flight ends (the last archived set is `docs/flights/v0-7-0/kukulu.json`). They run on every `kukulu_verify`:
 
 - `server-synchronous`: no `async` or `await` anywhere in `mcp/server.mjs` or `mcp/cleanroom.mjs`, including comments and strings. Long work uses `spawnSync`.
 - `no-dependencies`: `package.json` has no `dependencies` or `devDependencies`, and there is no lockfile.
@@ -58,7 +58,8 @@ Mechanical rules are in the `constraints` of a flight's `docs/kukulu.json`, whic
 - `no-sync-merge`: `gh pr merge` only ever runs with `--auto`, written as one inline argument array in `mcp/server.mjs`.
 - `no-gnu-sed-inplace`: no `sed -i` in `test/`, `scripts/` or `mcp/`; BSD sed on macOS rejects it. Write to a temp file and `mv`. `test/fixtures/` is exempt: it holds recorded commands as data, never run.
 - `scripts-node-builtins`: every `scripts/*.mjs` imports (statically, dynamically or by `require`) only `node:` modules or `./`/`../` siblings; `scripts/check-diagrams.mjs` (CI-only, documented to need mermaid and jsdom) is exempt.
-- `no-foundry-names` (active from P0-05): no `foundry` in any case in `mcp/`, `scripts/`, `hooks/`, `skills/`, `agents/` or `.mcp.json`, except `scripts/verify-attestation.mjs`; a legacy name is built from `"foun" + "dry"`.
+- `no-foundry-names`: no `foundry` in any case in `mcp/`, `scripts/`, `hooks/`, `skills/`, `agents/` or `.mcp.json`, except `scripts/verify-attestation.mjs`; a legacy name is built from `"foun" + "dry"`.
+- `progress-no-bare-macron`: in `docs/PROGRESS.md` the macron u (U+016B) appears only inside the display name; never write the letter, or an escape that decodes to it, in a task log or reason.
 - `one-hash-one-signature`: in `mcp/` and `scripts/`, `createHash` only with `"sha256"`, `generateKeyPairSync` only with `"ed25519"`, and no `createHmac`, `createSign` or `createVerify`.
 - `cleanroom-module-pure`: `mcp/cleanroom.mjs` imports only `node:` modules, never `child_process`, and has no `spawnSync`/`execFileSync`/`execSync`, `process.exit`, `console.*(` or dynamic `import(`.
 - `hooks-lazy-cleanroom`: the two clean-room hook scripts never import `mcp/cleanroom.mjs` statically; they `await import()` it after the no-policy check.
@@ -104,6 +105,8 @@ The reviewer checks these by reading, because no line pattern can express them:
 **Adding a site check.** A `check-site.mjs` failure is one line, `check-site: rule <n>: <file>: <what is wrong>; <what to do>`. Every new check gets a self-test case `{ rule, name, inject, expect }` in `CASES`; the self-test runs each case on a fresh temp copy of `site/`, `checks.json`, `package.json` and the site scripts, after a clean baseline that must pass. Never loosen a check to fit the page; fix the page.
 
 **Measuring an assumption.** Before = the ⚠️ ASSUMPTION default from `docs/site/checks.json`; after = the value `node scripts/check-site.mjs --report` measures, with its headroom. Put both on the commit body's `Measurement:` line and in the progress log. Never change `docs/site/checks.json`; a new default is the human's call.
+
+**Changing a guard rule.** Every change to `evaluate` in `mcp/cleanroom.mjs` adds deny and allow cases to `test/fixtures/guard-cases.json` whose names end in `(<task id>)`, after a space. An existing fixture may change its `expect` or `reason` only when the task names that fixture's form, and the commit body lists every one it changed (`git diff <merge-base>..HEAD -- test/fixtures/guard-cases.json` is how the reviewer checks). The same commit updates the rule's text in `docs/cleanroom.md`. A fixture's `reason` is a regular expression; `__ROOT__` and `__HOME__` are substituted in `input` only, never in `policy` or `reason` (write a policy path repo-relative, and a reason path as `.*`). Run `node scripts/cleanroom-guard.mjs --self-test templates/cleanroom.example.json` before committing.
 
 **HANDOFF.md.** `kukulu_run_finish` uses `docs/HANDOFF.md` as the draft PR's body. When a flight's spec says its result must not be merged yet (the 0.5.0 flight's did, until a human had run a flight from the working tree), put that instruction in the first line, in bold.
 
@@ -168,3 +171,29 @@ Clean-room vocabulary (SPEC §5.2, §6 D–F), fixed for every task:
 The first line of `docs/HANDOFF.md`, in bold: **Do not merge until the owner has run one clean-room flight from the working tree and deployed the site preview (SPEC §8 Phase 6).**
 
 SPEC.md wins over PLAN.md, and PLAN.md wins over code comments.
+
+## Flight v0-7-1 notes
+
+This flight builds Kūkulu 0.7.1 (SPEC §1): a cleanup patch with no new tools, no removed tools and no renamed input fields. The plugin running the flight is the installed 0.7.0, so nothing the flight changes affects the server running it; where the v0-7-0 notes above disagree with these, these win for this flight.
+
+- Every task is serial. `baseBranch` is `main`; build branches are `build/<date>`. The draft PR targets `main`.
+- The tool count stays 25: `docs/mcp-tools.md`'s first line keeps "Twenty-five tools" and README keeps "The server exposes twenty-five tools."
+- `docs/HANDOFF.md` has no "do not merge" line: this release has nothing a human must run first (SPEC §8 Phase 2).
+- Never edit `docs/SPEC.md`, `docs/flights/`, `docs/plans/`, `site/` or `docs/site/`. `docs/feedback/2026-10-20-kukulu.md` is gitignored: only P2-02 edits it, only its header, and never stages it.
+- The running 0.7.0 server does not have B-02's refusal yet, so `progress-no-bare-macron` is enforced only by `kukulu_verify`, after the log is committed. Write the macron letter in a `kukulu_task_done` log or a reason only inside the display name; spell it "the macron u" or "U+016B" otherwise, and never as an escape in the JSON argument.
+- This flight's `docs/kukulu.json` has no `policies` block: the running 0.7.0 server refuses `policies.syncBase` as an unknown key. Do not add one.
+
+Guard vocabulary, fixed for every guard task (SPEC §3 principle 1, §6 A):
+
+- The guard is a tripwire, not a sandbox: an option or wrapper spelling the tables do not model is a known gap, not a defect. Change only the rule the task names; do not widen a parser "while you are there".
+- "These rules" are `docs/cleanroom.md`'s rule list; "the fixture set" is `test/fixtures/guard-cases.json`. Follow the guard-rule protocol in Task protocols, with the task's id at the end of each new fixture name, for example `git add docs/* (P0-04)`.
+- Fixture `policy: "template"` loads `templates/cleanroom.example.json`: its `deny.words` include `zlib` and `miniz`, its `allow.paths` are `crates/cleanflate/`, `crates/oracle/` and `docs/`, so a bare `zlib.txt` at the root is outside them.
+- The always-protected set reaches `<root>/docs/cleanroom.json`, `<root>/.kukulu/cleanroom`, `<root>/.kukulu/state.json` and, once the plan exists, `<root>/docs/kukulu.json`; `protectedPaths` lists them in that order.
+- A reason names the path as resolved and the directory as the command wrote it: `protected path: <abs path> (<word> writes it into <dir>)`.
+- `KNOWN_LIMITS` has eight entries after P0-01; `CHECKPOINT_KEYS` never changes in this flight.
+
+Pipeline vocabulary (SPEC §6 B):
+
+- B-02's helper reads the same constraints, `from` activation and fixture self-test as `kukulu_verify`; it never runs a verify command.
+- B-03's merge happens only on a clean tracked tree, through `commitStaged`, with stage `implement` and task `-`; a conflict is `git merge --abort` plus a refusal, never a halt.
+- `policies.syncBase` defaults to `true` in `cfgFrom` only; it is an owner decision, not an ⚠️ ASSUMPTION.
