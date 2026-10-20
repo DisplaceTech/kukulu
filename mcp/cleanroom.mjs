@@ -856,9 +856,12 @@ export function evaluate(policy, hookInput, env) {
         if (v) return v;
       }
       // 6d. write-family commands and redirections on protected paths
-      const redirects = redirectTargets(segment);
+      const redirects = redirectTargets(segment).flatMap((t) => braceExpand(t));
+      const allArgs = rest;
       let writeDenied = null;
       if (WRITE_FAMILY.has(word)) {
+        // The shell expands braces before the command runs, so `rm -rf {docs,src}` is `rm -rf docs src`.
+        const rest = allArgs.flatMap((t) => braceExpand(t));
         if (word === "git" && rest[0] === "config" && rest.some((t) => /core\.hookspath/i.test(t))) return denied("protected path: git config core.hooksPath");
         // Every non-option operand of a write-family command is a path, with or without a `/`.
         // git's `-C dir` moves the operands that follow its subcommand.
@@ -868,7 +871,12 @@ export function evaluate(policy, hookInput, env) {
           if (writeDenied) return;
           if (!(!t.startsWith("-") || isPathLike(t))) return;
           const f = writeForms(tokenPath(t), git && i > git.subIndex ? gitCwd : shellCwd).find((x) => protectedList.some((p) => underPrefix(x, p)));
-          if (f) writeDenied = denied(`protected path: ${f}`);
+          if (f) {
+            writeDenied = denied(`protected path: ${f}`);
+            return;
+          }
+          const w = wildcardNames(writeForms(tokenPath(t), git && i > git.subIndex ? gitCwd : shellCwd), protectedList);
+          if (w) writeDenied = denied(`protected path: ${w} (can be named by the wildcard ${t})`);
         });
         if (writeDenied) return writeDenied;
         // A destructive form also destroys everything under the operand, so a protected path below it counts.
@@ -893,6 +901,8 @@ export function evaluate(policy, hookInput, env) {
       for (const t of redirects) {
         const f = writeForms(t).find((x) => protectedList.some((p) => underPrefix(x, p)));
         if (f) return denied(`protected path: ${f}`);
+        const w = wildcardNames(writeForms(t), protectedList);
+        if (w) return denied(`protected path: ${w} (can be named by the wildcard ${t})`);
       }
       // 6e. command patterns
       const hit = commandPatterns.find((x) => new RegExp(x.re.source, x.re.flags).test(segment));
@@ -1091,6 +1101,64 @@ function recursiveOperands(word, rest) {
 }
 
 /**
+ * The alternatives of a token's first top-level `{a,b}` group, expanded
+ * recursively as the shell does (`docs/{a,}` is `docs/a` and `docs/`). A `${`
+ * is a variable, a group without a comma is literal, and an expansion past
+ * 256 words is left as written.
+ */
+function braceExpand(token, budget = { left: 256 }) {
+  for (let i = 0; i < token.length; i++) {
+    if (token[i] === "\\") {
+      i++;
+      continue;
+    }
+    if (token[i] !== "{" || token[i - 1] === "$") continue;
+    let depth = 0;
+    const commas = [];
+    let close = -1;
+    for (let j = i; j < token.length; j++) {
+      if (token[j] === "{") depth++;
+      else if (token[j] === "}" && --depth === 0) {
+        close = j;
+        break;
+      } else if (token[j] === "," && depth === 1) commas.push(j);
+    }
+    if (close === -1 || !commas.length) continue;
+    const alts = [];
+    let from = i + 1;
+    for (const c of [...commas, close]) {
+      alts.push(token.slice(from, c));
+      from = c + 1;
+    }
+    if (alts.length > budget.left) return [token];
+    budget.left -= alts.length;
+    const head = token.slice(0, i);
+    const tail = token.slice(close + 1);
+    return alts.flatMap((a) => braceExpand(head + a + tail, budget));
+  }
+  return [token];
+}
+
+/**
+ * The protected path that a wildcard in one of `forms` can name, or a path
+ * under it, or null. Each wildcard component is matched against the protected
+ * path's component at the same depth; like the shell's, a leading `*`, `?` or
+ * `[` does not match a name that starts with a dot.
+ */
+function wildcardNames(forms, protectedList) {
+  for (const f of forms) {
+    if (!/[*?[]/.test(f)) continue;
+    const g = f.split("/").filter(Boolean);
+    for (const p of protectedList) {
+      const e = p.split("/").filter(Boolean);
+      if (g.length < e.length) continue;
+      if (e.every((c, i) => g[i] === c || (/[*?[]/.test(g[i]) && !(c.startsWith(".") && /^[*?[]/.test(g[i])) && globRe(g[i]).test(c)))) return p;
+    }
+  }
+  return null;
+}
+
+/**
  * A glob operand's verdict: the protected path whose next component, below the
  * glob's literal directory, the glob's first wildcard component matches, or null.
  */
@@ -1121,7 +1189,8 @@ function worktreeDiscard({ sub, subIndex }, rest) {
   const dd = args.indexOf("--");
   const afterDashes = dd === -1 ? [] : args.slice(dd + 1);
   if (sub === "stash") {
-    const first = args.find((t) => !t.startsWith("-"));
+    // The value of -m/--message is a message, not the subcommand: `git stash -m wip` is a push.
+    const first = args.find((t, i) => !t.startsWith("-") && !/^(?:-m|--message)$/.test(args[i - 1] ?? ""));
     if (first !== undefined && first !== "push" && first !== "save") return null;
     if (first === "save") return { form: "stash", pathspecs: [] };
     const operands = [];
@@ -1137,6 +1206,7 @@ function worktreeDiscard({ sub, subIndex }, rest) {
   }
   if (sub === "reset" && flags.some((t) => /^--(?:hard|merge|keep)$/.test(t))) return { form: "reset --hard", pathspecs: afterDashes };
   if (sub === "checkout" && flags.some((t) => t === "--force" || /^-[A-Za-z]*f[A-Za-z]*$/.test(t))) return { form: "checkout -f", pathspecs: afterDashes };
+  if (sub === "read-tree" && flags.some((t) => /^-[A-Za-z]*u[A-Za-z]*$/.test(t)) && flags.some((t) => t === "--reset" || /^-[A-Za-z]*m[A-Za-z]*$/.test(t))) return { form: "read-tree -u", pathspecs: [] };
   if (sub === "switch" && flags.some((t) => t === "--force" || t === "--discard-changes" || /^-[A-Za-z]*f[A-Za-z]*$/.test(t))) return { form: "switch -f", pathspecs: [] };
   return null;
 }
