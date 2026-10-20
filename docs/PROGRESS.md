@@ -68,7 +68,7 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] P5-07 Tamper tests over a real bundle; the archive moves it
 - [x] P5-08 Attestation docs and the summarize step
 - [x] P5-09 Phase 5 end: push and record the manual check
-- [ ] P6-01 Operations, architecture and writing-specs for 0.7.0
+- [~] P6-01 Operations, architecture and writing-specs for 0.7.0
 - [ ] P6-02 mcp-tools.md and README for 0.7.0
 - [ ] P6-03 CHANGELOG 0.7.0, the version and the feedback header
 - [ ] P6-04 Apply the approved copy, a solid clean-room diagram and check-site rule 16

@@ -238,7 +238,7 @@ Environment variables:
 | `KUKULU_CLEANROOM_LOG` | `.kukulu/cleanroom/log.jsonl` | Where the clean-room hash chain is written; for tests and the guard's self-test only |
 | `KUKULU_PROFILE` | the global file's own `"profile"` key, if any | Which profile in the global file to apply; wins over the file's own choice |
 
-Flights archived before 0.6.0 keep `foundry.json` in their archive directory, and finalizing one still reads it; an archive is a record and is never rewritten.
+Flights archived before 0.6.0 keep their configuration file under its old name, and finalizing one still reads it; an archive is a record and is never rewritten.
 
 ## Calibrating
 

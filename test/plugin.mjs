@@ -180,8 +180,21 @@ for (const name of ["plan-build", "implement"]) {
   const ws = read("docs/writing-specs.md");
   like(ws, /from: "<that task's id>"/, "writing-specs.md teaches from");
   like(ws, /mutation\.targeted/, "writing-specs.md teaches mutation.targeted");
-  like(ws, /commit-msg/, "writing-specs.md shows a commit-msg hook for provenance logging");
+  like(ws, /^## Clean-room flights$/m, "writing-specs.md has a Clean-room flights section");
+  like(ws, /`Kukulu-Stage` and `Kukulu-Task` trailers, added by the server and not by a git hook/, "...naming the built-in trailers");
+  ok(!/commit-msg/.test(ws), "...and no longer shows a commit-msg hook");
   like(read("templates/SPEC.md"), /\{filter\}/, "templates/SPEC.md names the {filter} placeholder");
+}
+{
+  const opsDoc = read("docs/operations.md");
+  const keys = /const CLEANROOM_KEYS = \[([^\]]*)\]/.exec(read("mcp/server.mjs"))[1].match(/"([A-Za-z]+)"/g).map((k) => k.replaceAll('"', ""));
+  const missing = keys.filter((k) => !opsDoc.includes("`cleanroom." + k + "`"));
+  eq(missing.join(",") + "|" + keys.length, "|" + keys.length, "operations.md documents every cleanroom key (" + keys.join(", ") + ")");
+  ok(opsDoc.includes("`KUKULU_CLEANROOM_LOG`") && opsDoc.includes("kukulu_run_resume"), "operations.md documents KUKULU_CLEANROOM_LOG and the resume call");
+  ok(!/foundry/i.test(opsDoc), "operations.md has no pre-0.6.0 name left");
+  const arch = read("docs/architecture.md");
+  ok(arch.includes("cleanroom-guard.mjs") && arch.includes("cleanroom-log.mjs") && /^## Clean-room mode$/m.test(arch), "architecture.md shows the clean-room hook scripts");
+  ok(!/decision 4a/i.test(arch) && /```mermaid\nflowchart LR\n    N\["kukulu_next picks a stage"\]/.test(arch), "architecture.md places the gate in a diagram, not in the numbered stage decisions");
 }
 like(read("docs/operations.md"), /^## Running flight after flight$/m, "operations.md explains running flight after flight");
 like(read("docs/operations.md"), /^## Signing$/m, "operations.md has a signing section");
