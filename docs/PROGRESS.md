@@ -15,7 +15,7 @@ Started: 2026-10-20T19:18:49.092Z
 - [x] P0-08 Phase 0 end: push and record the manual check
 - [x] P1-01 renumber rewrites ids in the flight's CLAUDE.md notes
 - [x] P1-02 Refuse task and halt text that would break a PROGRESS.md constraint
-- [~] P1-03 policies.syncBase merges the base branch into the build branch
+- [x] P1-03 policies.syncBase merges the base branch into the build branch
 - [ ] P1-04 The hard cap's documentation says what reviewSubmit does
 - [ ] P1-05 The bundle's SUMMARY.md is the summary as attested
 - [ ] P1-06 Phase 1 end: push and record the manual check
@@ -67,3 +67,7 @@ flightNotesRange/swapFlightNotes in server.mjs; CLAUDE.md written inside withRol
 ### P1-02 — 6104dc8
 
 refuseProgressText + constraintFixtureFailure (shared with checkConstraints) in server.mjs; called in task_done (after state check), task_block (before reset), task_reopen, run_halt (before withRollback). Tests in implement.mjs; docs Refuses lines; CHANGELOG. Interpretation: no-description constraints print "no description".
+
+### P1-03 — ff94a2b
+
+syncBase helper in server.mjs (policies.syncBase, default true, validated, documented in operations.md); commitStaged opts.noPathspec; baseSynced on run_start/task_next results; withRollback restores the clean-room log on failure. Tests spread over implement, streams, cleanroom, plugin. Config key introduced: policies.syncBase. Interpretation: sync also runs for run_start in fix rounds (existing build branch); stream/clean-room assertions placed in streams.mjs/cleanroom.mjs.
