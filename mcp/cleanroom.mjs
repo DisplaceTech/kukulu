@@ -676,7 +676,7 @@ export function evaluate(policy, hookInput, env) {
   const args = input.tool_input && typeof input.tool_input === "object" && !Array.isArray(input.tool_input) ? input.tool_input : {};
   const { root, home } = env;
   const cwd = typeof input.cwd === "string" && input.cwd ? input.cwd : root;
-  // Where a `cd` earlier in the command has moved the shell; only the protected-path rules use it, so the read rules judge as before.
+  // Where a `cd` earlier in the command has moved the shell; every relative token and the "outside the repository" clause resolve against it.
   let shellCwd = cwd;
   const writeForms = (p) => canonicalPaths(p, { cwd: shellCwd, home });
   const lockdown = lockdownActive(policy, env.progressText);
@@ -685,7 +685,7 @@ export function evaluate(policy, hookInput, env) {
   const denyPaths = [...prefixes(policy.deny.paths), ...(env.keyPath ? [env.keyPath] : [])];
   const allowPaths = prefixes(policy.allow.paths);
   const protectedList = env.protected ?? protectedPaths(policy, env);
-  const forms = (p) => canonicalPaths(p, { cwd, home });
+  const forms = (p) => canonicalPaths(p, { cwd: shellCwd, home });
   const inRepo = (p) => forms(p).some((f) => underPrefix(f, root));
   const exempt = (p) => forms(p).some((f) => allowPaths.some((a) => underPrefix(f, a)));
   const wordIn = (text) => {
@@ -773,13 +773,7 @@ export function evaluate(policy, hookInput, env) {
         const v = bashVerdict(shellString, depth + 1);
         if (v.decision === "denied") return v;
       }
-      // A `cd` or `pushd` in an earlier segment moves every later relative operand (`cd docs && rm cleanroom.json`).
-      if ((word === "cd" || word === "pushd") && !/^[<>]/.test(rest.find((t) => !t.startsWith("-")) ?? "")) {
-        const dir = rest.find((t) => !t.startsWith("-"));
-        if (dir && dir !== "-") shellCwd = canonicalPaths(tokenPath(dir), { cwd: shellCwd, home })[0];
-        continue;
-      }
-
+      // The segment is judged with every rule below, so a `cd ~/.cargo/registry` operand is a token under 6b; the directory it names takes effect afterwards.
       // 6a. network commands
       if (policy.deny.network) {
         const first = word === "git" ? gitSubcommand(rest) : rest.find((t) => !t.startsWith("-"));
@@ -804,7 +798,7 @@ export function evaluate(policy, hookInput, env) {
         for (const t of realPaths) {
           if (wordIn(t) && !exempt(tokenPath(t))) return denied(`forbidden word in path argument: ${t}`);
         }
-        const outside = realPaths.length ? realPaths.some((t) => !inRepo(tokenPath(t))) : !inRepo(cwd);
+        const outside = realPaths.length ? realPaths.some((t) => !inRepo(tokenPath(t))) : !inRepo(".");
         if (outside) {
           for (let i = 0; i < rest.length; i++) {
             const t = rest[i];
@@ -836,6 +830,11 @@ export function evaluate(policy, hookInput, env) {
       // 6e. command patterns
       const hit = commandPatterns.find((x) => new RegExp(x.re.source, x.re.flags).test(segment));
       if (hit) return denied(`commandPatterns ${hit.id}`);
+      // A `cd` or `pushd` moves every later relative operand (`cd docs && rm cleanroom.json`, `cd ~/.cargo && cat registry/x`).
+      if (word === "cd" || word === "pushd") {
+        const dir = rest.find((t) => !t.startsWith("-"));
+        if (dir && dir !== "-" && !/^[<>]/.test(dir)) shellCwd = canonicalPaths(tokenPath(dir), { cwd: shellCwd, home })[0];
+      }
     }
     return NO_ISSUES;
   }
