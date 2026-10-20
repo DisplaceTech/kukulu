@@ -68,6 +68,7 @@ You need Node ≥ 22, git, and Claude Code. Nothing to `npm install`.
 - **Per-role model routing**, from a global config file, optional profiles and a project override, lets you point any role at a cheaper model, local or hosted through a router, without changing how the pipeline runs. See [docs/routing.md](./docs/routing.md).
 - **A flight controller**, `/kukulu:go-flight`, that makes no engineering decisions. It asks the MCP what runs next, spawns that agent, and repeats until the pipeline reports `done` or `halt`.
 - **A deterministic MCP server** (`mcp/server.mjs`, no dependencies, Node ≥ 22) that owns stage selection, task selection, dependency skipping, checkbox edits, log entries, verification runs and every bookkeeping commit. The skills direct judgment and never describe mechanics.
+- **Clean-room mode**, opt-in with a policy file: a guard that checks every tool call, a hash-chained log with signed checkpoints, a gate before every stage, a lexical contamination score, and a signed attestation bundle that anyone with Node can verify offline. See [docs/cleanroom.md](./docs/cleanroom.md).
 - **A Stop-hook guard** that refuses to let the implementer stop while tasks are open, and gives up after a configurable cap so a stuck run ends instead of looping.
 - **Blocked-task handling** that keeps an unattended run moving: a task that cannot be done is reset, logged and left for the reviewer; its dependents are skipped rather than attempted.
 - **Everything on disk.** The plan, progress, handoff, review and summary are all committed, so a flight can be resumed from any point by re-running one command.
@@ -144,6 +145,10 @@ claude --plugin-dir /path/to/kukulu
 ```
 
 Plugin skills are namespaced, so the entry point is `/kukulu:go-flight`; the bare `/go-flight` form does not resolve for plugin skills.
+
+## Upgrading to 0.7.0
+
+0.7.0 no longer reads the pre-0.6.0 layout. A project that still has `.foundry/` or `docs/foundry.json` is refused by every tool with a message that names the move, which is by hand: `.foundry/state.json` and `.foundry/feedback.jsonl` go to `.kukulu/`, `docs/foundry.json` goes to `docs/kukulu.json`, the `.foundry/` lines of `.gitignore` become `.kukulu/`, and the result is committed (0.6.x's `kukulu_migrate` did this, and 0.7.0 does not). The `FOUNDRY_*` environment variables are no longer read either; use the `KUKULU_*` names. A project on the 0.6 layout needs nothing else, and clean-room mode stays off until it has a `docs/cleanroom.json`. Flights archived under `docs/flights/` keep their old file names and are never rewritten.
 
 ## Per-project use
 
@@ -229,7 +234,7 @@ Full arguments, return shapes and failure modes: [docs/mcp-tools.md](./docs/mcp-
 
 ## Clean-room mode
 
-A project with a `docs/cleanroom.json` policy runs in clean-room mode: a guard checks every tool call against the policy before it runs, a logger writes every allowed call and every prompt to a hash-chained log with signed checkpoints, and a gate refuses to start a stage if any of that machinery has changed since the flight began. Without the policy file nothing changes and nothing is paid for. The method is patent pending (U.S. Provisional Application No. 64/178,095, Displace Technologies LLC). [docs/cleanroom.md](./docs/cleanroom.md) has the policy reference, the log format, the gate and the known gaps.
+A project with a `docs/cleanroom.json` policy runs in clean-room mode: a guard checks every tool call against the policy before it runs, a logger writes every allowed call and every prompt to a hash-chained log with signed checkpoints, and a gate refuses to start a stage if any of that machinery has changed since the flight began. At the end of the flight `kukulu_attest` writes `docs/attestation/`, a signed bundle whose own `verify.mjs` checks the manifest, the signature, the chain, the checkpoints, the policy, the guard, the mode, the denials, the coverage gaps and the similarity report with nothing but Node (see [Verifying offline](./docs/cleanroom.md#verifying-offline)). Without the policy file nothing changes and nothing is paid for. The method is patent pending (U.S. Provisional Application No. 64/178,095, Displace Technologies LLC). [docs/cleanroom.md](./docs/cleanroom.md) has the policy reference, the log format, the gate and the known gaps.
 
 ## The guard hook
 

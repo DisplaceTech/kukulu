@@ -196,6 +196,18 @@ for (const name of ["plan-build", "implement"]) {
   ok(arch.includes("cleanroom-guard.mjs") && arch.includes("cleanroom-log.mjs") && /^## Clean-room mode$/m.test(arch), "architecture.md shows the clean-room hook scripts");
   ok(!/decision 4a/i.test(arch) && /```mermaid\nflowchart LR\n    N\["kukulu_next picks a stage"\]/.test(arch), "architecture.md places the gate in a diagram, not in the numbered stage decisions");
 }
+{
+  const readme = read("README.md");
+  like(readme, /^## Upgrading to 0\.7\.0$/m, "README has a 0.7.0 migration paragraph");
+  like(readme, /\.foundry\/state\.json[\s\S]*\.kukulu\/[\s\S]*`FOUNDRY_\*` environment variables are no longer read/, "...naming the manual move and the unread FOUNDRY_ variables");
+  like(readme, /\*\*Clean-room mode\*\*, opt-in with a policy file/, "README's feature list names clean-room mode");
+  like(readme, /thirteen suites/, "README counts thirteen suites");
+  const tools = read("docs/mcp-tools.md");
+  ok(tools.includes("`prChecks`") && tools.includes("`gate`") && /"source": "review"/.test(tools) && tools.includes("`constraints`"), "mcp-tools documents prChecks, gate and source (and the mutate constraints)");
+  ok(!tools.includes("kukulu_migrate"), "mcp-tools has no kukulu_migrate");
+  const sections = Array.from(tools.matchAll(/^## `(kukulu_[a-z_]+)`$/gm), (m) => m[1]).join(",");
+  ok(["kukulu_run_resume", "kukulu_cleanroom_record", "kukulu_similarity", "kukulu_attest"].every((t) => sections.includes(t)), "mcp-tools has a section for every 0.7.0 tool");
+}
 like(read("docs/operations.md"), /^## Running flight after flight$/m, "operations.md explains running flight after flight");
 like(read("docs/operations.md"), /^## Signing$/m, "operations.md has a signing section");
 like(read("skills/pull-feedback/SKILL.md"), /docs\/flights\/\*\/feedback\.jsonl/, "pull-feedback reads archived flight logs too");
