@@ -60,7 +60,7 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] P4-08 The summarize skill carries the contamination score
 - [x] P4-09 Phase 4 end: push and record the calibration check
 - [x] P5-01 The verifier: manifest, signature, chain and checkpoints
-- [~] P5-02 The verifier: policy, guard, mode, denials, coverage and similarity
+- [x] P5-02 The verifier: policy, guard, mode, denials, coverage and similarity
 - [ ] P5-03 Pre-0.6.0 logs and the cleanflate fixture
 - [ ] P5-04 Coverage gaps and cleanroom.idleGapHours
 - [ ] P5-05 Tune cleanroom.idleGapHours
@@ -242,3 +242,6 @@ Push: pushed build/2026-10-19. Manual check: NOT VERIFIED (human): run kukulu_si
 
 ### P5-01 — 8d43d74
 scripts/verify-attestation.mjs: verifyBundle(dir,{key}) -> {ok, reasons:[{check,reason}], notes, checks}, exports verifyChain/verifyCheckpoint (duplicates of the module's, same wording), CLI (<dir> [--key] [--json], exit 0/1, usage errors exit 2). Checks 1-4 named manifest, signature, chain, checkpoints; P5-02 adds policy, guard, mode, denials, coverage, similarity. Harness: buildBundle(dir, {key, checkpointKey, policyText}), signBundleManifest, rewriteManifest. Suite attest registered; suite counts now thirteen (CONTRIBUTING, README). Lesson: in a quoted heredoc write single backslashes and unescaped backticks; double escaping bit three times.
+
+### P5-02 — 4f7ef0a
+Verifier checks 5-10 named policy, guard, mode, denials, coverage, similarity; checks 5-9 say 'not checked' when the chain fails. Gaps recomputed in the spec order and printed as notes 'coverage gap: <json>'; manifest.coverage.idleGapHours is read from the manifest. A verdict counts only when it names a denied seq; mode failure = gate data.failed 'mode'. Harness buildBundle options: clock, extra(log), commits, gaps, idleGapHours, similarity, mode; manifest denials counted independently from entries. attest suite 96 assertions.
