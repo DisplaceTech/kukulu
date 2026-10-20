@@ -128,3 +128,15 @@ Review-fix round 1: seven R1 tasks, all done, none blocked or skipped. Branch `b
 - R1-07: `gh --version` and `gh pr view` in `prChecks` have the 30 s bound; `kukulu_status` returns `review.mutationFixRounds` and the skill reads it there. The hang test takes about 30 s of wall time.
 
 Guard self-test is 194 cases. Nothing to check by hand this round. Codebase note: a fake `gh` that hangs must `exec sleep`, or the sleep child keeps the pipe open past `spawnSync`'s timeout.
+
+## Round 2
+
+Review-fix round 2: seven R2 tasks, all done, none blocked or skipped. Branch `build/2026-10-19`, head `c64d1ea` before the progress commits; 82 of 82 tasks done. The guard self-test is 265 cases; `KNOWN_LIMITS` is seven strings.
+
+- R2-01: a `cd`/`pushd` segment is judged by every rule again (its operand is a 6b token), and its directory takes effect after the segment. The effective cwd now reaches every relative token and the 6c "outside the repository" clause. This replaces the R1-01 interpretation that the read rules keep the original cwd; the cleanflate cases keep their decisions.
+- R2-02: `stripGrouping` drops leading `(`, `{`, `!` and the reserved words and trailing `)`. A `cd` inside a subshell ends at its `)`. `>|` no longer splits a segment. git `-C dir` moves the operands after the subcommand, and a destructive git form with no operand but `-C` treats the `-C` dir as the operand. `exec nohup timeout stdbuf setsid` are wrappers (timeout's duration and `-s`/`-k` are skipped). Sixth `KNOWN_LIMITS` entry; counts in test/cleanroom.mjs and test/attest.mjs.
+- R2-03: `worktreeDiscard` denies `git stash` (not list/show/apply/pop), `reset --hard|--merge|--keep`, `checkout -f`, `switch -f|--discard-changes` unless every pathspec lies outside the protected paths. `globHit` denies a glob operand of a destructive form whose wildcard component matches a protected path below it (no dotfile exemption, so `rm -rf *` is denied). `chmod`/`chown` of any operand containing a protected path is denied, recursive or not.
+- R2-04: `reachesDenied`, `globRe` and `recursiveOperands` deny Grep/Glob roots, Glob patterns resolved against their path, glob tokens and the operands of recursive Bash forms (grep -r, rg, ag, ack, find, ls -R, tree, cp -r, tar, rsync) that equal or contain a `deny.paths` entry. They run after the 6c forbidden-word rules so existing reasons are unchanged. Seventh `KNOWN_LIMITS` entry (pathPatterns on named targets only).
+- R2-05, R2-06, R2-07 are test-only and kill the mutants of REVIEW.md F5, F6, F7 (hand-checked by mutating the source and restoring it). The state suite grew to about 80 s because of the second 30 s hang test.
+
+Nothing to check by hand this round. Codebase note: `git -C dir` and a leading `(` each hide the real command word from a parser that takes the segment's first token; strip grammar before choosing the command.
