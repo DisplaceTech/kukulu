@@ -17,7 +17,7 @@ Started: 2026-10-20T19:18:49.092Z
 - [x] P1-02 Refuse task and halt text that would break a PROGRESS.md constraint
 - [x] P1-03 policies.syncBase merges the base branch into the build branch
 - [x] P1-04 The hard cap's documentation says what reviewSubmit does
-- [ ] P1-05 The bundle's SUMMARY.md is the summary as attested
+- [x] P1-05 The bundle's SUMMARY.md is the summary as attested
 - [ ] P1-06 Phase 1 end: push and record the manual check
 - [ ] P2-01 README calls the guard a tripwire
 - [ ] P2-02 CHANGELOG 0.7.1, the version and the feedback header
@@ -75,3 +75,7 @@ syncBase helper in server.mjs (policies.syncBase, default true, validated, docum
 ### P1-04 — e9dd357
 
 Text-only: schema description, mcp-tools, operations (3 places), architecture (3 places), CHANGELOG; 2 review tests and 1 protocol test pin behavior. No interpretation choices.
+
+### P1-05 — 4b1ca00
+
+One sentence added after the bundle file table in docs/cleanroom.md; CHANGELOG line. Cited skills/summarize/SKILL.md line 30 (Attestation paragraph) as already covering the manifest hash. Ran lint, pre-commit and plugin test (docs-only), not the full verify.
