@@ -13,6 +13,7 @@ All notable changes to this plugin. Format follows
 
 ### Fixed
 
+- Every description of `maxRoundsHard` now says what `kukulu_review_submit` does: a review numbered above it that requests changes halts the flight, and an approving review ends it. The caps worked as designed; the words were wrong (kukulu F-04 and F-05, and the 0.7.0 REVIEW note that the hard cap passed at round 11 with no halt).
 - `kukulu_run_start` on an existing build branch and a serial `kukulu_task_next` merge new local base-branch commits into the build branch (new optional key `policies.syncBase`, default `true`; `false` keeps the old behavior). A conflict refuses without leaving a merge behind (kukulu F-03).
 - `kukulu_task_done`, `kukulu_task_block`, `kukulu_task_reopen` and `kukulu_run_halt` refuse text that would break an active constraint covering `docs/PROGRESS.md`, before anything is written, instead of letting the log commit break the tree (kukulu F-02).
 - `kukulu_plan_commit` with `renumber: true` now also rewrites the renumbered ids inside CLAUDE.md's `## Flight <slug> notes` section, and only there; a missing section or flight slug is reported in `notes` (kukulu F-01).

@@ -16,7 +16,7 @@ Started: 2026-10-20T19:18:49.092Z
 - [x] P1-01 renumber rewrites ids in the flight's CLAUDE.md notes
 - [x] P1-02 Refuse task and halt text that would break a PROGRESS.md constraint
 - [x] P1-03 policies.syncBase merges the base branch into the build branch
-- [ ] P1-04 The hard cap's documentation says what reviewSubmit does
+- [~] P1-04 The hard cap's documentation says what reviewSubmit does
 - [ ] P1-05 The bundle's SUMMARY.md is the summary as attested
 - [ ] P1-06 Phase 1 end: push and record the manual check
 - [ ] P2-01 README calls the guard a tripwire

@@ -62,7 +62,7 @@ stateDiagram-v2
     implement --> halt_ops: kukulu_run_halt called
     review --> summarize: APPROVED
     review --> implement: CHANGES REQUESTED, R-tasks queued
-    review --> halt_rounds: non-converging past maxRounds, or past maxRoundsHard
+    review --> halt_rounds: non-converging past maxRounds, or changes requested past maxRoundsHard
     summarize --> done: SUMMARY.md committed, then kukulu_pr_finalize
     done_signing --> done: signed, then kukulu_pr_finalize again
     done_archived --> plan: SPEC.md edited for the next flight
@@ -90,7 +90,7 @@ The server evaluates these decisions in this order:
 11. `APPROVED` and not summarized → **summarize**.
 12. Summarized → **done**.
 
-Only `kukulu_review_submit` makes the round-cap decision. It is the one place that decides a round is non-converging past `maxRounds` or has reached `maxRoundsHard`, and it records that as decision 2's `state.halted`. `next()` never re-derives it from `round` and `maxRounds`: open tasks after a round that was not itself halted are the next implement stage, like any other round (V3-10). `kukulu_run_halt` also sets `state.halted` directly. An implementer calls it for an operator-level problem it cannot resolve itself, such as a dead signing agent, a full disk or a vanished base branch.
+Only `kukulu_review_submit` makes the round-cap decision. It is the one place that decides a round is non-converging past `maxRounds` or is a review that requests changes numbered above `maxRoundsHard` (an approving review above it ends the flight and halts nothing), and it records that as decision 2's `state.halted`. `next()` never re-derives it from `round` and `maxRounds`: open tasks after a round that was not itself halted are the next implement stage, like any other round (V3-10). `kukulu_run_halt` also sets `state.halted` directly. An implementer calls it for an operator-level problem it cannot resolve itself, such as a dead signing agent, a full disk or a vanished base branch.
 
 Each stage comes back with a `prompt` that the flight controller passes to the subagent verbatim. The implement, review and summarize prompts each end with one sentence stating this run's policies (`signing`, `push`, `pr`), so every stage knows them without re-deriving them. The server generates the prompt and the controller only relays it, so the instruction a stage receives does not drift with the controller's context.
 
@@ -241,7 +241,7 @@ An `APPROVED` verdict commits `REVIEW.md` as `review: round N approved` and push
 
 Every tool reports a review by the number it was stamped with, and never as a fix-round count. `kukulu_review_submit` returns `round: N` for either verdict, with `fixRounds` for an approval. `kukulu_next`'s `done` reason and `kukulu_summary_commit` count *reviews* (the length of `state.rounds`) and *fix rounds* (`state.round`) separately. A flight approved on its second review took 2 reviews and 1 fix round.
 
-**Convergence.** `state.rounds` is `[{ round, fixTasks, unblocked, verdict, nonConverging, at }, …]`, one entry per submission. A `CHANGES REQUESTED` round is `nonConverging` when its `fixTasks + unblocked` is at least the previous `CHANGES REQUESTED` round's. Round 1 has nothing to compare against, so it is never non-converging. `kukulu_review_submit` halts when the round number reaches `maxRoundsHard` (default 6, an absolute ceiling), or when the count of non-converging rounds so far reaches `maxRounds` (default 3), whichever comes first. A flight whose findings shrink every round, 15 → 3 → 2 → 1, never trips the soft cap no matter how many rounds that takes; one that goes 4 → 4 → 4 does, on the third round, because none of those rounds improved on the one before it. The halt message includes the trail of counts, so a human can see the shape of the problem at once.
+**Convergence.** `state.rounds` is `[{ round, fixTasks, unblocked, verdict, nonConverging, at }, …]`, one entry per submission. A `CHANGES REQUESTED` round is `nonConverging` when its `fixTasks + unblocked` is at least the previous `CHANGES REQUESTED` round's. Round 1 has nothing to compare against, so it is never non-converging. `kukulu_review_submit` halts when a review that requests changes is numbered above `maxRoundsHard` (default 6, an absolute ceiling; an approving review above it ends the flight), or when the count of non-converging rounds so far reaches `maxRounds` (default 3), whichever comes first. A flight whose findings shrink every round, 15 → 3 → 2 → 1, never trips the soft cap no matter how many rounds that takes; one that goes 4 → 4 → 4 does, on the third round, because none of those rounds improved on the one before it. The halt message includes the trail of counts, so a human can see the shape of the problem at once.
 
 What the reviewer submits as structured JSON is rendered into PLAN.md and parsed back out by `kukulu_task_next`, so a fix task is an ordinary task and goes through the same test-first loop as any other.
 
