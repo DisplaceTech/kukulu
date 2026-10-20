@@ -397,9 +397,9 @@ const logLines = (dir) => fs.readFileSync(path.join(dir, "log.jsonl"), "utf8").s
   const inRepo = mkDir("kukulu-legacy-repo-");
   fs.mkdirSync(path.join(inRepo, ".git"));
   fs.mkdirSync(path.join(inRepo, "logs"));
-  fs.writeFileSync(path.join(inRepo, "logs", "log.jsonl"), row("Read", path.join(inRepo, "src", "zlib_notes.rs")) + row("Read", "/elsewhere/zlib.rs"));
+  fs.writeFileSync(path.join(inRepo, "logs", "log.jsonl"), row("Read", path.join(inRepo, "src", "zlib_notes.rs")) + row("Read", "/elsewhere/zlib.rs") + row("Read", path.join(path.dirname(inRepo), "kukulu-legacy-sibling", "zlib.rs")));
   const d = JSON.parse(spawnSync(process.execPath, [VERIFIER, "--legacy-log", path.join(inRepo, "logs", "log.jsonl"), "--roots", "/r/", "--words", "zlib", "--json"], { encoding: "utf8" }).stdout);
-  eq(JSON.stringify(d.candidates.map((c) => c.line)), "[2]", "--repo defaults to the git repository holding the log: a word inside it is not a candidate, one outside it is");
+  eq(JSON.stringify(d.candidates.map((c) => c.line)), "[2,3]", "--repo defaults to the git repository holding the log: a word inside it is not a candidate, one outside it, a sibling of the repository included, is");
   const p = JSON.parse(spawnSync(process.execPath, [VERIFIER, "--legacy-log", probe, "--roots", "/home/x/.cargo/registry/", "--words", "zlib,miniz", "--repo", "/repo", "--json"], { encoding: "utf8" }).stdout);
   eq(JSON.stringify(p.candidates.map((c) => c.line)), "[1,5]", "a root hit and a word outside the repository are candidates; a word inside it, a bare word and a write are not");
 
