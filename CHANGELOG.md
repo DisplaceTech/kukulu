@@ -8,6 +8,7 @@ All notable changes to this plugin. Format follows
 
 ### Fixed
 
+- The review-build skill now says when a guard finding becomes a fix task (a regression against the merge base, a protected-path write or denied read with a spelling already named, or a missing command word) and sends every other unmodelled spelling to `Known-gap candidates`; the summarize skill carries them into SUMMARY.md. This addresses the root cause of kukulu F-04 and F-05, the eleven review rounds of 0.7.0.
 - The known-limits list is now one list of eight in the code, the docs and the bundle manifest, and it names shell expansion and option parsing; this closes the 0.7.0 review spec issues "D-03 option parsing is best-effort" and "known gaps omit shell expansion".
 
 ## [0.7.0] — 2026-10-20

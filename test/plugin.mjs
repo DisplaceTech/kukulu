@@ -794,4 +794,12 @@ ok(glRev && glPin === glRev, "secret-scan.yml pins GITLEAKS_VERSION to the pre-c
   eq(okina.status, 0, "check-names accepts the okina");
 }
 
+{
+  const lines = read("skills/review-build/SKILL.md").split("\n");
+  const cr = lines.findIndex((l) => l.startsWith("**Clean-room mode.**"));
+  const gf = lines.findIndex((l) => l.startsWith("**Guard findings.**"));
+  ok(cr >= 0 && gf > cr && /Known-gap candidates/.test(lines[gf]) && /merge base/.test(lines[gf]), "the review-build skill has a Guard findings paragraph after the clean-room paragraph");
+  like(read("skills/summarize/SKILL.md"), /Known-gap candidates/, "the summarize skill carries Known-gap candidates into SUMMARY.md");
+}
+
 finish();
