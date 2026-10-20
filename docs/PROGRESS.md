@@ -101,6 +101,7 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] R7-01 Guard: cp long options are resolved against cp's own option list, and -T is read in a valued bundle
 - [x] R7-02 Guard: xargs --process-slot-var and BSD xargs -J/-R/-S are valued
 - [x] R8-01 Guard: cp, mv, ln and install each read their own valued options (cp --sparse/--no-preserve, install --strip-program, BSD install -S)
+- [ ] R9-01 Guard: mv, ln and install resolve long options against their own full lists (install --strip is a flag)
 
 ## Log
 
