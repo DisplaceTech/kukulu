@@ -78,7 +78,7 @@ Started: 2026-10-19T20:19:40.028Z
 - [x] R1-03 Guard: allow cleanflate's four remaining false positives by classifying pattern operands
 - [x] R1-04 Test verifyChain's prev linkage and seq density in mcp/cleanroom.mjs
 - [x] R1-05 Test the verifier's prev linkage and add the rehashed edit to the both-copies-agree fixtures
-- [ ] R1-06 Test the gate's liveness kind, genesis match and the trailer's default task
+- [x] R1-06 Test the gate's liveness kind, genesis match and the trailer's default task
 - [ ] R1-07 Bound every gh call in prChecks; report mutationFixRounds where the reviewer can read it
 
 ## Log
@@ -309,3 +309,7 @@ Added two fixtures (rehashed edit -> line 4 prev mismatch; seq 1,2,4 gap with co
 
 ### R1-05 — 71a90c1
 Added check-3 test (rehashed edit with refreshed manifest and signature -> "entry 4 (line 4): prev does not match") and two agreement assertions. Hand-checked: with the verifier's prev check disabled all three fail.
+
+### R1-06 — 8374d6c
+Three tests added; each hand-mutated in mcp/server.mjs and confirmed to fail (liveness `!== "gate"`, genesis check deleted, trailer fallback removed); server.mjs restored.
+Interpretation: kukulu_feedback_log commit has stage from its argument (implement), so the trailer assertion is Stage: implement, Task: P0-01.
