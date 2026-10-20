@@ -960,8 +960,11 @@ export function evaluate(policy, hookInput, env) {
         // git's `-C dir` moves the operands that follow its subcommand.
         const git = word === "git" ? gitParts(rest) : null;
         const gitCwd = git ? git.dirs.reduce((base, d) => canonicalPaths(tokenPath(d), { cwd: base, home })[0], shellCwd) : shellCwd;
+        // These git forms write only .git/ or nothing, so their pathspecs are not write targets; `--output` of diff, log and show still names a file they write (SPEC A-03).
+        const indexOnly = git && INDEX_ONLY_GIT.has(git.sub) ? gitOutputValues(git.sub, rest, git.subIndex) : null;
         rest.forEach((t, i) => {
           if (writeDenied) return;
+          if (indexOnly && i > git.subIndex && !indexOnly.has(i)) return;
           if (!(!t.startsWith("-") || isPathLike(t))) return;
           const f = writeForms(tokenPath(t), git && i > git.subIndex ? gitCwd : shellCwd).find((x) => protectedList.some((p) => underPrefix(x, p)));
           if (f) {
@@ -1228,6 +1231,28 @@ function extractSubstitutions(command) {
     } else text += c;
   }
   return { text, inner };
+}
+
+// git subcommands whose operands are pathspecs: they write only .git/ or nothing.
+const INDEX_ONLY_GIT = new Set(["add", "commit", "diff", "status", "log", "show", "blame", "ls-files", "grep"]);
+
+/**
+ * The indexes of the arguments after an index-only git subcommand that are still
+ * write targets: the value of `--output=<file>` or `--output <file>` on diff, log
+ * and show. git accepts a unique abbreviation, so `--outp` is read as `--output`.
+ */
+function gitOutputValues(sub, rest, subIndex) {
+  const out = new Set();
+  if (!["diff", "log", "show"].includes(sub)) return out;
+  for (let i = subIndex + 1; i < rest.length; i++) {
+    const t = rest[i];
+    if (t === "--") break;
+    const m = /^(--outp(?:u(?:t)?)?)(=.*)?$/.exec(t);
+    if (!m) continue;
+    if (m[2] !== undefined) out.add(i);
+    else if (i + 1 < rest.length) out.add(i + 1);
+  }
+  return out;
 }
 
 /** The first git argument that is not one of git's global options (`-C dir`, `-c k=v`, `--git-dir=...`), i.e. its subcommand. */

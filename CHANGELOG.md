@@ -6,6 +6,10 @@ All notable changes to this plugin. Format follows
 
 ## [Unreleased]
 
+### Changed
+
+- `git add docs/*`, `git add docs/cleanroom.json` and the other index-only git forms (`add`, `commit`, `diff`, `status`, `log`, `show`, `blame`, `ls-files`, `grep`) are now allowed; `git diff --output=<protected path>` is still denied.
+
 ### Fixed
 
 - The guard judges a bare read-family operand by the word clause like the same operand written `./x`: `cat zlib.txt` is now denied like `cat ./zlib.txt` (0.7.0 REVIEW spec issue).
