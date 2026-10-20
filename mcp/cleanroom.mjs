@@ -716,6 +716,15 @@ export function evaluate(policy, hookInput, env) {
     return null;
   };
 
+  /** The deny.paths entry a glob or a recursive operand can reach (see reachesDenied), as a verdict, or null. */
+  const reachVerdict = (token, base, recursive) => {
+    for (const f of canonicalPaths(tokenPath(token), { cwd: base, home })) {
+      const d = reachesDenied(f, denyPaths, recursive);
+      if (d) return denied(`denied path: ${d} (deny.paths) is reached by ${token}, which ${recursive ? "a recursive read would search" : "a glob matches"}`);
+    }
+    return null;
+  };
+
   // 1. tools denied outright
   if (policy.deny.tools.includes(tool)) return denied(`tool ${tool} is denied by deny.tools`);
   // 2. WebSearch
@@ -742,8 +751,18 @@ export function evaluate(policy, hookInput, env) {
       if (v) return v;
       if (!isSearch && wordIn(base) && !exempt(base)) return denied(`forbidden word in path: ${base}`);
     }
-    if (tool === "Glob" && typeof args.pattern === "string" && /^[/~]/.test(args.pattern)) {
-      const v = pathVerdict(args.pattern);
+    if (tool === "Glob" && typeof args.pattern === "string") {
+      if (/^[/~]/.test(args.pattern)) {
+        const v = pathVerdict(args.pattern);
+        if (v) return v;
+      }
+      // The pattern is resolved against the search root, wildcards and `..` included.
+      const v = reachVerdict(args.pattern, typeof base === "string" && base ? forms(base)[0] : cwd, false);
+      if (v) return v;
+    }
+    // A search reaches everything under its root.
+    if (isSearch && typeof base === "string" && base) {
+      const v = reachVerdict(base, cwd, true);
       if (v) return v;
     }
     if (isSearch) {
@@ -823,6 +842,18 @@ export function evaluate(policy, hookInput, env) {
             if (!isPathLike(t) && wordIn(t)) return denied(`forbidden word in command outside the repository: ${t}`);
           }
         }
+      }
+      // A glob token, and the operands of a recursive form, reach more than the path they name.
+      const textual = patternOperands(word, rest);
+      for (let i = 0; i < rest.length; i++) {
+        if (isPathLike(rest[i]) && !textual.has(i) && /[*?[{]/.test(tokenPath(rest[i]))) {
+          const v = reachVerdict(rest[i], shellCwd, false);
+          if (v) return v;
+        }
+      }
+      for (const t of recursiveOperands(word, rest) ?? []) {
+        const v = reachVerdict(t, shellCwd, true);
+        if (v) return v;
       }
       // 6d. write-family commands and redirections on protected paths
       const redirects = redirectTargets(segment);
@@ -980,6 +1011,85 @@ function gitParts(rest) {
   return { sub: undefined, subIndex: rest.length, dirs };
 }
 
+/** One path component as a regular expression: `*`, `?`, `[..]` and `{a,b}` are the shell's, everything else literal. */
+function globRe(component) {
+  const body = component
+    .replace(/[.+^$()|\\]/g, "\\$&")
+    .replace(/\*/g, "[^/]*")
+    .replace(/\?/g, "[^/]")
+    .replace(/\{([^{}]*)\}/g, (_, alts) => `(?:${alts.split(",").join("|")})`);
+  try {
+    return new RegExp(`^${body}$`);
+  } catch {
+    return /^$/;
+  }
+}
+
+/**
+ * The deny.paths entry that the absolute path `f`, which may hold wildcards,
+ * can reach: `f` names it or something under it, a `**` component can lead to
+ * it, or, when `recursive`, `f` is a directory that contains it. A wildcard
+ * component is matched against the entry's component at the same depth.
+ */
+function reachesDenied(f, denyPaths, recursive) {
+  const g = f.split("/").filter(Boolean);
+  for (const d of denyPaths) {
+    const e = d.split("/").filter(Boolean);
+    for (let i = 0; ; i++) {
+      if (i >= e.length) return d;
+      if (i >= g.length) {
+        if (recursive) return d;
+        break;
+      }
+      if (g[i] === "**") return d;
+      if (g[i] !== e[i] && !globRe(g[i]).test(e[i])) break;
+    }
+  }
+  return null;
+}
+
+/**
+ * The operands a recursive form searches or copies, or null when the command
+ * is not one: grep -r, rg, ag, ack, find, ls -R, tree, cp -r, tar and rsync.
+ * With no operand a search starts at `.`.
+ */
+function recursiveOperands(word, rest) {
+  const flagged = (re, long) => rest.some((t) => re.test(t) || (long && long.test(t)));
+  const plain = (list) => list.filter((t) => !t.startsWith("-"));
+  if (/^(?:e?grep|fgrep)$/.test(word)) {
+    if (!flagged(/^-[A-Za-z]*[rR][A-Za-z]*$/, /^--(?:dereference-)?recursive$|^--directories=recurse$/)) return null;
+    const text = patternOperands(word, rest);
+    const list = rest.filter((t, i) => !text.has(i) && !t.startsWith("-"));
+    return list.length ? list : ["."];
+  }
+  if (/^(?:rg|ag|ack)$/.test(word)) {
+    const text = patternOperands(word, rest);
+    const list = rest.filter((t, i) => !text.has(i) && !t.startsWith("-"));
+    return list.length ? list : ["."];
+  }
+  if (word === "find") {
+    const start = [];
+    for (const t of rest) {
+      if (/^-[HLP]$/.test(t)) continue;
+      if (t.startsWith("-") || t === "(" || t === "!") break;
+      start.push(t);
+    }
+    return start.length ? start : ["."];
+  }
+  if (word === "ls") {
+    if (!flagged(/^-[A-Za-z]*R[A-Za-z]*$/, /^--recursive$/)) return null;
+    const list = plain(rest);
+    return list.length ? list : ["."];
+  }
+  if (word === "tree") {
+    const list = plain(rest);
+    return list.length ? list : ["."];
+  }
+  if (word === "cp") return flagged(/^-[A-Za-z]*[rRa][A-Za-z]*$/, /^--(?:recursive|archive)$/) ? plain(rest) : null;
+  if (word === "tar" || word === "rsync") return plain(rest);
+  return null;
+}
+
 /**
  * A glob operand's verdict: the protected path whose next component, below the
  * glob's literal directory, the glob's first wildcard component matches, or null.
@@ -990,8 +1100,7 @@ function globHit(forms, protectedList) {
     const at = parts.findIndex((c) => /[*?[]/.test(c));
     if (at === -1) continue;
     const dir = parts.slice(0, at).join("/") || "/";
-    // [..] passes through as a character class; every other regex metacharacter is literal.
-    const re = new RegExp(`^${parts[at].replace(/[.+^$(){}|\\]/g, "\\$&").replace(/\*/g, "[^/]*").replace(/\?/g, "[^/]")}$`);
+    const re = globRe(parts[at]);
     for (const p of protectedList) {
       if (p === dir || !underPrefix(p, dir)) continue;
       const next = p.slice(dir === "/" ? 1 : dir.length + 1).split("/")[0];
@@ -1122,6 +1231,7 @@ export const KNOWN_LIMITS = [
   "MCP server internals are not tool calls, so what a server reads on its own is not logged.",
   "Hooks load at session start, so a session that writes the policy is not covered until the next one; the gate's liveness check catches a session with no hooks at all.",
   "Commands that run a command from their arguments (find -exec, watch, parallel, busybox) and programs outside the fixed network and write lists (unlink, shred, perl -i, cargo fetch, rsync) are not recognized.",
+  "pathPatterns regexes are matched on the paths a call names, not on the files a recursive read or a glob reaches below a directory.",
 ];
 
 /**
