@@ -4,6 +4,26 @@ All notable changes to this plugin. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.1] — 2026-10-20
+
+### Changed
+
+- `rsync` into a protected path, a recursive `rsync` into a directory that contains one, an `rsync` remote operand (under `deny.network`), a `tar` extraction into a directory that equals, contains or lies under a protected path (the repository root included), and `tar c|r|u` onto a protected archive path are now denied.
+- `git add docs/*`, `git add docs/cleanroom.json` and the other index-only git forms (`add`, `commit`, `diff`, `status`, `log`, `show`, `blame`, `ls-files`, `grep`) are now allowed; `git diff --output=<protected path>` is still denied.
+
+### Fixed
+
+- `docs/cleanroom.md` now says that a bundle's `SUMMARY.md` is the summary as attested, and that the Attestation section added afterwards, which cites the manifest's SHA-256, lives only in the repository's copy (0.7.0 SUMMARY spec issue on E-03 and F-05).
+- Every description of `maxRoundsHard` now says what `kukulu_review_submit` does: a review numbered above it that requests changes halts the flight, and an approving review ends it. The caps worked as designed; the words were wrong (kukulu F-04 and F-05, and the 0.7.0 REVIEW note that the hard cap passed at round 11 with no halt).
+- `kukulu_run_start` on an existing build branch and a serial `kukulu_task_next` merge new local base-branch commits into the build branch (new optional key `policies.syncBase`, default `true`; `false` keeps the old behavior). A conflict refuses without leaving a merge behind (kukulu F-03).
+- `kukulu_task_done`, `kukulu_task_block`, `kukulu_task_reopen` and `kukulu_run_halt` refuse text that would break an active constraint covering `docs/PROGRESS.md`, before anything is written, instead of letting the log commit break the tree (kukulu F-02).
+- `kukulu_plan_commit` with `renumber: true` now also rewrites the renumbered ids inside CLAUDE.md's `## Flight <slug> notes` section, and only there; a missing section or flight slug is reported in `notes` (kukulu F-01).
+- Gate check 3 now pins `mcp/cleanroom.mjs`: genesis records its hash as `cleanroomHash`, the manifest carries `plugin.cleanroomHash`, and the verifier compares it with genesis. A flight started on 0.7.0 passes with `unpinned` in its gate entry (0.7.0 REVIEW spec issue "D-08 check 3 does not pin `mcp/cleanroom.mjs`").
+- The denial for `install -S` landing a source on a protected path under its BSD-only reading named `null` as its directory; it now names the directory it was given (0.7.0 REVIEW Notes).
+- The guard judges a bare read-family operand by the word clause like the same operand written `./x`: `cat zlib.txt` is now denied like `cat ./zlib.txt` (0.7.0 REVIEW spec issue).
+- The review-build skill now says when a guard finding becomes a fix task (a regression against the merge base, a protected-path write or denied read with a spelling already named, or a missing command word) and sends every other unmodelled spelling to `Known-gap candidates`; the summarize skill carries them into SUMMARY.md. This addresses the root cause of kukulu F-04 and F-05, the eleven review rounds of 0.7.0.
+- The known-limits list is now one list of eight in the code, the docs and the bundle manifest, and it names shell expansion and option parsing; this closes the 0.7.0 review spec issues "D-03 option parsing is best-effort" and "known gaps omit shell expansion".
+
 ## [0.7.0] — 2026-10-20
 
 ### Summary

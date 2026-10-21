@@ -237,6 +237,23 @@ const logLines = (dir) => fs.readFileSync(path.join(dir, "log.jsonl"), "utf8").s
   }
 }
 
+{
+  // mcp/cleanroom.mjs is pinned in genesis from 0.7.1 on (SPEC A-06); older bundles stay readable.
+  const absent = fresh();
+  const absentOut = V.verifyBundle(absent.dir);
+  ok(absentOut.reasons.length === 0 && absentOut.notes.includes("plugin.cleanroomHash absent (bundle from 0.7.0 or earlier)"), "a bundle without plugin.cleanroomHash verifies with the absent note");
+  const pinned = fresh({ cleanroomHash: "c".repeat(64) });
+  const pinnedOut = V.verifyBundle(pinned.dir);
+  ok(pinnedOut.reasons.length === 0 && !pinnedOut.notes.some((n) => /cleanroomHash/.test(n)), "a bundle whose plugin.cleanroomHash equals genesis passes without a note");
+  const differs = fresh({ cleanroomHash: "c".repeat(64) });
+  rewriteManifest(differs.dir, differs.key, (m) => { m.plugin.cleanroomHash = "d".repeat(64); });
+  eq(JSON.stringify(reasons(differs.dir)), JSON.stringify(["guard: the manifest's plugin.cleanroomHash differs from the genesis entry's cleanroomHash"]), "a bundle whose plugin.cleanroomHash differs from genesis fails the guard check");
+  const noGenesis = fresh();
+  rewriteManifest(noGenesis.dir, noGenesis.key, (m) => { m.plugin.cleanroomHash = "d".repeat(64); });
+  const noGenesisOut = V.verifyBundle(noGenesis.dir);
+  ok(noGenesisOut.reasons.length === 0 && noGenesisOut.notes.includes("genesis has no cleanroomHash (flight started on 0.7.0 or earlier); plugin.cleanroomHash not compared"), "a genesis without cleanroomHash passes with the not-compared note");
+}
+
 // ---------------------------------------------------------------- check 7: the mode
 
 {
@@ -582,7 +599,9 @@ async function summarizedFlight() {
       eq(manifest.repo.head, head, "the manifest names the commit it was made at");
       eq(manifest.denials.verdicts["false positive"] + "|" + manifest.denials.verdicts.unclassified + "|" + manifest.denials.total, "1|0|1", "the denial's verdict is counted");
       eq(manifest.human.verdicts + "|" + (manifest.human.instructions >= 1), "1|true", "the human entries are counted, the prompt among them");
-      ok(manifest.coverage.knownLimits.length === 7 && manifest.coverage.idleGapHours === 3, "the coverage section carries the known limits and the idle threshold");
+      ok(JSON.stringify(manifest.coverage.knownLimits) === JSON.stringify(CR.KNOWN_LIMITS) && manifest.coverage.idleGapHours === 3, "the coverage section carries the known limits and the idle threshold");
+      eq(manifest.plugin.cleanroomHash, CR.policyHash(fs.readFileSync(path.join(ROOT, "mcp", "cleanroom.mjs"))), "the manifest's plugin object carries cleanroomHash");
+      eq(Object.keys(manifest.plugin).join(","), "version,guardHash,loggerHash,hooksHash,cleanroomHash,verifierHash", "...after hooksHash");
       eq(manifest.selfTest.ok + "|" + manifest.selfTest.cases, "true|" + manifest.selfTest.cases, "the self-test result is recorded");
       ok(manifest.selfTest.cases > 100, "...with its case count (" + manifest.selfTest.cases + ")");
 

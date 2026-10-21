@@ -897,6 +897,8 @@ export function evaluate(policy, hookInput, env) {
           if (!allowedFetch) return denied(`network command ${name} is denied`);
         }
       }
+      // An rsync operand that names a host (`host:path`, `user@host:path`, `rsync://...`) reaches the network.
+      if (policy.deny.network && word === "rsync" && rsyncParts(rest).operands.some((t) => /^rsync:\/\//i.test(t) || /^[^/]*:/.test(t))) return denied("network command rsync is denied");
       // 6b. any token under deny.paths or matching a pathPattern
       const pathTokens = rest.filter(isPathLike);
       for (const t of pathTokens) {
@@ -908,7 +910,9 @@ export function evaluate(policy, hookInput, env) {
         // A pattern, script or program operand is text, not a path: only the "outside the repository" clause judges it.
         const patterns = patternOperands(word, rest);
         const realPaths = rest.filter((t, i) => isPathLike(t) && !patterns.has(i));
-        for (const t of realPaths) {
+        // A bare operand (`cat zlib.txt`) is the same file as `./zlib.txt`, so it gets the same decision.
+        const operands = rest.filter((t, i) => !patterns.has(i) && (isPathLike(t) || !t.startsWith("-")));
+        for (const t of operands) {
           if (wordIn(t) && !exempt(tokenPath(t))) return denied(`forbidden word in path argument: ${t}`);
         }
         const outside = realPaths.length ? realPaths.some((t) => !inRepo(tokenPath(t))) : !inRepo(".");
@@ -946,6 +950,42 @@ export function evaluate(policy, hookInput, env) {
         const v = reachVerdict(t, shellCwd, true);
         if (v) return v;
       }
+      // 6d'. rsync and tar are not write-family as a whole: their sources and archives are only read, so each gets a rule of its own (SPEC A-04).
+      if (word === "rsync") {
+        const { operands, recursive } = rsyncParts(rest);
+        if (operands.length > 1) {
+          const dest = operands[operands.length - 1];
+          const landed = operands.slice(0, -1).map((src) => {
+            const trimmed = src.replace(/\/+$/, "");
+            const base = path.basename(trimmed);
+            return src.endsWith("/") || base === "." || base === ".." || base === "" ? dest : `${dest.replace(/\/+$/, "") || "/"}/${base}`;
+          });
+          for (const target of [dest, ...landed]) {
+            const forms = writeForms(tokenPath(target));
+            const f = forms.find((x) => protectedList.some((q) => underPrefix(x, q) || (recursive && target === dest && underPrefix(q, x))));
+            if (f) return denied(`protected path: ${f} (rsync writes it into ${dest})`);
+            const w = wildcardNames(forms, protectedList);
+            if (w) return denied(`protected path: ${w} (can be named by the wildcard ${target})`);
+          }
+        }
+      }
+      if (word === "tar") {
+        const { extract, writesArchive, dirs, file } = tarParts(rest);
+        if (extract) {
+          // The archive's contents cannot be known, so an extraction into a directory that holds or sits in a protected path is denied.
+          const dir = dirs.reduce((base, d) => canonicalPaths(tokenPath(d), { cwd: base, home })[0], shellCwd);
+          const forms = [dir, ...writeForms(dir)];
+          const hit = protectedList.find((q) => forms.some((x) => underPrefix(q, x) || underPrefix(x, q)));
+          if (hit) return denied(`protected path: ${hit} (tar extracts into ${dirs.length ? dirs[dirs.length - 1] : "."}; the archive's contents cannot be known)`);
+        }
+        if (writesArchive && file !== null && file !== "-") {
+          const forms = writeForms(tokenPath(file));
+          const f = forms.find((x) => protectedList.some((q) => underPrefix(x, q)));
+          if (f) return denied(`protected path: ${f}`);
+          const w = wildcardNames(forms, protectedList);
+          if (w) return denied(`protected path: ${w} (can be named by the wildcard ${file})`);
+        }
+      }
       // 6d. write-family commands and redirections on protected paths
       const redirects = redirectTargets(segment).flatMap((t) => braceExpand(t));
       const allArgs = rest;
@@ -958,8 +998,11 @@ export function evaluate(policy, hookInput, env) {
         // git's `-C dir` moves the operands that follow its subcommand.
         const git = word === "git" ? gitParts(rest) : null;
         const gitCwd = git ? git.dirs.reduce((base, d) => canonicalPaths(tokenPath(d), { cwd: base, home })[0], shellCwd) : shellCwd;
+        // These git forms write only .git/ or nothing, so their pathspecs are not write targets; `--output` of diff, log and show still names a file they write (SPEC A-03).
+        const indexOnly = git && INDEX_ONLY_GIT.has(git.sub) ? gitOutputValues(git.sub, rest, git.subIndex) : null;
         rest.forEach((t, i) => {
           if (writeDenied) return;
+          if (indexOnly && i > git.subIndex && !indexOnly.has(i)) return;
           if (!(!t.startsWith("-") || isPathLike(t))) return;
           const f = writeForms(tokenPath(t), git && i > git.subIndex ? gitCwd : shellCwd).find((x) => protectedList.some((p) => underPrefix(x, p)));
           if (f) {
@@ -972,10 +1015,10 @@ export function evaluate(policy, hookInput, env) {
         if (writeDenied) return writeDenied;
         // cp, mv, ln and install into a directory write `<directory>/<basename of source>`, a path no operand names.
         const landed = destinationPaths(word, rest);
-        for (const { target } of landed.targets) {
+        for (const { target, dir: into } of landed.targets) {
           const forms = writeForms(target);
           const f = forms.find((x) => protectedList.some((p) => underPrefix(x, p) || (landed.recursive && underPrefix(p, x))));
-          if (f) return denied(`protected path: ${f} (${word} writes it into ${landed.dir})`);
+          if (f) return denied(`protected path: ${f} (${word} writes it into ${into})`);
           const w = wildcardNames(forms, protectedList);
           if (w) return denied(`protected path: ${w} (can be named by the wildcard ${target})`);
         }
@@ -1139,7 +1182,7 @@ function destinationPathsFor(word, rest, spec) {
     const base = path.basename(trimmed);
     // `cp -r src/ dst` writes dst/src: only a `.` or `..` basename names the directory itself.
     const standsForDir = asSelf || base === "." || base === ".." || base === "";
-    return { target: standsForDir ? dir : `${dir.replace(/\/+$/, "") || "/"}/${base}`, standsForDir };
+    return { target: standsForDir ? dir : `${dir.replace(/\/+$/, "") || "/"}/${base}`, standsForDir, dir };
   });
   return { dir, recursive, targets };
 }
@@ -1226,6 +1269,141 @@ function extractSubstitutions(command) {
     } else text += c;
   }
   return { text, inner };
+}
+
+// rsync options that take a value, so the next token is not an operand (`-e ssh`, `--exclude '*.o'`).
+const RSYNC_SPEC = {
+  short: new Set("eTfBM"),
+  long: new Set(
+    ("--rsh --rsync-path --temp-dir --backup-dir --files-from --exclude --exclude-from --include --include-from --filter --partial-dir " +
+      "--compare-dest --copy-dest --link-dest --log-file --password-file --out-format --block-size --remote-option --chmod --chown " +
+      "--usermap --groupmap --timeout --contimeout --port --address --sockopts --bwlimit --max-size --min-size --modify-window " +
+      "--compress-level --skip-compress --suffix --iconv --read-batch --write-batch --only-write-batch --info --debug --max-delete").split(" "),
+  ),
+};
+
+/** rsync's operands and whether the call is recursive (`-r`, `-a`, in a bundle such as `-av`, or `--recursive`/`--archive` by unique prefix). */
+function rsyncParts(rest) {
+  const operands = [];
+  let recursive = false;
+  for (let i = 0; i < rest.length; i++) {
+    const t = rest[i];
+    if (t === "--") {
+      operands.push(...rest.slice(i + 1));
+      break;
+    }
+    if (!t.startsWith("-") || t === "-") {
+      operands.push(t);
+      continue;
+    }
+    const opt = scanOption(t, RSYNC_SPEC);
+    if (t.startsWith("--")) {
+      const given = t.split("=")[0];
+      const hits = ["--recursive", "--archive"].filter((n) => n.startsWith(given));
+      if (given.length > 2 && hits.length === 1) recursive = true;
+    } else {
+      // Only the letters before the valued one are flags; the rest of the token is that option's value.
+      const flags = opt ? t.slice(1, t.indexOf(opt.name, 1)) : t.slice(1);
+      if (/[ra]/.test(flags)) recursive = true;
+    }
+    if (opt && opt.value === null) i++;
+  }
+  return { operands, recursive };
+}
+
+// tar's short options that take a value, and its long options (a unique prefix names one; tar accepts abbreviations).
+const TAR_SPEC = { short: new Set("fCTXbHKLNVg"), long: new Set() };
+const TAR_LONG_MODES = {
+  "--extract": "x", "--get": "x", "--create": "c", "--append": "r", "--update": "u", "--catenate": "A", "--concatenate": "A", "--delete": "D",
+  "--list": "t", "--diff": "d", "--compare": "d",
+};
+const TAR_LONG_VALUED = (
+  "--directory --file --files-from --exclude-from --exclude --transform --xform --blocking-factor --format --owner --group --mode " +
+  "--newer-mtime --newer --listed-incremental --index-file --label --volno-file --use-compress-program --rsh-command --suffix " +
+  "--to-command --strip-components --tape-length --record-size --occurrence"
+).split(" ");
+const TAR_LONG_FLAGS = (
+  "--absolute-names --acls --anchored --atime-preserve --auto-compress --backup --bzip2 --check-device --dereference --gzip --gunzip " +
+  "--hard-dereference --ignore-case --ignore-command-error --ignore-failed-read --ignore-zeros --keep-directory-symlink --keep-newer-files " +
+  "--keep-old-files --lzip --lzma --lzop --no-anchored --no-auto-compress --no-recursion --no-same-owner --no-same-permissions --null " +
+  "--numeric-owner --one-file-system --overwrite --overwrite-dir --preserve-permissions --remove-files --same-owner --show-defaults " +
+  "--skip-old-files --sparse --unlink-first --verbose --verify --version --wildcards --xz --zstd --help --usage --totals --checkpoint " +
+  "--one-top-level --recursion --same-permissions --read-full-records --touch --multi-volume --incremental --warning"
+).split(" ");
+
+/**
+ * What a tar command line does: whether it extracts, whether it writes an
+ * archive (create, append, update), the -C/--directory values in order, and the
+ * archive file. The first argument without a leading `-` is old style: its
+ * letters are options, and the values of the valued ones follow in letter order.
+ */
+function tarParts(rest) {
+  const modes = new Set();
+  const dirs = [];
+  let file = null;
+  const args = [...rest];
+  const take = (name, value) => {
+    if (name === "C" || name === "--directory") dirs.push(value);
+    else if (name === "f" || name === "--file") file = value;
+  };
+  if (args.length && !args[0].startsWith("-")) {
+    const letters = args.shift();
+    for (const l of letters) {
+      modes.add(l);
+      if (TAR_SPEC.short.has(l)) take(l, args.length ? args.shift() : null);
+    }
+  }
+  const longs = [...Object.keys(TAR_LONG_MODES), ...TAR_LONG_VALUED, ...TAR_LONG_FLAGS];
+  for (let i = 0; i < args.length; i++) {
+    const t = args[i];
+    if (t === "--") break;
+    if (!t.startsWith("-") || t === "-") continue;
+    if (t.startsWith("--")) {
+      const eq = t.indexOf("=");
+      const given = eq === -1 ? t : t.slice(0, eq);
+      const hits = longs.includes(given) ? [given] : longs.filter((n) => n.startsWith(given));
+      if (hits.length !== 1) continue;
+      const name = hits[0];
+      if (TAR_LONG_MODES[name]) modes.add(TAR_LONG_MODES[name]);
+      if (TAR_LONG_VALUED.includes(name)) take(name, eq === -1 ? (args[++i] ?? null) : t.slice(eq + 1));
+      continue;
+    }
+    for (let k = 1; k < t.length; k++) {
+      modes.add(t[k]);
+      if (TAR_SPEC.short.has(t[k])) {
+        take(t[k], k + 1 < t.length ? t.slice(k + 1) : (args[++i] ?? null));
+        break;
+      }
+    }
+  }
+  return {
+    extract: modes.has("x"),
+    writesArchive: ["c", "r", "u", "A", "D"].some((m) => modes.has(m)),
+    dirs: dirs.filter((d) => d !== null),
+    file,
+  };
+}
+
+// git subcommands whose operands are pathspecs: they write only .git/ or nothing.
+const INDEX_ONLY_GIT = new Set(["add", "commit", "diff", "status", "log", "show", "blame", "ls-files", "grep"]);
+
+/**
+ * The indexes of the arguments after an index-only git subcommand that are still
+ * write targets: the value of `--output=<file>` or `--output <file>` on diff, log
+ * and show. git accepts a unique abbreviation, so `--outp` is read as `--output`.
+ */
+function gitOutputValues(sub, rest, subIndex) {
+  const out = new Set();
+  if (!["diff", "log", "show"].includes(sub)) return out;
+  for (let i = subIndex + 1; i < rest.length; i++) {
+    const t = rest[i];
+    if (t === "--") break;
+    const m = /^(--outp(?:u(?:t)?)?)(=.*)?$/.exec(t);
+    if (!m) continue;
+    if (m[2] !== undefined) out.add(i);
+    else if (i + 1 < rest.length) out.add(i + 1);
+  }
+  return out;
 }
 
 /** The first git argument that is not one of git's global options (`-C dir`, `-c k=v`, `--git-dir=...`), i.e. its subcommand. */
@@ -1534,12 +1712,13 @@ function redirectTargets(segment) {
 /** What the guard cannot see, stated in every bundle's manifest as coverage.knownLimits (SPEC D-03). */
 export const KNOWN_LIMITS = [
   "Interpreter escapes (python3 -c, node -e) are not parsed, so a path or word inside the quoted program is not seen.",
-  "Shell variables other than $HOME, and strings assembled at run time (a base64 decode, a variable holding a command), are not expanded, so a path or command built that way is not seen.",
+  "Shell expansion beyond ~ and $HOME is not evaluated: other variables, and strings assembled at run time (a base64 decode, a variable holding a command), so a path or command built that way is not seen.",
+  "Option and wrapper spellings the tables do not model are not recognized: the guard judges a command by its text, its wrapper and option parsing follows GNU coreutils, findutils and sudo (and BSD/macOS forms where their manual pages differ), and no table can be proved complete across tool versions.",
+  "Commands that run a command from their arguments (find -exec, watch, parallel, busybox) and programs outside the fixed network and write lists (unlink, shred, perl -i, cargo fetch) are not recognized.",
+  "pathPatterns regexes are matched on the paths a call names, not on the files a recursive read or a glob reaches below a directory.",
   "Subprocesses of a make target are not individual tool calls, so what they read is not logged.",
   "MCP server internals are not tool calls, so what a server reads on its own is not logged.",
   "Hooks load at session start, so a session that writes the policy is not covered until the next one; the gate's liveness check catches a session with no hooks at all.",
-  "Commands that run a command from their arguments (find -exec, watch, parallel, busybox) and programs outside the fixed network and write lists (unlink, shred, perl -i, cargo fetch, rsync) are not recognized.",
-  "pathPatterns regexes are matched on the paths a call names, not on the files a recursive read or a glob reaches below a directory.",
 ];
 
 /**

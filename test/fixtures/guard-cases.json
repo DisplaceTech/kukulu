@@ -6126,5 +6126,524 @@
    "cwd": "__ROOT__"
   },
   "expect": "allowed"
+ },
+ {
+  "name": "cat of a bare operand with a denied word (P0-03)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat zlib.txt"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "forbidden word in path argument"
+ },
+ {
+  "name": "head of a bare operand with a denied word (P0-03)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "head -n 5 zlib.txt"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "forbidden word in path argument"
+ },
+ {
+  "name": "less of a bare operand with a denied word (P0-03)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "less miniz.c"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "forbidden word in path argument"
+ },
+ {
+  "name": "grep pattern with a denied word stays text (P0-03)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "grep -n zlib src/a.rs"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "sed script with a denied word stays text (P0-03)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "sed -n 's/zlib/x/p' src/a.rs"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "bare operand under allow.paths is exempt (P0-03)",
+  "policy": {
+   "version": 1,
+   "deny": {
+    "words": [
+     "zlib"
+    ]
+   },
+   "allow": {
+    "paths": [
+     "."
+    ]
+   }
+  },
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat zlib.txt"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "git add with a glob under docs (P0-04)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "git add docs/*"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "git add of a protected file stages it (P0-04)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "git add docs/cleanroom.json"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "git commit with a pathspec (P0-04)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "git commit -m x docs/a.md"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "git diff of a protected file (P0-04)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "git -C . diff docs/kukulu.json"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "git diff --output= a protected file (P0-04)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "git diff --output=docs/cleanroom.json"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "git diff --output then a protected file (P0-04)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "git diff --output docs/cleanroom.json"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "git checkout of a protected file (P0-04)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "git checkout docs/cleanroom.json"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "git restore of the log directory (P0-04)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "git restore .kukulu"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "git log redirected into a protected file (P0-04)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "git log > docs/cleanroom.json"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "rsync evil/cleanroom.json docs/ (P0-05)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "rsync evil/cleanroom.json docs/"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "rsync -a evil/ .kukulu/ (P0-05)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "rsync -a evil/ .kukulu/"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "tar xf evil.tar -C docs (P0-05)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "tar xf evil.tar -C docs"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "tar -x -f evil.tar --directory=.kukulu (P0-05)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "tar -x -f evil.tar --directory=.kukulu"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "cd docs && tar xf ../evil.tar (P0-05)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd docs && tar xf ../evil.tar"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "tar cf docs/cleanroom.json src (P0-05)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "tar cf docs/cleanroom.json src"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "tar xf a.tar (P0-05)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "tar xf a.tar"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "rsync host:x build/ (P0-05)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "rsync host:x build/"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command rsync is denied"
+ },
+ {
+  "name": "rsync -a rsync://h/m build/ (P0-05)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "rsync -a rsync://h/m build/"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "network command rsync is denied"
+ },
+ {
+  "name": "rsync -a src/ build/ (P0-05)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "rsync -a src/ build/"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "rsync -e ssh -a src/ build/ (P0-05)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "rsync -e ssh -a src/ build/"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "tar xf a.tar -C build (P0-05)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "tar xf a.tar -C build"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "tar tf docs.tar (P0-05)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "tar tf docs.tar"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "tar cf build/a.tar docs (P0-05)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "tar cf build/a.tar docs"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "install -S evil/cleanroom.json docs, the BSD reading (P0-06)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "install -S evil/cleanroom.json docs"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*/docs/cleanroom\\.json \\(install writes it into docs\\)"
+ },
+ {
+  "name": "install -S .bak evil/cleanroom.json docs, the GNU reading (P0-06)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "install -S .bak evil/cleanroom.json docs"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*/docs/cleanroom\\.json \\(install writes it into docs\\)"
+ },
+ {
+  "name": "install -S .bak a.txt build/ stays allowed (P0-06)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "install -S .bak a.txt build/"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "tar -rf docs/cleanroom.json x (R1-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "tar -rf docs/cleanroom.json x"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "tar uf docs/cleanroom.json src (R1-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "tar uf docs/cleanroom.json src"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "tar --append --file=docs/cleanroom.json x (R1-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "tar --append --file=docs/cleanroom.json x"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "tar --update -f docs/cleanroom.json src (R1-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "tar --update -f docs/cleanroom.json src"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "tar --get -f a.tar -C docs (R1-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "tar --get -f a.tar -C docs"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "rsync evil/cleanroom.json docs -e ssh (R1-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "rsync evil/cleanroom.json docs -e ssh"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "rsync evil/x docs/cleanroom.js?? (R1-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "rsync evil/x docs/cleanroom.js??"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "can be named by the wildcard"
+ },
+ {
+  "name": "tar cf docs/cleanroom.js?? src (R1-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "tar cf docs/cleanroom.js?? src"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "can be named by the wildcard"
  }
 ]

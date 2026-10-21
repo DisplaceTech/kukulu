@@ -90,7 +90,7 @@ const MCP_ALLOW_RULE = "mcp__plugin_kukulu_kukulu";
 const PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 // Keep in sync with .claude-plugin/plugin.json and package.json; test/plugin.mjs checks it.
-const VERSION = "0.7.0";
+const VERSION = "0.7.1";
 
 // ---------------------------------------------------------------- clean-room mode (SPEC D-06)
 
@@ -99,10 +99,10 @@ const cleanroomPolicyPath = (cc) => path.join(ROOT, cc.cleanroom.policy);
 const cleanroomOn = (cc) => exists(cleanroomPolicyPath(cc));
 const cleanroomLogPath = () => logPathFor(ROOT, process.env);
 
-/** SHA-256 of the files the gate pins: the two hook scripts and hooks.json, as installed under PLUGIN_ROOT. */
+/** SHA-256 of the files the gate pins: the two hook scripts, hooks.json and the module the guard decides with, as installed under PLUGIN_ROOT. */
 function pluginHashes() {
   const of = (rel2) => policyHash(fs.readFileSync(path.join(PLUGIN_ROOT, rel2)));
-  return { guardHash: of("scripts/cleanroom-guard.mjs"), loggerHash: of("scripts/cleanroom-log.mjs"), hooksHash: of("hooks/hooks.json") };
+  return { guardHash: of("scripts/cleanroom-guard.mjs"), loggerHash: of("scripts/cleanroom-log.mjs"), hooksHash: of("hooks/hooks.json"), cleanroomHash: of("mcp/cleanroom.mjs") };
 }
 
 /** The signing key, generated first when the file is absent. */
@@ -180,10 +180,13 @@ function runGate(stage, st = loadState()) {
   const policyBytes = fs.readFileSync(policyPath);
   if (policyHash(policyBytes) !== recorded.policyHash) return failed("policy", `${cc.cleanroom.policy} changed since genesis (its SHA-256 no longer matches the recorded one)`);
 
-  // 3. guard: the two hook scripts and hooks.json are the ones recorded, and hooks.json still registers them
+  // 3. guard: the two hook scripts, hooks.json and mcp/cleanroom.mjs are the ones recorded, and hooks.json still registers the scripts
   checked.push("guard");
   const now = pluginHashes();
-  for (const [key, label] of [["guardHash", "scripts/cleanroom-guard.mjs"], ["loggerHash", "scripts/cleanroom-log.mjs"], ["hooksHash", "hooks/hooks.json"]]) {
+  // A flight that began on 0.7.0 recorded no cleanroomHash, so that one comparison is skipped and the passing entry says so.
+  const unpinned = recorded.cleanroomHash ? [] : ["mcp/cleanroom.mjs"];
+  for (const [key, label] of [["guardHash", "scripts/cleanroom-guard.mjs"], ["loggerHash", "scripts/cleanroom-log.mjs"], ["hooksHash", "hooks/hooks.json"], ["cleanroomHash", "mcp/cleanroom.mjs"]]) {
+    if (key === "cleanroomHash" && !recorded.cleanroomHash) continue;
     if (now[key] !== recorded[key]) return failed("guard", `${label} changed since genesis`);
   }
   let hooks;
@@ -235,7 +238,7 @@ function runGate(stage, st = loadState()) {
     return failed("liveness", "no tool call has been logged since the last gate; the clean-room hooks are not running in this session. Start a new session.");
   }
 
-  appendEntry(logPath, { kind: "gate", stage, role: "session", data: { checks: checked.length, ok: true } });
+  appendEntry(logPath, { kind: "gate", stage, role: "session", data: { checks: checked.length, ok: true, ...(unpinned.length ? { unpinned } : {}) } });
   return { ok: true, checked };
 }
 
@@ -268,7 +271,7 @@ function checkpoint(event, stage, st) {
       chainTip: entries.length ? entries[entries.length - 1].hash : ZERO_HASH,
       git: git(["rev-parse", "HEAD"]).out,
       policyHash: policyHash(fs.readFileSync(cleanroomPolicyPath(cc))),
-      ...pluginHashes(),
+      ...(({ guardHash, loggerHash, hooksHash }) => ({ guardHash, loggerHash, hooksHash }))(pluginHashes()),
       keyFingerprint: key.fingerprint,
       event,
     },
@@ -405,7 +408,9 @@ function commitStaged(rels, message, opts = {}) {
       timeout: SIGNING_TIMEOUT_MS,
       env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
     });
-  const r = run(["commit", "-q", "-m", message, "--", ...rels]);
+  // A merge in progress refuses `git commit -- <paths>`, so its commit takes whatever is staged.
+  const pathspec = (list) => (opts.noPathspec ? [] : ["--", ...list]);
+  const r = run(["commit", "-q", "-m", message, ...pathspec(rels)]);
   if (r.status === 0 && !r.error) return;
   const text = (r.stderr || r.stdout || "").trim();
   const timedOut = r.error?.code === "ETIMEDOUT" || Boolean(r.signal);
@@ -443,7 +448,7 @@ function commitStaged(rels, message, opts = {}) {
   let retry;
   try {
     git(["add", "-A", "--", ...all]);
-    retry = run(["-c", "commit.gpgsign=false", "commit", "-q", "-m", message, "--", ...all]);
+    retry = run(["-c", "commit.gpgsign=false", "commit", "-q", "-m", message, ...pathspec(all)]);
   } catch (e) {
     undoFallback();
     throw e;
@@ -551,7 +556,7 @@ function loadConfig() {
 
 const SIGNING_POLICIES = ["auto", "off", "required"];
 const PR_POLICIES = ["draft", "none"];
-const POLICY_KEYS = ["signing", "push", "pr", "feedback", "archive", "finalize", "mergeMethod"];
+const POLICY_KEYS = ["signing", "push", "pr", "feedback", "archive", "finalize", "mergeMethod", "syncBase"];
 const FINALIZE_POLICIES = ["auto", "ready", "draft"];
 const MERGE_METHODS = ["merge", "squash", "rebase"];
 const FLIGHT_SLUG = /^[a-z0-9][a-z0-9-]{0,39}$/;
@@ -585,6 +590,9 @@ function validatePolicies(policies) {
   }
   if (policies.mergeMethod !== undefined && !MERGE_METHODS.includes(policies.mergeMethod)) {
     throw new ToolError(`docs/kukulu.json policies.mergeMethod must be one of ${MERGE_METHODS.join(", ")}`);
+  }
+  if (policies.syncBase !== undefined && typeof policies.syncBase !== "boolean") {
+    throw new ToolError("docs/kukulu.json policies.syncBase must be a boolean");
   }
 }
 
@@ -909,6 +917,7 @@ function cfgFrom(c, planIds) {
       archive: c.policies?.archive ?? false,
       finalize: c.policies?.finalize ?? "auto",
       mergeMethod: c.policies?.mergeMethod ?? "merge",
+      syncBase: c.policies?.syncBase ?? true,
     },
   };
 }
@@ -2147,7 +2156,50 @@ function probeSigning(signingPolicy) {
   return `off (probe failed: ${errLine})`;
 }
 
-function startRun() {
+/**
+ * Merge the local base branch into the build branch when it has commits the
+ * branch lacks (SPEC B-03). Nothing is fetched. Returns null when there is
+ * nothing to do, `{ commits, merge: null, skipped }` when the tracked tree is
+ * dirty, else `{ commits, merge: <short sha> }`. A conflict aborts the merge
+ * and refuses; it never halts. Callers run it before any write of their own.
+ */
+function syncBase(tool) {
+  const cc = cfg();
+  if (!cc.policies.syncBase) return null;
+  const base = cc.baseBranch;
+  const baseRef = `refs/heads/${base}`;
+  if (!git(["rev-parse", "--verify", "--quiet", baseRef], { allowFail: true }).ok) return null;
+  const branch = gitFacts().branch;
+  if (!branch || branch === base) return null;
+  const n = Number(git(["rev-list", "--count", `HEAD..${baseRef}`], { allowFail: true }).out);
+  if (!(n > 0)) return null;
+  if (trackedDirtyLines().length) return { commits: n, merge: null, skipped: "the tracked tree has uncommitted changes" };
+  const st = loadState();
+  const crPaths = cleanroomPaths(st);
+  // withRollback puts the clean-room log back byte for byte if anything below throws, after the merge is aborted.
+  return withRollback(crPaths, () => {
+    const m = git(["merge", "--no-ff", "--no-commit", baseRef], { allowFail: true });
+    if (!m.ok) {
+      const files = git(["diff", "--name-only", "--diff-filter=U"], { allowFail: true }).out.split("\n").filter(Boolean);
+      git(["merge", "--abort"], { allowFail: true });
+      const why = files.length ? `they conflict in ${files.join(", ")}` : `the merge failed: ${(m.err || m.out || "unknown error").split("\n").filter(Boolean)[0] ?? "unknown error"}`;
+      throw new ToolError(`${base} has ${n} commits this branch lacks and ${why}; resolve the merge by hand on ${branch}, commit it, then call ${tool} again, or set policies.syncBase to false`);
+    }
+    try {
+      if (crPaths.length) {
+        checkpoint("base-sync", "implement", st);
+        git(["add", "--", ...crPaths.map(rel)]);
+      }
+      commitStaged(crPaths.map(rel), `chore: merge ${base} into ${branch}`, { stage: "implement", task: "-", noPathspec: true });
+    } catch (e) {
+      git(["merge", "--abort"], { allowFail: true });
+      throw e;
+    }
+    return { commits: n, merge: git(["rev-parse", "--short", "HEAD"]).out };
+  });
+}
+
+function startRun({ sync = false } = {}) {
   requireGate(implementStage(loadState()));
   for (const [k, p] of Object.entries({ spec: P.spec, plan: P.plan, progress: P.progress, config: P.config })) {
     if (!exists(p)) throw new ToolError(`${rel(p)} is missing (${k}); run the plan stage first`);
@@ -2155,6 +2207,9 @@ function startRun() {
   const c = cfg();
   const g = gitFacts();
   if (!g.inRepo) throw new ToolError("not a git repository");
+  // A branch this call cuts from the base is already up to date; only an existing build branch can lag behind it.
+  const baseSynced = sync && g.branch && g.branch.startsWith(c.branchPrefix) ? syncBase("kukulu_run_start") : null;
+  const withSync = (r) => (baseSynced ? { ...r, baseSynced } : r);
   const pr = parseProgress();
   const st = loadState();
 
@@ -2162,7 +2217,7 @@ function startRun() {
   let basePush;
   if (exists(P.lock) && pr.branch && !pr.branch.startsWith("(")) {
     resetLockCounter();
-    return { alreadyStarted: true, branch, counts: counts(pr.tasks), round: st.round, policies: st.policies, signing: st.signing };
+    return withSync({ alreadyStarted: true, branch, counts: counts(pr.tasks), round: st.round, policies: st.policies, signing: st.signing });
   }
   if (branch === c.baseBranch) {
     // Untracked files never block a run from starting: branching off HEAD
@@ -2226,7 +2281,7 @@ function startRun() {
   checkpoint("run-start", implementStage(st), st);
   return gitCommitIfChanged([P.gitignore, P.progress, P.state, P.feedback, ...crPaths], st.round === 0 ? "chore: start implementation run" : `chore: start review-fix round ${st.round}`, { stage: implementStage(st) });
   });
-  return { alreadyStarted: false, branch, commit: sha, counts: counts(pr.tasks), round: st.round, policies: st.policies, signing: st.signing, basePush };
+  return withSync({ alreadyStarted: false, branch, commit: sha, counts: counts(pr.tasks), round: st.round, policies: st.policies, signing: st.signing, basePush });
 }
 
 /**
@@ -2259,7 +2314,7 @@ function ensureStreamWorktree(stream, buildBranch, cc) {
 }
 
 function runStart({ stream } = {}) {
-  const res = startRun();
+  const res = startRun({ sync: stream === undefined });
   if (stream === undefined) return res;
 
   const { wave, cc } = streamScope(stream);
@@ -2356,6 +2411,9 @@ function streamFinish({ stream } = {}) {
 
 function taskNext({ stream } = {}) {
   requireGate(implementStage(loadState()));
+  // Only a serial flight syncs: a stream works in its own worktree, and a plan with streams merges them back by itself.
+  const baseSynced = stream === undefined && !parseProgress().tasks.some((t) => t.stream) ? syncBase("kukulu_task_next") : null;
+  const withSync = (r) => (baseSynced ? { ...r, baseSynced } : r);
   const pr = parseProgress();
   let inScope = () => true;
   if (stream !== undefined) {
@@ -2389,7 +2447,7 @@ function taskNext({ stream } = {}) {
       writeProgress(pr);
       if (skipped.length) gitCommitIfChanged([P.progress], `progress: skip ${skipped.map((x) => x.id).join(", ")}`, { stage: implementStage(loadState()) });
       setLockPaused(wave.index);
-      return {
+      return withSync({
         done: true,
         paused: true,
         wave: wave.index,
@@ -2397,12 +2455,12 @@ function taskNext({ stream } = {}) {
         counts: counts(pr.tasks),
         skipped,
         message: `Everything you can do serially is done: the next open task (${pick.id}) belongs to parallel wave ${wave.index}, whose streams the flight controller hands out next. Stop now. Do NOT write docs/HANDOFF.md and do NOT call kukulu_run_finish: the plan is not finished.`,
-      };
+      });
     }
     if (!pick) {
       writeProgress(pr);
       if (skipped.length) gitCommitIfChanged([P.progress], `progress: skip ${skipped.map((s) => s.id).join(", ")}`, { stage: implementStage(loadState()) });
-      return { done: true, counts: counts(pr.tasks), skipped, ...(stream !== undefined ? { stream } : {}) };
+      return withSync({ done: true, counts: counts(pr.tasks), skipped, ...(stream !== undefined ? { stream } : {}) });
     }
     const task = planTask(pick.id);
     const bad = task.depends.find((d) => {
@@ -2421,7 +2479,7 @@ function taskNext({ stream } = {}) {
     setLockPaused(null);
     const dependencyLogs = {};
     for (const d of task.depends) if (pr.logs[d]) dependencyLogs[d] = pr.logs[d];
-    return {
+    return withSync({
       done: false,
       id: task.id,
       title: task.title,
@@ -2433,7 +2491,7 @@ function taskNext({ stream } = {}) {
       counts: counts(pr.tasks),
       resumed,
       ...(stream !== undefined ? { stream } : {}),
-    };
+    });
   }
 }
 
@@ -2456,6 +2514,7 @@ function taskDone({ stream, id, log }) {
   const t = pr.tasks.find((x) => x.id === id);
   if (!t) throw new ToolError(`task ${id} not in docs/PROGRESS.md`);
   if (t.state !== "~") throw new ToolError(`task ${id} is '${STATE_NAMES[t.state]}', not in progress; call kukulu_task_next first`);
+  refuseProgressText("log", log, "kukulu_task_done");
   let cwd = ROOT;
   let ignore = loadState().preexistingUntracked;
   if (stream !== undefined) ({ cwd, ignore } = streamTaskContext(stream, pr, t));
@@ -2489,6 +2548,7 @@ function taskBlock({ stream, id, reason }) {
   let pr = parseProgress();
   const t = pr.tasks.find((x) => x.id === id);
   if (!t) throw new ToolError(`task ${id} not in docs/PROGRESS.md`);
+  refuseProgressText("reason", `BLOCKED: ${reason}`, "kukulu_task_block");
   let cwd = ROOT;
   let ignore = loadState().preexistingUntracked;
   if (stream !== undefined) ({ cwd, ignore } = streamTaskContext(stream, pr, t));
@@ -2573,6 +2633,7 @@ function taskReopen({ id, reason } = {}) {
   const t = pr.tasks.find((x) => x.id === id);
   if (!t) throw new ToolError(`task ${id} not in docs/PROGRESS.md`);
   if (t.state !== "!" && t.state !== "-") throw new ToolError(`task ${id} is '${STATE_NAMES[t.state]}'; only a blocked or skipped task can be reopened`);
+  refuseProgressText("reason", `REOPENED: ${reason}`, "kukulu_task_reopen");
   let dependents;
   const commit = withRollback([P.progress], () => {
     dependents = reopenWithDependents(pr, [id], "reopened", `REOPENED: ${reason}`);
@@ -2665,17 +2726,51 @@ const pathUnder = (file, p) => file === p || file.startsWith(p.endsWith("/") ? p
  * before its commit (F-26 of the 2026-09-30 cleanflate feedback). Ignored
  * files never are. Line-based only; no multi-line patterns.
  */
+const constraintTests = (c, line) => new RegExp(c.pattern, c.flags || "").test(line);
+
+/** Why a rule's own fixtures do not hold (`shouldMatch` line unmatched, `shouldNotMatch` line matched), or null. A rule with a failing fixture is never trusted to scan anything (F-14). */
+function constraintFixtureFailure(c) {
+  for (const line of c.shouldMatch) {
+    if (!constraintTests(c, line)) return `shouldMatch ${JSON.stringify(line)} did not match`;
+  }
+  for (const line of c.shouldNotMatch) {
+    if (constraintTests(c, line)) return `shouldNotMatch ${JSON.stringify(line)} matched`;
+  }
+  return null;
+}
+
+/**
+ * Refuse text that is about to be written into docs/PROGRESS.md (or, for a halt,
+ * stands for it) when it would break an active constraint that covers that file,
+ * before anything is written (SPEC B-02). A rule with failing fixtures or one
+ * that is still waiting on its `from` task is not enforced here, as in checkConstraints.
+ */
+function refuseProgressText(field, text, tool) {
+  const progressRel = path.relative(ROOT, P.progress).split(path.sep).join("/");
+  const covers = (list) => (list || []).some((p) => p === "." || p === "./" || pathUnder(progressRel, p.replace(/^\.\//, "")));
+  const progress = exists(P.progress) ? parseProgress() : null;
+  const lines = String(text).replace(/\s+$/, "").split("\n");
+  for (const c of cfg().constraints) {
+    if (!covers(c.paths) || covers(c.exclude)) continue;
+    if (constraintFixtureFailure(c) || inactiveUntil(c.from, progress)) continue;
+    for (const line of lines) {
+      const m = new RegExp(c.pattern, c.flags || "").exec(line);
+      if (!m) continue;
+      const start = Math.max(0, m.index - 40);
+      throw new ToolError(
+        `${field} would break constraint ${c.id} (${c.description || "no description"}) in ${progressRel} at "${line.slice(start, start + 80)}"; rewrite it without that text and call ${tool} again`,
+      );
+    }
+  }
+}
+
 function checkConstraints(constraints, cwd = ROOT, ignore = []) {
   const skip = new Set(ignore);
   const progress = exists(P.progress) ? parseProgress() : null;
-  const testLine = (c, line) => new RegExp(c.pattern, c.flags || "").test(line);
+  const testLine = constraintTests;
   const results = constraints.map((c) => {
-    for (const line of c.shouldMatch) {
-      if (!testLine(c, line)) return { id: c.id, ok: false, fixture: `shouldMatch ${JSON.stringify(line)} did not match`, hits: [] };
-    }
-    for (const line of c.shouldNotMatch) {
-      if (testLine(c, line)) return { id: c.id, ok: false, fixture: `shouldNotMatch ${JSON.stringify(line)} matched`, hits: [] };
-    }
+    const failure = constraintFixtureFailure(c);
+    if (failure) return { id: c.id, ok: false, fixture: failure, hits: [] };
     const waiting = inactiveUntil(c.from, progress);
     if (waiting) return { id: c.id, ok: true, inactive: `until ${waiting}`, fixture: null, hits: [] };
     const listed = git(["ls-files", "--cached", "--others", "--exclude-standard", "--", ...c.paths], { allowFail: true, cwd });
@@ -3423,6 +3518,7 @@ function flightOptions(args = {}) {
  */
 function runHalt({ reason }) {
   if (!reason) throw new ToolError("reason is required");
+  refuseProgressText("reason", reason, "kukulu_run_halt");
   const st = loadState();
   st.halted = reason;
   delete st.haltCap; // only a round-cap halt is resumable through kukulu_flight_options
@@ -4166,12 +4262,40 @@ function renumberMap(planText) {
   return map;
 }
 
+/** The [start, end) character range of CLAUDE.md's `## Flight <slug> notes` section, up to the next `## ` heading or the end, or null. */
+function flightNotesRange(text, slug) {
+  const lines = text.split("\n");
+  const start = lines.findIndex((l) => l.trimEnd() === `## Flight ${slug} notes`);
+  if (start < 0) return null;
+  let end = lines.findIndex((l, i) => i > start && l.startsWith("## "));
+  if (end < 0) end = lines.length;
+  const offset = (n) => lines.slice(0, n).reduce((sum, l) => sum + l.length + 1, 0);
+  return [offset(start), Math.min(offset(end), text.length)];
+}
+
+/** `swap` applied to the flight's notes section of CLAUDE.md and to nothing else; the text is returned as it was when the flight has no slug or no section. */
+function swapFlightNotes(claudeText, configText, swap) {
+  let slug = null;
+  try {
+    slug = JSON.parse(configText ?? "null")?.flight;
+  } catch {
+    return claudeText;
+  }
+  if (typeof slug !== "string" || !slug) return claudeText;
+  const range = flightNotesRange(claudeText, slug);
+  if (!range) return claudeText;
+  return claudeText.slice(0, range[0]) + swap(claudeText.slice(range[0], range[1])) + claudeText.slice(range[1]);
+}
+
 function planCommit({ renumber } = {}) {
   if (renumber !== undefined && typeof renumber !== "boolean") throw new ToolError("renumber must be a boolean");
   const readOrNull = (p) => (exists(p) ? read(p) : null);
   let planText = readOrNull(P.plan);
   let progressText = readOrNull(P.progress);
   let configText = readOrNull(P.config);
+  const claudePath = path.join(ROOT, "CLAUDE.md");
+  const claudeText = readOrNull(claudePath);
+  let claudeNew = claudeText;
   let map = {};
   if (renumber === true && planText != null && progressText != null) {
     const started = (progressText.match(/^Started:\s*(.*)$/m) || [])[1];
@@ -4185,6 +4309,8 @@ function planCommit({ renumber } = {}) {
     planText = swap(planText);
     progressText = swap(progressText);
     if (configText != null) configText = configText.replace(/("from"\s*:\s*")([^"]+)(")/g, (_, a, id, b) => `${a}${map[id] || id}${b}`);
+    // CLAUDE.md cites ids too, but only the flight's own notes section is rewritten: earlier flights' sections are history.
+    claudeNew = claudeText != null ? swapFlightNotes(claudeText, configText, swap) : claudeText;
   }
   let configRaw = null;
   let configError = null;
@@ -4195,7 +4321,6 @@ function planCommit({ renumber } = {}) {
       configError = `docs/kukulu.json is not valid JSON: ${e.message}`;
     }
   }
-  const claudePath = path.join(ROOT, "CLAUDE.md");
   const inRepo = git(["rev-parse", "--is-inside-work-tree"], { allowFail: true }).ok;
   const branch = inRepo ? git(["rev-parse", "--abbrev-ref", "HEAD"], { allowFail: true }).out || null : null;
   const problems = validatePlanTexts({ planText, progressText, configRaw, configError, claudeExists: exists(claudePath), branch });
@@ -4209,6 +4334,7 @@ function planCommit({ renumber } = {}) {
       write(P.plan, planText);
       write(P.progress, progressText);
       if (configText != null) write(P.config, configText);
+      if (claudeNew !== claudeText) write(claudePath, claudeNew);
     }
     return gitCommitIfChanged(paths, "plan: derive build plan from SPEC", { stage: "plan" });
   });
@@ -4221,6 +4347,10 @@ function planCommit({ renumber } = {}) {
   // A slug ending in a spec suffix means the title's dash was not honoured; say so, but never refuse.
   const notes = [];
   const slug = configRaw?.flight;
+  if (Object.keys(map).length) {
+    if (typeof slug !== "string" || !slug) notes.push("docs/kukulu.json has no flight slug; ids in CLAUDE.md were not renumbered");
+    else if (flightNotesRange(claudeText ?? "", slug) === null) notes.push(`CLAUDE.md has no "## Flight ${slug} notes" section; ids there were not renumbered`);
+  }
   if (typeof slug === "string" && /-spec(ification)?$/.test(slug)) {
     notes.push(`flight '${slug}' ends in a spec suffix; derive it from the text before the title's dash (plan-build), e.g. '${slug.replace(/-spec(ification)?$/, "")}'`);
   }
@@ -4277,7 +4407,7 @@ const TOOLS = [
     description: "Apply an operator's flight options to docs/kukulu.json and commit them: maxRounds (non-converging review rounds tolerated) and maxRoundsHard (absolute ceiling on review rounds). For the flight controller, when /kukulu:go-flight was given options such as a maximum review depth. Refused before the plan stage has written docs/kukulu.json. With resume: true it also clears a round-cap halt, provided the bound passed lifts the cap that fired. Returns { before, after, commit } (plus resumed: true).",
     inputSchema: S({
       maxRounds: { type: "integer", minimum: 1, description: "non-converging review rounds tolerated before the flight halts" },
-      maxRoundsHard: { type: "integer", minimum: 1, description: "a review numbered above this halts the flight, converging or not" },
+      maxRoundsHard: { type: "integer", minimum: 1, description: "a review numbered above this that requests changes halts the flight; an approving review ends it" },
       resume: { type: "boolean", description: "clear a round-cap halt (the call the halt message names); the bound passed must lift the cap that fired. Any other halt is refused" },
     }),
     fn: flightOptions,

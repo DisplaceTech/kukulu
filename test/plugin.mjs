@@ -614,6 +614,7 @@ ok(read("skills/plan-build/SKILL.md").includes("templates/constraints.example.js
       ok(opsDoc.includes("`policies.archive`"), "operations.md documents policies.archive");
       ok(opsDoc.includes("`policies.finalize`"), "operations.md documents policies.finalize");
       ok(opsDoc.includes("`policies.mergeMethod`"), "operations.md documents policies.mergeMethod");
+      ok(opsDoc.includes("`policies.syncBase`"), "operations.md documents policies.syncBase");
       continue;
     }
     if (key === "mutation") {
@@ -792,6 +793,14 @@ ok(glRev && glPin === glRev, "secret-scan.yml pins GITLEAKS_VERSION to the pre-c
 
   const okina = run({ "README.md": "Hawai\u02bbi and \u02bb\u014dlelo.\n" });
   eq(okina.status, 0, "check-names accepts the okina");
+}
+
+{
+  const lines = read("skills/review-build/SKILL.md").split("\n");
+  const cr = lines.findIndex((l) => l.startsWith("**Clean-room mode.**"));
+  const gf = lines.findIndex((l) => l.startsWith("**Guard findings.**"));
+  ok(cr >= 0 && gf > cr && /Known-gap candidates/.test(lines[gf]) && /merge base/.test(lines[gf]), "the review-build skill has a Guard findings paragraph after the clean-room paragraph");
+  like(read("skills/summarize/SKILL.md"), /Known-gap candidates/, "the summarize skill carries Known-gap candidates into SUMMARY.md");
 }
 
 finish();

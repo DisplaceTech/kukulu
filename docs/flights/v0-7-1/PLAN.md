@@ -436,3 +436,25 @@ Derived from docs/SPEC.md v0.7.1 on 2026-10-20. SPEC.md wins over this file.
 - A-03's "and `-o` where the subcommand defines it": none of `diff`, `log` and `show` defines a short output option. Resolution: only `--output` is a target.
 - B-04's documentation fix also applies to `docs/architecture.md` and `docs/operations.md`'s `maxRoundsHard` row, which SPEC §4 does not list. Resolution: P1-04 corrects them too (principle 8).
 - A-06 does not say whether checkpoints carry `cleanroomHash`. Resolution: they do not; `CHECKPOINT_KEYS` stays fixed so 0.7.0 logs verify.
+
+## Review fixes (round 1)
+
+### R1-01: Test the base sync's failed commit, signing fallback and parallel-plan paths
+
+**Goal:** Each of syncBase's three untested mechanics (SPEC §3 principle 4 and CLAUDE.md principle 3: a failed final commit leaves the tree as found; SPEC B-03 step 1: signing behaves like any other server commit; SPEC B-03: a parallel flight syncs only at kukulu_run_start) has a test that fails without it.
+**Files touched:** test/implement.mjs, test/streams.mjs
+**Design constraints:** SPEC §3 principle 4, §6 B-03; CLAUDE.md Task protocols 'Commit-failure tests' (an executable .git/hooks/commit-msg that exits 1 when the subject starts with `chore: merge`) and 'Signing tests' (a failing signer is local commit.gpgsign true, gpg.format openpgp, gpg.program /nonexistent-signing-agent); `server-synchronous`. Change mcp/server.mjs only if a new test exposes a real bug, and then name the bug in the commit's Interpretation line.
+**Acceptance tests:** test/implement.mjs: new "a failed base-sync merge commit leaves HEAD, the tree and the index as they were" (base ahead by one commit, commit-msg hook rejecting `chore: merge`; kukulu_task_next is an error; HEAD unmoved, no .git/MERGE_HEAD, `git status --porcelain` empty, `git diff --cached --name-only` empty, base.txt absent). New "a base sync whose signing fails under signing auto is retried unsigned and lands the merge commit" (failing signer; the result has baseSynced.commits 1, HEAD is a two-parent commit with subject `chore: merge main into <branch>`, the tree is clean). test/streams.mjs: new "a serial task_next in a plan with streams never merges the base" (waveRepo, serial kukulu_run_start, then a base commit, then serial kukulu_task_next: no baseSynced, HEAD unmoved, base.txt absent), plus "...while a serial run_start on the existing build branch does" (baseSynced.commits 1).
+**Out of scope:** Any change to syncBase's behavior or messages; fetching; stream worktree merges; docs.
+**Verification:** kukulu_verify green. Then kukulu_mutate on mcp/server.mjs kills each mutant: (1) delete `git(["merge", "--abort"], { allowFail: true });` from the catch after commitStaged in syncBase (targeted suite, filter implement); (2) replace `"commit", "-q", "-m", message, ...pathspec(all)]);` with `"commit", "-q", "-m", message, "--", ...all]);` (filter implement); (3) replace `stream === undefined && !parseProgress().tasks.some((t) => t.stream) ? syncBase` with `stream === undefined ? syncBase` (filter streams).
+**Depends on:** none
+
+### R1-02: Guard fixtures for tar append/update, --get, rsync -e and the rsync/tar wildcard checks
+
+**Goal:** Every A-04 spelling SPEC names (tar -r, -u and their long forms, --get, rsync -e|--rsh as a valued option), and the wildcard checks on rsync's targets and tar's archive file, has a fixture whose decision changes if the mechanic is removed.
+**Files touched:** test/fixtures/guard-cases.json
+**Design constraints:** SPEC §3 principles 3 and 6 (add fixtures only; no existing fixture's expect or reason changes), §6 A-04. Fixture names end in ` (R1-02)`, policy "template", tool Bash, cwd __ROOT__. Keep the file's one-space JSON indent (HANDOFF codebase notes). Do not change mcp/cleanroom.mjs: each form below is already denied today.
+**Acceptance tests:** test/fixtures/guard-cases.json, all denied with reason `protected path`: `tar -rf docs/cleanroom.json x`, `tar uf docs/cleanroom.json src`, `tar --append --file=docs/cleanroom.json x`, `tar --update -f docs/cleanroom.json src`, `tar --get -f a.tar -C docs`, `rsync evil/cleanroom.json docs -e ssh` (the -e value must be skipped for docs to be the destination), `rsync evil/x docs/cleanroom.js??` and `tar cf docs/cleanroom.js?? src` (both with the `can be named by the wildcard` reason). test/cleanroom.mjs, which runs every fixture, and the guard self-test pass.
+**Out of scope:** Any guard rule change; rsync deletion options and bsdtar/gtar (known-gap candidates in REVIEW.md); KNOWN_LIMITS; docs.
+**Verification:** kukulu_verify with test/fixtures/guard-cases.json in files (runs the guard self-test). Then kukulu_mutate on mcp/cleanroom.mjs (targeted suite, filter cleanroom) kills each mutant: `writesArchive: ["c", "r", "u", "A", "D"].some` to `writesArchive: ["c"].some`; `"--extract": "x", "--get": "x",` to `"--extract": "x",`; `short: new Set("eTfBM"),` to `short: new Set("TfBM"),`; deleting the rsync block's `if (w) return denied(... wildcard ${target})` line; deleting the tar block's `if (w) return denied(... wildcard ${file})` line.
+**Depends on:** none

@@ -757,4 +757,42 @@ const feedbackOf = (repo) => (hasFile(repo, ".kukulu/feedback.jsonl") ? readFile
   });
 }
 
+// policies.syncBase never merges for a stream (P1-03; here because the wave helpers live in this file).
+{
+  const repo = waveRepo();
+  await withServer(repo, async ({ call }) => {
+    const r = await call("kukulu_run_start", { stream: "api" });
+    const buildHead = git(repo, ["rev-parse", "HEAD"]);
+    const branch = git(repo, ["rev-parse", "--abbrev-ref", "HEAD"]);
+    git(repo, ["checkout", "-q", "main"]);
+    writeFile(repo, "base.txt", "from the base\n");
+    git(repo, ["add", "base.txt"]);
+    git(repo, ["commit", "-qm", "base side"]);
+    git(repo, ["checkout", "-q", branch]);
+    const t = await call("kukulu_task_next", { stream: "api" });
+    ok(t.baseSynced === undefined && git(repo, ["rev-parse", "HEAD"]) === buildHead && !hasFile(repo, "base.txt") && !hasFile(r.cwd, "base.txt"), "a stream task_next never merges the base");
+    const again = await call("kukulu_run_start", { stream: "api" });
+    ok(again.baseSynced === undefined && git(repo, ["rev-parse", "HEAD"]) === buildHead, "...nor does a stream run_start");
+  });
+}
+
+// A serial call in a plan with streams never merges the base; only a serial run_start does (SPEC B-03).
+{
+  const repo = waveRepo();
+  await withServer(repo, async ({ call }) => {
+    await call("kukulu_run_start");
+    const buildHead = git(repo, ["rev-parse", "HEAD"]);
+    const branch = git(repo, ["rev-parse", "--abbrev-ref", "HEAD"]);
+    git(repo, ["checkout", "-q", "main"]);
+    writeFile(repo, "base.txt", "from the base\n");
+    git(repo, ["add", "base.txt"]);
+    git(repo, ["commit", "-qm", "base side"]);
+    git(repo, ["checkout", "-q", branch]);
+    const t = await call("kukulu_task_next");
+    ok(t.baseSynced === undefined && git(repo, ["rev-parse", "HEAD"]) === buildHead && !hasFile(repo, "base.txt"), "a serial task_next in a plan with streams never merges the base");
+    const again = await call("kukulu_run_start");
+    eq(again.baseSynced?.commits, 1, "...while a serial run_start on the existing build branch does");
+  });
+}
+
 finish();

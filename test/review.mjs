@@ -391,6 +391,25 @@ async function driveRounds(call, repo, counts) {
 }
 
 {
+  // The hard cap halts a review that asks for more work; an approving review above it simply ends the flight (P1-04).
+  const repo = reviewableRepo({ config: { maxRounds: 100, maxRoundsHard: 2 }, round: 2, verdict: "APPROVED" });
+  await withServer(repo, async ({ call }) => {
+    const r = await call("kukulu_review_submit", { verdict: "APPROVED" });
+    ok(!r.error && !r.halted, "an APPROVED review above maxRoundsHard succeeds and sets no halt");
+    eq(r.round, 3, "...as round maxRoundsHard + 1");
+    eq(JSON.parse(readFile(repo, ".kukulu/state.json")).halted ?? null, null, "...and state carries no halted");
+  });
+}
+
+{
+  const repo = reviewableRepo({ config: { maxRounds: 100, maxRoundsHard: 2 }, round: 2 });
+  await withServer(repo, async ({ call }) => {
+    const r = await call("kukulu_review_submit", { verdict: "CHANGES REQUESTED", tasks: [FIX] });
+    like(r.halted, /exceeds the hard cap maxRoundsHard=2/, "a CHANGES REQUESTED review above maxRoundsHard halts with the hard-cap message");
+  });
+}
+
+{
   const repo = reviewableRepo({ config: { maxRounds: 2, policies: { feedback: false } } });
   await withServer(repo, async ({ call }) => {
     const r = await driveRounds(call, repo, [4, 4, 4]);

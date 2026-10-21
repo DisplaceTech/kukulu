@@ -84,6 +84,7 @@ eq(byName.kukulu_status.inputSchema.required, undefined, "read-only tools take n
 eq(byName.kukulu_task_done.inputSchema.required.join(","), "id,log", "task_done requires id and log");
 eq(byName.kukulu_task_block.inputSchema.required.join(","), "id,reason", "task_block requires id and reason");
 eq(byName.kukulu_review_submit.inputSchema.required.join(","), "verdict", "review_submit requires a verdict");
+like(byName.kukulu_flight_options.inputSchema.properties.maxRoundsHard.description, /^a review numbered above this that requests changes halts the flight; an approving review ends it$/, "flight_options describes maxRoundsHard as halting only a review that requests changes");
 eq(
   byName.kukulu_review_submit.inputSchema.properties.verdict.enum.join("|"),
   "APPROVED|CHANGES REQUESTED",

@@ -416,13 +416,14 @@ const stateOf = (repo) => (hasFile(repo, ".kukulu/state.json") ? JSON.parse(read
     const log = logOf(repo);
     eq(log.length + "|" + log[0].kind + "|" + log[0].stage + "|" + log[1].kind, "2|genesis|controller|gate", "the first kukulu_next with a policy appends a genesis entry, then the gate's");
     const d = log[0].data;
-    eq(Object.keys(d).join(","), "mode,policyHash,guardHash,loggerHash,hooksHash,pluginVersion,keyFingerprint,baseBranch,head", "...whose data names mode, the four hashes, pluginVersion, keyFingerprint, baseBranch and head");
+    eq(Object.keys(d).join(","), "mode,policyHash,guardHash,loggerHash,hooksHash,cleanroomHash,pluginVersion,keyFingerprint,baseBranch,head", "...whose data names mode, the five hashes, pluginVersion, keyFingerprint, baseBranch and head");
     eq(d.mode + "|" + d.baseBranch, "clean-room|main", "...in clean-room mode on main");
     like(d.head, /^[0-9a-f]{40}$/, "...at the commit it was written on");
     eq(d.policyHash, policyHash(fs.readFileSync(path.join(repo, "docs", "cleanroom.json"))), "...the policy hash is the SHA-256 of the file");
     eq(d.guardHash, policyHash(fs.readFileSync(path.join(ROOT, "scripts", "cleanroom-guard.mjs"))), "...and the guard hash of the installed script");
     const st = stateOf(repo);
-    eq(JSON.stringify(st.cleanroom), JSON.stringify({ genesis: log[0].hash, policyHash: d.policyHash, guardHash: d.guardHash, loggerHash: d.loggerHash, hooksHash: d.hooksHash }), "...and records state.cleanroom");
+    eq(JSON.stringify(st.cleanroom), JSON.stringify({ genesis: log[0].hash, policyHash: d.policyHash, guardHash: d.guardHash, loggerHash: d.loggerHash, hooksHash: d.hooksHash, cleanroomHash: d.cleanroomHash }), "...and records state.cleanroom");
+    eq(d.cleanroomHash, policyHash(fs.readFileSync(path.join(ROOT, "mcp", "cleanroom.mjs"))), "the genesis records the hash of mcp/cleanroom.mjs");
     eq(subject(repo), "chore: clean-room genesis", "...commits chore: clean-room genesis");
     eq(git(repo, ["show", "--name-only", "--format=", "HEAD"]).split("\n").sort().join(","), ".kukulu/cleanroom/log.jsonl,.kukulu/state.json", "...with the log and state");
     ok(fs.existsSync(testKeyFor(repo)), "...generating the key at KUKULU_CLEANROOM_KEY");
@@ -524,6 +525,29 @@ async function genesisRepo(planOpts = {}) {
   await live(repo, async ({ call }) => { await call("kukulu_next"); });
   addPlan(repo, planOpts);
   return repo;
+}
+
+{
+  // P1-03: the base-branch sync in clean-room mode checkpoints, commits the log with the merge and carries the trailers.
+  const repo = await genesisRepo({ config: { flight: "w1" } });
+  await live(repo, async ({ call }) => {
+    const branch = (await call("kukulu_run_start")).branch;
+    git(repo, ["checkout", "-q", "main"]);
+    writeFile(repo, "base.txt", "from the base\n");
+    git(repo, ["add", "base.txt"]);
+    git(repo, ["commit", "-qm", "base side"]);
+    git(repo, ["checkout", "-q", branch]);
+    appendEntry(LOG(repo), sample(0));
+    const t = await call("kukulu_task_next");
+    eq(t.baseSynced?.commits, 1, "(setup) the base sync ran in clean-room mode");
+    const cps = checkpoints(repo);
+    eq(cps.some((c) => c.data.event === "base-sync"), true, "a base-sync checkpoint is appended");
+    eq(git(repo, ["log", "--merges", "-1", "--format=%s"]), `chore: merge main into ${branch}`, "...and the merge commit follows");
+    eq(git(repo, ["log", "-1", "--merges", "--format=%(trailers:key=Kukulu-Stage,valueonly)"]).trim(), "implement", "...with the stage trailer");
+    eq(git(repo, ["log", "-1", "--merges", "--format=%(trailers:key=Kukulu-Task,valueonly)"]).trim(), "-", "...and the task trailer");
+    eq(git(repo, ["status", "--porcelain", "--untracked-files=no"]).split("\n").filter((l) => l && !l.endsWith("log.jsonl")).join(""), "M docs/PROGRESS.md", "...the tree is clean apart from the hooks' log and the task just marked in progress");
+    ok(verifyChain(fs.readFileSync(LOG(repo), "utf8").split("\n").filter(Boolean)).ok, "...and the chain still verifies");
+  });
 }
 
 {
@@ -912,6 +936,19 @@ async function genesisRepo(planOpts = {}) {
   ok(!fs.existsSync(LOG(repo)), "...but writes no log");
 }
 
+// ---------------------------------------------------------------- rsync and tar denials name what they hit
+
+{
+  const policy = loadPolicy(EXAMPLE);
+  const env = { root: "/p", home: "/h", policyPath: "/p/docs/cleanroom.json", pluginRoot: "/h/.claude/plugins/cache/kukulu", keyPath: "/h/.config/kukulu/cleanroom/ed25519.pem", planExists: true };
+  const run = (command) => evaluate(policy, { tool_name: "Bash", tool_input: { command }, cwd: "/p" }, env);
+  eq(run("tar xf evil.tar -C docs").reason, "protected path: /p/docs/cleanroom.json (tar extracts into docs; the archive's contents cannot be known)", "a tar extraction denial names the directory");
+  eq(run("rsync evil/cleanroom.json docs/").reason, "protected path: /p/docs/cleanroom.json (rsync writes it into docs/)", "an rsync denial names its destination");
+  eq(run("install -S evil/cleanroom.json docs").reason, "protected path: /p/docs/cleanroom.json (install writes it into docs)", "install's BSD-only denial names its directory");
+  ok(!/null/.test(run("install -S evil/cleanroom.json docs").reason), "...and never says null");
+  eq(run("install -S .bak evil/cleanroom.json docs").reason, "protected path: /p/docs/cleanroom.json (install writes it into docs)", "install's GNU-reading denial names its directory");
+}
+
 // ---------------------------------------------------------------- self-protection
 
 {
@@ -986,7 +1023,7 @@ const gateCheck = (reason) => (reason.match(/^clean-room gate failed: ([\w-]+):/
 
 {
   // The guard, the hooks file, the self-test: each against a temp copy of the plugin.
-  const edited = async (label, expectCheck, mutate, { before = false } = {}) => {
+  const edited = async (label, expectCheck, mutate, { before = false, reason = null } = {}) => {
     const plugin = tempPlugin();
     if (before) mutate(plugin);
     const repo = cleanroomRepo();
@@ -998,11 +1035,13 @@ const gateCheck = (reason) => (reason.match(/^clean-room gate failed: ([\w-]+):/
       }
       const n = await call("kukulu_next");
       eq(n.stage + "|" + gateCheck(n.reason), `halt|${expectCheck}`, label);
+      if (reason) like(n.reason, reason, `${label}: the reason names the file`);
       return n;
     }, withPlugin(plugin));
   };
   await edited("an edited guard under a temp PLUGIN_ROOT halts naming guard", "guard", (p) => fs.appendFileSync(path.join(p, "scripts", "cleanroom-guard.mjs"), "\n// tampered\n"));
   await edited("an edited logger halts naming guard", "guard", (p) => fs.appendFileSync(path.join(p, "scripts", "cleanroom-log.mjs"), "\n// tampered\n"));
+  await edited("an edited mcp/cleanroom.mjs under a temp PLUGIN_ROOT halts naming the file", "guard", (p) => fs.appendFileSync(path.join(p, "mcp", "cleanroom.mjs"), "\n// tampered\n"), { reason: /mcp\/cleanroom\.mjs changed since genesis/ });
   await edited("an edited hooks.json halts naming guard", "guard", (p) => fs.appendFileSync(path.join(p, "hooks", "hooks.json"), "\n"));
   await edited("hooks.json without the PreToolUse registration halts naming guard", "guard", (p) => {
     const file = path.join(p, "hooks", "hooks.json");
@@ -1015,6 +1054,22 @@ const gateCheck = (reason) => (reason.match(/^clean-room gate failed: ([\w-]+):/
     const cases = JSON.parse(fs.readFileSync(file, "utf8"));
     cases[0].expect = cases[0].expect === "denied" ? "allowed" : "denied";
     fs.writeFileSync(file, JSON.stringify(cases));
+  });
+}
+
+{
+  // A flight that began on 0.7.0 has no cleanroomHash in its state: the gate passes and says what it did not pin.
+  const repo = cleanroomRepo();
+  await live(repo, async ({ call }) => {
+    ok((await call("kukulu_next")).gate.ok, "(genesis, then the gate passes)");
+    const st = stateOf(repo);
+    delete st.cleanroom.cleanroomHash;
+    setState(repo, { cleanroom: st.cleanroom });
+    git(repo, ["commit", "-qam", "old flight"]);
+    const n = await call("kukulu_next");
+    ok(n.gate?.ok, "a genesis without cleanroomHash passes the gate and records unpinned");
+    const last = [...logOf(repo)].reverse().find((e) => e.kind === "gate");
+    eq(JSON.stringify(last.data.unpinned), JSON.stringify(["mcp/cleanroom.mjs"]), "...the passing gate entry names the file it did not pin");
   });
 }
 
@@ -1596,7 +1651,23 @@ eq(LANGUAGES.join(","), "rust,c,cpp,go,python,javascript,typescript,java,php", "
   let refused = null;
   try { coverageGaps([], [], { idleGapHours: 0 }); } catch (x) { refused = x; }
   ok(refused instanceof CleanroomError && /idleGapHours, a positive number/.test(refused.message), "coverageGaps refuses a limit that is not a positive number");
-  ok(KNOWN_LIMITS.length === 7 && KNOWN_LIMITS.every((l) => typeof l === "string" && l.endsWith(".")), "KNOWN_LIMITS is the seven fixed strings");
+  ok(KNOWN_LIMITS.length === 8 && KNOWN_LIMITS.every((l) => typeof l === "string" && l.endsWith(".")), "KNOWN_LIMITS is the eight fixed strings");
+  const tracked = spawnSync("git", ["ls-files", "docs/cleanroom.md"], { cwd: ROOT, encoding: "utf8" }).stdout.trim() === "docs/cleanroom.md";
+  ok(tracked, "docs/cleanroom.md is tracked");
+  if (tracked) {
+    const doc = fs.readFileSync(path.join(ROOT, "docs/cleanroom.md"), "utf8");
+    const lines = doc.split("\n");
+    const start = lines.indexOf("## Known gaps");
+    let end = lines.findIndex((l, i) => i > start && l.startsWith("## "));
+    if (end < 0) end = lines.length;
+    const bullets = lines.slice(start + 1, end).filter((l) => l.startsWith("- "));
+    const first5 = (t) => t.replace(/`/g, "").split(/\s+/).slice(0, 5).join(" ");
+    ok(bullets.length === 8 && bullets.every((b, i) => b.slice(2).replace(/`/g, "").includes(first5(KNOWN_LIMITS[i]))), "docs/cleanroom.md's Known gaps lists KNOWN_LIMITS one bullet each, in order");
+    const g = lines.indexOf("### What the guard decides");
+    const para = lines.slice(g + 1).find((l) => l.trim() !== "") ?? "";
+    ok(para.startsWith("The guard is a tripwire, not a sandbox."), "docs/cleanroom.md opens the guard section with the tripwire paragraph");
+    ok(lines.includes("### When a guard gap is a defect") && /Known-gap candidates/.test(doc), "docs/cleanroom.md has a When a guard gap is a defect subsection");
+  }
 }
 
 finish();
