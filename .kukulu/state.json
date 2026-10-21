@@ -1,55 +1,22 @@
 {
-  "round": 1,
-  "implemented": true,
-  "reviewed": true,
-  "verdict": "APPROVED",
-  "summarized": true,
+  "round": 0,
+  "implemented": false,
+  "reviewed": false,
+  "verdict": null,
+  "summarized": false,
   "halted": null,
   "preexistingUntracked": [],
   "policies": {
     "signing": "auto",
     "push": true,
     "pr": "draft",
-    "feedback": true,
-    "archive": false,
-    "finalize": "auto",
-    "mergeMethod": "merge"
+    "feedback": true
   },
-  "signing": "on",
-  "rounds": [
-    {
-      "round": 1,
-      "fixTasks": 2,
-      "unblocked": 0,
-      "verdict": "CHANGES REQUESTED",
-      "nonConverging": false,
-      "sources": {
-        "review": 2,
-        "mutation": 0,
-        "blocked": 0
-      },
-      "at": "2026-10-20T21:10:17.213Z"
-    },
-    {
-      "round": 2,
-      "fixTasks": 0,
-      "unblocked": 0,
-      "verdict": "APPROVED",
-      "sources": {
-        "review": 0,
-        "mutation": 0,
-        "blocked": 0
-      },
-      "at": "2026-10-20T21:44:14.958Z"
-    }
-  ],
+  "signing": null,
+  "rounds": [],
   "archived": {
-    "slug": "v0-7-0",
-    "dir": "docs/flights/v0-7-0",
-    "at": "2026-10-20T18:14:08.534Z"
-  },
-  "cleanroom": {
-    "mode": "general"
-  },
-  "breaking": true
+    "slug": "v0-7-1",
+    "dir": "docs/flights/v0-7-1",
+    "at": "2026-10-21T04:42:05.371Z"
+  }
 }
