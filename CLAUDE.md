@@ -17,8 +17,11 @@ Kūkulu is a Claude Code plugin: a dependency-free MCP server (`mcp/server.mjs`)
 
 - `npm run lint`: syntax and manifest lint (check-names and check-site included), under 3 s.
 - `pre-commit run --all-files`: hygiene, markdownlint, shellcheck, yamllint, gitleaks, about 4 s.
-- `npm test`: every suite registered in `test/run.mjs` (thirteen), about 100 s.
+- `npm test`: every suite registered in `test/run.mjs`, about 100 s.
 - `npm test -- state review`: named suites only; `node test/review.mjs`: one suite directly; `KEEP_REPO=1 npm test -- drive`: keep the temp repos.
+- `KUKULU_SANDBOX_IT=1 node test/sandbox.mjs`: the real-container integration step (Linux with docker on PATH; never in `verify`).
+- `node scripts/cleanroom-guard.mjs --self-test templates/cleanroom.local-only.example.json`: the guard self-test on the local-only template (once P2-01 of flight v0-8-0 exists).
+- `node scripts/sandbox.mjs doctor|run|stop`, `node scripts/model-identity.mjs <paths>`, `node scripts/publish-bundle.mjs <bundle> --key … --out …`, `node scripts/compare-bundles.mjs <a> <b>`: the 0.8.0 scripts; each runs only as the entry script and has no shebang.
 - `npm run check:site`: `node scripts/check-site.mjs --self-test && node scripts/check-site.mjs`, the static site rules (SPEC §3 rules 1–14); `node scripts/check-site.mjs --report` prints measured sizes and contrast against `docs/site/checks.json`.
 - `npm run check:site:browser`: rule 15 in headless Chrome (needs Chrome or Chromium; `CHROME_PATH` overrides discovery; binds `servePort`, so one at a time); `--shots` writes `.site-shots/<width>-<scheme>.png`.
 - `npm run site:serve`: serve `site/` on `127.0.0.1` with `site/_headers` applied (`SITE_PORT` or `--port N`); `node scripts/serve-site.mjs --self-test` checks it on an ephemeral port.
@@ -32,6 +35,10 @@ Kūkulu is a Claude Code plugin: a dependency-free MCP server (`mcp/server.mjs`)
 | `mcp/server.mjs` | Every deterministic operation and the JSON-RPC transport; one file |
 | `mcp/cleanroom.mjs` | Pure, synchronous clean-room functions shared by the server, the hooks and the tests: policy, canonicalization, guard decision, chain, checkpoints, key, scorer, coverage (new in 0.7.0) |
 | `mcp/run-command.mjs` | Runs one bounded command in its own process group (unchanged) |
+| `mcp/relay.mjs` | Inside the sandbox: pipes the server's stdio to the controller socket; `node:` only, may use `async`; the server reaches it only through `spawnSync` (new in 0.8.0) |
+| `scripts/sandbox.mjs`, `scripts/sandbox-entry.mjs` | The sandbox launcher and controller host (`doctor`, `run`, `stop`; the controller, log and proxy sockets), and the container's entrypoint (the loopback-to-socket bridge, then the harness) (new in 0.8.0) |
+| `scripts/model-identity.mjs`, `scripts/publish-bundle.mjs`, `scripts/compare-bundles.mjs` | Weight-file digests on an inference host; a publishable bundle copy and its re-check; two bundles side by side (new in 0.8.0) |
+| `templates/sandbox/Containerfile`, `templates/cleanroom.local-only.example.json` | The sandbox image template; the worked local-only, sandboxed policy |
 | `scripts/implement-guard.mjs` | Stop/SubagentStop hook |
 | `scripts/cleanroom-guard.mjs`, `scripts/cleanroom-log.mjs` | PreToolUse guard; PostToolUse and UserPromptSubmit logger (new in 0.7.0) |
 | `scripts/verify-attestation.mjs` | The offline attestation verifier, `node:` imports only, copied into every bundle (new in 0.7.0) |
@@ -40,7 +47,7 @@ Kūkulu is a Claude Code plugin: a dependency-free MCP server (`mcp/server.mjs`)
 | `agents/*.md` | Default model, effort and `tools:` per role; the tool list is the contract |
 | `skills/*/SKILL.md` | Stage prose |
 | `templates/` | SPEC skeleton, routing example, constraint examples |
-| `test/harness.mjs` + the suites | `plugin`, `protocol`, `state`, `implement`, `review`, `routing`, `constraints`, `feedback`, `streams`, `guard`, `drive`, and from 0.7.0 `cleanroom` and `attest`; `test/fixtures/` holds recorded data |
+| `test/harness.mjs` + the suites | `plugin`, `protocol`, `state`, `implement`, `review`, `routing`, `constraints`, `feedback`, `streams`, `guard`, `drive`, from 0.7.0 `cleanroom` and `attest`, and from 0.8.0 `sandbox` and `bundles`; `test/fixtures/` holds recorded data |
 | `docs/*.md`, `README.md`, `CHANGELOG.md`, `CONTRIBUTING.md` | User and maintainer docs |
 | `site/` | The kukulu.tech landing page, deployed as-is by Cloudflare Pages; a closed file set |
 | `docs/site/` | The site's inputs: approved mockup, screens, seeded assets, `checks.json`, `DEPLOY.md`; never deployed |
@@ -71,6 +78,10 @@ Mechanical rules are in the `constraints` of a flight's `docs/kukulu.json`, whic
 - `site-root-relative-src`, `site-css-root-relative`, `site-self-contained`: every `src=`, `<link href=` and CSS `url()` in `site/` is root-relative (the canonical `https://kukulu.tech/` excepted), there is no `@import`, and nothing references `docs/`, `scripts/`, `assets/` or `../`.
 - `site-display-name-ascii`, `site-no-theme-attr`, `site-no-cache-control`, `copy-buttons-start-hidden`: no `\bKukulu\b` in the site's HTML, no `data-theme`, no `Cache-Control` in `site/_headers`, and every `[data-copy-for]` button carries `hidden`.
 - `no-hardcoded-copy-feedback`, `no-hardcoded-site-tunables`: the ⚠️ ASSUMPTION values in `docs/site/checks.json` (2400, 65536, 184320, 2048, 4.5, 8788) are never literals in the site scripts; `copyFeedbackMs` appears only in `copy.js`'s `const COPY_FEEDBACK_MS = 2400;`.
+- `sandbox-network-none` (from P2-02 of flight v0-8-0): in `scripts/sandbox.mjs`, no `--network`, `--net` or `--network=` followed by anything but `none`, in the two-token or the `=` form.
+- `sandbox-no-escape-flags` (from P2-02): `scripts/sandbox.mjs` never contains `--privileged`, `--cap-add`, `--pid=host`, `--pid", "host`, `--security-opt", "seccomp=unconfined`, `docker.sock` or `podman.sock`, comments included.
+- `relay-not-in-server` (from P2-02): `mcp/server.mjs` never imports `node:net`, `net` or `./relay.mjs`; it reaches the relay only through `spawnSync`.
+- `no-hardcoded-log-socket-timeout`: 2000 is written only as `export const LOG_SOCKET_TIMEOUT_MS = 2000;` in `mcp/cleanroom.mjs`; the hooks and the sandbox read the export.
 The reviewer checks these by reading, because no line pattern can express them:
 
 - Refusals before writes; rollback on a failed commit (principle 3). The one sanctioned exception is the clean-room gate, which appends its own `gate` entry to the log before it refuses.
@@ -83,7 +94,10 @@ The reviewer checks these by reading, because no line pattern can express them:
 - `scripts/check-names.mjs` reports a private-name hit by file, line and denylist index only; no output ever contains the name.
 - `scripts/verify-attestation.mjs` duplicates the chain and signature code of `mcp/cleanroom.mjs` on purpose, and a test feeds both the same fixtures and asserts identical results.
 - `policies.archive`'s default `true` (an owner decision since 0.7.2, not an ⚠️ ASSUMPTION) is written only in `cfgFrom`.
-- ⚠️ ASSUMPTION values each live in one place: the "at least three" sweep only in the review-build skill; the 60-line budget only in the plan-build skill; `review.mutationFixRounds`' 2, `cleanroom.similarity.separationMargin`'s 0.0 and `cleanroom.idleGapHours`' 3 only in `cfgFrom`; the 50 ms hook budget only in `test/cleanroom.mjs`; 4000 only in `TARGET_MAX`.
+- ⚠️ ASSUMPTION values each live in one place: the "at least three" sweep only in the review-build skill; the 60-line budget only in the plan-build skill; `review.mutationFixRounds`' 2, `cleanroom.similarity.separationMargin`'s 0.0 and `cleanroom.idleGapHours`' 3 only in `cfgFrom`; the 50 ms hook budget only in `test/cleanroom.mjs`; 4000 only in `TARGET_MAX`; the 100 ms log-socket budget only in `test/sandbox.mjs`; `MODEL_FAMILIES` only in `mcp/cleanroom.mjs`.
+- `scripts/verify-attestation.mjs` duplicates `KNOWN_LIMITS`, `knownLimitsFor` and the `level`-aware `coverageGaps` of `mcp/cleanroom.mjs` on purpose, and `test/attest.mjs` feeds both copies the same inputs.
+- The controller and the checkpoint key stay outside the boundary: nothing in `scripts/sandbox-entry.mjs` or `mcp/relay.mjs` reads a key, writes `.kukulu/`, or opens a network connection except the loopback bridge; `scripts/sandbox.mjs` is the only file that spawns a container engine.
+- Every `spawnSync("git", …)` in `mcp/server.mjs` goes through `gitArgv` once P2-08 of flight v0-8-0 lands, so the sandbox's `-c core.hooksPath` and `-c core.fsmonitor=false` reach every git call.
 
 ## Task protocols
 
@@ -108,6 +122,12 @@ The reviewer checks these by reading, because no line pattern can express them:
 **Measuring an assumption.** Before = the ⚠️ ASSUMPTION default from `docs/site/checks.json`; after = the value `node scripts/check-site.mjs --report` measures, with its headroom. Put both on the commit body's `Measurement:` line and in the progress log. Never change `docs/site/checks.json`; a new default is the human's call.
 
 **Changing a guard rule.** Every change to `evaluate` in `mcp/cleanroom.mjs` adds deny and allow cases to `test/fixtures/guard-cases.json` whose names end in `(<task id>)`, after a space. An existing fixture may change its `expect` or `reason` only when the task names that fixture's form, and the commit body lists every one it changed (`git diff <merge-base>..HEAD -- test/fixtures/guard-cases.json` is how the reviewer checks). The same commit updates the rule's text in `docs/cleanroom.md`. A fixture's `reason` is a regular expression; `__ROOT__` and `__HOME__` are substituted in `input` only, never in `policy` or `reason` (write a policy path repo-relative, and a reason path as `.*`). The file is indented with one space: append cases with a script that loads it and dumps it with `indent=1` and no ASCII escaping, so the diff stays one block per case. Run `node scripts/cleanroom-guard.mjs --self-test templates/cleanroom.example.json` before committing.
+
+**Adding a test suite.** Register it in `test/run.mjs`'s `SUITES` at the position the task names; add its row to CONTRIBUTING.md's suite table and update CONTRIBUTING's two suite counts ("Harness plus N suites", `# all N suites`); update README's two counts (the `test/` line of the repo layout and the "N suites, about …" sentence under Testing) and `test/plugin.mjs`'s "README counts N suites" assertion to the new number word. Thirteen before flight v0-8-0, fourteen after P0-05, fifteen after P2-02.
+
+**The fake docker.** `test/harness.mjs`'s `mkFakeDocker()` returns a directory holding a `docker` script to prepend to `PATH`; it appends every invocation to `<dir>/calls.log` and answers from files in that directory (`version.txt`, `image-inspect.txt`, `image-missing`, `inspect.json`, `run-exit`, `exec-output`), with `exec` running the trailing `sh -c <command>` locally when no `exec-output` exists. Recorded engine output lives in `test/fixtures/docker/`, copied into the directory by the test; never inline in a `test/*.mjs`. A server under test gets `KUKULU_SANDBOX=<container name>`, `KUKULU_SANDBOX_ENGINE=docker` and `KUKULU_SANDBOX_HOOKS_PATH=<temp dir>` through `startServer(repo, { env })`. Tests never need a real engine; only the `KUKULU_SANDBOX_IT=1` step does.
+
+**Sandbox sockets in tests.** A Unix socket path is limited to about 100 bytes on macOS, so put sockets under a short temp directory (`os.tmpdir()` plus a short name), never under the repo. Start listeners in-process through the exported `startControllerSocket`, `startLogSocket`, `startProxy` and `startBridge`, and close them in a `finally`. Run `scripts/sandbox.mjs`'s CLI through its exported `main(argv, { platform, env, cwd })`, passing `platform: "linux"`, so the darwin refusal never fires on macOS CI.
 
 **HANDOFF.md.** `kukulu_run_finish` uses `docs/HANDOFF.md` as the draft PR's body. When a flight's spec says its result must not be merged yet (the 0.5.0 flight's did, until a human had run a flight from the working tree), put that instruction in the first line, in bold.
 
@@ -235,5 +255,31 @@ Carried from the 0.7.1 summary:
 - During a merge git refuses `git commit -- <paths>`, so the server's merge commit is a no-pathspec commit (`commitStaged`'s `noPathspec`); an aborted merge has `withRollback` restore the clean-room log byte for byte.
 - `kukulu_verify`'s output is large because it lists every constraint result; the useful parts are `ok` and the `npm test` summary.
 - The targeted `cleanroom` suite reports a guard mutant only as the gate's self-test failure; to see which fixture caught it, run the guard self-test directly.
+
+SPEC.md wins over PLAN.md, and PLAN.md wins over code comments.
+
+## Flight v0-8-0 notes
+
+This flight builds Kūkulu 0.8.0 (SPEC §1): one new tool (`kukulu_release`), optional policy, log and manifest fields, and the sandbox. The plugin running the flight is the installed 0.7.2, so none of the new behavior is active while the flight runs; where earlier flights' notes disagree with these, these win.
+
+- Every task is serial. `baseBranch` is `main`; build branches are `build/<date>`. The draft PR targets `main`; `policies` is `{ "archive": true, "finalize": "ready" }`, so finalize marks the PR ready and never enables auto-merge.
+- Tool count: 25 until P4-01, then 26 ("Twenty-six tools" in `docs/mcp-tools.md`, "twenty-six tools" in README). `kukulu_release` goes after `kukulu_pr_finalize` and on go-flight's `allowed-tools` in both spellings; no stage agent gets it.
+- Never edit `docs/SPEC.md`, `docs/flights/`, `docs/plans/`, `site/`, `docs/site/` or `docs/kukulu.json` (its `from` entries already name P2-01 and P2-02). Feedback files are not edited in this flight.
+- `CHANGELOG.md`: lines go under `## [Unreleased]` (P0-01 creates it above `## [0.7.2] — 2026-10-26`), under `### Added`, `### Changed` or `### Fixed`, each citing its goal (`G-06`), feedback item or note. No Breaking changes heading (SPEC §1).
+- The first line of `docs/HANDOFF.md`, in bold: **Do not merge until the owner has run one sandboxed clean-room flight from the working tree on Linux (`node scripts/sandbox.mjs run`) and its bundle verifies with `--require-enforcement container+proxy` (SPEC §8 Phase 2).**
+- The macron letter: in prose Kūkulu; in script and test source as the Unicode escape of U+016B (backslash, `u`, `016b`), never the literal character; in a `kukulu_task_done` log or a reason only inside the display name.
+- New scripts have no shebang and run their CLI only when `import.meta.url` is the entry script; `scripts/sandbox.mjs` and `scripts/compare-bundles.mjs` may import `../mcp/cleanroom.mjs`; `mcp/relay.mjs`, `scripts/sandbox-entry.mjs`, `scripts/model-identity.mjs` and `scripts/publish-bundle.mjs` import `node:` modules only. `scripts/sandbox.mjs` may not spell `--privileged`, `--cap-add`, `--pid=host`, `docker.sock` or `podman.sock` even in a comment.
+- Spikes: `docs/spikes/P0-04.md` (MODEL_FAMILIES), `docs/spikes/P2-03.md` (the log socket's 100 ms budget), `docs/spikes/P2-04.md` (proxy overhead, informational). Each follows "Tuning an assumption" or "Measuring an assumption" with the `Measurement:` line.
+- Recorded data lives in `test/fixtures/`: `families.json`, `identity/`, `docker/`, `lockfiles/`, `transcripts/`, `compare/`, `bundles/v0-7-2/`, `gh/`. A committed bundle holds a public key and signatures only; never a PEM private key.
+
+Vocabulary fixed for every task (SPEC §5, §6):
+
+- Runners live in the global file under `runners.<name>` (`endpoint`, `locality`, `match`, `identities`); the built-in runner is `anthropic` (`https://api.anthropic.com`, remote); an unmatched model has runner `null` and locality `unknown`. `resolveRouting().roles[role]` carries `model`, `runner`, `endpoint`, `locality`.
+- `normalizeModel` lowercases and strips every `<segment>/` or `<segment>,` prefix; `familyOf` returns a `MODEL_FAMILIES` family or `unknown:<normalized>`.
+- Genesis `data` gains `roles`, `distinct`, `mode` (`clean-room` or `control-positive`), `control.priorArt`, `enforcement` (`hook` or `container+proxy`) and `boundary`. Gate checks: 8 `routing`, 9 `boundary` (container+proxy only), 10 `packages` (deny.packages only); the gate line counts what ran.
+- Entry kinds added: `egress` (the proxy's decisions), `stage` (`kukulu_next`'s start and end), `usage` (SubagentStop token sums). Entries reported from inside the boundary carry `data.source: "box"`.
+- The verifier: check 11 `enforcement`, check 12 `roles`; `--expect clean-room|control-positive`, `--require-enforcement <level>`; exit 0 pass, 1 fail, 2 usage, 3 `CONTROL (positive)`. `ENFORCEMENT_LEVELS` is `hook` < `container+proxy` < `container+proxy+audit`; `knownLimitsFor("hook")` has ten texts, `knownLimitsFor("container+proxy")` five.
+- The sandbox: container `kukulu-<project id>` (16 hex of the real root's SHA-256), home volume `kukulu-<id>-home`, runtime dir `$XDG_RUNTIME_DIR/kukulu/<id>/` (else `~/.cache/kukulu/run/<id>/`) holding `controller.sock`, `log.sock`, `proxy.sock`, `hooks-empty/`, `run.json`; inside, `/run/kukulu/*.sock`, `127.0.0.1:3128`; env `KUKULU_CONTROLLER_SOCKET`, `KUKULU_LOG_SOCKET`; the controller child gets `KUKULU_SANDBOX`, `KUKULU_SANDBOX_ENGINE`, `KUKULU_SANDBOX_HOOKS_PATH`. The policy's image digest is the engine's image id.
+- Refusal texts are quoted in PLAN.md; copy them verbatim.
 
 SPEC.md wins over PLAN.md, and PLAN.md wins over code comments.
