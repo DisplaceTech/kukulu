@@ -171,6 +171,8 @@ A repository usually runs more than one flight. Three things make the second one
 
 A commit that fails for a reason git does not word as signing is checked with a signed and an unsigned probe on the empty tree, so an SSH signer's own error still counts as a signing failure.
 
+When a fallback has set `state.signingOverride`, the next `kukulu_run_start` lifts the local `commit.gpgsign false` it wrote and probes the operator's own setting again, on a fresh run and on an already-started branch (where it commits the outcome as `chore: signing re-probed`); a repo-local `false` without `signingOverride` is the operator's choice and is never touched.
+
 At the end of a flight, `kukulu_pr_finalize` looks at the commits themselves, never at `state.signing`: every commit since the merge base with `baseBranch` is checked with `git log --format='%H %G?'`. `N` (none) and `B` (bad) are unsigned; anything else, `E` included, counts as signed, because a machine without your public key still holds a signed commit.
 
 - **All signed.** The draft PR is marked ready and, per `policies.finalize`, set to auto-merge. `"auto"` (the default) does both unless the flight is `breaking`; `"ready"` only marks it ready; `"draft"` leaves it alone. `policies.mergeMethod` (`"merge"`, `"squash"` or `"rebase"`) is the method passed to `gh pr merge --auto`. If auto-merge cannot be enabled the PR is left ready and the result says `unavailable: <why>`.

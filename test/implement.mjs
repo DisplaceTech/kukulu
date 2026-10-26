@@ -1142,6 +1142,70 @@ function sshSignerRepo(policy) {
   });
 }
 
+// ---------------------------------------------------------------- the fallback's override is lifted (B-02)
+
+/** The operator's own signing, in a temp global git config; the repo-local `false` is what a fallback would have left. */
+function operatorSigning(gpg) {
+  const cfgFile = path.join(mkDir("kukulu-gitcfg-"), "gitconfig");
+  fs.writeFileSync(cfgFile, `[commit]\n\tgpgsign = true\n[gpg]\n\tformat = openpgp\n[gpg "openpgp"]\n\tprogram = ${gpg}\n[user]\n\tsigningkey = 0123456789ABCDEF\n`);
+  return { env: { GIT_CONFIG_GLOBAL: cfgFile } };
+}
+const stateOf = (repo) => JSON.parse(readFile(repo, ".kukulu/state.json"));
+
+{
+  const repo = plannedRepo();
+  setState(repo, { signingOverride: true, signing: "off (probe failed: x)" });
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-qm", "chore: post-archive state"]);
+  await withServer(repo, async ({ call }) => {
+    const r = await call("kukulu_run_start");
+    eq(r.signing, "on", "an archived flight's override is lifted when the signer works: signing is on");
+    const g = spawnSync("git", ["config", "--local", "--get", "commit.gpgsign"], { cwd: repo, encoding: "utf8" });
+    ok(g.stdout.trim() !== "false", "...local commit.gpgsign no longer reads false");
+    ok(!("signingOverride" in stateOf(repo)), "...signingOverride is gone");
+    ok(git(repo, ["cat-file", "-p", "HEAD"]).includes("gpgsig"), "...and the run-start commit is signed");
+  }, operatorSigning(mkFakeGpg()));
+}
+
+{
+  const repo = plannedRepo();
+  setState(repo, { signingOverride: true, signing: "off (probe failed: x)" });
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-qm", "chore: post-archive state"]);
+  await withServer(repo, async ({ call }) => {
+    const r = await call("kukulu_run_start");
+    like(r.signing, /^off \(probe failed:/, "an archived flight's override comes back when the signer still fails");
+    eq(git(repo, ["config", "--local", "commit.gpgsign"]), "false", "...local commit.gpgsign reads false again");
+    eq(stateOf(repo).signingOverride, true, "...and signingOverride stays");
+  }, operatorSigning(mkFakeGpg({ failAfter: 0 })));
+}
+
+{
+  const repo = plannedRepo();
+  const gpg = mkFakeGpg();
+  await withServer(repo, async ({ call }) => {
+    await call("kukulu_run_start");
+    setState(repo, { signingOverride: true, signing: "off (commit signing failed: timed out)" });
+    git(repo, ["add", "-A"]);
+    git(repo, ["commit", "-qm", "chore: simulated fallback"]);
+    const r = await call("kukulu_run_start");
+    eq(r.alreadyStarted + "|" + r.signing, "true|on", "a resumed run re-probes after the signer recovers");
+    eq(subject(repo), "chore: signing re-probed", "...committing the new record");
+    ok(git(repo, ["cat-file", "-p", "HEAD"]).includes("gpgsig"), "...signed");
+    ok(!("signingOverride" in stateOf(repo)), "...with the override gone");
+  }, operatorSigning(gpg));
+}
+
+{
+  const repo = plannedRepo();
+  git(repo, ["config", "--local", "commit.gpgsign", "false"]);
+  await withServer(repo, async ({ call }) => {
+    const r = await call("kukulu_run_start");
+    eq(r.signing, "none", "an operator's own local false is left alone: signing is none");
+    eq(git(repo, ["config", "--local", "commit.gpgsign"]), "false", "...and local commit.gpgsign still reads false");
+  });
+}
+
 // ---------------------------------------------------------------- rollback
 
 function rejectCommitsStarting(repo, prefix) {

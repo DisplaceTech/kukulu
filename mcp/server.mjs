@@ -2162,11 +2162,26 @@ const PROMPTS = {
  * configured), or `"off (probe failed: <reason>)"` for `auto` falling back.
  * Throws under `required` when signing is not configured or the probe fails.
  */
-function probeSigning(signingPolicy) {
+function probeSigning(signingPolicy, st) {
   if (signingPolicy === "off") {
     git(["config", "--local", "commit.gpgsign", "false"]);
     return "off";
   }
+  // A fallback's local `false` hid the operator's own setting; lift it so the probe sees what the operator configured (SPEC B-02).
+  const lifted = st?.signingOverride === true;
+  if (lifted) git(["config", "--local", "--unset", "commit.gpgsign"], { allowFail: true });
+  try {
+    const outcome = probeConfigured(signingPolicy);
+    // On "none" the caller decides whether the override still stands.
+    if (lifted && outcome === "on") delete st.signingOverride;
+    return outcome;
+  } catch (e) {
+    if (lifted) git(["config", "--local", "commit.gpgsign", "false"], { allowFail: true });
+    throw e;
+  }
+}
+
+function probeConfigured(signingPolicy) {
   const configured = git(["config", "--get", "commit.gpgsign"], { allowFail: true }).out === "true";
   if (!configured) {
     if (signingPolicy === "required") {
@@ -2227,6 +2242,27 @@ function syncBase(tool) {
   });
 }
 
+/**
+ * An already-started run whose signing fell back is re-probed at the next
+ * run start, so a recovered agent signs again (SPEC B-02). A "none" outcome
+ * never replaces the recorded fallback: the override goes back as it was.
+ */
+function reprobeSigning(c, st) {
+  if (st.signingOverride !== true || c.policies.signing === "off") return;
+  const outcome = probeSigning(c.policies.signing, st);
+  if (outcome === "none") {
+    git(["config", "--local", "commit.gpgsign", "false"], { allowFail: true });
+    return;
+  }
+  withRollback([P.state, P.feedback], () => {
+    st.signing = outcome;
+    if (outcome.startsWith("off (probe failed")) st.signingOverride = true;
+    saveState(st);
+    if (c.policies.feedback && outcome.startsWith("off (probe failed")) appendFeedback("implement", `Signing disabled for this run: ${outcome}`, "signing", "auto");
+    gitCommitIfChanged([P.state, P.feedback], "chore: signing re-probed", { stage: implementStage(st) });
+  });
+}
+
 function startRun({ sync = false } = {}) {
   requireGate(implementStage(loadState()));
   for (const [k, p] of Object.entries({ spec: P.spec, plan: P.plan, progress: P.progress, config: P.config })) {
@@ -2236,6 +2272,8 @@ function startRun({ sync = false } = {}) {
   const g = gitFacts();
   if (!g.inRepo) throw new ToolError("not a git repository");
   // A branch this call cuts from the base is already up to date; only an existing build branch can lag behind it.
+  // A fallback the base sync itself just made is not re-probed in the same call; only an override that was already there is.
+  const overrideBefore = loadState().signingOverride === true;
   const baseSynced = sync && g.branch && g.branch.startsWith(c.branchPrefix) ? syncBase("kukulu_run_start") : null;
   const withSync = (r) => (baseSynced ? { ...r, baseSynced } : r);
   const pr = parseProgress();
@@ -2245,6 +2283,7 @@ function startRun({ sync = false } = {}) {
   let basePush;
   if (exists(P.lock) && pr.branch && !pr.branch.startsWith("(")) {
     resetLockCounter();
+    if (overrideBefore) reprobeSigning(c, st);
     return withSync({ alreadyStarted: true, branch, counts: counts(pr.tasks), round: st.round, policies: st.policies, signing: st.signing });
   }
   if (branch === c.baseBranch) {
@@ -2296,8 +2335,9 @@ function startRun({ sync = false } = {}) {
   st.preexistingUntracked = preexistingUntracked;
   if (!cleanroomOn(c) && !st.cleanroom) st.cleanroom = { mode: "general" };
   st.policies = c.policies;
-  st.signing = probeSigning(c.policies.signing);
+  st.signing = probeSigning(c.policies.signing, st);
   if (st.signing.startsWith("off (probe failed")) st.signingOverride = true;
+  else if (st.signing === "none") delete st.signingOverride;
   st.implemented = false; st.reviewed = false; st.verdict = null;
   saveState(st);
   // Only the auto fallback is friction — an explicit "off" or an
