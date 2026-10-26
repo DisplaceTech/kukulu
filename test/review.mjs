@@ -637,6 +637,26 @@ const untouched = (repo, head) => {
   });
 }
 
+// restoredChanges names what kind of change each restored path had (D-03).
+for (const [cmd, want, label] of [
+  ["chmod +x tests/regressions.txt", "mode", "a chmod residue is classified as mode"],
+  ["echo more >> tests/regressions.txt", "content", "an edit residue is classified as content"],
+  ["rm tests/regressions.txt", "deleted", "a deletion residue is classified as deleted"],
+]) {
+  const repo = mutationRepo({ config: { verify: [`${cmd}; node test/add.test.mjs`] } });
+  writeFile(repo, "tests/regressions.txt", "# seeds\n");
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-qm", "regressions file"]);
+  const mode = git(repo, ["ls-files", "-s", "tests/regressions.txt"]).split(" ")[0];
+  await withServer(repo, async ({ call }) => {
+    const r = await call("kukulu_mutate", { file: "src/add.mjs", find: "a + b", replace: "a - b" });
+    eq(JSON.stringify(r.restoredChanges), JSON.stringify([{ path: "tests/regressions.txt", change: want }]), label);
+    eq(readFile(repo, "tests/regressions.txt"), "# seeds\n", "...and the file is back to HEAD's content");
+    eq(git(repo, ["status", "--porcelain"]), "", "...and its mode is HEAD's too (the tree is clean)");
+    eq(mode, "100644", "...a regular file");
+  });
+}
+
 // A per-call timeout only ever shortens the configured one (cleanflate F-06).
 {
   const repo = mutationRepo({ config: { verify: [{ cmd: "sleep 30", timeoutMs: 600000 }] } });

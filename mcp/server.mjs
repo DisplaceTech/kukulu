@@ -3006,20 +3006,48 @@ function recoverMutation() {
 const trackedChanges = () => git(["diff", "--name-only", "HEAD"]).out.split("\n").filter(Boolean).sort();
 
 /**
+ * What differs between HEAD and the working tree for each path: `deleted`, `mode`
+ * (same content, other permission bits) or `content` (anything else, a type change
+ * included). Read before the paths are restored (SPEC D-03).
+ */
+function classifyChanges(paths) {
+  const raw = spawnSync("git", ["diff", "--raw", "-z", "--abbrev=40", "HEAD", "--", ...paths], { cwd: ROOT, encoding: "utf8" }).stdout || "";
+  const parts = raw.split("\0");
+  const byPath = new Map();
+  for (let i = 0; i + 1 < parts.length; i += 2) {
+    const m = /^:(\d+) (\d+) ([0-9a-f]+) ([0-9a-f]+) (\w)/.exec(parts[i]);
+    if (!m) continue;
+    const [, oldMode, newMode, oldId, newIdRaw, type] = m;
+    let change = "content";
+    if (type === "D") change = "deleted";
+    else if (type === "M" && oldMode !== newMode) {
+      // The working-tree side of an unstaged change has no blob id yet; hash the file the way git would.
+      const newId = /^0+$/.test(newIdRaw) ? git(["hash-object", "--", parts[i + 1]], { allowFail: true }).out : newIdRaw;
+      if (newId === oldId) change = "mode";
+    }
+    byPath.set(parts[i + 1], change);
+  }
+  return paths.map((p) => ({ path: p, change: byPath.get(p) ?? "content" }));
+}
+
+/**
  * Put back everything a mutation's commands changed besides the mutated file
  * itself (F-10, F-14, F-17 of the 2026-09-30 cleanflate feedback: a killed
  * mutant made proptest write a regressions file). Only paths that were clean,
  * or did not exist, before the mutation are touched; ignored files never are.
- * Returns `{ restored, removed }`.
+
+ * Returns `{ restored, removed, restoredChanges }`; `restoredChanges` names
+ * what each restored path had been, in the same order as `restored`.
  */
 function undoMutationResidue(before) {
   const dirtyBefore = new Set(before.tracked);
   const untrackedBefore = new Set(before.untracked);
   const restored = trackedChanges().filter((p) => !dirtyBefore.has(p));
+  const restoredChanges = restored.length ? classifyChanges(restored) : [];
   if (restored.length) git(["checkout", "-q", "HEAD", "--", ...restored]);
   const removed = untrackedPaths().filter((p) => !untrackedBefore.has(p));
   for (const p of removed) fs.rmSync(path.join(ROOT, p), { force: true });
-  return { restored, removed };
+  return { restored, removed, restoredChanges };
 }
 
 function mutate({ file, find, replace, commands, timeoutMs, targeted, filter, confirmKill } = {}) {
@@ -3161,6 +3189,7 @@ function mutate({ file, find, replace, commands, timeoutMs, targeted, filter, co
     results,
     constraints: scan,
     restored: residue.restored,
+    restoredChanges: residue.restoredChanges,
     removed: residue.removed,
     recoveredMutation: recovered,
   };
@@ -4688,7 +4717,7 @@ const TOOLS = [
   },
   {
     name: "kukulu_mutate",
-    description: "Mutation-test one file: apply one exact find/replace to a clean tracked file, run the verify commands that file triggers (verify plus matching extraVerify), always restore the file, undo anything else the commands changed (tracked files that were clean, untracked files that are new), and commit nothing. Returns { file, killed, verdict, results, restored, removed, recoveredMutation }; killed is true when at least one command failed. For reviewers checking that a test fails without the mechanic it covers — never edit source by hand instead.",
+    description: "Mutation-test one file: apply one exact find/replace to a clean tracked file, run the verify commands that file triggers (verify plus matching extraVerify), always restore the file, undo anything else the commands changed (tracked files that were clean, untracked files that are new), and commit nothing. Returns { file, killed, verdict, results, restored, restoredChanges, removed, recoveredMutation }; killed is true when at least one command failed. For reviewers checking that a test fails without the mechanic it covers — never edit source by hand instead.",
     inputSchema: S(
       {
         file: { type: "string", description: "repo-relative path of a tracked, clean text file" },

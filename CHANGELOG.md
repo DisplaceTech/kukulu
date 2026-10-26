@@ -23,6 +23,7 @@ All notable changes to this plugin. Format follows
 
 ### Fixed
 
+- `kukulu_mutate` says whether each restored file differed in mode, content or by deletion (`restoredChanges`; project-f F-02).
 - `kukulu_status`'s `prChecks` works on a gh without `pr checks --json` (gh 2.45.0) through the REST API (kukulu F-01; project-e F-02, F-04, F-05).
 - A round cap changed through `kukulu_flight_options` is recorded in PLAN.md's Decisions, so the plan no longer claims the default (0.7.1 SUMMARY note).
 - Under `policies.signing: "required"`, `kukulu_next` reports a broken signer before the plan stage instead of after the planner's work (project-e F-03).
