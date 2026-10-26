@@ -19,7 +19,7 @@ Started: 2026-10-26T14:17:50.269Z
 - [x] P2-02 The merge commit's subject repeats the PR title
 - [x] P2-03 policies.archive defaults to true
 - [x] P2-04 The CHANGELOG decides whether a flight is breaking
-- [~] P2-05 kukulu_flight_options records a changed round cap in PLAN.md
+- [x] P2-05 kukulu_flight_options records a changed round cap in PLAN.md
 - [ ] P2-06 Phase 2 end: push and record the manual check
 - [ ] P3-01 prChecks falls back to the REST API on an older gh
 - [ ] P3-02 kukulu_mutate's filter takes a list
@@ -86,3 +86,7 @@ cfgFrom default archive ?? true (only place). Interpretation: kukulu_config_show
 ### P2-04 — eb40db1
 
 changelogVerdict(); prFinalize refuses disagreement before any write, adds breakingSource to results; schema/description/skill/docs updated. Interpretation: summarize skill status line matches merge starting with "enabled". Verify green (3822).
+
+### P2-05 — f2095ea
+
+withDecisions() helper; flightOptions adds PLAN.md to rollback set and commit only when a cap changes. 4 tests in state.mjs; CONTRIBUTING row, mcp-tools, CHANGELOG. Verify green (3830).
