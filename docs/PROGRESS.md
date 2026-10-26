@@ -6,7 +6,7 @@ Started: 2026-10-26T14:17:50.269Z
 ## Tasks
 
 - [x] P0-01 The agent defaults pass the plugin's own checks again
-- [ ] P0-02 rsync's deleting options are write targets
+- [x] P0-02 rsync's deleting options are write targets
 - [ ] P0-03 bsdtar and gtar get every decision tar gets
 - [ ] P0-04 The 0.7.1 review's advisory notes on the guard and the server
 - [ ] P0-05 Phase 0 end: push and record the manual check
@@ -34,3 +34,7 @@ Started: 2026-10-26T14:17:50.269Z
 ### P0-01 — 294355a
 
 Restored model/effort lines of the four agents from 418b291^. kukulu_verify green (npm test 3715 assertions). No interpretation choices.
+
+### P0-02 — eca89a1
+
+rsyncParts now returns deletes/removesSources; evaluate checks them before A-04 checks. 8 fixtures (P0-02), 2 assertions. Interpretation: under-case source reason uses the source's resolved path. Self-test 517 cases; verify green. CHANGELOG [Unreleased] section created.
