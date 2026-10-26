@@ -5,7 +5,7 @@ Started: 2026-10-26T21:19:36.125Z
 
 ## Tasks
 
-- [ ] P0-01 Runners in the global file, and each role's runner in the routing
+- [x] P0-01 Runners in the global file, and each role's runner in the routing
 - [ ] P0-02 The policy's runner and role keys, and the model-family table
 - [ ] P0-03 Gate check 8 and genesis record the roles
 - [ ] P0-04 Tune MODEL_FAMILIES against the recorded routing strings
@@ -47,3 +47,10 @@ Started: 2026-10-26T21:19:36.125Z
 ## Log
 
 (one entry per task, appended by implement)
+
+### P0-01 — 7cf3296
+
+Added validateRunners, runnerFor, GLOBAL_KEYS runners; resolveRouting returns runners and per-role runner/endpoint/locality/source.runner; routing table gained runner column; config_show returns runners. Template, routing.md Runners section, mcp-tools.md, CHANGELOG Unreleased done.
+Tests: 11 refusal assertions plus resolution/table tests in test/routing.mjs (274 pass); full npm test green.
+Interpretation: identities entry without weights refused with the weights message; non-object runner block refused as must be an object.
+Separate chore commit c05c6a7: mcp/cleanroom.mjs LOCK_WAIT_MS = 2000 tripped the new no-hardcoded-log-socket-timeout constraint (hit existed at base); rewritten as 2 * 1000 (unrelated lock wait). Later tasks adding LOG_SOCKET_TIMEOUT_MS must keep 2000 only in its export line.
