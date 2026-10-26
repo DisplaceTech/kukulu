@@ -671,6 +671,11 @@ for (const [config, re, label] of [
     const fail = await checks(withOrigin(), ghEnv(apiGh(runsAll.check_runs, statusAll.statuses)));
     eq(fail.state + "|" + fail.via, "fail|gh api", "prChecks falls back to gh api and reports a failure");
     eq(fail.failing.map((f) => `${f.name} ${f.link}`).sort().join(","), ["failure", "cancelled", "timed_out", "action_required", "startup_failure"].map((c) => `run-${c} https://ci.invalid/run-${c}`).concat(["failure", "error"].map((c) => `status-${c} https://ci.invalid/status-${c}`)).sort().join(","), "...failing names and links exactly the failing runs and statuses");
+    {
+      const loose = apiGh(runsAll.check_runs, statusAll.statuses);
+      writeFile(loose, "checks-stderr", fx("pr-checks-unknown-flag.txt").replace("unknown flag:", "Unknown flag"));
+      eq((await checks(withOrigin(), ghEnv(loose))).via, "gh api", "prChecks falls back on an unknown flag message without the colon or in another case");
+    }
     const pass = await checks(withOrigin(), ghEnv(apiGh(named(runsAll.check_runs, ["run-success", "run-neutral", "run-skipped"]), named(statusAll.statuses, ["status-success"]))));
     eq(JSON.stringify(pass), JSON.stringify({ state: "pass", failing: [], via: "gh api" }), "...reports pass");
     const pending = await checks(withOrigin(), ghEnv(apiGh(named(runsAll.check_runs, ["run-success", "run-in_progress"]), named(statusAll.statuses, ["status-success", "status-pending"]))));

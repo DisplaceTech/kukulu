@@ -900,6 +900,10 @@ eq((await prTitleFor({ config: { flight: "w-1" }, round: 2 })).title, "w-1: Widg
   eq(r.prTitle, expected, "...and run_finish returns the same prTitle");
 }
 
+for (const heading of ["Widget 1.0 \u2013 Specification", "Widget 1.0: Specification", "Widget 1.0 - Spec"]) {
+  eq((await prTitleFor({ spec: `# ${heading}\n`, config: { flight: "w-1" } })).title, "w-1: Widget 1.0", `the derived title strips an en dash, colon or hyphen separator and a bare Spec: ${JSON.stringify(heading)}`);
+}
+
 // The draft PR targets baseBranch, not the repository's default branch, and
 // the summary reports the PR it finds (2026-09-30 cleanflate F-24, F-25).
 {
@@ -1243,6 +1247,23 @@ const stateOf = (repo) => JSON.parse(readFile(repo, ".kukulu/state.json"));
     ok(git(repo, ["cat-file", "-p", "HEAD"]).includes("gpgsig"), "...signed");
     ok(!("signingOverride" in stateOf(repo)), "...with the override gone");
   }, operatorSigning(gpg));
+}
+
+{
+  const repo = plannedRepo();
+  setState(repo, { signingOverride: true, signing: "off (probe failed: x)" });
+  git(repo, ["config", "--local", "commit.gpgsign", "false"]);
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-qm", "chore: post-archive state"]);
+  const emptyGlobal = path.join(mkDir("kukulu-gitcfg-"), "gitconfig");
+  fs.writeFileSync(emptyGlobal, "");
+  await withServer(repo, async ({ call }) => {
+    const r = await call("kukulu_run_start");
+    eq(r.signing, "none", "an archived flight's override with no operator signing records none: signing is none");
+    ok(!("signingOverride" in stateOf(repo)), "...and drops the override");
+    const g = spawnSync("git", ["config", "--local", "--get", "commit.gpgsign"], { cwd: repo, encoding: "utf8" });
+    eq(g.stdout.trim(), "", "...and local commit.gpgsign is unset");
+  }, { env: { GIT_CONFIG_GLOBAL: emptyGlobal } });
 }
 
 {

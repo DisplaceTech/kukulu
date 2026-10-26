@@ -52,6 +52,13 @@ for (const [value, got, label] of [
   });
 }
 
+{
+  const repo = plannedRepo({ config: { prTitle: "\u{1F600}".repeat(61) } });
+  await withServer(repo, async ({ call }) => {
+    ok(!(await call("kukulu_status")).error, "a prTitle of 61 astral characters is accepted, counted in code points");
+  });
+}
+
 // ---------------------------------------------------------------- defaults, no global file
 
 {
