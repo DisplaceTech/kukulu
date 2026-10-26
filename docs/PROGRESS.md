@@ -13,7 +13,7 @@ Started: 2026-10-26T21:19:36.125Z
 - [x] P0-06 The manifest records each role's identity
 - [x] P0-07 Phase 0 end: push and record the manual check
 - [x] P1-01 Control mode in the policy and the guard
-- [ ] P1-02 Control mode in genesis, the manifest and the verifier
+- [x] P1-02 Control mode in genesis, the manifest and the verifier
 - [ ] P1-03 The control bundle is the positive pair
 - [ ] P1-04 scripts/publish-bundle.mjs and docs/publishing.md
 - [ ] P1-05 Phase 1 end: push and record the manual check
@@ -86,3 +86,8 @@ Manual check: NOT VERIFIED (human): with the owner's real global file holding th
 
 loadPolicy: mode (clean-room|control-positive), control.priorArt with all refusals; policy now carries mode and control. controlPaths exported. evaluate: read-only exemption from deny.paths/pathPatterns/deny.words for paths under priorArt (read tools; Bash read-family words; recursive/glob reach). 8 new fixtures (P1-01), none changed; guard self-test 532 cases. docs/cleanroom.md: policy rows and ## Control mode. Verify green (4005 assertions).
 Interpretation: exemption reads-only; a path is control only if every canonical form is under a priorArt entry.
+
+### P1-02 — 0ab84ec
+
+Genesis data.mode = policy.mode (+ control.priorArt for control flights); attest manifest mode from genesis; kukulu_attest runs verifier with --expect <genesis mode>. Verifier: verifyBundle {key, expect}, returns mode; check 7 new reasons; CLI --expect, exit 3 + CONTROL (positive); --json carries mode. buildBundle opts.mode now sets manifest mode too. Tests: attest 243, cleanroom 1184; verify green.
+Interpretation: --expect control-positive on a passing control bundle prints PASS exit 0; old check-7 reason text replaced.
