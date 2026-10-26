@@ -2041,7 +2041,7 @@ function next() {
   // accurate even before this round's kukulu_run_start has recorded
   // state.policies (round 0, before the implementer's first call).
   let gateResult = null;
-  const policySentence = `Run policies: signing=${c.policies.signing}, push=${c.policies.push ? "on" : "off"}, pr=${c.policies.pr}.${cleanroomOn(c) ? ` ${CLEANROOM_SENTENCE}` : ""}`;
+  const policySentence = `Run policies: signing=${c.policies.signing}, push=${c.policies.push ? "on" : "off"}, pr=${c.policies.pr}.${cleanroomOn(c) ? ` ${CLEANROOM_SENTENCE}` : ""}${signingNoteFor(st.signing) ? ` ${signingNoteFor(st.signing)}` : ""}`;
   const stage = (name, reason, extra = {}) => {
     const info = agentInfo(name);
     return {
@@ -2284,7 +2284,7 @@ function startRun({ sync = false } = {}) {
   if (exists(P.lock) && pr.branch && !pr.branch.startsWith("(")) {
     resetLockCounter();
     if (overrideBefore) reprobeSigning(c, st);
-    return withSync({ alreadyStarted: true, branch, counts: counts(pr.tasks), round: st.round, policies: st.policies, signing: st.signing });
+    return withSync({ alreadyStarted: true, branch, counts: counts(pr.tasks), round: st.round, policies: st.policies, signing: st.signing, ...signingNoteField(st.signing) });
   }
   if (branch === c.baseBranch) {
     // Untracked files never block a run from starting: branching off HEAD
@@ -2349,7 +2349,7 @@ function startRun({ sync = false } = {}) {
   checkpoint("run-start", implementStage(st), st);
   return gitCommitIfChanged([P.gitignore, P.progress, P.state, P.feedback, ...crPaths], st.round === 0 ? "chore: start implementation run" : `chore: start review-fix round ${st.round}`, { stage: implementStage(st) });
   });
-  return withSync({ alreadyStarted: false, branch, commit: sha, counts: counts(pr.tasks), round: st.round, policies: st.policies, signing: st.signing, basePush });
+  return withSync({ alreadyStarted: false, branch, commit: sha, counts: counts(pr.tasks), round: st.round, policies: st.policies, signing: st.signing, ...signingNoteField(st.signing), basePush });
 }
 
 /**
@@ -3894,6 +3894,25 @@ function nextSteps(mergeBase) {
   return `Unlock the signing agent, then tell the flight controller to finalize with re-signing: kukulu_pr_finalize({ resign: true }). Or by hand: git rebase -f --rebase-merges --gpg-sign ${mergeBase}, then git push --force-with-lease, then kukulu_pr_finalize({}).`;
 }
 
+/** Whether finalize holds the PR for signatures: always under `required`, and under `auto` unless signing was never configured (SPEC B-03). */
+function signaturesExpected(policy, signing) {
+  return policy === "required" || (policy === "auto" && signing !== "none");
+}
+
+/** What run_start and the stage prompts tell the agent about finalize's signature wait, or null when signing is on. */
+function signingNoteFor(signing) {
+  if (typeof signing !== "string" || signing === "on") return null;
+  if (signing === "off" || signing === "none") return "Commits in this run are unsigned and kukulu_pr_finalize will not wait for signatures.";
+  if (signing.startsWith("off (")) {
+    return "Commits from here on are unsigned; kukulu_pr_finalize will wait for signatures, so unlock the signing agent and call kukulu_run_start again to resume signing, or re-sign at the end.";
+  }
+  return null;
+}
+const signingNoteField = (signing) => {
+  const note = signingNoteFor(signing);
+  return note ? { signingNote: note } : {};
+};
+
 /**
  * Count the flight's commits that carry no valid-looking signature, judged
  * from the commits themselves, never from state.signing. `%G?` of N (none)
@@ -3941,6 +3960,18 @@ function prFinalize({ breaking, resign } = {}) {
   const brk = breaking !== undefined ? breaking : st.breaking;
   if (typeof brk !== "boolean") throw new ToolError("breaking is required on the first call: pass true or false");
   const cc = finalizeConfig(st);
+  // A post-archive state has no signing of its own; the archived copy recorded it.
+  let recordedSigning = st.signing;
+  if (recordedSigning == null && st.archived) {
+    try {
+      recordedSigning = JSON.parse(read(path.join(ROOT, st.archived.dir, "state.json"))).signing;
+    } catch {
+      recordedSigning = undefined;
+    }
+  }
+  // A re-sign is the operator asking for signatures, whatever the policy says.
+  const expected = resign === true || signaturesExpected(cc.policies.signing, recordedSigning);
+  const signatures = expected ? "required" : cc.policies.signing === "off" ? "not required: policies.signing is off" : "not required: signing is not configured";
   const mb = git(["merge-base", cc.baseBranch, "HEAD"], { allowFail: true }).out;
   if (!mb) throw new ToolError(`cannot find a merge base with baseBranch '${cc.baseBranch}'; check out the build branch, or fix baseBranch in docs/kukulu.json`);
 
@@ -3963,7 +3994,7 @@ function prFinalize({ breaking, resign } = {}) {
       gitCommitIfChanged(paths, "chore: awaiting signing", { stage: "summarize" });
     });
     return {
-      signed: check.signed, unsigned: check.unsigned, ready: false, merge: "skipped: awaiting signing", breaking: brk,
+      signed: check.signed, unsigned: check.unsigned, ready: false, merge: "skipped: awaiting signing", signatures, breaking: brk,
       awaitingSigning: st.awaitingSigning, resigned: false,
       push: pushBranch(branch, cc.policies.push), pr: prState(cc.policies, cc.baseBranch), next: nextSteps(mb),
     };
@@ -4025,7 +4056,7 @@ function prFinalize({ breaking, resign } = {}) {
   }
 
   const before = signedCheck(mb);
-  if (before.unsigned) return awaiting(before);
+  if (before.unsigned && expected) return awaiting(before);
 
   st.breaking = brk;
   delete st.awaitingSigning;
@@ -4039,7 +4070,7 @@ function prFinalize({ breaking, resign } = {}) {
     gitCommitIfChanged([P.state], "chore: finalize flight", { stage: "summarize" });
   });
   const after = signedCheck(mb);
-  if (after.unsigned) return awaiting(after);
+  if (after.unsigned && expected) return awaiting(after);
 
   const push = pushBranch(branch, cc.policies.push);
   let pr = prState(cc.policies, cc.baseBranch);
@@ -4064,7 +4095,7 @@ function prFinalize({ breaking, resign } = {}) {
     pr = prState(cc.policies, cc.baseBranch);
   }
   return {
-    signed: after.signed, unsigned: 0, ready: typeof pr === "object" ? pr.draft === false : false, merge, breaking: brk,
+    signed: after.signed, unsigned: after.unsigned, signatures, ready: typeof pr === "object" ? pr.draft === false : false, merge, breaking: brk,
     awaitingSigning: null, resigned, ...(resignPush !== undefined ? { resignPush } : {}), push, pr,
   };
 }
@@ -4446,7 +4477,7 @@ const TOOLS = [
   { name: "kukulu_status", description: "Everything the pipeline knows from disk: which docs exist, task counts by state, branch/base/head, lock, round, review verdict, review.mutationFixRounds, and the pull request's CI checks as prChecks (every gh call bounded to 30 s). Read-only.", inputSchema: S({}), fn: () => ({ ...status(), prChecks: prChecks() }) },
   { name: "kukulu_next", description: "Deterministic stage selection: returns { stage, agent, agentFallback, fallbackAgent, restartRequired, model, agentModel, agentModelExact, round, reason, prompt, streams? }. stage is plan | implement | review | summarize | done | halt. agentModel is the value to pass as the Agent tool's model when agentFallback is true (an alias, or null to pass none); agentModelExact is false when a full claude-* id was mapped to its family alias. restartRequired is true only when the routed model cannot be reached without relaunching the session. Read-only, except that when a parallel wave's partition is invalid it records once (state, one feedback entry, one commit, only on a build branch) that the wave runs serially. When streams is present, spawn one implementer per entry, all at once, and wait for all of them.", inputSchema: S({}), fn: next },
   { name: "kukulu_plan_commit", description: "Validate the plan as a whole and commit it: docs/PLAN.md, docs/PROGRESS.md, docs/kukulu.json and CLAUDE.md must exist and agree (task headings, numbering, dependencies, streams, config, from references). Every problem is listed at once, as numbered lines and as structuredContent.problems [{ check, id?, message }]; nothing is committed while any remain. With renumber: true (only before any run has started) it first renumbers split ids everywhere. On success it commits 'plan: derive build plan from SPEC' and returns { commit, tasks, phases, waves, renumbered }. For the planner, as its last step.", inputSchema: S({ renumber: { type: "boolean", description: "rewrite split or out-of-sequence task ids (such as P1-02a) to a clean P<n>-01.. sequence everywhere they appear, then validate and commit; refused once a run has started" } }), fn: planCommit },
-  { name: "kukulu_run_start", description: "Begin (or resume) an implementation run: create/reuse the build branch, arm the implement guard lock, stamp Branch/Started in PROGRESS.md, commit. Idempotent. With stream, also create (or resume) that stream's git worktree for a parallel wave, run parallel.setup in it, and return its cwd: do all of that stream's work inside cwd.", inputSchema: S({ stream: { type: "string", description: "a stream of the current parallel wave, when kukulu_next handed you one" } }), fn: runStart },
+  { name: "kukulu_run_start", description: "Begin (or resume) an implementation run: create/reuse the build branch, arm the implement guard lock, stamp Branch/Started in PROGRESS.md, commit. Idempotent. The result carries signingNote when commits are or will be unsigned and says whether kukulu_pr_finalize will wait for signatures. With stream, also create (or resume) that stream's git worktree for a parallel wave, run parallel.setup in it, and return its cwd: do all of that stream's work inside cwd.", inputSchema: S({ stream: { type: "string", description: "a stream of the current parallel wave, when kukulu_next handed you one" } }), fn: runStart },
   { name: "kukulu_task_next", description: "Select the next task (first [~], else first [ ]), auto-skip tasks whose dependencies are blocked, mark it [~], and return its PLAN.md text plus dependency log entries. Returns { done: true } when none remain.", inputSchema: S({ stream: { type: "string", description: "restrict to this stream's tasks (parallel waves only)" } }), fn: taskNext },
   { name: "kukulu_task_done", description: "Mark a task [x] and append its log entry stamped with HEAD's sha. Requires HEAD's commit subject to start with '<id>:' and a clean tree. Commits PROGRESS.md.", inputSchema: S({ stream: { type: "string", description: "the stream this task belongs to, when working in a parallel wave" }, id: { type: "string" }, log: { type: "string", description: "Log entry body, under 15 lines" } }, ["id", "log"]), fn: taskDone },
   { name: "kukulu_task_block", description: "Give up on a task: hard-reset uncommitted changes, mark it [!], log BLOCKED: <reason>, commit PROGRESS.md.", inputSchema: S({ stream: { type: "string", description: "the stream this task belongs to, when working in a parallel wave" }, id: { type: "string" }, reason: { type: "string", description: "what you tried / what fails / what you think the fix is" } }, ["id", "reason"]), fn: taskBlock },
@@ -4553,7 +4584,7 @@ const TOOLS = [
     fn: attest,
   },
   { name: "kukulu_flight_archive", description: "Archive a summarized flight so the repository can run its next flight: move PLAN, PROGRESS, HANDOFF, REVIEW, SUMMARY, kukulu.json, .kukulu/state.json and .kukulu/feedback.jsonl into docs/flights/<slug>/ and docs/attestation/ into docs/flights/<slug>/attestation/ (copying SPEC.md, which stays), write a fresh state.json, commit 'chore: archive flight <slug>' and push per policy. slug defaults to the 'flight' key in docs/kukulu.json. Refused unless the flight is summarized, no run is armed, and the tree is clean. All-or-nothing. Returns { slug, dir, moved, copied, commit, push }.", inputSchema: S({ slug: { type: "string", description: "lowercase letters, digits and - (at most 40 characters); defaults to docs/kukulu.json's flight" } }), fn: flightArchive },
-  { name: "kukulu_pr_finalize", description: "End a flight. Checks that every commit since the merge base with baseBranch is signed (judged from the commits, not from state): if so, marks the draft PR ready and, unless breaking is true, enables auto-merge (gh pr merge --auto, never an immediate merge), per policies.finalize and policies.mergeMethod. If any commit is unsigned the PR stays a draft, state.awaitingSigning is recorded, the steps are appended to SUMMARY.md, and kukulu_next reports done until it is resolved. breaking is required on the first call. Returns { signed, unsigned, ready, merge, breaking, awaitingSigning, resigned, push, pr, next? }; merge is enabled, skipped: breaking, skipped: policy, skipped: no pull request, skipped: awaiting signing or unavailable: <why>.", inputSchema: S({ breaking: { type: "boolean", description: "whether this flight is a breaking change, so its PR must not auto-merge; required on the first call, remembered after" }, resign: { type: "boolean", description: "HUMAN-INITIATED ONLY: never pass this on your own. Re-sign every commit of the branch (git rebase -f --rebase-merges --gpg-sign), force-push with lease, then finalize. For an operator who has unlocked the signing agent after an awaiting-signing result" } }), fn: prFinalize },
+  { name: "kukulu_pr_finalize", description: "End a flight. Checks that every commit since the merge base with baseBranch is signed (judged from the commits, not from state): if so, or if the policy does not expect signatures (policies.signing off, or auto with signing never configured; the result says so in signatures), marks the draft PR ready and, unless breaking is true, enables auto-merge (gh pr merge --auto, never an immediate merge), per policies.finalize and policies.mergeMethod. If any commit is unsigned and signatures are expected the PR stays a draft, state.awaitingSigning is recorded, the steps are appended to SUMMARY.md, and kukulu_next reports done until it is resolved. breaking is required on the first call. Returns { signed, unsigned, ready, merge, signatures, breaking, awaitingSigning, resigned, push, pr, next? }; signatures is required or not required: <why>; merge is enabled, skipped: breaking, skipped: policy, skipped: no pull request, skipped: awaiting signing or unavailable: <why>.", inputSchema: S({ breaking: { type: "boolean", description: "whether this flight is a breaking change, so its PR must not auto-merge; required on the first call, remembered after" }, resign: { type: "boolean", description: "HUMAN-INITIATED ONLY: never pass this on your own. Re-sign every commit of the branch (git rebase -f --rebase-merges --gpg-sign), force-push with lease, then finalize. For an operator who has unlocked the signing agent after an awaiting-signing result" } }), fn: prFinalize },
   {
     name: "kukulu_agents_sync",
     description: "Generate .claude/agents/kukulu-<role>.md from the merged routing config (plugin defaults < global file < profile < docs/kukulu.json roles). Writes only files whose content changed, excludes them from git, and returns the resolved per-role table. `restartRequired` is true only when this is the directory's first population and a changed role's model cannot be named directly by the Agent tool. Also ensures the MCP allow rule in .claude/settings.local.json (`permissions` in the result), without which a subagent's first kukulu_status call is denied under any permission mode.",

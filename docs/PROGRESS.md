@@ -12,7 +12,7 @@ Started: 2026-10-26T14:17:50.269Z
 - [x] P0-05 Phase 0 end: push and record the manual check
 - [x] P1-01 A failed commit is classified as a signing failure by a probe
 - [x] P1-02 The fallback's override is lifted at the next run start
-- [ ] P1-03 kukulu_pr_finalize waits for signatures only when the policy expects them
+- [~] P1-03 kukulu_pr_finalize waits for signatures only when the policy expects them
 - [ ] P1-04 A broken signer is reported before the plan stage under required
 - [ ] P1-05 Phase 1 end: push and record the manual check
 - [ ] P2-01 The draft PR is titled after the flight, and prTitle overrides it

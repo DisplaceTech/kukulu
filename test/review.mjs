@@ -1068,6 +1068,44 @@ for (const [label, args, policies, expect, mergeFails] of [
   }, opts);
 }
 
+// ---------------------------------------------------------------- finalize waits only when signatures are expected (B-03)
+
+for (const [label, policies, stateExtra, wantSignatures, wantAwait] of [
+  ["finalize does not wait under signing off", { signing: "off" }, {}, "not required: policies.signing is off", false],
+  ["finalize does not wait under auto with no signing configured", { signing: "auto" }, { signing: "none" }, "not required: signing is not configured", false],
+  ["finalize still waits under auto after a fallback", { signing: "auto" }, { signing: "off (commit signing failed: x)" }, "required", true],
+  ["finalize still waits under required", { signing: "required" }, {}, "required", true],
+]) {
+  const { repo, opts } = finalizeRepo({ policies });
+  setState(repo, stateExtra);
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-q", "--allow-empty", "-m", "chore: state"]);
+  await withServer(repo, async ({ call }) => {
+    const r = await call("kukulu_pr_finalize", { breaking: false });
+    eq(r.signatures, wantSignatures, `${label}: signatures is ${wantSignatures}`);
+    if (wantAwait) {
+      ok(Boolean(r.awaitingSigning), "...awaiting signing is recorded");
+      eq(r.merge, "skipped: awaiting signing", "...and merge is skipped");
+    } else {
+      eq(r.awaitingSigning, null, "...awaitingSigning is null");
+      ok(r.unsigned > 0, "...the unsigned commits are still counted");
+      eq(r.ready, true, "...and the PR is marked ready");
+    }
+  }, opts);
+}
+
+{
+  const { repo, opts } = finalizeRepo({ policies: { signing: "auto" } });
+  writeFile(repo, "docs/flights/x/state.json", JSON.stringify({ summarized: true, signing: "none" }) + "\n");
+  setState(repo, { summarized: false, archived: { slug: "x", dir: "docs/flights/x" } });
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-qm", "chore: post-archive state"]);
+  await withServer(repo, async ({ call }) => {
+    const r = await call("kukulu_pr_finalize", { breaking: false });
+    eq(r.signatures + "|" + r.awaitingSigning, "not required: signing is not configured|null", "finalize reads signing from the archived state");
+  }, opts);
+}
+
 for (const [verify, want] of [["err", 0], ["bad", 2]]) {
   const { repo, opts } = finalizeRepo({ signed: true });
   await withServer(repo, async ({ call }) => {

@@ -138,7 +138,7 @@ flowchart TD
     MCP -->|"kukulu_pr_finalize readies the PR, notes awaiting signing in"| SUMMARY
 ```
 
-Three tools have the MCP commit a stage's own output. `kukulu_plan_commit` validates the planner's four files together and commits them, so the planner never runs `git commit`. `kukulu_flight_archive` moves a summarized flight's artifacts into `docs/flights/<slug>/` and writes a fresh state. `kukulu_pr_finalize` is the last call of a flight: it checks the commits' signatures, marks the draft PR ready, and enables GitHub auto-merge (never a synchronous merge); when a commit is unsigned it leaves the PR a draft and appends an `## Awaiting signing` section to `docs/SUMMARY.md`.
+Three tools have the MCP commit a stage's own output. `kukulu_plan_commit` validates the planner's four files together and commits them, so the planner never runs `git commit`. `kukulu_flight_archive` moves a summarized flight's artifacts into `docs/flights/<slug>/` and writes a fresh state. `kukulu_pr_finalize` is the last call of a flight: it checks the commits' signatures, marks the draft PR ready, and enables GitHub auto-merge (never a synchronous merge); when a commit is unsigned and the policy expects signatures (`required`, or `auto` with signing configured) it leaves the PR a draft and appends an `## Awaiting signing` section to `docs/SUMMARY.md`.
 
 `docs/PROGRESS.md` has one writer, the MCP. That is why the guard hook can rely on it: the agent the hook guards cannot edit the file the hook counts open tasks in.
 

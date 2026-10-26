@@ -1206,6 +1206,35 @@ const stateOf = (repo) => JSON.parse(readFile(repo, ".kukulu/state.json"));
   });
 }
 
+// ---------------------------------------------------------------- the signing note (B-03)
+
+const NOTE_UNSIGNED = "Commits in this run are unsigned and kukulu_pr_finalize will not wait for signatures.";
+const NOTE_FALLBACK = "Commits from here on are unsigned; kukulu_pr_finalize will wait for signatures, so unlock the signing agent and call kukulu_run_start again to resume signing, or re-sign at the end.";
+
+{
+  const repo = plannedRepo({ config: { policies: { signing: "off" } } });
+  await withServer(repo, async ({ call }) => {
+    eq((await call("kukulu_run_start")).signingNote, NOTE_UNSIGNED, "run_start says commits are unsigned and finalize will not wait");
+  });
+}
+
+{
+  const repo = failingSignerRepo({ policies: { signing: "auto" } });
+  await withServer(repo, async ({ call }) => {
+    eq((await call("kukulu_run_start")).signingNote, NOTE_FALLBACK, "run_start says finalize will wait after a fallback");
+  });
+}
+
+{
+  const repo = plannedRepo();
+  git(repo, ["config", "--local", "--unset", "commit.gpgsign"]);
+  await withServer(repo, async ({ call }) => {
+    const r = await call("kukulu_run_start");
+    eq(r.signing, "on", "run_start has no signingNote when signing is on: signing is on");
+    ok(!("signingNote" in r), "...and there is no signingNote");
+  }, operatorSigning(mkFakeGpg()));
+}
+
 // ---------------------------------------------------------------- rollback
 
 function rejectCommitsStarting(repo, prefix) {

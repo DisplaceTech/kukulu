@@ -113,6 +113,22 @@ for (const missing of ["docs/PLAN.md", "docs/PROGRESS.md", "docs/kukulu.json"]) 
 
 // -------------------------------------------------------------- implement stage
 
+{
+  const note = "Commits in this run are unsigned and kukulu_pr_finalize will not wait for signatures.";
+  const repo = plannedRepo();
+  setState(repo, { signing: "none" });
+  await withServer(repo, async ({ call }) => {
+    const n = await call("kukulu_next");
+    ok(n.prompt.trimEnd().endsWith(note), "the Run policies sentence carries the signing note");
+  });
+  const on = plannedRepo();
+  setState(on, { signing: "on" });
+  await withServer(on, async ({ call }) => {
+    const n = await call("kukulu_next");
+    ok(!n.prompt.includes("kukulu_pr_finalize will"), "...and not when signing is on");
+  });
+}
+
 await withServer(plannedRepo(), async ({ call }) => {
   const s = await call("kukulu_status");
   eq(s.counts.total, 3, "status counts every task");
