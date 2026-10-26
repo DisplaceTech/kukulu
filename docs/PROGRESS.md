@@ -23,7 +23,7 @@ Started: 2026-10-26T21:19:36.125Z
 - [x] P2-04 The egress proxy, the bridge, and its overhead
 - [x] P2-05 containerArgs, the plan, the Containerfile, the fake docker and doctor
 - [x] P2-06 run and stop, and docs/sandbox.md
-- [ ] P2-07 Gate check 9 and the boundary in genesis
+- [x] P2-07 Gate check 9 and the boundary in genesis
 - [ ] P2-08 Commands run inside the boundary
 - [ ] P2-09 The enforcement level: known limits per level, the manifest and verifier check 11
 - [ ] P2-10 Signing under the boundary
@@ -137,3 +137,8 @@ Interpretation: doctor treats enforcement hook / missing sandbox.image as proble
 
 scripts/sandbox.mjs: run (async, all refusals in the specified order before anything starts, listeners + container, cleanup, SIGINT/SIGTERM stop) and stop. imagePresent now compares ids (doctor too). mkFakeDocker run writes runtime-listing.txt for the mid-run socket check. docs/sandbox.md completed (Running a flight, macOS, What an agent inside can/cannot do, worked local-only flight); operations.md env table. test/sandbox.mjs 120 assertions; verify green (4206).
 Interpretation: main returns a promise for run only; CLI awaits it.
+
+### P2-07 — 43a52f4
+
+server.mjs: inspectContainer, boundaryCheck, egressAudit; genesis records data.enforcement (+ boundary under container+proxy) and refuses with "clean-room genesis refused: boundary: ..." before writing; runGate check 9 boundary after routing (passing entry carries container id). Tests in test/sandbox.mjs (156). Fixture inspect.json gained an Id.
+Interpretation: the writable-mount set is project + /home/kukulu + /run/kukulu (containerArgs mounts the socket directory writable, so the task text "exactly project and home volume" cannot hold for a real container). Gate count is 9 under container+proxy, 8 otherwise.
