@@ -32,6 +32,63 @@ for (const [config, want, label] of [[{}, true, "config_show reports archive tru
   });
 }
 
+// ---------------------------------------------------------------- runners (A-01)
+
+const RUNNERS_OK = {
+  spark: { endpoint: "http://spark.example:8000", locality: "local", match: ["spark/"] },
+  "spark-big": { endpoint: "http://spark.example:8001", locality: "local", match: ["spark/big-"] },
+};
+const withRunners = async (obj, fn) => {
+  const repo = plannedRepo();
+  await withServer(repo, fn, { env: { KUKULU_CONFIG: writeGlobalConfig(cfgDir(), obj) } });
+};
+
+await withRunners({ runners: RUNNERS_OK }, async ({ call }) => {
+  const cfg = await call("kukulu_config_show");
+  eq(cfg.roles.planner.runner, "anthropic", "opus resolves to the built-in anthropic runner");
+  eq(cfg.roles.planner.endpoint, "https://api.anthropic.com", "...with the Anthropic endpoint");
+  eq(cfg.roles.planner.locality, "remote", "...and locality remote");
+  eq(cfg.roles.planner.source.runner, "builtin", "...from the builtin source");
+  ok(cfg.runners.spark && cfg.runners["spark-big"], "config_show returns the validated runners");
+});
+await withRunners({ runners: RUNNERS_OK, roles: { planner: { model: "claude-opus-5-5" } } }, async ({ call }) => {
+  eq((await call("kukulu_config_show")).roles.planner.runner, "anthropic", "a claude-* id resolves to the built-in runner");
+});
+await withRunners({ runners: RUNNERS_OK, roles: { implementer: { model: "spark/big-nemotron" }, reviewer: { model: "spark/small" }, summarizer: { model: "other/x" } } }, async ({ call }) => {
+  const cfg = await call("kukulu_config_show");
+  eq(cfg.roles.implementer.runner, "spark-big", "the longest match prefix wins");
+  eq(cfg.roles.implementer.endpoint, "http://spark.example:8001", "config_show reports each role's runner endpoint");
+  eq(cfg.roles.implementer.source.runner, "global", "config_show reports each role's runner with its source");
+  eq(cfg.roles.reviewer.runner, "spark", "a shorter prefix still matches its own models");
+  eq(cfg.roles.reviewer.locality, "local", "...with the runner's locality");
+  eq(cfg.roles.summarizer.runner, null, "an unmatched model resolves to runner null");
+  eq(cfg.roles.summarizer.locality, "unknown", "...with locality unknown");
+  eq(cfg.roles.summarizer.source.runner, "none", "...and source none");
+  const rows = cfg.table.split("\n");
+  eq(rows[0], "| role | agent | model | runner | effort | source |", "the routing table has a runner column after model");
+  like(rows[3], /\| spark-big \|/, "...naming the runner in a row");
+  like(rows[5], /\| other\/x \| – \|/, "...and – for an unmatched model");
+});
+
+const D = "sha256:" + "a".repeat(64);
+for (const [runners, re, label] of [
+  [{ "Bad_Name": { match: ["x/"] } }, /runners\.Bad_Name is not a runner name \(lowercase letters, digits and -, at most 40 characters\)/, "a bad runner name refuses"],
+  [{ anthropic: { match: ["x/"] } }, /runners\.anthropic is reserved for the built-in Anthropic runner/, "the reserved name anthropic refuses"],
+  [{ a: { colour: 1 } }, /runners\.a has an unknown key 'colour'/, "an unknown runner key refuses"],
+  [{ a: { endpoint: "http://h:1/v1" } }, /runners\.a\.endpoint must be http\(s\):\/\/host\[:port\] with no path, query or credentials \(got "http:\/\/h:1\/v1"\)/, "an endpoint with a path refuses"],
+  [{ a: { endpoint: "http://u:p@h:1" } }, /runners\.a\.endpoint must be http\(s\)/, "an endpoint with credentials refuses"],
+  [{ a: { locality: "near" } }, /runners\.a\.locality must be "local" or "remote"/, "a bad locality refuses"],
+  [{ a: { match: [] } }, /runners\.a\.match must be a non-empty array of model-string prefixes/, "an empty match list refuses"],
+  [{ a: { match: ["x/"] }, b: { match: ["x/"] } }, /runners\.a\.match and .*runners\.b\.match both name the prefix "x\/"; a prefix may belong to one runner/, "a duplicate match prefix refuses"],
+  [{ a: { identities: { "a/m": { weights: "sha256:abc" } } } }, /runners\.a\.identities\["a\/m"\]\.weights must be sha256:<64 hex>/, "a bad identity digest refuses"],
+  [{ a: { identities: { "a/m": { weights: D, image: "nope" } } } }, /identities\["a\/m"\]\.image must be sha256:<64 hex>/, "a bad image digest refuses"],
+  [[], /runners must be an object/, "a non-object runners refuses"],
+]) {
+  await withRunners({ runners }, async ({ call }) => {
+    isError(await call("kukulu_config_show"), re, label);
+  });
+}
+
 // ---------------------------------------------------------------- prTitle validation (C-01)
 
 for (const [value, got, label] of [

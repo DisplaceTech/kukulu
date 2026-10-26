@@ -4,6 +4,12 @@ All notable changes to this plugin. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Runners in the global config (`runners`), and each role's runner, endpoint and locality in `kukulu_config_show` and the routing table (G-01, A-01).
+
 ## [0.7.2] — 2026-10-26
 
 ### Changed

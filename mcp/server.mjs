@@ -981,7 +981,7 @@ const ROLE_KEYS = ["model", "effort"];
 const EFFORTS = ["low", "medium", "high", "xhigh", "max"];
 const ANTHROPIC_ALIASES = ["fable", "opus", "sonnet", "haiku", "inherit"];
 const PERMISSION_MODES = ["default", "acceptEdits", "auto", "dontAsk", "bypassPermissions", "plan", "manual"];
-const GLOBAL_KEYS = ["roles", "profiles", "profile", "permissionMode"];
+const GLOBAL_KEYS = ["roles", "profiles", "profile", "permissionMode", "runners"];
 
 const isAnthropicModel = (m) => ANTHROPIC_ALIASES.includes(m) || m.startsWith("claude-");
 
@@ -1080,6 +1080,89 @@ function validateRolesBlock(roles, where) {
   }
 }
 
+const RUNNER_KEYS = ["endpoint", "locality", "match", "identities"];
+const RUNNER_NAME = /^[a-z0-9][a-z0-9-]{0,39}$/;
+const DIGEST = /^sha256:[0-9a-f]{64}$/;
+const ANTHROPIC_ENDPOINT = "https://api.anthropic.com";
+
+/** `where` names the block itself, e.g. "global config <path> runners". Returns the map, `{}` when absent. */
+function validateRunners(runners, where) {
+  if (runners === undefined) return {};
+  if (typeof runners !== "object" || runners === null || Array.isArray(runners)) {
+    throw new ToolError(`${where} must be an object`);
+  }
+  const seen = new Map();
+  for (const [name, block] of Object.entries(runners)) {
+    if (!RUNNER_NAME.test(name)) {
+      throw new ToolError(`${where}.${name} is not a runner name (lowercase letters, digits and -, at most 40 characters)`);
+    }
+    if (name === "anthropic") throw new ToolError(`${where}.anthropic is reserved for the built-in Anthropic runner`);
+    if (typeof block !== "object" || block === null || Array.isArray(block)) {
+      throw new ToolError(`${where}.${name} must be an object`);
+    }
+    for (const [k, v] of Object.entries(block)) {
+      if (!RUNNER_KEYS.includes(k)) throw new ToolError(`${where}.${name} has an unknown key '${k}'`);
+      if (k === "endpoint") {
+        let u = null;
+        try { u = typeof v === "string" ? new URL(v) : null; } catch { u = null; }
+        const ok = u && (u.protocol === "http:" || u.protocol === "https:") && u.username === "" && u.password === ""
+          && (u.pathname === "" || u.pathname === "/") && u.search === "" && u.hash === "";
+        if (!ok) {
+          throw new ToolError(`${where}.${name}.endpoint must be http(s)://host[:port] with no path, query or credentials (got ${JSON.stringify(v)})`);
+        }
+      } else if (k === "locality") {
+        if (v !== "local" && v !== "remote") throw new ToolError(`${where}.${name}.locality must be "local" or "remote"`);
+      } else if (k === "match") {
+        if (!Array.isArray(v) || v.length === 0 || v.some((x) => typeof x !== "string" || !x)) {
+          throw new ToolError(`${where}.${name}.match must be a non-empty array of model-string prefixes`);
+        }
+        for (const prefix of v) {
+          if (seen.has(prefix) && seen.get(prefix) !== name) {
+            throw new ToolError(`${where}.${seen.get(prefix)}.match and ${where}.${name}.match both name the prefix ${JSON.stringify(prefix)}; a prefix may belong to one runner`);
+          }
+          seen.set(prefix, name);
+        }
+      } else if (k === "identities") {
+        if (typeof v !== "object" || v === null || Array.isArray(v)) {
+          throw new ToolError(`${where}.${name}.identities must be an object`);
+        }
+        for (const [model, id] of Object.entries(v)) {
+          if (typeof id !== "object" || id === null || Array.isArray(id)) {
+            throw new ToolError(`${where}.${name}.identities[${JSON.stringify(model)}] must be an object with weights and optional image`);
+          }
+          for (const [ik, iv] of Object.entries(id)) {
+            if (ik !== "weights" && ik !== "image") {
+              throw new ToolError(`${where}.${name}.identities[${JSON.stringify(model)}] has an unknown key '${ik}'`);
+            }
+            if (typeof iv !== "string" || !DIGEST.test(iv)) {
+              throw new ToolError(`${where}.${name}.identities[${JSON.stringify(model)}].${ik} must be sha256:<64 hex>`);
+            }
+          }
+          if (id.weights === undefined) {
+            throw new ToolError(`${where}.${name}.identities[${JSON.stringify(model)}].weights must be sha256:<64 hex>`);
+          }
+        }
+      }
+    }
+  }
+  return runners;
+}
+
+/** Which runner serves a model: the built-in one for Anthropic ids, else the longest configured match prefix. */
+function runnerFor(model, runners) {
+  if (isAnthropicModel(model)) return { runner: "anthropic", endpoint: ANTHROPIC_ENDPOINT, locality: "remote" };
+  let best = null;
+  let bestLen = -1;
+  for (const [name, r] of Object.entries(runners || {})) {
+    for (const prefix of r.match || []) {
+      if (model.startsWith(prefix) && prefix.length > bestLen) { best = name; bestLen = prefix.length; }
+    }
+  }
+  if (best === null) return { runner: null, endpoint: null, locality: "unknown" };
+  const r = runners[best];
+  return { runner: best, endpoint: r.endpoint ?? null, locality: r.locality ?? "unknown" };
+}
+
 /** `where` names the key itself, e.g. "global config <path> permissionMode". */
 function validatePermissionMode(mode, where) {
   if (mode === undefined) return;
@@ -1097,6 +1180,7 @@ function resolveRouting() {
   const global = loadGlobalConfig();
   validateRolesBlock(global.data.roles, `global config ${global.path} roles`);
   validatePermissionMode(global.data.permissionMode, `global config ${global.path} permissionMode`);
+  const runners = validateRunners(global.data.runners, `global config ${global.path} runners`);
   if (global.data.profiles !== undefined) {
     if (typeof global.data.profiles !== "object" || global.data.profiles === null || Array.isArray(global.data.profiles)) {
       throw new ToolError(`global config ${global.path} 'profiles' must be an object`);
@@ -1149,7 +1233,9 @@ function resolveRouting() {
       effortDropped[role] = effort;
       effort = undefined;
     }
-    roles[role] = { model, effort, source: { model: modelSource, effort: effortSource } };
+    const run = runnerFor(model, runners);
+    const runnerSource = run.runner === "anthropic" ? "builtin" : run.runner === null ? "none" : "global";
+    roles[role] = { model, effort, ...run, source: { model: modelSource, effort: effortSource, runner: runnerSource } };
   }
 
   let permissionMode = "acceptEdits";
@@ -1163,6 +1249,7 @@ function resolveRouting() {
     profile,
     profileSource,
     roles,
+    runners,
     permissionMode,
     permissionModeSource,
     effortDropped,
@@ -1197,9 +1284,9 @@ function routingTable(r) {
     const e = r.roles[role];
     const effort = e.effort !== undefined ? e.effort : "–";
     const source = e.source.model === e.source.effort ? e.source.model : `model:${e.source.model} effort:${e.source.effort}`;
-    return `| ${role} | kukulu-${role} | ${e.model} | ${effort} | ${source} |`;
+    return `| ${role} | kukulu-${role} | ${e.model} | ${e.runner ?? "–"} | ${effort} | ${source} |`;
   });
-  return ["| role | agent | model | effort | source |", "|---|---|---|---|---|", ...rows].join("\n");
+  return ["| role | agent | model | runner | effort | source |", "|---|---|---|---|---|---|", ...rows].join("\n");
 }
 
 /** Roles whose generated agent file currently exists on disk. */
@@ -1275,8 +1362,12 @@ function configShow() {
     permissionMode: r.permissionMode,
     permissionModeSource: r.permissionModeSource,
     roles: Object.fromEntries(
-      ROLES.map((role) => [role, { agent: `kukulu-${role}`, model: r.roles[role].model, effort: r.roles[role].effort, source: r.roles[role].source }]),
+      ROLES.map((role) => {
+        const e = r.roles[role];
+        return [role, { agent: `kukulu-${role}`, model: e.model, effort: e.effort, runner: e.runner, endpoint: e.endpoint, locality: e.locality, source: e.source }];
+      }),
     ),
+    runners: r.runners,
     effortDropped: r.effortDropped,
     agentsGenerated: generated,
     agentsStale: stale,

@@ -543,13 +543,13 @@ Generate `.claude/agents/kukulu-<role>.md` for each of the four roles from the m
 
 **Returns:** `{ dir, globalConfig, globalConfigPath, profile, profileSource, projectOverride, permissionMode, roles, effortDropped, changed, unchanged, permissions, restartRequired, exclude, table }`.
 
-- `roles`: `{ <role>: { agent, model, effort, source: { model, effort } } }` for all four roles; `source` is `default` | `global` | `profile:<name>` | `project`
+- `roles`: `{ <role>: { agent, model, effort, runner, endpoint, locality, source: { model, effort, runner } } }` for all four roles; `source.model` and `source.effort` are `default` | `global` | `profile:<name>` | `project`, and `source.runner` is `builtin` | `global` | `none` (see [routing.md](./routing.md#runners))
 - `effortDropped`: `{ <role>: <effort> }` for any role whose configured effort was dropped because its model is not an Anthropic one
 - `changed` / `unchanged`: role names written this call / left alone because their rendered content was already correct
 - `permissions`: `"added"` | `"present"` | `"failed: <why>"`, from the MCP allow rule step above
 - `restartRequired`: true only when this call populated the `.claude/agents` directory for the *first* time in this project and at least one changed role's model is not one the `Agent` tool can name directly. Claude Code hot-reloads a change to an already-populated agents directory within seconds, so every other case, including every later routing edit, needs no restart; `kukulu_next` falls back to the plugin's own agent with the resolved model in the meantime. See [routing.md](./routing.md).
 - `exclude`: `"added"` | `"present"` | `"skipped: not a git repository"`
-- `table`: the same information as a ready-to-print Markdown table
+- `table`: the same information as a ready-to-print Markdown table, `| role | agent | model | runner | effort | source |`, with `–` as the runner of a model no runner matches
 
 `/kukulu:go-flight` checks `restartRequired` and stops with a fixed message rather than spawning a stage against a model it cannot reach; see [operations.md](./operations.md#routing).
 
@@ -563,7 +563,7 @@ The merged routing config, read-only, with the source of every value.
 
 **Arguments:** none.
 
-**Returns:** `{ globalConfig, globalConfigPath, profile, profileSource, projectOverride, permissionMode, permissionModeSource, roles, effortDropped, agentsGenerated, agentsStale, permissionRule, archive, table }`. `archive` is the resolved `policies.archive` (default `true`).
+**Returns:** `{ globalConfig, globalConfigPath, profile, profileSource, projectOverride, permissionMode, permissionModeSource, roles, runners, effortDropped, agentsGenerated, agentsStale, permissionRule, archive, table }`. `roles[role]` has `runner`, `endpoint`, `locality` and `source.runner` as in `kukulu_agents_sync`, and `runners` is the validated `runners` map of the global file (`{}` when absent). `archive` is the resolved `policies.archive` (default `true`).
 
 `agentsGenerated` is the same field `kukulu_status` returns. `agentsStale` lists roles whose generated file exists but no longer matches what `kukulu_agents_sync` would write for the current config. `permissionRule` is `"present"` when either settings file already covers the MCP allow rule, else `"missing"`. This tool writes nothing, so both are reported, not fixed; only `kukulu_agents_sync` writes.
 

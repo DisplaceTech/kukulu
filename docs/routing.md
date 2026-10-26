@@ -76,6 +76,20 @@ A project can still override any role for itself, in `docs/kukulu.json`:
 
 Only the keys you name change; everything else keeps coming from the profile or the defaults. Run `kukulu_config_show` in any Kūkulu-enabled session to see the resolved table and where each value came from.
 
+## Runners
+
+A runner is a place a model is served from. Runners live in the global file under `runners`, because endpoints are facts about one person's machines. The template shows two:
+
+| Key | Type | Meaning |
+|---|---|---|
+| `runners.<name>` | object | `<name>` is a slug (`/^[a-z0-9][a-z0-9-]{0,39}$/`); `anthropic` is reserved and refused |
+| `.endpoint` | `http(s)://host[:port]` | Where the runner serves. A path, query or credentials in it are refused |
+| `.locality` | `"local"` or `"remote"` | Whether the endpoint is the operator's own hardware |
+| `.match` | non-empty array of strings | Prefixes of a role's model string. Two runners sharing a prefix are refused |
+| `.identities` | object | Optional. Exact model string to `{ weights, image? }`, each `sha256:<64 hex>` |
+
+Resolution: a role's model is served by the built-in `anthropic` runner (endpoint `https://api.anthropic.com`, locality `remote`) when it is an Anthropic alias or a `claude-*` id. Otherwise the configured runner whose `match` entry is the longest prefix of the model string wins. A model no runner matches resolves to runner `null`, endpoint `null` and locality `unknown`; `kukulu_config_show` and the routing table show runner `–` for it. A policy that requires a local runner fails closed on locality `unknown`.
+
 ## Routing through claude-code-router (v3)
 
 The model string Kūkulu writes reaches Claude Code unchanged, and Claude Code sends it to whatever `ANTHROPIC_BASE_URL` the session is running under. A `provider/model` string therefore only means something when the session is launched through a router that understands that syntax; plain Claude Code cannot do anything with `Ollama/qwen3.6:35b-a3b`. [claude-code-router](https://github.com/musistudio/claude-code-router) (CCR) is one such router. This section covers its current release line (v3.x, latest v3.1.1 as of this writing). All facts below are cited to CCR's own docs at [ccrdesk.top](https://ccrdesk.top/); read them yourself before relying on any of this in an unattended flight.
