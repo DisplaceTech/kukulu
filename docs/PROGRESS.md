@@ -14,7 +14,7 @@ Started: 2026-10-26T21:19:36.125Z
 - [x] P0-07 Phase 0 end: push and record the manual check
 - [x] P1-01 Control mode in the policy and the guard
 - [x] P1-02 Control mode in genesis, the manifest and the verifier
-- [ ] P1-03 The control bundle is the positive pair
+- [x] P1-03 The control bundle is the positive pair
 - [ ] P1-04 scripts/publish-bundle.mjs and docs/publishing.md
 - [ ] P1-05 Phase 1 end: push and record the manual check
 - [ ] P2-01 The policy's enforcement, sandbox and package keys, and the local-only template
@@ -91,3 +91,8 @@ Interpretation: exemption reads-only; a path is control only if every canonical 
 
 Genesis data.mode = policy.mode (+ control.priorArt for control flights); attest manifest mode from genesis; kukulu_attest runs verifier with --expect <genesis mode>. Verifier: verifyBundle {key, expect}, returns mode; check 7 new reasons; CLI --expect, exit 3 + CONTROL (positive); --json carries mode. buildBundle opts.mode now sets manifest mode too. Tests: attest 243, cleanroom 1184; verify green.
 Interpretation: --expect control-positive on a passing control bundle prints PASS exit 0; old check-7 reason text replaced.
+
+### P1-03 — ea67e3f
+
+validateSimilarity/normalizeSimilarity: control key on the positive pair only; verifyControlBundle() runs the bundle's verify.mjs --expect control-positive --json then compares the left side HEAD with manifest repo.head, before readSide; similarity.json config.pairs positive gets control {manifest, head, fingerprint}. buildBundle opts.head. Tests in test/cleanroom.mjs (1194). Docs operations/mcp-tools/CHANGELOG. Verify green.
+Interpretation: left "subject" means project root for rev-parse; missing verify.mjs refusal wording added.
