@@ -11,7 +11,7 @@ Started: 2026-10-26T21:19:36.125Z
 - [x] P0-04 Tune MODEL_FAMILIES against the recorded routing strings
 - [x] P0-05 scripts/model-identity.mjs and the bundles suite
 - [x] P0-06 The manifest records each role's identity
-- [ ] P0-07 Phase 0 end: push and record the manual check
+- [x] P0-07 Phase 0 end: push and record the manual check
 - [ ] P1-01 Control mode in the policy and the guard
 - [ ] P1-02 Control mode in genesis, the manifest and the verifier
 - [ ] P1-03 The control bundle is the positive pair
@@ -76,3 +76,8 @@ scripts/model-identity.mjs (exports identityOf, main; CLI only as entry), fixtur
 ### P0-06 — 837f6d0
 
 attest() manifest gains roles after genesis (genesis.data.roles each plus assurance configuration, null when absent). Tests in test/attest.mjs (224 pass). Interpretation: the null-roles case is not testable through the server (log edits break the chain), so it is covered by reading. Docs updated. Verify green.
+
+### P0-07 — ca9b149
+
+Push: pushed build branch to origin. Empty phase-end commit.
+Manual check: NOT VERIFIED (human): with the owner's real global file holding the Spark and Mac runners, kukulu_config_show reports each role's runner; a throwaway clean-room flight with runners.locality "local" and the default routing refuses at its first kukulu_next; with profile B routing it writes a genesis whose roles name both runners and the Spark model's measured weights digest from scripts/model-identity.mjs run on the Spark.
