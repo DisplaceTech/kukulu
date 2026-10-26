@@ -7,7 +7,7 @@ Started: 2026-10-26T21:19:36.125Z
 
 - [x] P0-01 Runners in the global file, and each role's runner in the routing
 - [x] P0-02 The policy's runner and role keys, and the model-family table
-- [ ] P0-03 Gate check 8 and genesis record the roles
+- [x] P0-03 Gate check 8 and genesis record the roles
 - [ ] P0-04 Tune MODEL_FAMILIES against the recorded routing strings
 - [ ] P0-05 scripts/model-identity.mjs and the bundles suite
 - [ ] P0-06 The manifest records each role's identity
@@ -58,3 +58,9 @@ Separate chore commit c05c6a7: mcp/cleanroom.mjs LOCK_WAIT_MS = 2000 tripped the
 ### P0-02 — 188506d
 
 loadPolicy returns runners {allow,locality} and roles {distinct} with defaults null/any/none; exports normalizeModel, MODEL_FAMILIES (assumption data, only in cleanroom.mjs), familyOf. Fixture test/fixtures/families.json (16 entries). docs/cleanroom.md rows, CHANGELOG line. Tests in test/cleanroom.mjs (1125 pass), full verify green.
+
+### P0-03 — 2f52b07
+
+rolesRecord/routingCheck added in server.mjs; cleanroomGenesis runs parts 2-4 before key/writes and records data.roles and data.distinct; runGate check 8 routing (genesis roles from chain.entries[0].data.roles; skipped when absent). Gate counts now 8 in tests/docs. Tests: test/cleanroom.mjs (1150 pass), full verify green.
+Interpretation: first failing role in role order named in each reason.
+Note: hand-built gate entries in harness/attest tests still say checks: 7; harmless.
