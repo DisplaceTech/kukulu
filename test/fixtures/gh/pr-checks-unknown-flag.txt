@@ -1,0 +1,3 @@
+unknown flag: --json
+
+Usage:  gh pr checks [<number> | <url> | <branch>] [flags]

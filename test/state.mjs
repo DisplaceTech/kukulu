@@ -638,7 +638,7 @@ for (const [config, re, label] of [
   };
   const ghWith = (list, exit) => {
     const dir = mkFakeGhBin();
-    writeFile(dir, "pr.json", '{"url":"https://github.invalid/pull/1","state":"OPEN","isDraft":true,"baseRefName":"main"}\n');
+    writeFile(dir, "pr.json", '{"url":"https://github.invalid/pull/1","state":"OPEN","isDraft":true,"baseRefName":"main","headRefOid":"0123456789abcdef0123456789abcdef01234567"}\n');
     if (list !== undefined) writeFile(dir, "checks.json", typeof list === "string" ? list : JSON.stringify(list));
     if (exit !== undefined) writeFile(dir, "checks-exit", String(exit));
     return dir;
@@ -654,6 +654,32 @@ for (const [config, re, label] of [
   eq((await checks(withOrigin(), ghEnv(ghWith([{ name: "slow", state: "IN_PROGRESS", link: "u" }], 8)))).state, "pending", "...pending");
   eq(JSON.stringify(await checks(withOrigin(), ghEnv(ghWith([])))), JSON.stringify({ state: "none", failing: [] }), "...none for an empty list");
   like(await checks(withOrigin(), ghEnv(ghWith("no checks reported", 1))), /^unknown: /, "...unknown when gh pr checks prints no JSON");
+
+  {
+    // An older gh (2.45.0) has no `pr checks --json`; the REST API answers instead (D-01). Bodies come from recorded fixtures.
+    const fx = (name) => fs.readFileSync(path.join(ROOT, "test", "fixtures", "gh", name), "utf8");
+    const runsAll = JSON.parse(fx("check-runs.json"));
+    const statusAll = JSON.parse(fx("status.json"));
+    const apiGh = (runs, statuses) => {
+      const dir = ghWith(undefined, 1);
+      writeFile(dir, "checks-stderr", fx("pr-checks-unknown-flag.txt"));
+      writeFile(dir, "api-check-runs.json", JSON.stringify({ ...runsAll, check_runs: runs }));
+      writeFile(dir, "api-status.json", JSON.stringify({ ...statusAll, statuses }));
+      return dir;
+    };
+    const named = (list, names) => list.filter((x) => names.includes(x.name ?? x.context));
+    const fail = await checks(withOrigin(), ghEnv(apiGh(runsAll.check_runs, statusAll.statuses)));
+    eq(fail.state + "|" + fail.via, "fail|gh api", "prChecks falls back to gh api and reports a failure");
+    eq(fail.failing.map((f) => `${f.name} ${f.link}`).sort().join(","), ["failure", "cancelled", "timed_out", "action_required", "startup_failure"].map((c) => `run-${c} https://ci.invalid/run-${c}`).concat(["failure", "error"].map((c) => `status-${c} https://ci.invalid/status-${c}`)).sort().join(","), "...failing names and links exactly the failing runs and statuses");
+    const pass = await checks(withOrigin(), ghEnv(apiGh(named(runsAll.check_runs, ["run-success", "run-neutral", "run-skipped"]), named(statusAll.statuses, ["status-success"]))));
+    eq(JSON.stringify(pass), JSON.stringify({ state: "pass", failing: [], via: "gh api" }), "...reports pass");
+    const pending = await checks(withOrigin(), ghEnv(apiGh(named(runsAll.check_runs, ["run-success", "run-in_progress"]), named(statusAll.statuses, ["status-success", "status-pending"]))));
+    eq(pending.state, "pending", "...reports pending");
+    eq((await checks(withOrigin(), ghEnv(apiGh([], [])))).state, "none", "...reports none");
+    const broken = apiGh(runsAll.check_runs, statusAll.statuses);
+    writeFile(broken, "api-fails", "HTTP 502: bad gateway\nsecond line\n");
+    eq(await checks(withOrigin(), ghEnv(broken)), "unknown: HTTP 502: bad gateway", "a failing gh api call is unknown");
+  }
 
   {
     // A gh that never answers `pr view` must not hang the synchronous server: the 30 s bound turns it into unknown.

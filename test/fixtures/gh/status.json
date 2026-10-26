@@ -1,0 +1,25 @@
+{
+ "state": "failure",
+ "statuses": [
+  {
+   "context": "status-success",
+   "state": "success",
+   "target_url": "https://ci.invalid/status-success"
+  },
+  {
+   "context": "status-failure",
+   "state": "failure",
+   "target_url": "https://ci.invalid/status-failure"
+  },
+  {
+   "context": "status-error",
+   "state": "error",
+   "target_url": "https://ci.invalid/status-error"
+  },
+  {
+   "context": "status-pending",
+   "state": "pending",
+   "target_url": "https://ci.invalid/status-pending"
+  }
+ ]
+}

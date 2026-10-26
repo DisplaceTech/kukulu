@@ -3887,6 +3887,45 @@ const CHECKS_FAIL = ["FAILURE", "ERROR", "CANCELLED", "TIMED_OUT", "ACTION_REQUI
 const CHECKS_PENDING = ["PENDING", "QUEUED", "IN_PROGRESS", "WAITING", "REQUESTED", "EXPECTED"];
 const CHECKS_TIMEOUT_MS = 30000;
 
+/** One bounded gh call for the REST fallback: `{ json }` or `{ why }`, never a throw. */
+function ghJson(args) {
+  const r = spawnSync("gh", args, { cwd: ROOT, encoding: "utf8", timeout: CHECKS_TIMEOUT_MS });
+  if (r.error) return { why: r.error.code === "ETIMEDOUT" ? `gh ${args[0]} timed out after ${CHECKS_TIMEOUT_MS} ms` : r.error.message };
+  if (r.status !== 0) return { why: (r.stderr || r.stdout || "").trim().split("\n")[0] || `gh ${args[0]} failed` };
+  try {
+    return { json: JSON.parse(r.stdout) };
+  } catch {
+    return { why: (r.stdout || "").trim().split("\n")[0] || `gh ${args[0]} printed no JSON` };
+  }
+}
+
+/** prChecks for a gh without `pr checks --json`: the head commit's check runs and statuses, in the same shape plus `via` (SPEC D-01). */
+function prChecksViaApi() {
+  const head = ghJson(["pr", "view", "--json", "headRefOid"]);
+  if (head.why) return `unknown: ${head.why}`;
+  const sha = head.json?.headRefOid;
+  if (typeof sha !== "string" || !sha) return "unknown: gh pr view printed no headRefOid";
+  const runs = ghJson(["api", `repos/{owner}/{repo}/commits/${sha}/check-runs?per_page=100`]);
+  if (runs.why) return `unknown: ${runs.why}`;
+  const statuses = ghJson(["api", `repos/{owner}/{repo}/commits/${sha}/status`]);
+  if (statuses.why) return `unknown: ${statuses.why}`;
+  const runFails = new Set(["failure", "cancelled", "timed_out", "action_required", "startup_failure"]);
+  const entries = [
+    ...(Array.isArray(runs.json?.check_runs) ? runs.json.check_runs : []).map((c) => ({
+      name: c.name, link: c.html_url, fail: c.status === "completed" && runFails.has(c.conclusion), pending: c.status !== "completed",
+    })),
+    ...(Array.isArray(statuses.json?.statuses) ? statuses.json.statuses : []).map((c) => ({
+      name: c.context, link: c.target_url, fail: c.state === "failure" || c.state === "error", pending: c.state === "pending",
+    })),
+  ];
+  const failing = entries.filter((e) => e.fail).map((e) => ({ name: e.name, link: e.link }));
+  let state = "pass";
+  if (!entries.length) state = "none";
+  else if (failing.length) state = "fail";
+  else if (entries.some((e) => e.pending)) state = "pending";
+  return { state, failing, via: "gh api" };
+}
+
 /**
  * The pull request's CI checks for `kukulu_status`: `null` when there is
  * nothing to ask (no origin, no gh, no pull request), else
@@ -3906,6 +3945,8 @@ function prChecks() {
   }
   const r = spawnSync("gh", ["pr", "checks", "--json", "name,state,link"], { cwd: ROOT, encoding: "utf8", timeout: CHECKS_TIMEOUT_MS });
   if (r.error) return `unknown: gh pr checks failed: ${r.error.code === "ETIMEDOUT" ? `timed out after ${CHECKS_TIMEOUT_MS} ms` : r.error.message}`;
+  // gh 2.45.0 has no --json on `pr checks`; the REST API answers the same question.
+  if (r.status !== 0 && /unknown flag:? --json/i.test(r.stderr || "")) return prChecksViaApi();
   let list;
   try {
     list = JSON.parse(r.stdout);
