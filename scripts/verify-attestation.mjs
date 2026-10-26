@@ -4,7 +4,7 @@
 // chain and signature code duplicates mcp/cleanroom.mjs on purpose: a bundle must
 // be checkable by someone who does not trust, or even have, the plugin.
 //
-//   node verify-attestation.mjs <bundle-dir> [--key sha256:<hex>] [--json]
+//   node verify-attestation.mjs <bundle-dir> [--key sha256:<hex>] [--expect clean-room|control-positive] [--json]
 //   node verify-attestation.mjs --legacy-log <file> --roots a,b --words a,b [--repo path] [--json]
 
 import { createHash, createPublicKey, verify } from "node:crypto";
@@ -71,11 +71,11 @@ const fingerprintOf = (publicKey) => `sha256:${sha256(publicKey.export({ type: "
 const readIfExists = (file) => (fs.existsSync(file) ? fs.readFileSync(file) : null);
 
 /**
- * Verify the bundle in `dir`. Returns `{ ok, reasons, notes, checks }`: every
+ * Verify the bundle in `dir`. Returns `{ ok, mode, reasons, notes, checks }` (`mode` is the genesis's): every
  * failure is a reason `{ check, reason }`, not only the first, and `checks` maps
  * each check that ran to whether it passed.
  */
-export function verifyBundle(dir, { key = null } = {}) {
+export function verifyBundle(dir, { key = null, expect = null } = {}) {
   const reasons = [];
   const notes = [];
   const checks = {};
@@ -229,7 +229,12 @@ export function verifyBundle(dir, { key = null } = {}) {
   // 7. the mode: clean-room from the genesis on, and no gate ever failed on it
   if (notChecked("mode")) {
     const genesis = entries.find((e) => e.kind === "genesis");
-    if (genesis?.data?.mode !== "clean-room") fail("mode", `the genesis records mode ${JSON.stringify(genesis?.data?.mode ?? null)}, not "clean-room"`);
+    const gm = genesis?.data?.mode;
+    if (gm !== "clean-room" && gm !== "control-positive") fail("mode", `the genesis records mode ${JSON.stringify(gm ?? null)}, which is neither "clean-room" nor "control-positive"`);
+    else {
+      if (manifest?.mode !== gm) fail("mode", `the manifest says ${manifest?.mode}, but the genesis records ${gm}`);
+      if (expect && gm !== expect) fail("mode", `the bundle is ${gm}, expected ${expect}`);
+    }
     for (const e of entries) {
       if (e.kind === "gate" && e.data?.failed === "mode") fail("mode", `entry ${e.seq}: a gate failed the mode check${e.data.reason ? `: ${e.data.reason}` : ""}`);
     }
@@ -298,7 +303,8 @@ export function verifyBundle(dir, { key = null } = {}) {
     else if (sha256(bytes) !== manifest.similarity.sha256) fail("similarity", "similarity.json does not hash to the manifest's similarity.sha256");
   }
 
-  return { ok: reasons.length === 0, reasons, notes, checks };
+  const genesisMode = entries.find((e) => e.kind === "genesis")?.data?.mode;
+  return { ok: reasons.length === 0, mode: typeof genesisMode === "string" ? genesisMode : null, reasons, notes, checks };
 }
 
 // ---------------------------------------------------------------- pre-0.6.0 tool logs
@@ -415,13 +421,13 @@ function printLegacy(file, r) {
 
 function main(argv) {
   const args = argv.slice(2);
-  const usage = "usage: node verify-attestation.mjs <bundle-dir> [--key sha256:<hex>] [--json]\n       node verify-attestation.mjs --legacy-log <file> --roots <a,b> --words <a,b> [--repo <path>] [--json]\n";
+  const usage = "usage: node verify-attestation.mjs <bundle-dir> [--key sha256:<hex>] [--expect clean-room|control-positive] [--json]\n       node verify-attestation.mjs --legacy-log <file> --roots <a,b> --words <a,b> [--repo <path>] [--json]\n";
   let json = false;
   let key = null;
   let legacy = null;
   const legacyOpts = {};
   const positional = [];
-  const wants = { "--key": "key", "--legacy-log": "legacy", "--roots": "roots", "--words": "words", "--repo": "repo" };
+  const wants = { "--key": "key", "--expect": "expect", "--legacy-log": "legacy", "--roots": "roots", "--words": "words", "--repo": "repo" };
   const given = {};
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--json") json = true;
@@ -467,6 +473,10 @@ function main(argv) {
     else printLegacy(legacy, result);
     return result.failed.length ? 1 : 0;
   }
+  if (given.expect !== undefined && given.expect !== "clean-room" && given.expect !== "control-positive") {
+    process.stderr.write("verify-attestation: --expect takes clean-room or control-positive\n" + usage);
+    return 2;
+  }
   if (given.roots || given.words || given.repo) {
     process.stderr.write("verify-attestation: --roots, --words and --repo belong to --legacy-log\n" + usage);
     return 2;
@@ -475,15 +485,17 @@ function main(argv) {
     process.stderr.write(usage);
     return 2;
   }
-  const result = verifyBundle(path.resolve(positional[0]), { key });
+  const result = verifyBundle(path.resolve(positional[0]), { key, expect: given.expect ?? null });
+  // A control bundle that passes is not a clean-room pass: it exits 3 unless the caller said it expected a control bundle.
+  const passCode = result.ok && result.mode === "control-positive" && given.expect !== "control-positive" ? 3 : 0;
   if (json) {
     process.stdout.write(JSON.stringify(result) + "\n");
-    return result.ok ? 0 : 1;
+    return result.ok ? passCode : 1;
   }
   for (const r of result.reasons) process.stdout.write("verify-attestation: " + r.check + ": " + r.reason + "\n");
   for (const n of result.notes) process.stdout.write("verify-attestation: note: " + n + "\n");
-  process.stdout.write(result.ok ? "verify-attestation: PASS\n" : "verify-attestation: FAIL (" + result.reasons.length + " reason" + (result.reasons.length === 1 ? "" : "s") + ")\n");
-  return result.ok ? 0 : 1;
+  process.stdout.write(!result.ok ? "verify-attestation: FAIL (" + result.reasons.length + " reason" + (result.reasons.length === 1 ? "" : "s") + ")\n" : passCode === 3 ? "verify-attestation: CONTROL (positive)\n" : "verify-attestation: PASS\n");
+  return result.ok ? passCode : 1;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) process.exit(main(process.argv));

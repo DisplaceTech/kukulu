@@ -1264,6 +1264,27 @@ const gateCheck = (reason) => (reason.match(/^clean-room gate failed: ([\w-]+):/
   }
 }
 
+// ---------------------------------------------------------------- control mode in genesis (P1-02)
+
+{
+  const policy = JSON.stringify({ ...JSON.parse(EXAMPLE), mode: "control-positive", control: { priorArt: ["vendor/"] } });
+  const repo = cleanroomRepo({ policy });
+  await live(repo, async ({ call }) => {
+    const n = await call("kukulu_next");
+    eq(n.gate.ok, true, "a control-positive policy passes gate check 1 at genesis");
+    const g = logOf(repo).find((e) => e.kind === "genesis");
+    eq(g.data.mode, "control-positive", "...the genesis records mode control-positive");
+    eq(JSON.stringify(g.data.control), '{"priorArt":["vendor/"]}', "...and control.priorArt as written");
+    ok((await call("kukulu_next")).gate.ok, "...and the next gate passes too");
+  });
+  const plain = cleanroomRepo();
+  await live(plain, async ({ call }) => {
+    await call("kukulu_next");
+    const g = logOf(plain).find((e) => e.kind === "genesis");
+    eq(g.data.mode + "|" + ("control" in g.data), "clean-room|false", "a clean-room genesis records mode clean-room and no control");
+  });
+}
+
 // ---------------------------------------------------------------- gate liveness
 
 {

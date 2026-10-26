@@ -192,7 +192,7 @@ function cleanroomGenesis(cc, st) {
       kind: "genesis",
       stage: "controller",
       role: "session",
-      data: { mode: "clean-room", policyHash: policyHash(policyBytes), ...hashes, pluginVersion: VERSION, keyFingerprint: key.fingerprint, baseBranch: cc.baseBranch, head, roles, distinct: policy.roles.distinct },
+      data: { mode: policy.mode, policyHash: policyHash(policyBytes), ...hashes, pluginVersion: VERSION, keyFingerprint: key.fingerprint, baseBranch: cc.baseBranch, head, roles, distinct: policy.roles.distinct, ...(policy.mode === "control-positive" ? { control: { priorArt: policy.control.priorArt } } : {}) },
     });
     st.cleanroom = { genesis: entry.hash, policyHash: policyHash(policyBytes), ...hashes };
     saveState(st);
@@ -3712,7 +3712,7 @@ function attest({ evidence } = {}) {
     flight: cc.flight ?? gitFacts().branch,
     plugin: { version: VERSION, ...hashes, verifierHash: sha256Hex(verifierBytes) },
     repo: { baseBranch: cc.baseBranch, base, head, branch: gitFacts().branch },
-    mode: "clean-room",
+    mode: genesis.data?.mode ?? "clean-room",
     genesis,
     // A flight that began on 0.7.x has no roles in its genesis. "configuration" is the weakest assurance: the roles are what the routing said, not what a runner reported or the proxy saw.
     roles: genesis.data?.roles ? Object.fromEntries(ROLES.map((role) => [role, { ...genesis.data.roles[role], assurance: "configuration" }])) : null,
@@ -3748,7 +3748,7 @@ function attest({ evidence } = {}) {
         fs.writeFileSync(path.join(dir, name), bytes);
       }
       // The verifier that ships in the bundle checks the bundle before anything is committed.
-      const run = spawnSync(process.execPath, [path.join(dir, "verify.mjs"), dir, "--key", key.fingerprint, "--json"], { encoding: "utf8", timeout: GATE_SELF_TEST_MS });
+      const run = spawnSync(process.execPath, [path.join(dir, "verify.mjs"), dir, "--key", key.fingerprint, "--expect", genesis.data?.mode ?? "clean-room", "--json"], { encoding: "utf8", timeout: GATE_SELF_TEST_MS });
       let verdict;
       try {
         verdict = JSON.parse(run.stdout);

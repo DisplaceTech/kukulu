@@ -78,7 +78,8 @@ A positive-control flight (`"mode": "control-positive"`) is the same flight with
 - **What stays the same.** The protected set, every write rule, `deny.tools`, the network rules and `commandPatterns` apply exactly as in a clean-room flight, and a write to a prior-art path is still denied by `deny.paths`.
 - **What differs.** A read-family tool or a path-like Bash read operand that equals or lies under a `control.priorArt` path is exempt from `deny.paths`, `deny.pathPatterns` and `deny.words`. In clean-room mode the list is empty and nothing changes.
 
-The genesis, gate, manifest and verifier parts of control mode are described where those are (the verifier exits 3 and prints `CONTROL (positive)`).
+- **The record.** The genesis entry's `mode` is `control-positive` and its `control.priorArt` repeats the policy's list; the manifest's `mode` equals it. Gate check 1 (`mode`) passes a control flight.
+- **The verdict.** The offline verifier never reports a control bundle as a clean-room pass. A passing control bundle prints `verify-attestation: CONTROL (positive)` as its last line and exits 3. `--expect control-positive` says the caller wants a control bundle, and then the same bundle prints `PASS` and exits 0; `--expect clean-room` makes a control bundle fail check 7 (`mode: the bundle is control-positive, expected clean-room`). `kukulu_attest` runs its own verifier with `--expect` set to the genesis's mode, so a control bundle's own check exits 0.
 
 ## The log
 
@@ -186,10 +187,10 @@ The manifest's fields, in the order it writes them:
 ## Verifying offline
 
 ```text
-node docs/attestation/verify.mjs docs/attestation --key sha256:<fingerprint>
+node docs/attestation/verify.mjs docs/attestation --key sha256:<fingerprint> [--expect clean-room|control-positive]
 ```
 
-`--key` is the signer's fingerprint, which you got from the publisher by some other route than the bundle (the bundle can carry any key it likes). Without it the bundle is only self-consistent, and the report says so with `verify-attestation: note: signer: self-consistent, fingerprint not checked against an out-of-band value`. `--json` prints the result as one object (`ok`, `reasons`, `notes`, `checks`) instead of text. Exit status is 0 for a pass, 1 for a failure and 2 for a usage error. The verifier needs Node 22 or later, nothing else: no network, no git, no packages. The copy in the bundle and `scripts/verify-attestation.mjs` are the same file.
+`--key` is the signer's fingerprint, which you got from the publisher by some other route than the bundle (the bundle can carry any key it likes). Without it the bundle is only self-consistent, and the report says so with `verify-attestation: note: signer: self-consistent, fingerprint not checked against an out-of-band value`. `--json` prints the result as one object (`ok`, `mode`, `reasons`, `notes`, `checks`) instead of text. `--expect` names the mode the bundle must have. Exit status is 0 for a pass, 1 for a failure, 2 for a usage error and 3 for a passing control bundle (`CONTROL (positive)`, see [Control mode](#control-mode)) when `--expect control-positive` was not given. The verifier needs Node 22 or later, nothing else: no network, no git, no packages. The copy in the bundle and `scripts/verify-attestation.mjs` are the same file.
 
 It runs ten checks in order and reports every failure, not only the first:
 
@@ -199,7 +200,7 @@ It runs ten checks in order and reports every failure, not only the first:
 4. `checkpoints`: every checkpoint verifies with `publisher.pub`, those the manifest names exist with that signature, and the genesis equals `manifest.genesis`.
 5. `policy`: every checkpoint's policy hash is in `policy.hashes`, `policy.json` hashes to `policy.current`, and a change of policy between checkpoints is reported as `policy changed at seq <n>` (a note, not a failure).
 6. `guard`: every checkpoint saw the guard, logger and hooks that the manifest names.
-7. `mode`: the genesis is `clean-room` and no gate failed the mode check.
+7. `mode`: the genesis records `clean-room` or `control-positive`, the manifest's `mode` equals it, no gate failed the mode check, and with `--expect` the mode is the expected one.
 8. `denials`: the denial and verdict counts, recounted from the log.
 9. `coverage`: the gaps, recomputed and printed.
 10. `similarity`: `similarity.json` hashes to the manifest's value, when there is one.

@@ -37,7 +37,7 @@ const logLines = (dir) => fs.readFileSync(path.join(dir, "log.jsonl"), "utf8").s
   like(wrong.stdout, /verify-attestation: FAIL \(1 reason\)\n$/, "...and counting one reason");
   const j = run(b.dir, "--json");
   const parsed = JSON.parse(j.stdout);
-  eq(j.stdout.trim().split("\n").length + "|" + parsed.ok + "|" + Object.keys(parsed).sort().join(","), "1|true|checks,notes,ok,reasons", "--json prints one object");
+  eq(j.stdout.trim().split("\n").length + "|" + parsed.ok + "|" + Object.keys(parsed).sort().join(","), "1|true|checks,mode,notes,ok,reasons", "--json prints one object");
   eq(Object.keys(parsed.checks).join(","), "manifest,signature,chain,checkpoints,policy,guard,mode,denials,coverage,similarity", "...with a result for each of the ten checks");
   eq(run(b.dir, "--json").status, 0, "...and exits 0 on a pass");
   const bad = JSON.parse(run(b.dir, "--json", "--key", "sha256:" + "1".repeat(64)).stdout);
@@ -262,7 +262,44 @@ const logLines = (dir) => fs.readFileSync(path.join(dir, "log.jsonl"), "utf8").s
   const other = fresh({ extra: (log) => CR.appendEntry(log, { kind: "gate", stage: "controller", role: "session", data: { failed: "chain", reason: "x" } }) });
   ok(V.verifyBundle(other.dir).ok, "a gate that failed on another check does not fail check 7");
   const general = fresh({ mode: "general" });
-  eq(JSON.stringify(reasons(general.dir)), JSON.stringify(['mode: the genesis records mode "general", not "clean-room"']), "a genesis that is not clean-room fails check 7");
+  eq(JSON.stringify(reasons(general.dir)), JSON.stringify(['mode: the genesis records mode "general", which is neither "clean-room" nor "control-positive"']), "a genesis that is neither mode fails check 7");
+}
+
+// ---------------------------------------------------------------- control mode (P1-02)
+
+{
+  const c = fresh({ mode: "control-positive" });
+  const r = run(c.dir);
+  eq(r.status, 3, "a control bundle exits 3");
+  eq(r.stdout.trimEnd().split("\n").at(-1), "verify-attestation: CONTROL (positive)", "...with CONTROL (positive) as the last line");
+  const expected = run(c.dir, "--expect", "control-positive");
+  eq(expected.status, 0, "...and 0 with --expect control-positive");
+  eq(expected.stdout.trimEnd().split("\n").at(-1), "verify-attestation: PASS", "...printing PASS");
+  const wrong = run(c.dir, "--expect", "clean-room");
+  eq(wrong.status, 1, "a control bundle expected to be clean-room fails");
+  like(wrong.stdout, /mode: the bundle is control-positive, expected clean-room/, "...naming both modes");
+  const clean = fresh();
+  const mismatch = run(clean.dir, "--expect", "control-positive");
+  eq(mismatch.status, 1, "a clean-room bundle with --expect control-positive fails");
+  like(mismatch.stdout, /mode: the bundle is clean-room, expected control-positive/, "...with the mode reason");
+  eq(run(clean.dir, "--expect", "clean-room").status, 0, "a clean-room bundle with --expect clean-room passes");
+  eq(JSON.parse(run(c.dir, "--json").stdout).mode + "|" + run(c.dir, "--json").status, "control-positive|3", "--json carries mode and uses exit 3 for a control bundle");
+  eq(JSON.parse(run(clean.dir, "--json").stdout).mode, "clean-room", "...and clean-room for a clean-room bundle");
+  const bad = run(clean.dir, "--expect", "other");
+  eq(bad.status, 2, "a bad --expect is a usage error");
+  like(bad.stderr, /--expect takes clean-room or control-positive/, "...saying what it takes");
+  eq(run(clean.dir, "--expect").status, 2, "--expect without a value is a usage error");
+  rewriteManifest(c.dir, c.key, (m) => { m.mode = "clean-room"; });
+  const edited = run(c.dir);
+  eq(edited.status, 1, "a control bundle whose manifest says clean-room fails");
+  like(edited.stdout, /mode: the manifest says clean-room, but the genesis records control-positive/, "...on mode");
+  const unsigned = fresh({ mode: "control-positive" });
+  const mp = path.join(unsigned.dir, "manifest.json");
+  fs.writeFileSync(mp, fs.readFileSync(mp, "utf8").replace('"mode": "control-positive"', '"mode": "clean-room"'));
+  const tampered = run(unsigned.dir);
+  eq(tampered.status, 1, "a manifest edited without re-signing fails");
+  like(tampered.stdout, /signature: manifest\.sig does not verify/, "...on signature");
+  like(tampered.stdout, /mode: the manifest says clean-room/, "...and on mode");
 }
 
 // ---------------------------------------------------------------- check 8: the denials
