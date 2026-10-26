@@ -6,10 +6,14 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { finish, ok, eq, like, ROOT, cleanroomRepo, plannedRepo, setState, startServer, withServer } from "./harness.mjs";
-import { startControllerSocket, startLogSocket, main as sandboxMain } from "../scripts/sandbox.mjs";
-import { readEntries, verifyChain } from "../mcp/cleanroom.mjs";
+import net from "node:net";
+import { startControllerSocket, startLogSocket, startProxy, egressDecision, hostPortOf, main as sandboxMain } from "../scripts/sandbox.mjs";
+import { startBridge } from "../scripts/sandbox-entry.mjs";
+import { readEntries, verifyChain, loadPolicy, lockdownActive } from "../mcp/cleanroom.mjs";
 
 // A Unix socket path is limited to about 100 bytes on macOS, so sockets live under a short temp directory.
+/** The host:port a URL names, as the sandbox derives a runner endpoint. */
+const hostPortFor = (url) => { const { host, port } = hostPortOf(url); return `${host}:${port}`; };
 const shortDir = () => fs.mkdtempSync(path.join(fs.realpathSync(process.env.TMPDIR || "/tmp"), "ks-"));
 
 const names = async (s) => (await s.rpc("tools/list", {})).result.tools.map((t) => t.name);
@@ -156,6 +160,113 @@ const runHookAsync = (script, payload, env) => new Promise((resolve) => {
   } finally {
     await broken.close();
   }
+}
+
+// ---------------------------------------------------------------- the egress proxy and the bridge (P2-04)
+
+/** A local TCP echo server, the fake runner. Resolves { port, close }. */
+const startEcho = () => new Promise((resolve) => {
+  const server = net.createServer((c) => { c.on("data", (d) => c.write(d)); c.on("error", () => {}); });
+  server.listen(0, "127.0.0.1", () => resolve({ port: server.address().port, close: () => new Promise((r) => { server.close(() => r()); server.closeAllConnections?.(); }) }));
+});
+
+/** Send raw bytes to a socket path or port and collect what comes back until the connection ends or `until` matches. */
+const exchange = (target, bytes, { until = null, then = null } = {}) => new Promise((resolve) => {
+  const c = typeof target === "number" ? net.connect(target, "127.0.0.1") : net.connect(target);
+  let got = "";
+  c.setEncoding("latin1");
+  c.on("connect", () => c.write(bytes));
+  c.on("data", (d) => {
+    got += d;
+    if (then && got.includes("\r\n\r\n") && !then.done) { then.done = true; c.write(then.send); }
+    if (until && until.test(got)) c.end();
+  });
+  c.on("error", () => resolve(got));
+  c.on("close", () => resolve(got));
+});
+
+{
+  const runner = await startEcho();
+  const other = await startEcho();
+  const dir = shortDir();
+  const policy = loadPolicy(JSON.stringify({ version: 1, allow: { urls: [`http://127.0.0.1:${other.port}/x`] }, lockdown: { after: "P0-01" }, sandbox: {} }));
+  const endpoints = [{ runner: "fake", host: "127.0.0.1", port: runner.port }];
+  let progress = "- [ ] P0-01 first\n";
+  const records = [];
+  const proxySocket = path.join(dir, "p.sock");
+  const proxy = startProxy({
+    socketPath: proxySocket,
+    decide: (host, port) => egressDecision({ policy, endpoints, lockdown: lockdownActive(policy, progress), host, port }),
+    record: (r) => records.push(r),
+  });
+  await proxy.listening;
+  const settled = async (n) => { for (let i = 0; i < 100 && records.length < n; i++) await new Promise((r) => setTimeout(r, 20)); };
+  try {
+    const reply = await exchange(proxySocket, `CONNECT 127.0.0.1:${runner.port} HTTP/1.1\r\nHost: x\r\n\r\n`, { then: { send: "hello runner" }, until: /hello runner$/ });
+    like(reply, /^HTTP\/1\.1 200 Connection Established\r\n\r\nhello runner$/, "a CONNECT to the runner endpoint is allowed and the bytes are echoed");
+    await settled(1);
+    const r = records[0];
+    eq(r.target + "|" + r.decision + "|" + r.reason, `127.0.0.1:${runner.port}|allowed|runner endpoint fake`, "...logged with its target, decision and reason");
+    ok(r.data.bytesUp === 12 && r.data.bytesDown === 12 && typeof r.data.ms === "number", "...and its byte counts and elapsed time");
+
+    const denied = await exchange(proxySocket, "CONNECT example.com:443 HTTP/1.1\r\n\r\n");
+    const body = "kukulu egress: example.com:443 is not allowed by this flight's policy";
+    eq(denied, `HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain\r\nContent-Length: ${body.length}\r\nConnection: close\r\n\r\n${body}`, "a CONNECT to another host gets 403 with the exact body");
+    eq(records[1].target + "|" + records[1].decision + "|" + records[1].reason + "|" + ("data" in records[1]), "example.com:443|denied|not allowed by this flight's policy|false", "...and a denied record without data");
+
+    const early = await exchange(proxySocket, `CONNECT 127.0.0.1:${other.port} HTTP/1.1\r\n\r\n`, { then: { send: "x" }, until: /x$/ });
+    like(early, /^HTTP\/1\.1 200 /, "an allow.urls host is allowed before lockdown");
+    await settled(3);
+    eq(records[2].reason, "allow.urls", "...with reason allow.urls");
+    progress = "- [x] P0-01 first\n";
+    const late = await exchange(proxySocket, `CONNECT 127.0.0.1:${other.port} HTTP/1.1\r\n\r\n`);
+    like(late, /^HTTP\/1\.1 403 Forbidden/, "...and denied after lockdown");
+    eq(records[3].reason, "lockdown is active", "...with reason lockdown is active");
+
+    const literal = await exchange(proxySocket, "CONNECT 203.0.113.9:443 HTTP/1.1\r\n\r\n");
+    like(literal, /^HTTP\/1\.1 403 Forbidden/, "a literal IP the policy does not name is denied");
+    eq(records.at(-1).reason, "literal IP addresses are not allowed", "...with the literal-IP reason");
+
+    const plain = await exchange(proxySocket, "GET /path HTTP/1.1\r\nHost: x\r\n\r\n");
+    like(plain, /^HTTP\/1\.1 400 Bad Request/, "a request that is neither CONNECT nor absolute-form gets 400");
+    const tls = await exchange(proxySocket, "\u0016\u0003\u0001garbage\r\n\r\n");
+    like(tls, /^HTTP\/1\.1 400 Bad Request/, "...and so does garbage");
+    const before = records.length;
+
+    const absolute = await exchange(proxySocket, `GET http://127.0.0.1:${runner.port}/x HTTP/1.1\r\nHost: x\r\n\r\n`, { until: /\r\n\r\n/ });
+    like(absolute, /^GET http:\/\/127\.0\.0\.1:\d+\/x HTTP\/1\.1/, "an allowed absolute-form request is forwarded unchanged (the echo server returns it)");
+    await settled(before + 1);
+    eq(records.at(-1).decision, "allowed", "...and recorded");
+
+    // the bridge: 127.0.0.1:<ephemeral> forwards to the proxy socket
+    const bridge = startBridge({ port: 0, socketPath: proxySocket });
+    await bridge.listening;
+    try {
+      const n = records.length;
+      const viaBridge = await exchange(bridge.port(), `CONNECT 127.0.0.1:${runner.port} HTTP/1.1\r\n\r\n`, { then: { send: "through the bridge" }, until: /bridge$/ });
+      like(viaBridge, /^HTTP\/1\.1 200 Connection Established\r\n\r\nthrough the bridge$/, "the bridge forwards 127.0.0.1:<port> to the proxy socket");
+      await settled(n + 1);
+      eq(records.length, n + 1, "...and the proxy recorded the connection");
+    } finally {
+      await bridge.close();
+    }
+  } finally {
+    await proxy.close();
+    await runner.close();
+    await other.close();
+  }
+
+  const p = (extra) => loadPolicy(JSON.stringify({ version: 1, ...extra }));
+  const ends = [{ runner: "r1", host: "Spark.Test", port: 8000 }, { runner: "r2", host: "api.example", port: 443 }];
+  eq(JSON.stringify(egressDecision({ policy: p({}), endpoints: ends, lockdown: false, host: "spark.test", port: 8000 })), '{"allowed":true,"reason":"runner endpoint r1"}', "egressDecision compares hosts case-insensitively");
+  eq(egressDecision({ policy: p({}), endpoints: ends, lockdown: false, host: "spark.test", port: 9000 }).allowed, false, "...and the port too");
+  const bySchemeHttps = hostPortFor("https://api.example");
+  eq(bySchemeHttps, "api.example:443", "egressDecision defaults an endpoint's port by scheme (https)");
+  eq(hostPortFor("http://mac.test"), "mac.test:80", "...and http");
+  eq(hostPortFor("http://mac.test:11434"), "mac.test:11434", "...and keeps an explicit port");
+  eq(egressDecision({ policy: p({ sandbox: { image: undefined, egress: ["pypi.org:443"] }, enforcement: "hook" }), endpoints: [], lockdown: false, host: "pypi.org", port: 443 }).reason, "sandbox.egress", "sandbox.egress hosts are allowed before lockdown");
+  eq(egressDecision({ policy: p({ allow: { urls: ["https://www.rfc-editor.org/rfc/rfc1951.txt"] } }), endpoints: [], lockdown: false, host: "www.rfc-editor.org", port: 443 }).reason, "allow.urls", "an allow.urls entry's https port defaults to 443");
+  eq(egressDecision({ policy: p({ allow: { urls: ["https://www.rfc-editor.org/rfc/rfc1951.txt"] } }), endpoints: [], lockdown: true, host: "www.rfc-editor.org", port: 443 }).reason, "lockdown is active", "...and lockdown denies it");
 }
 
 finish();
