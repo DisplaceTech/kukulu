@@ -8,7 +8,7 @@ Started: 2026-10-26T21:19:36.125Z
 - [x] P0-01 Runners in the global file, and each role's runner in the routing
 - [x] P0-02 The policy's runner and role keys, and the model-family table
 - [x] P0-03 Gate check 8 and genesis record the roles
-- [ ] P0-04 Tune MODEL_FAMILIES against the recorded routing strings
+- [x] P0-04 Tune MODEL_FAMILIES against the recorded routing strings
 - [ ] P0-05 scripts/model-identity.mjs and the bundles suite
 - [ ] P0-06 The manifest records each role's identity
 - [ ] P0-07 Phase 0 end: push and record the manual check
@@ -64,3 +64,7 @@ loadPolicy returns runners {allow,locality} and roles {distinct} with defaults n
 rolesRecord/routingCheck added in server.mjs; cleanroomGenesis runs parts 2-4 before key/writes and records data.roles and data.distinct; runGate check 8 routing (genesis roles from chain.entries[0].data.roles; skipped when absent). Gate counts now 8 in tests/docs. Tests: test/cleanroom.mjs (1150 pass), full verify green.
 Interpretation: first failing role in role order named in each reason.
 Note: hand-built gate entries in harness/attest tests still say checks: 7; harmless.
+
+### P0-04 — 0e5c62b
+
+Measured MODEL_FAMILIES against all documented routing strings (docs/spikes/P0-04.md). Before = P0-02 table (nine families); after = unchanged: no documented routing string belonging to a listed family fell into unknown. fable-5-1, opus-5-5, sonnet-5-5 (an old base-commit mistake) stay unknown to match isAnthropicModel. families.json now 26 entries. Verify green.
