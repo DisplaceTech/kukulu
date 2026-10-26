@@ -4,14 +4,11 @@ All notable changes to this plugin. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
-
-### Added
-
-- `kukulu_config_show` reports the resolved `archive` policy.
+## [0.7.2] — 2026-10-26
 
 ### Changed
 
+- `kukulu_config_show` reports the resolved `archive` policy.
 - `kukulu_mutate`'s `filter` also accepts a list of up to 10 test paths (project-e F-01).
 - `kukulu_pr_finalize` takes its breaking verdict from `CHANGELOG.md`'s newest entry when there is one, and `breaking` is optional then (0.7.1 SUMMARY's Breaking call).
 - `policies.archive` now defaults to `true`; set it to `false` to keep a finished flight in place (owner decision).

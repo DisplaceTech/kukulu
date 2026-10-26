@@ -6,7 +6,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/License-Apache%202.0-blue" alt="Apache License 2.0" />
-  <img src="https://img.shields.io/badge/version-0.7.1-informational" alt="Version 0.7.1" />
+  <img src="https://img.shields.io/badge/version-0.7.2-informational" alt="Version 0.7.2" />
   <img src="https://img.shields.io/badge/Node-%E2%89%A5%2022-339933?logo=nodedotjs&logoColor=white" alt="Node 22 or later" />
   <img src="https://img.shields.io/badge/Claude%20Code-plugin-D97757" alt="Claude Code plugin" />
   <img src="https://img.shields.io/badge/dependencies-none-brightgreen" alt="No dependencies" />
