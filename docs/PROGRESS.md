@@ -24,7 +24,7 @@ Started: 2026-10-26T21:19:36.125Z
 - [x] P2-05 containerArgs, the plan, the Containerfile, the fake docker and doctor
 - [x] P2-06 run and stop, and docs/sandbox.md
 - [x] P2-07 Gate check 9 and the boundary in genesis
-- [ ] P2-08 Commands run inside the boundary
+- [x] P2-08 Commands run inside the boundary
 - [ ] P2-09 The enforcement level: known limits per level, the manifest and verifier check 11
 - [ ] P2-10 Signing under the boundary
 - [ ] P2-11 Lockfile parsers, gate check 10 and the manifest's packages
@@ -142,3 +142,7 @@ Interpretation: main returns a promise for run only; CLI awaits it.
 
 server.mjs: inspectContainer, boundaryCheck, egressAudit; genesis records data.enforcement (+ boundary under container+proxy) and refuses with "clean-room genesis refused: boundary: ..." before writing; runGate check 9 boundary after routing (passing entry carries container id). Tests in test/sandbox.mjs (156). Fixture inspect.json gained an Id.
 Interpretation: the writable-mount set is project + /home/kukulu + /run/kukulu (containerArgs mounts the socket directory writable, so the task text "exactly project and home volume" cannot hold for a real container). Gate count is 9 under container+proxy, 8 otherwise.
+
+### P2-08 — 8db035e
+
+server.mjs: gitArgv wraps every spawnSync("git") site (git(), signingProbe, commitStaged, classifyChanges, attest log, rebase, control-bundle rev-parse); runShell(cmd, timeoutMs, cwd, {inside}) wraps in engine exec with inner timeout when KUKULU_SANDBOX is set (guard self-tests pass inside:false); runStart refuses a stream inside. Tests in test/sandbox.mjs (168). docs: mcp-tools (verify, mutate, run_start), sandbox.md What runs where. Markdownlint caught an inserted paragraph before a --- rule (setext heading); fixed and amended before recording.
