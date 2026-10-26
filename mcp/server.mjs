@@ -17,7 +17,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import {
-  CleanroomError, loadPolicy, policyHash, appendEntry, readEntries, logPathFor, generateKey, loadKey, signCheckpoint, verifyCheckpoint, verifyChain, evaluate, lockdownActive, normalizeModel, familyOf, ZERO_HASH, scorePair, position, verdictOf, LIMITS, coverageGaps, KNOWN_LIMITS, summarizeEntries, signBytes,
+  CleanroomError, loadPolicy, policyHash, appendEntry, readEntries, logPathFor, generateKey, loadKey, signCheckpoint, verifyCheckpoint, verifyChain, evaluate, lockdownActive, normalizeModel, familyOf, controlPaths, ZERO_HASH, scorePair, position, verdictOf, LIMITS, coverageGaps, KNOWN_LIMITS, summarizeEntries, signBytes,
 } from "./cleanroom.mjs";
 
 /**
@@ -180,6 +180,97 @@ function routingCheck(policy, roles, genesisRoles) {
   return null;
 }
 
+/** `{ host, port }` of a URL with the port defaulted by scheme, or null when it is not a URL. */
+function hostPortOfUrl(url) {
+  try {
+    const u = new URL(url);
+    return { host: u.hostname.replace(/^\[|\]$/g, "").toLowerCase(), port: u.port ? Number(u.port) : u.protocol === "https:" ? 443 : 80 };
+  } catch {
+    return null;
+  }
+}
+
+/** The container as the engine reports it, or `{ error }` with the engine's first stderr line. */
+function inspectContainer(engine, name) {
+  const r = spawnSync(engine, ["inspect", name], { encoding: "utf8", timeout: 30000 });
+  if (r.error || r.status !== 0) return { error: `could not inspect container ${name}: ${(r.error?.message || (r.stderr || "").trim().split("\n")[0] || `exit ${r.status}`)}` };
+  try {
+    const c = JSON.parse(r.stdout)[0];
+    return {
+      id: c.Id,
+      running: Boolean(c.State?.Running),
+      image: c.Image,
+      network: c.HostConfig?.NetworkMode,
+      mounts: (c.Mounts ?? []).map((m) => ({ source: m.Source, destination: m.Destination, rw: Boolean(m.RW) })).sort((a, b) => (a.destination < b.destination ? -1 : a.destination > b.destination ? 1 : 0)),
+    };
+  } catch (e) {
+    return { error: `could not inspect container ${name}: the engine's output is not the JSON it should be (${e.message})` };
+  }
+}
+
+const mountKey = (m) => `${m.destination}\0${m.source}\0${m.rw}`;
+
+/**
+ * Gate check 9 (SPEC C-01): this server runs behind the sandbox, and the container is the one
+ * genesis recorded. Returns `{ reason }` on failure, else `{ id, boundary }`.
+ */
+function boundaryCheck(cc, policy, recorded) {
+  const name = envVar("SANDBOX");
+  if (!name) return { reason: "this flight's policy requires enforcement container+proxy, but this server is not behind a K\u016bkulu sandbox; start the session with node scripts/sandbox.mjs run" };
+  const engine = envVar("SANDBOX_ENGINE") || "docker";
+  const c = inspectContainer(engine, name);
+  if (c.error) return { reason: c.error };
+  if (!c.running) return { reason: `container ${name} is not running` };
+  const digest = /@(sha256:[0-9a-f]{64})$/.exec(policy.sandbox.image ?? "")?.[1];
+  if (c.image !== digest) return { reason: `image is ${c.image}, but the policy pins ${digest}` };
+  if (c.network !== "none") return { reason: `network is ${c.network}, but the policy requires none` };
+  const writable = c.mounts.filter((m) => m.rw).map((m) => m.destination).sort();
+  // /run/kukulu is the runtime directory that holds the sockets; connecting to a socket needs it writable.
+  const allowed = [...new Set([ROOT, "/home/kukulu", "/run/kukulu"])].sort();
+  if (writable.join("\n") !== allowed.join("\n")) {
+    return { reason: `read-write mounts are ${writable.join(", ")}; only the project, the home volume and the socket directory may be writable` };
+  }
+  const home = os.homedir();
+  const expand = (e) => (e === "~" || e.startsWith("~/") ? path.join(home, e.slice(1)) : path.resolve(ROOT, e));
+  const required = [
+    cleanroomPolicyPath(cc), P.stateDir, path.join(ROOT, ".claude"), path.join(ROOT, ".git", "config"), path.join(ROOT, ".git", "hooks"), path.join(ROOT, ".git", "info"),
+    P.spec, PLUGIN_ROOT, ...policy.sandbox.mounts.map((m) => expand(m.path)), ...controlPaths(policy, { root: ROOT, home }),
+  ];
+  for (const p of required) {
+    if (!c.mounts.some((m) => m.destination === p && !m.rw)) return { reason: `mount ${p} is missing` };
+  }
+  if (!c.mounts.some((m) => m.destination === "/run/kukulu")) return { reason: "mount /run/kukulu is missing" };
+  const boundary = { engine, image: c.image, network: c.network, mounts: c.mounts };
+  if (recorded) {
+    for (const field of ["engine", "image", "network"]) {
+      if (recorded[field] !== boundary[field]) return { reason: `${field} is ${boundary[field]}, but genesis recorded ${recorded[field]}` };
+    }
+    const now = c.mounts.map(mountKey).sort().join("\n");
+    const then = (recorded.mounts ?? []).map(mountKey).sort().join("\n");
+    if (now !== then) return { reason: `mounts are ${c.mounts.map((m) => `${m.destination}${m.rw ? " (rw)" : ""}`).join(", ")}, but genesis recorded ${(recorded.mounts ?? []).map((m) => `${m.destination}${m.rw ? " (rw)" : ""}`).join(", ")}` };
+  }
+  return { id: c.id, boundary };
+}
+
+/** Every allowed `egress` entry after genesis must name a host the policy allows, lockdown ignored; returns a reason or null. */
+function egressAudit(policy, entries) {
+  const named = new Set(policy.sandbox.egress.map((e) => e.toLowerCase()));
+  for (const url of policy.allow.urls) {
+    const hp = hostPortOfUrl(url);
+    if (hp) named.add(`${hp.host}:${hp.port}`);
+  }
+  for (const r of Object.values(resolveRouting().roles)) {
+    const hp = r.endpoint ? hostPortOfUrl(r.endpoint) : null;
+    if (hp) named.add(`${hp.host}:${hp.port}`);
+  }
+  for (const e of entries) {
+    if (e.kind === "egress" && e.decision === "allowed" && !named.has(String(e.target).toLowerCase())) {
+      return `egress entry ${e.seq} allowed ${e.target}, which no runner endpoint, sandbox.egress or allow.urls entry names`;
+    }
+  }
+  return null;
+}
+
 /**
  * Append the genesis entry and record the hashes the gate will compare against,
  * in one commit with the log. A policy that does not load is a refusal.
@@ -190,6 +281,12 @@ function cleanroomGenesis(cc, st) {
   const roles = rolesRecord(resolveRouting());
   const routingReason = routingCheck(policy, roles, null);
   if (routingReason) throw new ToolError(`clean-room genesis refused: routing: ${routingReason}`);
+  let boundary = null;
+  if (policy.enforcement === "container+proxy") {
+    const b = boundaryCheck(cc, policy, null);
+    if (b.reason) throw new ToolError(`clean-room genesis refused: boundary: ${b.reason}`);
+    boundary = b.boundary;
+  }
   const key = ensureKey(cc);
   const hashes = pluginHashes();
   const logPath = cleanroomLogPath();
@@ -201,7 +298,7 @@ function cleanroomGenesis(cc, st) {
       kind: "genesis",
       stage: "controller",
       role: "session",
-      data: { mode: policy.mode, policyHash: policyHash(policyBytes), ...hashes, pluginVersion: VERSION, keyFingerprint: key.fingerprint, baseBranch: cc.baseBranch, head, roles, distinct: policy.roles.distinct, ...(policy.mode === "control-positive" ? { control: { priorArt: policy.control.priorArt } } : {}) },
+      data: { mode: policy.mode, policyHash: policyHash(policyBytes), ...hashes, pluginVersion: VERSION, keyFingerprint: key.fingerprint, baseBranch: cc.baseBranch, head, roles, distinct: policy.roles.distinct, ...(policy.mode === "control-positive" ? { control: { priorArt: policy.control.priorArt } } : {}), enforcement: policy.enforcement, ...(boundary ? { boundary } : {}) },
     });
     st.cleanroom = { genesis: entry.hash, policyHash: policyHash(policyBytes), ...hashes };
     saveState(st);
@@ -306,7 +403,18 @@ function runGate(stage, st = loadState()) {
   const routingReason = routingCheck(policy, rolesRecord(resolveRouting()), genesisRoles);
   if (routingReason) return failed("routing", routingReason);
 
-  appendEntry(logPath, { kind: "gate", stage, role: "session", data: { checks: checked.length, ok: true, ...(unpinned.length ? { unpinned } : {}) } });
+  // 9. boundary: under container+proxy, the container is the one genesis recorded and nothing it allowed out is outside the policy
+  let container = null;
+  if (policy.enforcement === "container+proxy") {
+    checked.push("boundary");
+    const b = boundaryCheck(cc, policy, chain.entries[0]?.data?.boundary ?? null);
+    if (b.reason) return failed("boundary", b.reason);
+    const leak = egressAudit(policy, chain.entries.slice(1));
+    if (leak) return failed("boundary", leak);
+    container = b.id;
+  }
+
+  appendEntry(logPath, { kind: "gate", stage, role: "session", data: { checks: checked.length, ok: true, ...(container ? { container } : {}), ...(unpinned.length ? { unpinned } : {}) } });
   return { ok: true, checked };
 }
 

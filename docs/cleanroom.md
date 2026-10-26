@@ -119,7 +119,7 @@ A checkpoint is an entry of kind `checkpoint` whose `data` holds `chainTip`, `gi
 
 ## Genesis, sticky mode and the gate
 
-The first `kukulu_next` of a flight with a policy appends the genesis entry (mode, the hashes of the policy, the guard, the logger, `hooks.json` and `mcp/cleanroom.mjs`, the plugin version, the key fingerprint, the base branch and the head, then `roles`, each role's model, runner, endpoint, locality, identity source and family, and `distinct`, the policy's `roles.distinct`) and records the same hashes in `state.json`. A project without a policy records itself as a general flight and writes no log.
+The first `kukulu_next` of a flight with a policy appends the genesis entry (mode, the hashes of the policy, the guard, the logger, `hooks.json` and `mcp/cleanroom.mjs`, the plugin version, the key fingerprint, the base branch and the head, then `roles`, each role's model, runner, endpoint, locality, identity source and family, `distinct`, the policy's `roles.distinct`, `enforcement`, and under `container+proxy` the `boundary`: the engine, the container's image id, its network mode and its mounts with each one's `rw`) and records the same hashes in `state.json`. A project without a policy records itself as a general flight and writes no log.
 
 The mode is sticky. A policy that appears after the flight started in general mode, one first seen after the plan exists, or one removed after genesis makes `kukulu_next` halt with "clean-room coverage is broken"; `kukulu_run_resume` cannot clear it, so archive the flight and start another.
 
@@ -133,8 +133,9 @@ Before a stage starts, `kukulu_next` (always, once the flight has a genesis) and
 6. **chain**: every hash recomputes, the first entry is the genesis, and the newest checkpoint verifies with the signing key.
 7. **liveness**: at least one `allowed` entry has been logged since the last gate; otherwise the hooks are not running in this session and you must start a new one.
 8. **routing**: in this order, the first failing part stops it. (1) Every role's resolved `model` and `runner` equal the ones genesis recorded (skipped for a flight whose genesis has no `roles`). (2) With `runners.allow`, every role's runner is in the list. (3) With `runners.locality` `"local"`, every role's locality is `local`. (4) With `roles.distinct` `"model"` or `"family"`, the implementer and the reviewer differ in normalized model or in family. Genesis runs parts 2 to 4 before it writes anything and refuses with `clean-room genesis refused: routing: <reason>`.
+9. **boundary** (only when the policy's `enforcement` is `container+proxy`): the server is behind a sandbox (`KUKULU_SANDBOX` is set); `<engine> inspect` reports the container running with the policy's pinned image id and network `none`; the only writable mounts are the project, the home volume and the socket directory; every required read-only mount (the policy file, `.kukulu`, `.claude`, `.git/config`, `.git/hooks`, `.git/info`, `docs/SPEC.md`, the plugin root, each `sandbox.mounts` and `control.priorArt` path) is present; the engine, image, network and mounts equal what genesis recorded; and every `egress` entry after genesis whose decision is `allowed` names a runner endpoint, a `sandbox.egress` entry or an `allow.urls` host (lockdown is ignored: the audit asks whether the proxy could ever have allowed it). Genesis runs the first parts before it writes anything and refuses with `clean-room genesis refused: boundary: <reason>`. A passing gate entry then records `container`, the container's id.
 
-A failing gate appends its own entry first, so the refusal is in the chain, and then halts the flight. `/kukulu:go-flight` prints `gate: ok (8 checks)` or the halt.
+A failing gate appends its own entry first, so the refusal is in the chain, and then halts the flight. `/kukulu:go-flight` prints `gate: ok (8 checks)` (9 under `container+proxy`) or the halt.
 
 ## Recording what you did
 

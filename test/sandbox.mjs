@@ -5,12 +5,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
-import { finish, ok, eq, like, ROOT, cleanroomRepo, plannedRepo, setState, startServer, withServer, mkFakeDocker, mkDir, writeFile, readFile } from "./harness.mjs";
+import { finish, ok, eq, like, isError, ROOT, cleanroomRepo, plannedRepo, setState, startServer, withServer, mkFakeDocker, mkDir, writeFile, readFile, logCall } from "./harness.mjs";
 import net from "node:net";
 import { startControllerSocket, startLogSocket, startProxy, egressDecision, hostPortOf, planFor, containerArgs, projectIdFor, runtimeDirFor, main as sandboxMain } from "../scripts/sandbox.mjs";
 import { startBridge } from "../scripts/sandbox-entry.mjs";
 import { createHash } from "node:crypto";
-import { readEntries, verifyChain, loadPolicy, lockdownActive } from "../mcp/cleanroom.mjs";
+import { readEntries, verifyChain, loadPolicy, lockdownActive, appendEntry } from "../mcp/cleanroom.mjs";
 
 // A Unix socket path is limited to about 100 bytes on macOS, so sockets live under a short temp directory.
 /** The host:port a URL names, as the sandbox derives a runner endpoint. */
@@ -456,6 +456,114 @@ const exchange = (target, bytes, { until = null, then = null } = {}) => new Prom
   const stopTwice = await sandboxRun(repo, dockerWith({}), ["stop"]);
   eq(stopTwice.code, 0, "stop of a container that is not running is not an error");
   eq((await sandboxRun(repo, dockerWith(), ["stop", "extra"])).code, 2, "stop with an argument is a usage error");
+}
+
+// ---------------------------------------------------------------- gate check 9 and the boundary in genesis (P2-07)
+
+{
+  const zero = "sha256:" + "0".repeat(64);
+  const policy = JSON.stringify({ version: 1, enforcement: "container+proxy", sandbox: { image: `kukulu-sandbox@${zero}`, mounts: [{ path: "tools/oracle", mode: "ro" }], egress: ["pypi.org:443"] } });
+  const name = "kukulu-0123456789abcdef";
+  const boundaryRepo = () => {
+    const repo = cleanroomRepo({ policy });
+    const dockerDir = mkFakeDocker();
+    const inspect = JSON.parse(readFile(ROOT, "test/fixtures/docker/inspect.json").replaceAll("__ROOT__", repo).replaceAll("/opt/kukulu", ROOT));
+    return { repo, dockerDir, inspect, put: (obj) => writeFile(dockerDir, "inspect.json", JSON.stringify(obj)) };
+  };
+  const envFor = (dockerDir, extra = {}) => ({ env: { PATH: `${dockerDir}:${process.env.PATH}`, KUKULU_SANDBOX: name, KUKULU_SANDBOX_ENGINE: "docker", ...extra } });
+  const logOf = (repo) => readEntries(path.join(repo, ".kukulu", "cleanroom", "log.jsonl"));
+  const live = async (repo, opts, fn) => withServer(repo, async (s) => fn({ ...s, call: async (n, a) => { logCall(repo); return s.call(n, a); } }), opts);
+
+  {
+    const b = boundaryRepo();
+    b.put(b.inspect);
+    await live(b.repo, envFor(b.dockerDir), async ({ call }) => {
+      const n = await call("kukulu_next");
+      eq(n.stage, "plan", "genesis passes under container+proxy with the recorded inspect output");
+      eq(n.gate.checked.join(","), "mode,policy,guard,self-test,lockdown,chain,liveness,routing,boundary", "gate check 9 passes: gate.checked ends in boundary");
+      const genesis = logOf(b.repo)[0];
+      eq(genesis.data.enforcement + "|" + genesis.data.boundary.engine + "|" + genesis.data.boundary.network + "|" + genesis.data.boundary.image, `container+proxy|docker|none|${b.inspect[0].Image}`, "genesis records enforcement and the boundary");
+      ok(genesis.data.boundary.mounts.every((m) => "source" in m && "destination" in m && "rw" in m) && genesis.data.boundary.mounts.length === b.inspect[0].Mounts.length, "...with every mount's source, destination and rw");
+      const second = await call("kukulu_next");
+      eq(second.gate.ok, true, "the next gate passes too");
+      const gates = logOf(b.repo).filter((e) => e.kind === "gate" && e.data.ok);
+      eq(gates.at(-1).data.checks + "|" + gates.at(-1).data.container, `9|${b.inspect[0].Id}`, "...recording nine checks and the container id");
+    });
+  }
+
+  // each way the container can differ, after genesis (the gate) and, for the first, at genesis too
+  for (const [label, mutate, want] of [
+    ["network mode bridge", (i) => { i[0].HostConfig.NetworkMode = "bridge"; }, /boundary: network is bridge, but the policy requires none/],
+    ["an extra read-write mount", (i) => { i[0].Mounts.push({ Type: "bind", Source: "/etc", Destination: "/etc-rw", RW: true }); }, /boundary: read-write mounts are \/etc-rw, .*; only the project, the home volume and the socket directory may be writable/],
+    ["a different image digest", (i) => { i[0].Image = "sha256:" + "b".repeat(64); }, new RegExp(`boundary: image is sha256:b{64}, but the policy pins ${zero}`)],
+    ["a container that is not running", (i) => { i[0].State.Running = false; }, new RegExp(`boundary: container ${name} is not running`)],
+    ["a missing read-only mount", (i) => { i[0].Mounts = i[0].Mounts.filter((m) => !m.Destination.endsWith("/docs/SPEC.md")); }, /boundary: mount .*\/docs\/SPEC\.md is missing/],
+    ["a read-write policy file", (i) => { i[0].Mounts.find((m) => m.Destination.endsWith("/docs/cleanroom.json")).RW = true; }, /boundary: read-write mounts are/],
+  ]) {
+    const b = boundaryRepo();
+    mutate(b.inspect);
+    b.put(b.inspect);
+    await live(b.repo, envFor(b.dockerDir), async ({ call }) => {
+      isError(await call("kukulu_next"), new RegExp(`^clean-room genesis refused: ${want.source}`), `genesis refuses ${label}`);
+    });
+    ok(!fs.existsSync(path.join(b.repo, ".kukulu", "cleanroom", "log.jsonl")), "...writing nothing");
+  }
+
+  for (const [label, mutate, want] of [
+    ["network mode bridge", (i) => { i[0].HostConfig.NetworkMode = "bridge"; }, /boundary: network is bridge, but the policy requires none/],
+    ["an extra read-write mount", (i) => { i[0].Mounts.push({ Type: "bind", Source: "/etc", Destination: "/etc-rw", RW: true }); }, /boundary: read-write mounts are/],
+    ["a different image digest", (i) => { i[0].Image = "sha256:" + "b".repeat(64); }, /boundary: image is sha256:b{64}/],
+    ["a changed mount source", (i) => { i[0].Mounts.find((m) => m.Destination === "/home/kukulu").Source = "/elsewhere"; }, /boundary: mounts are .*, but genesis recorded/],
+  ]) {
+    const b = boundaryRepo();
+    b.put(b.inspect);
+    await live(b.repo, envFor(b.dockerDir), async ({ call }) => {
+      await call("kukulu_next");
+      mutate(b.inspect);
+      b.put(b.inspect);
+      const h = await call("kukulu_next");
+      eq(h.stage, "halt", `gate check 9 halts on ${label}`);
+      like(h.reason, new RegExp(`^clean-room gate failed: ${want.source}`), "...with the boundary reason");
+      eq(logOf(b.repo).filter((e) => e.kind === "gate").at(-1).data.failed, "boundary", "...and the failing gate entry is in the chain");
+    });
+  }
+
+  {
+    const b = boundaryRepo();
+    b.put(b.inspect);
+    await live(b.repo, envFor(b.dockerDir, { KUKULU_SANDBOX: "" }), async ({ call }) => {
+      isError(await call("kukulu_next"), /^clean-room genesis refused: boundary: this flight's policy requires enforcement container\+proxy, but this server is not behind a K\u016bkulu sandbox; start the session with node scripts\/sandbox\.mjs run$/, "genesis refuses without KUKULU_SANDBOX");
+    });
+  }
+
+  {
+    const b = boundaryRepo();
+    b.put(b.inspect);
+    await live(b.repo, envFor(b.dockerDir), async ({ call }) => {
+      await call("kukulu_next");
+      const log = path.join(b.repo, ".kukulu", "cleanroom", "log.jsonl");
+      appendEntry(log, { kind: "egress", stage: "controller", role: "session", tool: null, target: "pypi.org:443", decision: "allowed", reason: "sandbox.egress", data: { bytesUp: 1, bytesDown: 1, ms: 1 } });
+      appendEntry(log, { kind: "egress", stage: "controller", role: "session", tool: null, target: "api.anthropic.com:443", decision: "allowed", reason: "runner endpoint anthropic", data: { bytesUp: 1, bytesDown: 1, ms: 1 } });
+      appendEntry(log, { kind: "egress", stage: "controller", role: "session", tool: null, target: "example.org:443", decision: "denied", reason: "not allowed by this flight's policy" });
+      ok((await call("kukulu_next")).gate.ok, "allowed egress to a named host and a denied entry pass the audit");
+      appendEntry(log, { kind: "egress", stage: "controller", role: "session", tool: null, target: "evil.example:443", decision: "allowed", reason: "x", data: { bytesUp: 1, bytesDown: 1, ms: 1 } });
+      const seq = readEntries(log).at(-1).seq;
+      const h = await call("kukulu_next");
+      eq(h.stage, "halt", "an allowed egress entry for a host the policy does not name halts");
+      eq(h.reason, `clean-room gate failed: boundary: egress entry ${seq} allowed evil.example:443, which no runner endpoint, sandbox.egress or allow.urls entry names`, "...naming the seq and the host");
+    });
+  }
+
+  {
+    const dir = mkFakeDocker();
+    const hookRepo = cleanroomRepo();
+    await live(hookRepo, envFor(dir), async ({ call }) => {
+      const n = await call("kukulu_next");
+      eq(n.gate.checked.at(-1), "routing", "under hook enforcement there is no boundary check");
+      const g = logOf(hookRepo)[0];
+      eq(g.data.enforcement + "|" + ("boundary" in g.data), "hook|false", "...and genesis records enforcement hook and no boundary");
+    });
+  }
 }
 
 finish();

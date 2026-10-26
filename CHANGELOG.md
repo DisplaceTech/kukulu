@@ -22,6 +22,7 @@ All notable changes to this plugin. Format follows
 - The egress proxy: a `CONNECT`-only proxy on `proxy.sock` that allows the roles' runner endpoints, `sandbox.egress` and `allow.urls` hosts (the last two until lockdown), logs every decision as an `egress` entry, and a loopback bridge in `scripts/sandbox-entry.mjs` (G-06, C-03).
 - `scripts/sandbox.mjs doctor`, the exact container argument list (`containerArgs`), the plan it is built from, and `templates/sandbox/Containerfile` (G-06, C-01).
 - `scripts/sandbox.mjs run` and `stop`: the three listeners and the container in the foreground, with every refusal before anything starts (G-06, C-01).
+- Clean-room gate check 9, `boundary`: under `enforcement` `container+proxy` genesis records the container's image, network and mounts, and every gate proves the server is behind the sandbox, the container is as recorded and every allowed `egress` entry names a host the policy allows (G-06, C-01, C-03).
 
 ## [0.7.2] — 2026-10-26
 

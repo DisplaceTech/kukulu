@@ -490,7 +490,7 @@ const stateOf = (repo) => (hasFile(repo, ".kukulu/state.json") ? JSON.parse(read
     const log = logOf(repo);
     eq(log.length + "|" + log[0].kind + "|" + log[0].stage + "|" + log[1].kind, "2|genesis|controller|gate", "the first kukulu_next with a policy appends a genesis entry, then the gate's");
     const d = log[0].data;
-    eq(Object.keys(d).join(","), "mode,policyHash,guardHash,loggerHash,hooksHash,cleanroomHash,pluginVersion,keyFingerprint,baseBranch,head,roles,distinct", "...whose data names mode, the five hashes, pluginVersion, keyFingerprint, baseBranch, head, roles and distinct");
+    eq(Object.keys(d).join(","), "mode,policyHash,guardHash,loggerHash,hooksHash,cleanroomHash,pluginVersion,keyFingerprint,baseBranch,head,roles,distinct,enforcement", "...whose data names mode, the five hashes, pluginVersion, keyFingerprint, baseBranch, head, roles and distinct");
     eq(d.mode + "|" + d.baseBranch, "clean-room|main", "...in clean-room mode on main");
     like(d.head, /^[0-9a-f]{40}$/, "...at the commit it was written on");
     eq(d.policyHash, policyHash(fs.readFileSync(path.join(repo, "docs", "cleanroom.json"))), "...the policy hash is the SHA-256 of the file");
