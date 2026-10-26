@@ -10,7 +10,7 @@ Started: 2026-10-26T21:19:36.125Z
 - [x] P0-03 Gate check 8 and genesis record the roles
 - [x] P0-04 Tune MODEL_FAMILIES against the recorded routing strings
 - [x] P0-05 scripts/model-identity.mjs and the bundles suite
-- [ ] P0-06 The manifest records each role's identity
+- [x] P0-06 The manifest records each role's identity
 - [ ] P0-07 Phase 0 end: push and record the manual check
 - [ ] P1-01 Control mode in the policy and the guard
 - [ ] P1-02 Control mode in genesis, the manifest and the verifier
@@ -72,3 +72,7 @@ Measured MODEL_FAMILIES against all documented routing strings (docs/spikes/P0-0
 ### P0-05 — b56a80b
 
 scripts/model-identity.mjs (exports identityOf, main; CLI only as entry), fixtures in test/fixtures/identity (expected.txt digest independently re-computed). test/bundles.mjs registered between attest and drive; suite counts now fourteen (CONTRIBUTING, README, plugin test). routing.md Runners paragraph on measuring digests; CHANGELOG. Verify green (3982 assertions).
+
+### P0-06 — 837f6d0
+
+attest() manifest gains roles after genesis (genesis.data.roles each plus assurance configuration, null when absent). Tests in test/attest.mjs (224 pass). Interpretation: the null-roles case is not testable through the server (log edits break the chain), so it is covered by reading. Docs updated. Verify green.
