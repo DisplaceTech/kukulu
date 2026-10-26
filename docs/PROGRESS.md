@@ -10,7 +10,7 @@ Started: 2026-10-26T14:17:50.269Z
 - [x] P0-03 bsdtar and gtar get every decision tar gets
 - [x] P0-04 The 0.7.1 review's advisory notes on the guard and the server
 - [x] P0-05 Phase 0 end: push and record the manual check
-- [ ] P1-01 A failed commit is classified as a signing failure by a probe
+- [x] P1-01 A failed commit is classified as a signing failure by a probe
 - [ ] P1-02 The fallback's override is lifted at the next run start
 - [ ] P1-03 kukulu_pr_finalize waits for signatures only when the policy expects them
 - [ ] P1-04 A broken signer is reported before the plan stage under required
@@ -50,3 +50,7 @@ Recursive containment now has its own branch naming the held protected path; lan
 ### P0-05 — e07e416
 
 Pushed build/2026-10-26. Manual check: NOT VERIFIED (human): in a live clean-room session with claude --plugin-dir ., rsync -d --delete empty/ docs/ and bsdtar -xf a.tar -C docs are denied
+
+### P1-01 — 3b4d7f5
+
+Added signingProbe() (signed + unsigned commit-tree on empty tree); commitStaged consults it when text is unmatched and commit.gpgsign is true; probeSigning reuses it. 3 tests in test/implement.mjs, fixture test/fixtures/signing/ssh-agent-missing-key.txt. Docs and CHANGELOG updated. Verify green.
