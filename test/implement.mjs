@@ -891,6 +891,15 @@ eq((await prTitleFor()).title, "Widget 1.0", "...and is the spec title alone wit
 eq((await prTitleFor({ spec: "no heading here\n" })).title.startsWith("Build: build/"), true, "without a spec heading the title is Build: <branch>");
 eq((await prTitleFor({ config: { flight: "w-1" }, round: 2 })).title, "w-1: Widget 1.0", "the title has no round suffix at round 2");
 
+{
+  const topic = "Caf\u00e9 " + "long ".repeat(40).trim();
+  const { r, title } = await prTitleFor({ spec: `# ${topic} \u2014 Specification\n`, config: { flight: "w-1" } });
+  const expected = [...`w-1: ${topic}`].slice(0, 120).join("");
+  eq([...expected].length, 120, "a derived PR title is cut to 120 characters: the fixture is longer than the cut");
+  eq(title, expected, "...gh gets exactly the first 120 code points");
+  eq(r.prTitle, expected, "...and run_finish returns the same prTitle");
+}
+
 // The draft PR targets baseBranch, not the repository's default branch, and
 // the summary reports the PR it finds (2026-09-30 cleanflate F-24, F-25).
 {
@@ -1234,6 +1243,28 @@ const stateOf = (repo) => JSON.parse(readFile(repo, ".kukulu/state.json"));
     ok(git(repo, ["cat-file", "-p", "HEAD"]).includes("gpgsig"), "...signed");
     ok(!("signingOverride" in stateOf(repo)), "...with the override gone");
   }, operatorSigning(gpg));
+}
+
+{
+  const repo = plannedRepo();
+  const emptyGlobal = path.join(mkDir("kukulu-gitcfg-"), "gitconfig");
+  fs.writeFileSync(emptyGlobal, "");
+  const fallback = "off (commit signing failed: timed out)";
+  await withServer(repo, async ({ call }) => {
+    await call("kukulu_run_start");
+    setState(repo, { signingOverride: true, signing: fallback });
+    git(repo, ["config", "--local", "commit.gpgsign", "false"]);
+    git(repo, ["add", "-A"]);
+    git(repo, ["commit", "-qm", "chore: simulated fallback"]);
+    const head = git(repo, ["rev-parse", "HEAD"]);
+    const r = await call("kukulu_run_start");
+    eq(r.alreadyStarted + "|" + r.signing, "true|" + fallback, "a resumed run with no operator signing keeps the fallback record");
+    eq(stateOf(repo).signing, fallback, "...state.signing is unchanged");
+    eq(stateOf(repo).signingOverride, true, "...signingOverride is still true");
+    const lg = spawnSync("git", ["config", "--local", "--get", "commit.gpgsign"], { cwd: repo, encoding: "utf8" });
+    eq(lg.stdout.trim(), "false", "...local commit.gpgsign reads false again");
+    eq(git(repo, ["rev-parse", "HEAD"]), head, "...and HEAD did not move (no re-probe commit)");
+  }, { env: { GIT_CONFIG_GLOBAL: emptyGlobal } });
 }
 
 {
