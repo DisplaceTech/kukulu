@@ -20,7 +20,7 @@ Started: 2026-10-26T14:17:50.269Z
 - [x] P2-03 policies.archive defaults to true
 - [x] P2-04 The CHANGELOG decides whether a flight is breaking
 - [x] P2-05 kukulu_flight_options records a changed round cap in PLAN.md
-- [ ] P2-06 Phase 2 end: push and record the manual check
+- [x] P2-06 Phase 2 end: push and record the manual check
 - [ ] P3-01 prChecks falls back to the REST API on an older gh
 - [ ] P3-02 kukulu_mutate's filter takes a list
 - [ ] P3-03 kukulu_mutate says what kind of change it restored
@@ -90,3 +90,7 @@ changelogVerdict(); prFinalize refuses disagreement before any write, adds break
 ### P2-05 — f2095ea
 
 withDecisions() helper; flightOptions adds PLAN.md to rollback set and commit only when a cap changes. 4 tests in state.mjs; CONTRIBUTING row, mcp-tools, CHANGELOG. Verify green (3830).
+
+### P2-06 — 9ddb1d3
+
+Pushed. Manual check: NOT VERIFIED (human): once 0.7.2 is installed, the next flight's draft PR is titled <flight>: <spec title> (this flight's own PR is opened by the running 0.7.1 as Build: <branch>)
