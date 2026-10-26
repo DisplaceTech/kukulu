@@ -9,6 +9,7 @@ All notable changes to this plugin. Format follows
 ### Changed
 
 - rsync's deleting options (`--delete`, `--del`, `--delete-*`) now deny a destination that equals or contains a protected path, and `--remove-source-files` denies a protected source (0.7.1 known-gap candidate).
+- `bsdtar` and `gtar` now get every guard decision `tar` gets (0.7.1 known-gap candidate).
 
 ## [0.7.1] — 2026-10-20
 

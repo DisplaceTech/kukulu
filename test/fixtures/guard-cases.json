@@ -6746,5 +6746,93 @@
    "cwd": "__ROOT__"
   },
   "expect": "allowed"
+ },
+ {
+  "name": "bsdtar -xf a.tar -C docs (P0-03)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "bsdtar -xf a.tar -C docs"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "gtar xf a.tar -C .kukulu (P0-03)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "gtar xf a.tar -C .kukulu"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "bsdtar -cf docs/cleanroom.json src (P0-03)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "bsdtar -cf docs/cleanroom.json src"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "bsdtar -cf build/a.tar /usr/include (P0-03)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "bsdtar -cf build/a.tar /usr/include"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "deny\\.paths"
+ },
+ {
+  "name": "bsdtar -tf a.tar (P0-03)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "bsdtar -tf a.tar"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "gtar xf a.tar -C build (P0-03)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "gtar xf a.tar -C build"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "gtar cf build/a.tar docs (P0-03)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "gtar cf build/a.tar docs"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
  }
 ]

@@ -984,14 +984,14 @@ export function evaluate(policy, hookInput, env) {
           }
         }
       }
-      if (word === "tar") {
+      if (TAR_WORDS.has(word)) {
         const { extract, writesArchive, dirs, file } = tarParts(rest);
         if (extract) {
           // The archive's contents cannot be known, so an extraction into a directory that holds or sits in a protected path is denied.
           const dir = dirs.reduce((base, d) => canonicalPaths(tokenPath(d), { cwd: base, home })[0], shellCwd);
           const forms = [dir, ...writeForms(dir)];
           const hit = protectedList.find((q) => forms.some((x) => underPrefix(q, x) || underPrefix(x, q)));
-          if (hit) return denied(`protected path: ${hit} (tar extracts into ${dirs.length ? dirs[dirs.length - 1] : "."}; the archive's contents cannot be known)`);
+          if (hit) return denied(`protected path: ${hit} (${word} extracts into ${dirs.length ? dirs[dirs.length - 1] : "."}; the archive's contents cannot be known)`);
         }
         if (writesArchive && file !== null && file !== "-") {
           const forms = writeForms(tokenPath(file));
@@ -1333,6 +1333,9 @@ function rsyncParts(rest) {
   return { operands, recursive, deletes, removesSources };
 }
 
+// BSD and GNU tar under their other names parse the same options.
+const TAR_WORDS = new Set(["tar", "bsdtar", "gtar"]);
+
 // tar's short options that take a value, and its long options (a unique prefix names one; tar accepts abbreviations).
 const TAR_SPEC = { short: new Set("fCTXbHKLNVg"), long: new Set() };
 const TAR_LONG_MODES = {
@@ -1522,7 +1525,7 @@ function recursiveOperands(word, rest) {
     return list.length ? list : ["."];
   }
   if (word === "cp") return flagged(/^-[A-Za-z]*[rRa][A-Za-z]*$/, /^--(?:recursive|archive)$/) ? plain(rest) : null;
-  if (word === "tar" || word === "rsync") return plain(rest);
+  if (TAR_WORDS.has(word) || word === "rsync") return plain(rest);
   return null;
 }
 

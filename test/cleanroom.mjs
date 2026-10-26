@@ -943,6 +943,7 @@ async function genesisRepo(planOpts = {}) {
   const env = { root: "/p", home: "/h", policyPath: "/p/docs/cleanroom.json", pluginRoot: "/h/.claude/plugins/cache/kukulu", keyPath: "/h/.config/kukulu/cleanroom/ed25519.pem", planExists: true };
   const run = (command) => evaluate(policy, { tool_name: "Bash", tool_input: { command }, cwd: "/p" }, env);
   eq(run("tar xf evil.tar -C docs").reason, "protected path: /p/docs/cleanroom.json (tar extracts into docs; the archive's contents cannot be known)", "a tar extraction denial names the directory");
+  eq(run("bsdtar -xf a.tar -C docs").reason, "protected path: /p/docs/cleanroom.json (bsdtar extracts into docs; the archive's contents cannot be known)", "a bsdtar denial names the word as written");
   eq(run("rsync evil/cleanroom.json docs/").reason, "protected path: /p/docs/cleanroom.json (rsync writes it into docs/)", "an rsync denial names its destination");
   eq(run("rsync -d --delete empty/ docs/").reason, "protected path: /p/docs/cleanroom.json (rsync --delete* can remove it from docs/)", "an rsync --delete denial names the protected path and the destination");
   eq(run("rsync --remove-source-files docs/cleanroom.json build/").reason, "protected path: /p/docs/cleanroom.json (rsync --remove-source-files removes it)", "an rsync --remove-source-files denial names the protected path");
