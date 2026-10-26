@@ -1,0 +1,66 @@
+[
+ {
+  "model": "opus",
+  "family": "claude"
+ },
+ {
+  "model": "claude-opus-5-5",
+  "family": "claude"
+ },
+ {
+  "model": "fable",
+  "family": "claude"
+ },
+ {
+  "model": "inherit",
+  "family": "claude"
+ },
+ {
+  "model": "spark/nemotron-3.5-super-nvfp4",
+  "family": "nemotron"
+ },
+ {
+  "model": "mac/qwen3.8-27b",
+  "family": "qwen"
+ },
+ {
+  "model": "Ollama/qwen3.6:35b-a3b",
+  "family": "qwen"
+ },
+ {
+  "model": "OpenRouter/deepseek/deepseek-v4-pro",
+  "family": "deepseek"
+ },
+ {
+  "model": "glm-5.2",
+  "family": "glm"
+ },
+ {
+  "model": "devstral-small-2",
+  "family": "mistral"
+ },
+ {
+  "model": "mistral-large",
+  "family": "mistral"
+ },
+ {
+  "model": "llama-3.3-70b",
+  "family": "llama"
+ },
+ {
+  "model": "gemma-3-27b",
+  "family": "gemma"
+ },
+ {
+  "model": "gpt-5",
+  "family": "gpt"
+ },
+ {
+  "model": "some-unknown-model",
+  "family": "unknown:some-unknown-model"
+ },
+ {
+  "model": "Vendor/Some-Unknown",
+  "family": "unknown:some-unknown"
+ }
+]

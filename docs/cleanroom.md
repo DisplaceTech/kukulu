@@ -30,6 +30,9 @@ A project without the policy file pays nothing: both hooks exit at once, before 
 | `allow.paths` | no, `[]` | Prefixes exempt from `deny.words` (the project's own tree). Never exempt from `deny.paths` or `pathPatterns` |
 | `allow.urls` | no, `[]` | Exact URLs allowed for `WebFetch`, `curl` and `wget` until lockdown |
 | `lockdown.after` | no | A task id. Once that task is `[x]` in `PROGRESS.md`, or when no open task remains, `allow.urls` is treated as empty. Absent means no lockdown |
+| `runners.allow` | no, any runner | Non-empty array of runner names. A role resolving to a runner not in the list fails gate check 8 |
+| `runners.locality` | no, `"any"` | `"local"` or `"any"`. `"local"` fails gate check 8 for any role whose runner is not `local` |
+| `roles.distinct` | no, `"none"` | `"none"`, `"model"` or `"family"`: how far apart the implementer's and reviewer's models must be. `family` compares `familyOf` of the normalized model strings |
 | `protected` | no, `[]` | Extra prefixes that no write tool or write-family Bash command may touch, in addition to the always-protected set |
 
 ### What the guard decides

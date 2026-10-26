@@ -16,7 +16,10 @@ export class CleanroomError extends Error {
 }
 
 const TASK_ID = /^[PR]\d+-\d+$/;
-const POLICY_KEYS = ["version", "deny", "allow", "lockdown", "protected"];
+const POLICY_KEYS = ["version", "deny", "allow", "lockdown", "protected", "runners", "roles"];
+const RUNNERS_KEYS = ["allow", "locality"];
+const ROLES_KEYS = ["distinct"];
+const RUNNER_NAME = /^[a-z0-9][a-z0-9-]{0,39}$/;
 const DENY_KEYS = ["tools", "network", "paths", "pathPatterns", "words", "commandPatterns"];
 const ALLOW_KEYS = ["paths", "urls"];
 const LOCKDOWN_KEYS = ["after"];
@@ -111,6 +114,23 @@ export function loadPolicy(text) {
     throw new CleanroomError(`policy lockdown.after must be a task id such as "P0-10" (got ${JSON.stringify(lockdown.after)})`);
   }
 
+  const runners = raw.runners === undefined ? {} : raw.runners;
+  if (!isObject(runners)) throw new CleanroomError("policy runners must be an object");
+  onlyKeys(runners, RUNNERS_KEYS, "runners");
+  if (runners.allow !== undefined && (!Array.isArray(runners.allow) || !runners.allow.length
+    || runners.allow.some((n) => typeof n !== "string" || !RUNNER_NAME.test(n)))) {
+    throw new CleanroomError("policy runners.allow must be a non-empty array of runner names (lowercase letters, digits and -)");
+  }
+  if (runners.locality !== undefined && runners.locality !== "local" && runners.locality !== "any") {
+    throw new CleanroomError(`policy runners.locality must be "local" or "any" (got ${JSON.stringify(runners.locality)})`);
+  }
+  const roles = raw.roles === undefined ? {} : raw.roles;
+  if (!isObject(roles)) throw new CleanroomError("policy roles must be an object");
+  onlyKeys(roles, ROLES_KEYS, "roles");
+  if (roles.distinct !== undefined && !["none", "model", "family"].includes(roles.distinct)) {
+    throw new CleanroomError(`policy roles.distinct must be "none", "model" or "family" (got ${JSON.stringify(roles.distinct)})`);
+  }
+
   return {
     version: 1,
     deny: {
@@ -127,7 +147,38 @@ export function loadPolicy(text) {
     },
     lockdown: { after: lockdown.after ?? null },
     protected: stringArray(raw.protected, "protected"),
+    runners: { allow: runners.allow ? runners.allow.slice() : null, locality: runners.locality ?? "any" },
+    roles: { distinct: roles.distinct ?? "none" },
   };
+}
+
+/** A model string lowercased with every leading `<provider>/` or `<provider>,` segment removed. */
+export function normalizeModel(s) {
+  let out = String(s).toLowerCase();
+  while (/^[^/,]+[/,]/.test(out)) out = out.replace(/^[^/,]+[/,]/, "");
+  return out;
+}
+
+// ⚠️ ASSUMPTION: a table of family patterns, measured against the routing
+// strings real flights use. Each pattern runs on the normalized string; the
+// first match names the family. Written only here.
+export const MODEL_FAMILIES = [
+  { family: "claude", pattern: /^(?:fable|opus|sonnet|haiku|inherit)$|^claude-/ },
+  { family: "qwen", pattern: /qwen/ },
+  { family: "nemotron", pattern: /nemotron/ },
+  { family: "mistral", pattern: /mistral|devstral|codestral|magistral|mixtral/ },
+  { family: "deepseek", pattern: /deepseek/ },
+  { family: "glm", pattern: /^glm|[-_/]glm/ },
+  { family: "llama", pattern: /llama/ },
+  { family: "gemma", pattern: /gemma/ },
+  { family: "gpt", pattern: /^gpt|[-_/]gpt|^o[1-9]\b/ },
+];
+
+/** The family a model string belongs to, or `unknown:<normalized string>`. */
+export function familyOf(model) {
+  const n = normalizeModel(model);
+  for (const { family, pattern } of MODEL_FAMILIES) if (pattern.test(n)) return family;
+  return `unknown:${n}`;
 }
 
 /** SHA-256 of a file's bytes, as lowercase hex; a string is hashed as UTF-8. */

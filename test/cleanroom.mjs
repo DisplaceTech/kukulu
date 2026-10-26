@@ -19,6 +19,7 @@ import {
   splitSegments, shellWords, commandWord, isPathLike, tokenPath, canonicalPaths,
   evaluate, lockdownActive, NETWORK_COMMANDS, READ_FAMILY, WRITE_FAMILY, protectedPaths,
   coverageGaps, KNOWN_LIMITS,
+  normalizeModel, familyOf,
   generateKey, loadKey, keyFingerprint, CHECKPOINT_KEYS, signCheckpoint, verifyCheckpoint,
 } from "../mcp/cleanroom.mjs";
 
@@ -51,6 +52,26 @@ const pattern = (extra = {}) => ({ id: "p", pattern: "/build/", shouldMatch: ["/
   eq(JSON.stringify([empty.deny.tools, empty.deny.paths, empty.deny.words, empty.allow.paths, empty.allow.urls, empty.protected]), "[[],[],[],[],[],[]]", "every list defaults to empty");
   eq(empty.lockdown.after, null, "...and lockdown.after to null");
   eq(loadPolicy('{"version":1,"deny":{"network":false}}').deny.network, false, "deny.network false is kept");
+}
+
+{
+  const d = loadPolicy('{"version":1}');
+  eq(d.runners.allow, null, "defaults fill runners: allow is null");
+  eq(d.runners.locality, "any", "...locality is any");
+  eq(d.roles.distinct, "none", "...and roles.distinct is none");
+  eq(loadPolicy(JSON.stringify(base({ runners: { allow: ["spark", "mac-1"], locality: "local" }, roles: { distinct: "family" } }))).runners.allow.join(","), "spark,mac-1", "runners.allow accepts a list of names");
+  eq(refusal(base({ runners: { allow: [] } })), "policy runners.allow must be a non-empty array of runner names (lowercase letters, digits and -)", "an empty runners.allow refuses");
+  eq(refusal(base({ runners: { allow: ["Bad"] } })), "policy runners.allow must be a non-empty array of runner names (lowercase letters, digits and -)", "a badly named runners.allow entry refuses");
+  eq(refusal(base({ runners: { locality: "near" } })), 'policy runners.locality must be "local" or "any" (got "near")', "a bad runners.locality refuses");
+  eq(refusal(base({ roles: { distinct: "x" } })), 'policy roles.distinct must be "none", "model" or "family" (got "x")', "a bad roles.distinct refuses");
+  like(refusal(base({ runners: { deny: [] } })), /policy runners has an unknown key 'deny'; the legal keys are allow, locality/, "an unknown runners key refuses");
+  like(refusal(base({ roles: { other: 1 } })), /policy roles has an unknown key 'other'/, "an unknown roles key refuses");
+  const families = JSON.parse(readFile(ROOT, "test/fixtures/families.json"));
+  ok(families.length >= 16, "the family fixture has at least sixteen entries");
+  for (const { model, family } of families) eq(familyOf(model), family, `familyOf classifies ${model}`);
+  eq(normalizeModel("OpenRouter/deepseek/deepseek-v4-pro"), "deepseek-v4-pro", "normalizeModel strips every provider prefix");
+  eq(normalizeModel("Prov,Mixed/Model-X"), "model-x", "...whether the separator is a slash or a comma");
+  ok(familyOf("alpha-1") !== familyOf("beta-1"), "two unknown strings are their own families");
 }
 
 {

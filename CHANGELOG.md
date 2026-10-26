@@ -9,6 +9,7 @@ All notable changes to this plugin. Format follows
 ### Added
 
 - Runners in the global config (`runners`), and each role's runner, endpoint and locality in `kukulu_config_show` and the routing table (G-01, A-01).
+- Clean-room policy keys `runners.allow`, `runners.locality` and `roles.distinct` (G-01, G-03).
 
 ## [0.7.2] — 2026-10-26
 
