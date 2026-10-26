@@ -15,7 +15,7 @@ Started: 2026-10-26T21:19:36.125Z
 - [x] P1-01 Control mode in the policy and the guard
 - [x] P1-02 Control mode in genesis, the manifest and the verifier
 - [x] P1-03 The control bundle is the positive pair
-- [ ] P1-04 scripts/publish-bundle.mjs and docs/publishing.md
+- [x] P1-04 scripts/publish-bundle.mjs and docs/publishing.md
 - [ ] P1-05 Phase 1 end: push and record the manual check
 - [ ] P2-01 The policy's enforcement, sandbox and package keys, and the local-only template
 - [ ] P2-02 mcp/relay.mjs, the controller socket and the sandbox suite
@@ -96,3 +96,8 @@ Interpretation: --expect control-positive on a passing control bundle prints PAS
 
 validateSimilarity/normalizeSimilarity: control key on the positive pair only; verifyControlBundle() runs the bundle's verify.mjs --expect control-positive --json then compares the left side HEAD with manifest repo.head, before readSide; similarity.json config.pairs positive gets control {manifest, head, fingerprint}. buildBundle opts.head. Tests in test/cleanroom.mjs (1194). Docs operations/mcp-tools/CHANGELOG. Verify green.
 Interpretation: left "subject" means project root for rev-parse; missing verify.mjs refusal wording added.
+
+### P1-04 — 6c701a5
+
+scripts/publish-bundle.mjs (publish and --check; exports publish, check, main), docs/publishing.md, README docs-map link, CONTRIBUTING row, CHANGELOG. bundles suite now 47 assertions. Interpretation: --check expects exit 3 only for control-positive; file count includes SHA256SUMS and VERIFY.txt.
+Lesson: the plugin suite's link check reads git ls-files, so a new doc must be committed before kukulu_verify is green.
