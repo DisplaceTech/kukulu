@@ -62,5 +62,45 @@
  {
   "model": "Vendor/Some-Unknown",
   "family": "unknown:some-unknown"
+ },
+ {
+  "model": "sonnet",
+  "family": "claude"
+ },
+ {
+  "model": "haiku",
+  "family": "claude"
+ },
+ {
+  "model": "claude-fable-5-1",
+  "family": "claude"
+ },
+ {
+  "model": "deepseek/deepseek-v4-pro",
+  "family": "deepseek"
+ },
+ {
+  "model": "qwen3.6:27b",
+  "family": "qwen"
+ },
+ {
+  "model": "qwen3.6:35b-a3b",
+  "family": "qwen"
+ },
+ {
+  "model": "nemotron-3.5-super-nvfp4",
+  "family": "nemotron"
+ },
+ {
+  "model": "fable-5-1",
+  "family": "unknown:fable-5-1"
+ },
+ {
+  "model": "opus-5-5",
+  "family": "unknown:opus-5-5"
+ },
+ {
+  "model": "sonnet-5-5",
+  "family": "unknown:sonnet-5-5"
  }
 ]
