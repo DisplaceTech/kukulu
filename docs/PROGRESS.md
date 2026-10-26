@@ -18,7 +18,7 @@ Started: 2026-10-26T14:17:50.269Z
 - [x] P2-01 The draft PR is titled after the flight, and prTitle overrides it
 - [x] P2-02 The merge commit's subject repeats the PR title
 - [x] P2-03 policies.archive defaults to true
-- [~] P2-04 The CHANGELOG decides whether a flight is breaking
+- [x] P2-04 The CHANGELOG decides whether a flight is breaking
 - [ ] P2-05 kukulu_flight_options records a changed round cap in PLAN.md
 - [ ] P2-06 Phase 2 end: push and record the manual check
 - [ ] P3-01 prChecks falls back to the REST API on an older gh
@@ -82,3 +82,7 @@ Merge subject from gh pr view --json title,number for merge/squash; failure yiel
 ### P2-03 — fdc6a9c
 
 cfgFrom default archive ?? true (only place). Interpretation: kukulu_config_show gained an archive field so routing tests can assert the default; documented in mcp-tools and CHANGELOG Added. Docs operations updated. Verify green.
+
+### P2-04 — eb40db1
+
+changelogVerdict(); prFinalize refuses disagreement before any write, adds breakingSource to results; schema/description/skill/docs updated. Interpretation: summarize skill status line matches merge starting with "enabled". Verify green (3822).
