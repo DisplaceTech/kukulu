@@ -14,7 +14,7 @@ Started: 2026-10-26T14:17:50.269Z
 - [x] P1-02 The fallback's override is lifted at the next run start
 - [x] P1-03 kukulu_pr_finalize waits for signatures only when the policy expects them
 - [x] P1-04 A broken signer is reported before the plan stage under required
-- [ ] P1-05 Phase 1 end: push and record the manual check
+- [x] P1-05 Phase 1 end: push and record the manual check
 - [ ] P2-01 The draft PR is titled after the flight, and prTitle overrides it
 - [ ] P2-02 The merge commit's subject repeats the PR title
 - [ ] P2-03 policies.archive defaults to true
@@ -66,3 +66,7 @@ signaturesExpected/signingNoteFor helpers; prFinalize gains signatures field and
 ### P1-04 — 9c1e707
 
 requiredSigningPolicy(st) + plan-stage probe in next(); go-flight step 2 sentence; docs and CHANGELOG. 3 tests in state.mjs, 1 in plugin.mjs. Verify green (3794).
+
+### P1-05 — dbdcb51
+
+Pushed. Manual check: NOT VERIFIED (human): in a scratch repo with the owner's real SSH signer and SSH_AUTH_SOCK pointed at the wrong agent, kukulu_plan_commit under auto commits unsigned and logs the fallback; with the socket fixed, kukulu_run_start signs again
