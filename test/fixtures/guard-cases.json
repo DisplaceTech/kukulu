@@ -6645,5 +6645,106 @@
   },
   "expect": "denied",
   "reason": "can be named by the wildcard"
+ },
+ {
+  "name": "rsync -d --delete empty/ docs/ (P0-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "rsync -d --delete empty/ docs/"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*docs/cleanroom\\.json \\(rsync --delete\\* can remove it from docs/\\)"
+ },
+ {
+  "name": "rsync --dirs --delete-after empty/ .kukulu/ (P0-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "rsync --dirs --delete-after empty/ .kukulu/"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "rsync --delete\\* can remove it from \\.kukulu/"
+ },
+ {
+  "name": "rsync -r --del empty/ ./ (P0-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "rsync -r --del empty/ ./"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "rsync --delete\\* can remove it from \\./"
+ },
+ {
+  "name": "rsync --remove-source-files docs/cleanroom.json build/ (P0-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "rsync --remove-source-files docs/cleanroom.json build/"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*docs/cleanroom\\.json \\(rsync --remove-source-files removes it\\)"
+ },
+ {
+  "name": "rsync --remove-source-files .kukulu/cleanroom/log.jsonl out/ (P0-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "rsync --remove-source-files .kukulu/cleanroom/log.jsonl out/"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "rsync --remove-source-files removes it"
+ },
+ {
+  "name": "rsync -a --delete src/ build/ (P0-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "rsync -a --delete src/ build/"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "rsync --remove-source-files build/a.o out/ (P0-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "rsync --remove-source-files build/a.o out/"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "rsync -d empty/ docs/ (P0-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "rsync -d empty/ docs/"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
  }
 ]

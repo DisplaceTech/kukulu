@@ -952,9 +952,24 @@ export function evaluate(policy, hookInput, env) {
       }
       // 6d'. rsync and tar are not write-family as a whole: their sources and archives are only read, so each gets a rule of its own (SPEC A-04).
       if (word === "rsync") {
-        const { operands, recursive } = rsyncParts(rest);
+        const { operands, recursive, deletes, removesSources } = rsyncParts(rest);
         if (operands.length > 1) {
           const dest = operands[operands.length - 1];
+          // The deleting options remove whatever the destination holds, recursive or not, so a destination that contains a protected path is a write target.
+          if (deletes) {
+            const forms = writeForms(tokenPath(dest));
+            const q = protectedList.find((p) => forms.some((x) => underPrefix(p, x)));
+            if (q) return denied(`protected path: ${q.replace(/\/$/, "")} (rsync --delete* can remove it from ${dest})`);
+          }
+          if (removesSources) {
+            for (const src of operands.slice(0, -1)) {
+              const forms = writeForms(tokenPath(src));
+              const q = protectedList.find((p) => forms.some((x) => underPrefix(p, x)));
+              if (q) return denied(`protected path: ${q.replace(/\/$/, "")} (rsync --remove-source-files removes it)`);
+              const f = forms.find((x) => protectedList.some((p) => underPrefix(x, p)));
+              if (f) return denied(`protected path: ${f} (rsync --remove-source-files removes it)`);
+            }
+          }
           const landed = operands.slice(0, -1).map((src) => {
             const trimmed = src.replace(/\/+$/, "");
             const base = path.basename(trimmed);
@@ -1282,10 +1297,15 @@ const RSYNC_SPEC = {
   ),
 };
 
-/** rsync's operands and whether the call is recursive (`-r`, `-a`, in a bundle such as `-av`, or `--recursive`/`--archive` by unique prefix). */
+// rsync's deleting options, and the one that removes sources; matched whole (before any `=`), never by abbreviation (KNOWN_LIMITS entry 3).
+const RSYNC_DELETES = new Set(["--delete", "--del", "--delete-before", "--delete-during", "--delete-delay", "--delete-after", "--delete-excluded", "--delete-missing-args"]);
+
+/** rsync's operands, whether the call is recursive (`-r`, `-a`, in a bundle such as `-av`, or `--recursive`/`--archive` by unique prefix), and whether it deletes at the destination or removes its sources. */
 function rsyncParts(rest) {
   const operands = [];
   let recursive = false;
+  let deletes = false;
+  let removesSources = false;
   for (let i = 0; i < rest.length; i++) {
     const t = rest[i];
     if (t === "--") {
@@ -1299,6 +1319,8 @@ function rsyncParts(rest) {
     const opt = scanOption(t, RSYNC_SPEC);
     if (t.startsWith("--")) {
       const given = t.split("=")[0];
+      if (RSYNC_DELETES.has(given)) deletes = true;
+      if (given === "--remove-source-files") removesSources = true;
       const hits = ["--recursive", "--archive"].filter((n) => n.startsWith(given));
       if (given.length > 2 && hits.length === 1) recursive = true;
     } else {
@@ -1308,7 +1330,7 @@ function rsyncParts(rest) {
     }
     if (opt && opt.value === null) i++;
   }
-  return { operands, recursive };
+  return { operands, recursive, deletes, removesSources };
 }
 
 // tar's short options that take a value, and its long options (a unique prefix names one; tar accepts abbreviations).

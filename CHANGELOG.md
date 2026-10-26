@@ -4,6 +4,12 @@ All notable changes to this plugin. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- rsync's deleting options (`--delete`, `--del`, `--delete-*`) now deny a destination that equals or contains a protected path, and `--remove-source-files` denies a protected source (0.7.1 known-gap candidate).
+
 ## [0.7.1] — 2026-10-20
 
 ### Changed
