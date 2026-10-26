@@ -12,7 +12,7 @@ Started: 2026-10-26T14:17:50.269Z
 - [x] P0-05 Phase 0 end: push and record the manual check
 - [x] P1-01 A failed commit is classified as a signing failure by a probe
 - [x] P1-02 The fallback's override is lifted at the next run start
-- [~] P1-03 kukulu_pr_finalize waits for signatures only when the policy expects them
+- [x] P1-03 kukulu_pr_finalize waits for signatures only when the policy expects them
 - [ ] P1-04 A broken signer is reported before the plan stage under required
 - [ ] P1-05 Phase 1 end: push and record the manual check
 - [ ] P2-01 The draft PR is titled after the flight, and prTitle overrides it
@@ -58,3 +58,7 @@ Added signingProbe() (signed + unsigned commit-tree on empty tree); commitStaged
 ### P1-02 — b080d17
 
 probeSigning(policy, st) lifts the override and puts it back on throw; fresh path drops override on none; reprobeSigning for already-started runs commits chore: signing re-probed. Interpretation: override created by this call's base sync is not re-probed (overrideBefore captured before sync). 4 tests; verify green.
+
+### P1-03 — 113286b
+
+signaturesExpected/signingNoteFor helpers; prFinalize gains signatures field and skips awaiting when not expected; run_start results and kukulu_next policy sentence carry signingNote. Interpretation: resign:true => expected; archived null signing => expected. Docs, README, architecture, CHANGELOG updated. Verify green (3781).
