@@ -21,7 +21,7 @@ Started: 2026-10-26T21:19:36.125Z
 - [x] P2-02 mcp/relay.mjs, the controller socket and the sandbox suite
 - [x] P2-03 The log socket, and its round-trip budget
 - [x] P2-04 The egress proxy, the bridge, and its overhead
-- [ ] P2-05 containerArgs, the plan, the Containerfile, the fake docker and doctor
+- [x] P2-05 containerArgs, the plan, the Containerfile, the fake docker and doctor
 - [ ] P2-06 run and stop, and docs/sandbox.md
 - [ ] P2-07 Gate check 9 and the boundary in genesis
 - [ ] P2-08 Commands run inside the boundary
@@ -127,3 +127,8 @@ Interpretation: unreachable socket denies even before genesis; logger appends de
 
 scripts/sandbox.mjs: hostPortOf, egressDecision, startProxy ({listening, close}); scripts/sandbox-entry.mjs: startBridge ({listening, port(), close}) and main (spawns claude --plugin-dir, or --exec). Tests in test/sandbox.mjs (55 assertions, in-process proxy + echo servers). docs/sandbox.md ## Egress, cleanroom.md egress kind. docs/spikes/P2-04.md informational: bridge+proxy added ~1 ms median per connection (two runs: 1.06/0.94 ms), bulk transfer 2-5x slower than direct loopback.
 Interpretation: 403 carries Content-Length too; CONNECT to an unreachable upstream gets 502; hostPortOf exported for runner endpoints.
+
+### P2-05 — 5d6cddf
+
+scripts/sandbox.mjs: projectIdFor, runtimeDirFor, planFor (extra optional policyPath), containerArgs (exact list, no other flag), doctor (+ --engine). templates/sandbox/Containerfile, mkFakeDocker in test/harness.mjs, test/fixtures/docker/{version.txt,inspect.json,README.md}. inspect.json: container kukulu-0123456789abcdef, plugin root /opt/kukulu, root as __ROOT__ (P2-06/P2-07 tests substitute). docs/sandbox.md: Building the image, doctor, The mount list. test/sandbox.mjs 94 assertions. Verify green (4180).
+Interpretation: doctor treats enforcement hook / missing sandbox.image as problems; missing image is one problem (plus build/paste lines).
