@@ -49,3 +49,13 @@ No new ⚠️ ASSUMPTION keys. `policies.archive` now defaults to `true` in `cfg
 - `DEFAULT_STATE.signing` is `null`, not undefined; test with `== null`.
 - Unescaped double quotes inside a `TOOLS` description string break `node --check` for the whole server; keep quoted headings out of those strings.
 - A markdownlint MD038 trips on code spans such as `` `## ` ``; describe the heading in words.
+
+## Round 1
+
+Branch build/2026-10-26; three fix tasks, all done (24 of 24 tasks done, none blocked or skipped).
+
+- R1-01: `.gitleaks.toml` allowlist widened to `test/(harness|review|state|implement).mjs`. Interpretation: the round 1 review (79f3342) also quotes the fake key in `docs/REVIEW.md`, which the range scan flagged; a second allowlist scoped to that commit and the same value covers it, because a docs path would break `test/plugin.mjs`'s tests-only paths check. Local `gitleaks git` range scan reports no leaks.
+- R1-02: tests for B-02's kept fallback record on a resumed run and C-01's 120-code-point title cut (`test/implement.mjs`).
+- R1-03: tests killing the four remaining server mutants (fresh-path none, code-point length check, title separators, gh unknown-flag fallback) in `implement`, `routing` and `state`. `mcp/server.mjs` is unchanged.
+- Mutants were applied by hand, since `kukulu_mutate` is not available to the implementer; each was killed by its new test.
+- Check after the push that the CI `gitleaks` check passes.
