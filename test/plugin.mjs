@@ -91,6 +91,7 @@ ok(exists(server.args[0].replace("${CLAUDE_PLUGIN_ROOT}/", "")), "the server fil
 eq(server.env.KUKULU_PROJECT_DIR, "${CLAUDE_PROJECT_DIR}", "the server is told which project it is operating on");
 eq(server.env.KUKULU_CONFIG, "${KUKULU_CONFIG:-}", "the global routing config path passes through, empty by default");
 eq(server.env.KUKULU_PROFILE, "${KUKULU_PROFILE:-}", "the routing profile passes through, empty by default");
+eq(server.env.KUKULU_CONTROLLER_SOCKET, "${KUKULU_CONTROLLER_SOCKET:-}", "the controller socket passes through, empty by default");
 eq(server.env.FOUNDRY_CONFIG, undefined, ".mcp.json no longer passes FOUNDRY_CONFIG");
 eq(server.env.FOUNDRY_PROFILE, undefined, "...or FOUNDRY_PROFILE");
 
@@ -201,7 +202,7 @@ for (const name of ["plan-build", "implement"]) {
   like(readme, /^## Upgrading to 0\.7\.0$/m, "README has a 0.7.0 migration paragraph");
   like(readme, /\.foundry\/state\.json[\s\S]*\.kukulu\/[\s\S]*`FOUNDRY_\*` environment variables are no longer read/, "...naming the manual move and the unread FOUNDRY_ variables");
   like(readme, /\*\*Clean-room mode\*\*, opt-in with a policy file/, "README's feature list names clean-room mode");
-  like(readme, /fourteen suites/, "README counts fourteen suites");
+  like(readme, /fifteen suites/, "README counts fifteen suites");
   const tools = read("docs/mcp-tools.md");
   ok(tools.includes("`prChecks`") && tools.includes("`gate`") && /"source": "review"/.test(tools) && tools.includes("`constraints`"), "mcp-tools documents prChecks, gate and source (and the mutate constraints)");
   ok(!tools.includes("kukulu_migrate"), "mcp-tools has no kukulu_migrate");

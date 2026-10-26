@@ -6,7 +6,8 @@
       "env": {
         "KUKULU_PROJECT_DIR": "${CLAUDE_PROJECT_DIR}",
         "KUKULU_CONFIG": "${KUKULU_CONFIG:-}",
-        "KUKULU_PROFILE": "${KUKULU_PROFILE:-}"
+        "KUKULU_PROFILE": "${KUKULU_PROFILE:-}",
+        "KUKULU_CONTROLLER_SOCKET": "${KUKULU_CONTROLLER_SOCKET:-}"
       }
     }
   }

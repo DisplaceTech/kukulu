@@ -16,6 +16,8 @@ Every behaviour change to the server therefore needs a test, because the thing u
 |---|---|
 | `mcp/server.mjs` | Every deterministic operation, and the JSON-RPC transport |
 | `mcp/run-command.mjs` | Runs one verify/mutate/setup command in its own process group, bounded in time and output, for the synchronous server |
+| `mcp/relay.mjs` | Inside the sandbox: pipes the server's stdio to the controller socket; `node:` only, reached by the server only through `spawnSync` |
+| `scripts/sandbox.mjs` | The sandbox launcher: the controller socket now, then the log socket, proxy, `doctor`, `run` and `stop` |
 | `scripts/implement-guard.mjs` | The Stop / SubagentStop hook |
 | `scripts/lint.sh` | Dependency-free syntax and manifest lint |
 | `scripts/check-names.mjs` | Fails on a misplaced kahakō or an ASCII spelling of the display name in prose; run by `scripts/lint.sh` |
@@ -31,7 +33,7 @@ Every behaviour change to the server therefore needs a test, because the thing u
 | `templates/SPEC.md` | The spec skeleton users copy |
 | `templates/kukulu.config.example.json`, `templates/ccr/` | The global routing config and claude-code-router provider manifests |
 | `templates/constraints.example.json` | Three worked `docs/kukulu.json` `constraints` rules, with fixtures |
-| `test/` | Harness plus fourteen suites |
+| `test/` | Harness plus fifteen suites |
 | `docs/` | Architecture, tool reference, routing guide, spec guide, runbook |
 | `docs/plans/` | The task-by-task plan behind each release |
 | `docs/feedback/` | Stumbling blocks a real flight hit, feeding the next release plan; gitignored, local to the maintainer |
@@ -58,7 +60,7 @@ When `docs/feedback/.private-names` exists on your machine (gitignored; see [Fli
 
 ```bash
 npm run lint                    # node --check, bash -n, JSON parse, exec bits
-npm test                        # all fourteen suites
+npm test                        # all fifteen suites
 npm test -- guard protocol      # named suites only
 node test/state.mjs             # one suite, directly
 KEEP_REPO=1 npm test -- drive   # keep the temp repos for inspection
@@ -81,6 +83,7 @@ npm install --no-save mermaid jsdom && node scripts/check-diagrams.mjs
 | `guard` | The Stop / SubagentStop hook: scoping, blocking, counting, giving up, environment handling |
 | `cleanroom` | Clean-room mode: the policy loader and its refusals, the guard, the hash chain, checkpoints, the gate and scoring |
 | `attest` | The offline verifier (`scripts/verify-attestation.mjs`), attestation bundles, tamper detection, and pre-0.6.0 logs |
+| `sandbox` | The sandbox: the relay and controller socket, the log socket, the proxy, the container launcher and gate checks 9 and 10; no container engine needed |
 | `bundles` | The bundle scripts: `scripts/model-identity.mjs`, and `publish-bundle.mjs` and `compare-bundles.mjs` once they exist |
 | `drive` | Complete flights end to end over real stdio: one serial, and parallel ones (a wave, `maxStreams: 1`, an overlapping partition) |
 

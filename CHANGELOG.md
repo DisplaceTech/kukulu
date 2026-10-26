@@ -17,6 +17,7 @@ All notable changes to this plugin. Format follows
 - A verified control bundle can be the positive similarity pair by reference: `cleanroom.similarity` pairs gain `control`, which `kukulu_similarity` verifies and records in `similarity.json` (G-04, B-02).
 - `scripts/publish-bundle.mjs`, which writes a publishable copy of a verified bundle with `SHA256SUMS` and `VERIFY.txt` and re-checks one, and `docs/publishing.md` (G-05, B-03).
 - Clean-room policy keys `enforcement`, `sandbox.image`, `sandbox.mounts`, `sandbox.egress` and `deny.packages`, the log kinds `egress`, `stage` and `usage`, and `templates/cleanroom.local-only.example.json` (G-06, G-08).
+- `mcp/relay.mjs` and the controller socket: a server started with `KUKULU_CONTROLLER_SOCKET` relays its stdio to `scripts/sandbox.mjs`, which runs the real server per connection; `kukulu_status` reports `sandbox` (G-06, C-02).
 
 ## [0.7.2] — 2026-10-26
 

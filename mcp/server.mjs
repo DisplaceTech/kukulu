@@ -89,6 +89,15 @@ const MCP_ALLOW_RULE = "mcp__plugin_kukulu_kukulu";
 // plugin.
 const PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
+// Inside the sandbox the server does not run: the relay pipes this process's stdio to the
+// controller socket, where the real server runs outside the container with the key and the
+// project's .kukulu. It goes through spawnSync because the relay needs node:net, which this
+// file never imports.
+if (envVar("CONTROLLER_SOCKET")) {
+  const relayed = spawnSync(process.execPath, [path.join(PLUGIN_ROOT, "mcp", "relay.mjs")], { stdio: "inherit" });
+  process.exit(relayed.status ?? 1);
+}
+
 // Keep in sync with .claude-plugin/plugin.json and package.json; test/plugin.mjs checks it.
 const VERSION = "0.7.2";
 
@@ -2091,6 +2100,7 @@ function status() {
     feedbackCount: countFeedback(),
     longestCommandTimeoutMs: longestCommandTimeoutMs(),
     review: { mutationFixRounds: cfg().review.mutationFixRounds },
+    sandbox: envVar("SANDBOX") ?? null,
     reviewRoundsInPlan: reviewRoundCount(),
     branch: null,
     started: null,
