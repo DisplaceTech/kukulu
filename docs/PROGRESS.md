@@ -28,7 +28,7 @@ Started: 2026-10-26T14:17:50.269Z
 - [x] P3-05 Phase 3 end: push and record the manual check
 - [x] R1-01 The PR's gitleaks check passes: allowlist the fake signer key in the suites that use it
 - [x] R1-02 Test B-02's kept fallback record and C-01's 120-character title cut
-- [ ] R1-03 Cover the remaining mcp/server.mjs mutation survivors (fresh-path none, prTitle code points, separators, gh fallback trigger)
+- [x] R1-03 Cover the remaining mcp/server.mjs mutation survivors (fresh-path none, prTitle code points, separators, gh fallback trigger)
 
 ## Log
 
@@ -125,3 +125,7 @@ Allowlist paths widened to test/(harness|review|state|implement).mjs. Interpreta
 ### R1-02 — c373104
 
 Added B-02 resumed-run-keeps-fallback test (empty temp GIT_CONFIG_GLOBAL) and C-01 120-code-point title test (non-ASCII before the cut) in test/implement.mjs. Local gpgsign read uses spawnSync so a missing key is an assertion failure, not a crash. Mutants checked by hand (kukulu_mutate not available to me): put-back removed and none-branch skipped both fail; uncut title fails. No server change.
+
+### R1-03 — 6efeb5b
+
+Four tests added: (a) fresh-path none drops signingOverride and unsets local gpgsign (implement); (b) 61 astral-char prTitle accepted (routing); (c) en dash, colon, hyphen+Spec separators in derived title (implement); (d) fallback on "Unknown flag" stderr derived at runtime from the fixture (state). Each mutant applied by hand and killed by its suite; server restored, unchanged.
