@@ -21,7 +21,7 @@ Started: 2026-10-26T14:17:50.269Z
 - [x] P2-04 The CHANGELOG decides whether a flight is breaking
 - [x] P2-05 kukulu_flight_options records a changed round cap in PLAN.md
 - [x] P2-06 Phase 2 end: push and record the manual check
-- [~] P3-01 prChecks falls back to the REST API on an older gh
+- [x] P3-01 prChecks falls back to the REST API on an older gh
 - [ ] P3-02 kukulu_mutate's filter takes a list
 - [ ] P3-03 kukulu_mutate says what kind of change it restored
 - [ ] P3-04 CHANGELOG 0.7.2, the version and the feedback headers
@@ -94,3 +94,7 @@ withDecisions() helper; flightOptions adds PLAN.md to rollback set and commit on
 ### P2-06 — 9ddb1d3
 
 Pushed. Manual check: NOT VERIFIED (human): once 0.7.2 is installed, the next flight's draft PR is titled <flight>: <spec title> (this flight's own PR is opened by the running 0.7.1 as Build: <branch>)
+
+### P3-01 — af6f4ff
+
+prChecksViaApi + ghJson helpers; trigger on non-zero exit with unknown-flag stderr. Interpretation: seven failing entries, not six (five run conclusions + failure + error statuses), per the stated mapping. Fixtures under test/fixtures/gh. Verify green (3836; pre-commit whitespace auto-fixed then rerun clean).
