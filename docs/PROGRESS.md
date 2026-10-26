@@ -16,7 +16,7 @@ Started: 2026-10-26T14:17:50.269Z
 - [x] P1-04 A broken signer is reported before the plan stage under required
 - [x] P1-05 Phase 1 end: push and record the manual check
 - [x] P2-01 The draft PR is titled after the flight, and prTitle overrides it
-- [~] P2-02 The merge commit's subject repeats the PR title
+- [x] P2-02 The merge commit's subject repeats the PR title
 - [ ] P2-03 policies.archive defaults to true
 - [ ] P2-04 The CHANGELOG decides whether a flight is breaking
 - [ ] P2-05 kukulu_flight_options records a changed round cap in PLAN.md
@@ -74,3 +74,7 @@ Pushed. Manual check: NOT VERIFIED (human): in a scratch repo with the owner's r
 ### P2-01 — 558ade0
 
 prTitle config key validated in cfgFrom (returned as prTitle: c.prTitle ?? null); prTitleFor(c, branch); run_finish passes it to gh pr create and returns prTitle. mkFakeGhBin pr.json now has number and title. Docs row, mcp-tools, CHANGELOG. Interpretation: a "Spec"-only heading is kept; prTitle omitted from result when pr create failed. Verify green apart from a markdownlint fix applied before commit.
+
+### P2-02 — 2423ffe
+
+Merge subject from gh pr view --json title,number for merge/squash; failure yields "enabled (default subject: ...)". no-sync-merge passes (one inline array). Harness: view-title-fails; test DRAFT_PR carries number/title. Verify green.
