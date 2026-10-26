@@ -5,7 +5,7 @@ Started: 2026-10-26T14:17:50.269Z
 
 ## Tasks
 
-- [ ] P0-01 The agent defaults pass the plugin's own checks again
+- [x] P0-01 The agent defaults pass the plugin's own checks again
 - [ ] P0-02 rsync's deleting options are write targets
 - [ ] P0-03 bsdtar and gtar get every decision tar gets
 - [ ] P0-04 The 0.7.1 review's advisory notes on the guard and the server
@@ -30,3 +30,7 @@ Started: 2026-10-26T14:17:50.269Z
 ## Log
 
 (one entry per task, appended by implement)
+
+### P0-01 — 294355a
+
+Restored model/effort lines of the four agents from 418b291^. kukulu_verify green (npm test 3715 assertions). No interpretation choices.
