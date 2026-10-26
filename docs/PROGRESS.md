@@ -19,7 +19,7 @@ Started: 2026-10-26T21:19:36.125Z
 - [x] P1-05 Phase 1 end: push and record the manual check
 - [x] P2-01 The policy's enforcement, sandbox and package keys, and the local-only template
 - [x] P2-02 mcp/relay.mjs, the controller socket and the sandbox suite
-- [ ] P2-03 The log socket, and its round-trip budget
+- [x] P2-03 The log socket, and its round-trip budget
 - [ ] P2-04 The egress proxy, the bridge, and its overhead
 - [ ] P2-05 containerArgs, the plan, the Containerfile, the fake docker and doctor
 - [ ] P2-06 run and stop, and docs/sandbox.md
@@ -116,3 +116,9 @@ Interpretation: empty deny.packages ecosystem list refused; mounts entries accep
 
 mcp/relay.mjs, server startup relay hand-off (spawnSync, before anything else), kukulu_status.sandbox, .mcp.json env key, scripts/sandbox.mjs startControllerSocket {listening, close} and main (darwin refusal, usage 2). test/sandbox.mjs (12 assertions); suite registered (fifteen suites in CONTRIBUTING/README/plugin test). Constraints sandbox-network-none, sandbox-no-escape-flags, relay-not-in-server now active and green.
 Interpretation: controller server uses allowHalfOpen; startControllerSocket returns a listening promise so tests can await it.
+
+### P2-03 — 7717ef0
+
+startLogSocket in scripts/sandbox.mjs ({listening, close}); both hooks gained an inlined socket client (guard connects first and denies when unreachable; logger exits 1) using LOG_SOCKET_TIMEOUT_MS; docs/sandbox.md created (## The sockets) and linked from README; docs/cleanroom.md source box sentence. test/sandbox.mjs 30 assertions; hooks run async in tests since spawnSync would block the in-process socket. Plugin suite plugin-wide link rule: every docs/*.md must be linked from README.
+Measurement: before 100 ms (SPEC 5.5); after 100 ms unchanged. Cost over bare Node: median 26.4/24.8 ms, p90 36.7/35.3 ms, max 39.7/47.5 ms (30 runs, two measurements); headroom ~52 ms at worst run. docs/spikes/P2-03.md.
+Interpretation: unreachable socket denies even before genesis; logger appends detail in parentheses for non-unreachable errors.
