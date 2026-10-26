@@ -12,6 +12,7 @@ All notable changes to this plugin. Format follows
 
 ### Changed
 
+- `kukulu_mutate`'s `filter` also accepts a list of up to 10 test paths (project-e F-01).
 - `kukulu_pr_finalize` takes its breaking verdict from `CHANGELOG.md`'s newest entry when there is one, and `breaking` is optional then (0.7.1 SUMMARY's Breaking call).
 - `policies.archive` now defaults to `true`; set it to `false` to keep a finished flight in place (owner decision).
 - The merge commit's subject is the PR's title and number (a beta user's request).

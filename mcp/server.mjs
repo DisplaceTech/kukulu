@@ -3043,8 +3043,15 @@ function mutate({ file, find, replace, commands, timeoutMs, targeted, filter, co
     const names = Object.keys(cc.mutation.targeted);
     const legal = names.length ? `Configured names: ${names.join(", ")}.` : "No targeted commands are configured; add them under `mutation.targeted` in docs/kukulu.json.";
     if (typeof targeted !== "string" || !Object.hasOwn(cc.mutation.targeted, targeted)) throw new ToolError(`unknown targeted command ${JSON.stringify(targeted)}. ${legal}`);
-    if (typeof filter !== "string" || !MUTATION_FILTER.test(filter)) {
-      throw new ToolError(`filter must be 1 to 200 characters from letters, digits and _ . : / - (no spaces, quotes or shell characters); got ${JSON.stringify(filter)}`);
+    if (Array.isArray(filter)) {
+      if (!filter.length || filter.length > 10 || filter.some((f) => typeof f !== "string")) {
+        throw new ToolError(`filter must be a string or a list of 1 to 10 strings, each 1 to 200 characters from letters, digits and _ . : / -; got ${JSON.stringify(filter)}`);
+      }
+    }
+    for (const f of Array.isArray(filter) ? filter : [filter]) {
+      if (typeof f !== "string" || !MUTATION_FILTER.test(f)) {
+        throw new ToolError(`filter must be 1 to 200 characters from letters, digits and _ . : / - (no spaces, quotes or shell characters); got ${JSON.stringify(f)}`);
+      }
     }
   }
   const recovered = recoverMutation();
@@ -3075,7 +3082,7 @@ function mutate({ file, find, replace, commands, timeoutMs, targeted, filter, co
   let cmds;
   if (targeted !== undefined) {
     const t = cc.mutation.targeted[targeted];
-    cmds = [{ cmd: t.cmd.replace("{filter}", () => `'${filter}'`), timeoutMs: t.timeoutMs, exclusive: false, from: null }];
+    cmds = [{ cmd: t.cmd.replace("{filter}", () => (Array.isArray(filter) ? filter : [filter]).map((f) => `'${f}'`).join(" ")), timeoutMs: t.timeoutMs, exclusive: false, from: null }];
   } else if (commands) {
     const legal = new Map([...cc.verify, ...Object.values(cc.extraVerify).flat()].map((x) => [x.cmd, x]));
     const unknown = commands.filter((x) => !legal.has(x));
@@ -4689,7 +4696,7 @@ const TOOLS = [
         replace: { type: "string", description: "the mutated text (\"\" deletes the match)" },
         commands: { type: "array", items: { type: "string" }, description: "optional: run only these configured verify/extraVerify commands, each spelled exactly as in docs/kukulu.json" },
         targeted: { type: "string", description: "optional: the name of a docs/kukulu.json mutation.targeted command to run instead of the verify commands; pass with filter, never with commands" },
-        filter: { type: "string", description: "with targeted: the test name or path substituted for {filter} (letters, digits and _ . : / - only)" },
+        filter: { type: ["string", "array"], items: { type: "string" }, description: "with targeted: one test name or path, or a list of up to 10, substituted for {filter}, each single-quoted and space-separated (letters, digits and _ . : / - only)" },
         timeoutMs: { type: "integer", minimum: 1, description: "optional: cap every command's timeout for this call (never raises a configured one), for a mutant you suspect hangs" },
         confirmKill: { type: "boolean", description: "optional: when the mutant is killed, re-run each failed command once on the unmutated tree; a command that fails there too makes the result inconclusive, not a kill" },
       },

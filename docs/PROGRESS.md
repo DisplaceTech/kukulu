@@ -22,7 +22,7 @@ Started: 2026-10-26T14:17:50.269Z
 - [x] P2-05 kukulu_flight_options records a changed round cap in PLAN.md
 - [x] P2-06 Phase 2 end: push and record the manual check
 - [x] P3-01 prChecks falls back to the REST API on an older gh
-- [ ] P3-02 kukulu_mutate's filter takes a list
+- [~] P3-02 kukulu_mutate's filter takes a list
 - [ ] P3-03 kukulu_mutate says what kind of change it restored
 - [ ] P3-04 CHANGELOG 0.7.2, the version and the feedback headers
 - [ ] P3-05 Phase 3 end: push and record the manual check

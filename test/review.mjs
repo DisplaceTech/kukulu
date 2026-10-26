@@ -3,6 +3,7 @@
 // so the tool is strict about what a finding must carry before it counts.
 
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import {
@@ -772,6 +773,23 @@ const untouched = (repo, head) => {
   await withServer(repo, async ({ call }) => {
     const r = await call("kukulu_mutate", { file: "src/add.mjs", find: "a + b", replace: "a - b", targeted: "unit", filter: "tests\\Unit\\FooTest" });
     like(r.results[0].stdoutTail, /tests\\Unit\\FooTest/, "a targeted filter is passed as one single-quoted word (backslashes arrive verbatim)");
+  });
+}
+
+{
+  // A list reaches the command as separate quoted words, in order (D-02).
+  const out = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "kukulu-filter-")), "args.txt");
+  const repo = mutationRepo({ config: { mutation: { targeted: { unit: { cmd: `printf '%s\\n' {filter} > ${out}` } } } } });
+  await withServer(repo, async ({ call }) => {
+    const base = { file: "src/add.mjs", find: "a + b", replace: "a - b", targeted: "unit" };
+    await call("kukulu_mutate", { ...base, filter: ["tests/A.php", "tests/B.php"] });
+    eq(fs.readFileSync(out, "utf8"), "tests/A.php\ntests/B.php\n", "a two-entry filter reaches the command as two quoted words");
+    const shape = /filter must be a string or a list of 1 to 10 strings, each 1 to 200 characters from letters, digits and _ \. : \/ -; got /;
+    isError(await call("kukulu_mutate", { ...base, filter: [] }), shape, "an empty filter list refuses");
+    isError(await call("kukulu_mutate", { ...base, filter: Array.from({ length: 11 }, (_, i) => `t${i}`) }), shape, "an 11-entry filter list refuses");
+    isError(await call("kukulu_mutate", { ...base, filter: ["ok", 5] }), shape, "a non-string filter entry refuses");
+    isError(await call("kukulu_mutate", { ...base, filter: ["ok", "a;b"] }), /filter must be 1 to 200 characters.*got "a;b"/, "an invalid filter entry refuses naming it");
+    eq(readFile(repo, "src/add.mjs"), ADD_SRC, "...and the file is unchanged");
   });
 }
 
