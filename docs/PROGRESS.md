@@ -18,7 +18,7 @@ Started: 2026-10-26T21:19:36.125Z
 - [x] P1-04 scripts/publish-bundle.mjs and docs/publishing.md
 - [x] P1-05 Phase 1 end: push and record the manual check
 - [x] P2-01 The policy's enforcement, sandbox and package keys, and the local-only template
-- [ ] P2-02 mcp/relay.mjs, the controller socket and the sandbox suite
+- [x] P2-02 mcp/relay.mjs, the controller socket and the sandbox suite
 - [ ] P2-03 The log socket, and its round-trip budget
 - [ ] P2-04 The egress proxy, the bridge, and its overhead
 - [ ] P2-05 containerArgs, the plan, the Containerfile, the fake docker and doctor
@@ -111,3 +111,8 @@ Manual check: NOT VERIFIED (human): a small control flight's bundle verifies as 
 
 loadPolicy: enforcement, sandbox.{image,mounts,egress}, deny.packages with all refusals; policy carries enforcement, sandbox {image,mounts,egress}, deny.packages. KINDS += egress, stage, usage; LOG_SOCKET_TIMEOUT_MS exported (2000 only on that line). templates/cleanroom.local-only.example.json (SPEC example); both guard self-tests pass (532 / 528 cases). Tests in test/cleanroom.mjs (1211); KINDS count test now twelve. Verify green.
 Interpretation: empty deny.packages ecosystem list refused; mounts entries accept only path/mode.
+
+### P2-02 — 3e14bc0
+
+mcp/relay.mjs, server startup relay hand-off (spawnSync, before anything else), kukulu_status.sandbox, .mcp.json env key, scripts/sandbox.mjs startControllerSocket {listening, close} and main (darwin refusal, usage 2). test/sandbox.mjs (12 assertions); suite registered (fifteen suites in CONTRIBUTING/README/plugin test). Constraints sandbox-network-none, sandbox-no-escape-flags, relay-not-in-server now active and green.
+Interpretation: controller server uses allowHalfOpen; startControllerSocket returns a listening promise so tests can await it.
