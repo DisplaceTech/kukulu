@@ -27,7 +27,7 @@ Started: 2026-10-26T14:17:50.269Z
 - [x] P3-04 CHANGELOG 0.7.2, the version and the feedback headers
 - [x] P3-05 Phase 3 end: push and record the manual check
 - [x] R1-01 The PR's gitleaks check passes: allowlist the fake signer key in the suites that use it
-- [ ] R1-02 Test B-02's kept fallback record and C-01's 120-character title cut
+- [x] R1-02 Test B-02's kept fallback record and C-01's 120-character title cut
 - [ ] R1-03 Cover the remaining mcp/server.mjs mutation survivors (fresh-path none, prTitle code points, separators, gh fallback trigger)
 
 ## Log
@@ -121,3 +121,7 @@ Pushed. Manual check: NOT VERIFIED (human): on a machine with gh 2.45.0, kukulu_
 ### R1-01 — 32be844
 
 Allowlist paths widened to test/(harness|review|state|implement).mjs. Interpretation: review commit 79f3342 also quotes the key in docs/REVIEW.md (range scan flagged it); added a second allowlist scoped to that commit and the same value, since a docs path would break test/plugin.mjs's tests-only paths check. Local gitleaks range scan: no leaks; pre-commit passes; plugin suite passes. Push left to run_finish.
+
+### R1-02 — c373104
+
+Added B-02 resumed-run-keeps-fallback test (empty temp GIT_CONFIG_GLOBAL) and C-01 120-code-point title test (non-ASCII before the cut) in test/implement.mjs. Local gpgsign read uses spawnSync so a missing key is an assertion failure, not a crash. Mutants checked by hand (kukulu_mutate not available to me): put-back removed and none-branch skipped both fail; uncut title fails. No server change.
