@@ -16,7 +16,7 @@ Started: 2026-10-26T21:19:36.125Z
 - [x] P1-02 Control mode in genesis, the manifest and the verifier
 - [x] P1-03 The control bundle is the positive pair
 - [x] P1-04 scripts/publish-bundle.mjs and docs/publishing.md
-- [ ] P1-05 Phase 1 end: push and record the manual check
+- [x] P1-05 Phase 1 end: push and record the manual check
 - [ ] P2-01 The policy's enforcement, sandbox and package keys, and the local-only template
 - [ ] P2-02 mcp/relay.mjs, the controller socket and the sandbox suite
 - [ ] P2-03 The log socket, and its round-trip budget
@@ -101,3 +101,8 @@ Interpretation: left "subject" means project root for rev-parse; missing verify.
 
 scripts/publish-bundle.mjs (publish and --check; exports publish, check, main), docs/publishing.md, README docs-map link, CONTRIBUTING row, CHANGELOG. bundles suite now 47 assertions. Interpretation: --check expects exit 3 only for control-positive; file count includes SHA256SUMS and VERIFY.txt.
 Lesson: the plugin suite's link check reads git ls-files, so a new doc must be committed before kukulu_verify is green.
+
+### P1-05 — e66f04d
+
+Push: pushed build branch to origin. Empty phase-end commit.
+Manual check: NOT VERIFIED (human): a small control flight's bundle verifies as CONTROL (positive) with exit 3; publish-bundle.mjs output copied to a static host verifies with --check from a second machine.
