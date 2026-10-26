@@ -23,6 +23,15 @@ const pluginAgent = (role) => splitFrontmatter(readFile(ROOT, `agents/${role}.md
 /** A fresh directory to hold a global-config fixture, separate from any project repo. */
 const cfgDir = () => mkDir("kukulu-cfg-");
 
+// ---------------------------------------------------------------- policies.archive default (C-02)
+
+for (const [config, want, label] of [[{}, true, "config_show reports archive true by default"], [{ policies: { archive: false } }, false, "...and false when it is set"]]) {
+  const repo = plannedRepo({ config });
+  await withServer(repo, async ({ call }) => {
+    eq((await call("kukulu_config_show")).archive, want, label);
+  });
+}
+
 // ---------------------------------------------------------------- prTitle validation (C-01)
 
 for (const [value, got, label] of [

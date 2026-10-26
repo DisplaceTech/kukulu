@@ -6,8 +6,13 @@ All notable changes to this plugin. Format follows
 
 ## [Unreleased]
 
+### Added
+
+- `kukulu_config_show` reports the resolved `archive` policy.
+
 ### Changed
 
+- `policies.archive` now defaults to `true`; set it to `false` to keep a finished flight in place (owner decision).
 - The merge commit's subject is the PR's title and number (a beta user's request).
 - The draft PR is titled `<flight>: <spec title>` (new optional key `prTitle` overrides it) instead of `Build: <branch>` (a beta user's request).
 - `kukulu_pr_finalize` waits for signatures only under `required`, or `auto` with signing configured; `kukulu_run_start` returns a `signingNote` and every stage prompt carries it (owner decision; project-e F-06 to F-08, project-f F-01).

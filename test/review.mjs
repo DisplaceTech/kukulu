@@ -973,7 +973,7 @@ const snapshot = (repo) => Object.fromEntries(ARCHIVE_FILES.map((f) => [f, hasFi
   });
 }
 
-for (const [archive, want] of [[undefined, false], [true, true]]) {
+for (const [archive, want] of [[undefined, true], [true, true], [false, false]]) {
   const repo = reviewableRepo({ verdict: "APPROVED", config: archive === undefined ? {} : { policies: { archive } } });
   await withServer(repo, async ({ call }) => {
     await call("kukulu_review_submit", { verdict: "APPROVED" });

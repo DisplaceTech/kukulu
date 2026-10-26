@@ -561,7 +561,7 @@ The merged routing config, read-only, with the source of every value.
 
 **Arguments:** none.
 
-**Returns:** `{ globalConfig, globalConfigPath, profile, profileSource, projectOverride, permissionMode, permissionModeSource, roles, effortDropped, agentsGenerated, agentsStale, permissionRule, table }`.
+**Returns:** `{ globalConfig, globalConfigPath, profile, profileSource, projectOverride, permissionMode, permissionModeSource, roles, effortDropped, agentsGenerated, agentsStale, permissionRule, archive, table }`. `archive` is the resolved `policies.archive` (default `true`).
 
 `agentsGenerated` is the same field `kukulu_status` returns. `agentsStale` lists roles whose generated file exists but no longer matches what `kukulu_agents_sync` would write for the current config. `permissionRule` is `"present"` when either settings file already covers the MCP allow rule, else `"missing"`. This tool writes nothing, so both are reported, not fixed; only `kukulu_agents_sync` writes.
 

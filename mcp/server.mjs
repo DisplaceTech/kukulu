@@ -957,8 +957,8 @@ function cfgFrom(c, planIds) {
       push: c.policies?.push ?? true,
       pr: c.policies?.pr ?? "draft",
       feedback: c.policies?.feedback ?? true,
-      // ⚠️ ASSUMPTION: archiving a finished flight is opt-in until it has been proven in real flights.
-      archive: c.policies?.archive ?? false,
+      // An owner decision, not an assumption: two release flights needed the archive, so a finished flight archives itself unless this is false.
+      archive: c.policies?.archive ?? true,
       finalize: c.policies?.finalize ?? "auto",
       mergeMethod: c.policies?.mergeMethod ?? "merge",
       syncBase: c.policies?.syncBase ?? true,
@@ -1281,6 +1281,7 @@ function configShow() {
     agentsGenerated: generated,
     agentsStale: stale,
     permissionRule: mcpAllowRulePresent() ? "present" : "missing",
+    archive: cfg().policies.archive,
     table: routingTable(r),
   };
 }
