@@ -9,7 +9,7 @@ Started: 2026-10-26T14:17:50.269Z
 - [x] P0-02 rsync's deleting options are write targets
 - [x] P0-03 bsdtar and gtar get every decision tar gets
 - [x] P0-04 The 0.7.1 review's advisory notes on the guard and the server
-- [ ] P0-05 Phase 0 end: push and record the manual check
+- [x] P0-05 Phase 0 end: push and record the manual check
 - [ ] P1-01 A failed commit is classified as a signing failure by a probe
 - [ ] P1-02 The fallback's override is lifted at the next run start
 - [ ] P1-03 kukulu_pr_finalize waits for signatures only when the policy expects them
@@ -46,3 +46,7 @@ TAR_WORDS set used in evaluate write rule and recursiveOperands; reason uses wor
 ### P0-04 — ded73e6
 
 Recursive containment now has its own branch naming the held protected path; landing-path hits unchanged. Fixture "rsync -a evil/ .kukulu/ (P0-05)" reason changed as specified. Comments moved/fixed in server.mjs and cleanroom.mjs. Verify green.
+
+### P0-05 — e07e416
+
+Pushed build/2026-10-26. Manual check: NOT VERIFIED (human): in a live clean-room session with claude --plugin-dir ., rsync -d --delete empty/ docs/ and bsdtar -xf a.tar -C docs are denied
