@@ -5,7 +5,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
-import { finish, ok, eq, like, isError, ROOT, cleanroomRepo, plannedRepo, setState, startServer, withServer, mkFakeDocker, mkDir, writeFile, readFile, logCall } from "./harness.mjs";
+import { finish, ok, eq, like, isError, ROOT, cleanroomRepo, plannedRepo, setState, startServer, withServer, mkFakeDocker, mkDir, writeFile, readFile, logCall, git } from "./harness.mjs";
 import net from "node:net";
 import { startControllerSocket, startLogSocket, startProxy, egressDecision, hostPortOf, planFor, containerArgs, projectIdFor, runtimeDirFor, main as sandboxMain } from "../scripts/sandbox.mjs";
 import { startBridge } from "../scripts/sandbox-entry.mjs";
@@ -563,6 +563,80 @@ const exchange = (target, bytes, { until = null, then = null } = {}) => new Prom
       const g = logOf(hookRepo)[0];
       eq(g.data.enforcement + "|" + ("boundary" in g.data), "hook|false", "...and genesis records enforcement hook and no boundary");
     });
+  }
+}
+
+// ---------------------------------------------------------------- commands run inside the boundary (P2-08)
+
+{
+  const inside = (dockerDir, extra = {}) => ({ env: { PATH: `${dockerDir}:${process.env.PATH}`, KUKULU_SANDBOX: "kukulu-x", KUKULU_SANDBOX_ENGINE: "docker", KUKULU_SANDBOX_HOOKS_PATH: mkDir("kukulu-hooks-empty-"), ...extra } });
+  const callsOf = (dir) => (fs.existsSync(path.join(dir, "calls.log")) ? fs.readFileSync(path.join(dir, "calls.log"), "utf8") : null);
+
+  {
+    const repo = plannedRepo({ config: { verify: ["echo ok"] } });
+    const dockerDir = mkFakeDocker();
+    await withServer(repo, async ({ call }) => {
+      const v = await call("kukulu_verify");
+      const run = v.results.find((r) => r.command === "echo ok");
+      eq(run.ok, true, "kukulu_verify reports the command ok");
+      eq(callsOf(dockerDir).trimEnd(), `exec -w ${repo} kukulu-x timeout -k 5 600 sh -c echo ok`, "kukulu_verify runs each command through docker exec with the wrapper");
+      eq(run.command + "|" + run.stdoutTail, "echo ok|ok", "...and the result keeps the command as written");
+    }, inside(dockerDir));
+  }
+
+  {
+    const repo = plannedRepo({ config: { verify: ["echo ok"] } });
+    writeFile(repo, "src/add.mjs", "export const add = (a, b) => a + b;\n");
+    git(repo, ["add", "-A"]);
+    git(repo, ["commit", "-qm", "add the source"]);
+    const dockerDir = mkFakeDocker();
+    await withServer(repo, async ({ call }) => {
+      const r = await call("kukulu_mutate", { file: "src/add.mjs", find: "a + b", replace: "a - b" });
+      ok(!r.error, "kukulu_mutate runs" + (r.error ? ": " + r.error : ""));
+      like(callsOf(dockerDir), /^exec -w .* kukulu-x timeout -k 5 600 sh -c echo ok$/m, "kukulu_mutate runs inside too");
+      eq(readFile(repo, "src/add.mjs"), "export const add = (a, b) => a + b;\n", "...and still restores the file");
+    }, inside(dockerDir));
+  }
+
+  {
+    const commitHook = '#!/bin/sh\nif head -1 "$1" | grep -q "^plan:"; then echo "hook says no" >&2; exit 1; fi\nexit 0\n';
+    const hooked = () => {
+      const repo = plannedRepo();
+      // Un-commit the plan so that kukulu_plan_commit has something to commit.
+      git(repo, ["reset", "-q", "HEAD~1"]);
+      writeFile(repo, ".git/hooks/commit-msg", commitHook);
+      fs.chmodSync(path.join(repo, ".git", "hooks", "commit-msg"), 0o755);
+      return repo;
+    };
+    const dockerDir = mkFakeDocker();
+    const sandboxed = hooked();
+    await withServer(sandboxed, async ({ call }) => {
+      const r = await call("kukulu_plan_commit");
+      ok(!r.error && r.commit, "a commit ignores the repository's hooks inside the sandbox" + (r.error ? ": " + r.error : ""));
+    }, inside(dockerDir));
+    const outside = hooked();
+    await withServer(outside, async ({ call }) => {
+      isError(await call("kukulu_plan_commit"), /hook says no/, "...and the same hook refuses the commit without KUKULU_SANDBOX");
+    });
+  }
+
+  {
+    const repo = plannedRepo();
+    const dockerDir = mkFakeDocker();
+    await withServer(repo, async ({ call }) => {
+      isError(await call("kukulu_run_start", { stream: "api" }), /^parallel streams are not supported inside the sandbox \(\.kukulu\/ is read-only there\); run a serial plan, or set parallel\.maxStreams to 1$/, "a stream run start refuses inside the sandbox");
+      ok(!fs.existsSync(path.join(repo, ".kukulu", "implement.lock")), "...before any write");
+    }, inside(dockerDir));
+  }
+
+  {
+    const repo = plannedRepo({ config: { verify: ["echo ok"] } });
+    const dockerDir = mkFakeDocker();
+    await withServer(repo, async ({ call }) => {
+      const v = await call("kukulu_verify");
+      eq(v.results.find((r) => r.command === "echo ok").stdoutTail, "ok", "without KUKULU_SANDBOX the verify command runs directly");
+      eq(callsOf(dockerDir), null, "...and the engine is never called");
+    }, { env: { PATH: `${dockerDir}:${process.env.PATH}` } });
   }
 }
 

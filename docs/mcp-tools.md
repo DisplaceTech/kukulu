@@ -157,6 +157,8 @@ Every other stream-scoped tool works the same way: `PROGRESS.md`, `PLAN.md` and 
 
 **Clean-room mode.** After genesis, this tool appends a signed `checkpoint` entry (event `run-start`) to `.kukulu/cleanroom/log.jsonl` before its final commit and commits the log with its own files; a failed commit restores the log byte for byte. General mode writes none. Uncommitted appends to the log never count as a dirty tree, because the hooks write to it after every tool call.
 
+**Inside the sandbox.** Behind the sandbox (`KUKULU_SANDBOX` set), a call with `stream` refuses before any write: `parallel streams are not supported inside the sandbox (.kukulu/ is read-only there); run a serial plan, or set parallel.maxStreams to 1`. Every git command the server runs also ignores the repository's hooks there.
+
 ---
 
 ## `kukulu_task_next`
@@ -249,6 +251,8 @@ Every command (here, in `kukulu_mutate` and in `parallel.setup`) runs under `mcp
 
 **Refuses when:** `kukulu.json` is missing or has no `verify` commands; any `verify`/`extraVerify`/`build` entry is malformed (neither a string nor `{ cmd, timeoutMs }`, missing `cmd`, or `timeoutMs` not a positive integer); or any `constraints` entry is malformed (missing `id`, `paths`, `pattern`, `shouldMatch` or `shouldNotMatch`, an unparseable `pattern`, or a duplicate `id`).
 
+**Inside the sandbox.** When the server runs behind the sandbox's controller (`KUKULU_SANDBOX` is set), each `verify` and `extraVerify` command runs through `<engine> exec -w <cwd> <container> timeout -k 5 <seconds> sh -c <command>` instead of on the host, so the project's own commands run inside the boundary. The result's `command` is still the command as written. The clean-room guard self-test is not one of them: it runs on the host.
+
 ---
 
 ## `kukulu_mutate`
@@ -276,6 +280,8 @@ If the restore did not take, it says so (naming the file and the command to run 
 **Returns:** `{ file, killed, verdict, failedCommands, results, constraints, restored, restoredChanges, removed, recoveredMutation }`, plus `confirm` (the re-run results, present only when `confirmKill` re-ran something) and `inconclusive: true` when a re-run failed again. `failedCommands` lists the command text of every failed result. `restored` and `removed` list the residue paths it put back or deleted; `restoredChanges` is `[{ path, change }]` in the same order as `restored`, where `change` is `"mode"` (same content, other permission bits), `"deleted"` or `"content"`. `constraints` is `{ ok, results }` as `kukulu_verify` reports it, run on the mutated tree: a rule with hits counts as a kill, a rule whose own fixture fails is reported but is not one. `killed` is true when at least one command failed or a constraint has hits, meaning the tests or a rule noticed; a timeout counts as a failure, and a command skipped as inactive until a `from` task never does. `verdict` is `"killed: the tests caught the mutation"`, `"killed: constraint <id> caught the mutation"` (the first such id, when no command failed), or `"survived: no command failed — the mechanic is untested"`; a survivor is a category-3 review finding. `results` has the same per-command shape as `kukulu_verify`. Run `kukulu_verify` first: on a tree that already fails, every mutation looks killed.
 
 **Refuses when:** an implementation run is in progress (`.kukulu/implement.lock` exists), since this is a review-stage tool; `file` is outside the project, missing, a symlink, untracked, binary, or has uncommitted changes; `find` is empty, or matches zero or several times, or equals `replace`; `timeoutMs` is not a positive integer; `commands` names something that is not a configured `verify`/`extraVerify` command (the message lists the legal ones); or the config has no `verify` commands.
+
+**Inside the sandbox.** Behind the sandbox (`KUKULU_SANDBOX` set), the verify commands run through `<engine> exec` in the container, as for `kukulu_verify`; the file is still mutated and restored on the host, where the server runs.
 
 ---
 

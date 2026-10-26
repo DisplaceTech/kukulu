@@ -23,6 +23,7 @@ All notable changes to this plugin. Format follows
 - `scripts/sandbox.mjs doctor`, the exact container argument list (`containerArgs`), the plan it is built from, and `templates/sandbox/Containerfile` (G-06, C-01).
 - `scripts/sandbox.mjs run` and `stop`: the three listeners and the container in the foreground, with every refusal before anything starts (G-06, C-01).
 - Clean-room gate check 9, `boundary`: under `enforcement` `container+proxy` genesis records the container's image, network and mounts, and every gate proves the server is behind the sandbox, the container is as recorded and every allowed `egress` entry names a host the policy allows (G-06, C-01, C-03).
+- Commands inside the boundary: behind the sandbox every verify, extraVerify, build and mutate command runs through `<engine> exec` with an inner `timeout`, every git call the server makes ignores the repository's hooks, and a stream run start refuses (G-06, C-04).
 
 ## [0.7.2] — 2026-10-26
 

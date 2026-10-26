@@ -133,3 +133,12 @@ Profile B: the Mac plans and reviews, the Spark implements. The global file `~/.
 ```
 
 The policy is `templates/cleanroom.local-only.example.json` with the image digest replaced by `doctor`'s line. `runners.locality: "local"` makes the gate refuse a role that resolves to a remote runner, `roles.distinct: "family"` makes it refuse an implementer and reviewer from one model family, and `enforcement: "container+proxy"` makes `run` the only way to start the flight. Run `doctor`, then `run`.
+
+## What runs where
+
+The server runs outside the container, with the key and the project's `.kukulu/`. Behind the sandbox:
+
+- **Inside the container:** every `verify`, `extraVerify` and build command, and every `kukulu_mutate` run, through `<engine> exec -w <directory> <container> timeout -k 5 <seconds> sh -c <command>`. The `timeout` runs inside, because the supervisor outside can only kill the engine's client, not the process it started.
+- **Outside, on the host:** git (every call the server makes, with the repository's hooks switched off by pointing `core.hooksPath` at the empty `hooks-empty/` directory and `core.fsmonitor` off, because a repository hook is project code and would run outside the boundary), the contamination scorer, the attestation bundle and the guard self-test.
+
+A parallel stream cannot run inside, so `kukulu_run_start` with `stream` refuses there; a sandboxed flight is serial.

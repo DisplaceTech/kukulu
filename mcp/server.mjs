@@ -361,7 +361,7 @@ function runGate(stage, st = loadState()) {
 
   // 4. self-test
   checked.push("self-test");
-  const selfTest = runShell(`node ${shellQuote(path.join(PLUGIN_ROOT, "scripts", "cleanroom-guard.mjs"))} --self-test ${shellQuote(policyPath)}`, GATE_SELF_TEST_MS);
+  const selfTest = runShell(`node ${shellQuote(path.join(PLUGIN_ROOT, "scripts", "cleanroom-guard.mjs"))} --self-test ${shellQuote(policyPath)}`, GATE_SELF_TEST_MS, ROOT, { inside: false });
   if (!selfTest.ok) return failed("self-test", (selfTest.stderrTail || selfTest.stdoutTail || `exit ${selfTest.exitCode}`).split("\n")[0]);
 
   // 5. lockdown: once the lockdown task is done, an allowed URL must be denied
@@ -544,8 +544,23 @@ function ensureLineInFile(file, line) {
   return true;
 }
 
+/**
+ * The arguments for one git call. Inside the sandbox the repository's hooks are code from the
+ * project, and the server runs outside the container: git is pointed at an empty hooks directory
+ * and told not to start a file-system monitor (SPEC C-04). Every git call in this file goes through it.
+ */
+function gitArgv(args) {
+  if (!envVar("SANDBOX")) return args;
+  let hooks = envVar("SANDBOX_HOOKS_PATH");
+  if (!hooks) {
+    hooks = path.join(os.tmpdir(), "kukulu-hooks-empty");
+    fs.mkdirSync(hooks, { recursive: true });
+  }
+  return ["-c", `core.hooksPath=${hooks}`, "-c", "core.fsmonitor=false", ...args];
+}
+
 function git(args, { allowFail = false, cwd = ROOT } = {}) {
-  const r = spawnSync("git", args, { cwd, encoding: "utf8" });
+  const r = spawnSync("git", gitArgv(args), { cwd, encoding: "utf8" });
   if (r.status !== 0 && !allowFail) {
     throw new ToolError(`git ${args.join(" ")} failed: ${(r.stderr || r.stdout || "").trim()}`);
   }
@@ -565,7 +580,7 @@ const SIGNING_FAILURE = /gpg failed to sign|failed to sign|signing failed|cannot
  */
 function signingProbe() {
   const run = (args) =>
-    spawnSync("git", args, {
+    spawnSync("git", gitArgv(args), {
       cwd: ROOT,
       encoding: "utf8",
       timeout: SIGNING_TIMEOUT_MS,
@@ -606,7 +621,7 @@ function commitStaged(rels, message, opts = {}) {
   const { stage } = opts;
   message = withTrailers(message, opts);
   const run = (args) =>
-    spawnSync("git", args, {
+    spawnSync("git", gitArgv(args), {
       cwd: ROOT,
       encoding: "utf8",
       timeout: SIGNING_TIMEOUT_MS,
@@ -2686,6 +2701,9 @@ function ensureStreamWorktree(stream, buildBranch, cc) {
 }
 
 function runStart({ stream } = {}) {
+  if (stream !== undefined && envVar("SANDBOX")) {
+    throw new ToolError("parallel streams are not supported inside the sandbox (.kukulu/ is read-only there); run a serial plan, or set parallel.maxStreams to 1");
+  }
   const res = startRun({ sync: stream === undefined });
   if (stream === undefined) return res;
 
@@ -3033,8 +3051,14 @@ const TAIL_CHARS = 4000;
 // up on the runner itself (which should never need it).
 const RUNNER_BACKSTOP_MS = 30_000;
 
-function runShell(cmd, timeoutMs, cwd = ROOT) {
-  const spec = { cmd, cwd, timeoutMs, maxOutputBytes: OUTPUT_LIMIT_BYTES, keepBytes: TAIL_CHARS * 8 };
+function runShell(cmd, timeoutMs, cwd = ROOT, { inside = true } = {}) {
+  // Behind the sandbox a command runs in the container, never here: `exec` with an inner timeout
+  // (the supervisor outside can only kill the engine's client, not the process in the container).
+  const inContainer = inside && envVar("SANDBOX");
+  const wrapped = inContainer
+    ? `${envVar("SANDBOX_ENGINE") || "docker"} exec -w ${shellQuote(cwd)} ${envVar("SANDBOX")} timeout -k 5 ${Math.ceil(timeoutMs / 1000)} sh -c ${shellQuote(cmd)}`
+    : cmd;
+  const spec = { cmd: wrapped, cwd, timeoutMs, maxOutputBytes: OUTPUT_LIMIT_BYTES, keepBytes: TAIL_CHARS * 8 };
   const r = spawnSync(process.execPath, [RUNNER, JSON.stringify(spec)], {
     encoding: "utf8",
     timeout: timeoutMs + RUNNER_BACKSTOP_MS,
@@ -3283,7 +3307,7 @@ const trackedChanges = () => git(["diff", "--name-only", "HEAD"]).out.split("\n"
  * included). Read before the paths are restored (SPEC D-03).
  */
 function classifyChanges(paths) {
-  const raw = spawnSync("git", ["diff", "--raw", "-z", "--abbrev=40", "HEAD", "--", ...paths], { cwd: ROOT, encoding: "utf8" }).stdout || "";
+  const raw = spawnSync("git", gitArgv(["diff", "--raw", "-z", "--abbrev=40", "HEAD", "--", ...paths]), { cwd: ROOT, encoding: "utf8" }).stdout || "";
   const parts = raw.split("\0");
   const byPath = new Map();
   for (let i = 0; i + 1 < parts.length; i += 2) {
@@ -3614,7 +3638,7 @@ function verifyControlBundle(sim) {
   const manifestBytes = fs.readFileSync(path.join(dir, "manifest.json"));
   const manifest = JSON.parse(manifestBytes.toString("utf8"));
   const left = positive.left === "subject" ? ROOT : similarityDirs(positive.left, sim)[0];
-  const at = spawnSync("git", ["-C", left, "rev-parse", "HEAD"], { encoding: "utf8" });
+  const at = spawnSync("git", gitArgv(["-C", left, "rev-parse", "HEAD"]), { encoding: "utf8" });
   const head = at.status === 0 ? at.stdout.trim() : null;
   if (head !== manifest.repo?.head) {
     throw new ToolError(`the positive pair's left side ${left} is at ${head ?? "no commit"}, but the control bundle was made at ${manifest.repo?.head}; check out the control flight's result there`);
@@ -3844,9 +3868,9 @@ function attest({ evidence } = {}) {
   const key = loadKey(cc.cleanroom.signingKey);
   const policyPath = cleanroomPolicyPath(cc);
   const policyBytes = fs.readFileSync(policyPath);
-  const selfTest = runShell("node " + shellQuote(path.join(PLUGIN_ROOT, "scripts", "cleanroom-guard.mjs")) + " --self-test " + shellQuote(policyPath), GATE_SELF_TEST_MS);
+  const selfTest = runShell("node " + shellQuote(path.join(PLUGIN_ROOT, "scripts", "cleanroom-guard.mjs")) + " --self-test " + shellQuote(policyPath), GATE_SELF_TEST_MS, ROOT, { inside: false });
   if (!selfTest.ok) throw new ToolError("the guard self-test fails, so nothing was attested: " + (selfTest.stderrTail || selfTest.stdoutTail || "exit " + selfTest.exitCode).split("\n")[0]);
-  const gl = spawnSync("git", ["log", "--format=%H%x1f%G?%x1f%s%x1f%(trailers:key=Kukulu-Stage,valueonly,separator=%x2C)%x1f%(trailers:key=Kukulu-Task,valueonly,separator=%x2C)", base + "..HEAD"], { cwd: ROOT, encoding: "utf8" });
+  const gl = spawnSync("git", gitArgv(["log", "--format=%H%x1f%G?%x1f%s%x1f%(trailers:key=Kukulu-Stage,valueonly,separator=%x2C)%x1f%(trailers:key=Kukulu-Task,valueonly,separator=%x2C)", base + "..HEAD"]), { cwd: ROOT, encoding: "utf8" });
   if (gl.status !== 0) throw new ToolError("git log " + base + "..HEAD failed: " + (gl.stderr || "").trim());
   const verifierBytes = fs.readFileSync(path.join(PLUGIN_ROOT, "scripts", "verify-attestation.mjs"));
   const hashes = pluginHashes();
@@ -4504,7 +4528,7 @@ function prFinalize({ breaking, resign } = {}) {
         gitCommitIfChanged(crPaths, "chore: clean-room record", { stage: "controller" });
       });
     }
-    const rb = spawnSync("git", ["rebase", "-f", "--rebase-merges", "--gpg-sign", mb], {
+    const rb = spawnSync("git", gitArgv(["rebase", "-f", "--rebase-merges", "--gpg-sign", mb]), {
       cwd: ROOT,
       encoding: "utf8",
       timeout: cc.commandTimeoutMs,
