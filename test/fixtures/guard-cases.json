@@ -6351,7 +6351,7 @@
    "cwd": "__ROOT__"
   },
   "expect": "denied",
-  "reason": "protected path"
+  "reason": "protected path: .*\\.kukulu/(cleanroom|state\\.json) \\(rsync writes it into \\.kukulu/\\)"
  },
  {
   "name": "tar xf evil.tar -C docs (P0-05)",

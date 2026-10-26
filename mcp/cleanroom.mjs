@@ -977,8 +977,13 @@ export function evaluate(policy, hookInput, env) {
           });
           for (const target of [dest, ...landed]) {
             const forms = writeForms(tokenPath(target));
-            const f = forms.find((x) => protectedList.some((q) => underPrefix(x, q) || (recursive && target === dest && underPrefix(q, x))));
+            const f = forms.find((x) => protectedList.some((q) => underPrefix(x, q)));
             if (f) return denied(`protected path: ${f} (rsync writes it into ${dest})`);
+            // A recursive call into a directory that holds a protected path names that path, not the directory.
+            if (recursive && target === dest) {
+              const held = protectedList.find((q) => forms.some((x) => underPrefix(q, x)));
+              if (held) return denied(`protected path: ${held.replace(/\/$/, "")} (rsync writes it into ${dest})`);
+            }
             const w = wildcardNames(forms, protectedList);
             if (w) return denied(`protected path: ${w} (can be named by the wildcard ${target})`);
           }
@@ -1734,7 +1739,7 @@ function redirectTargets(segment) {
 
 // ---------------------------------------------------------------- coverage gaps
 
-/** What the guard cannot see, stated in every bundle's manifest as coverage.knownLimits (SPEC D-03). */
+/** What the guard cannot see, stated in every bundle's manifest as coverage.knownLimits (0.7.1 SPEC A-01). */
 export const KNOWN_LIMITS = [
   "Interpreter escapes (python3 -c, node -e) are not parsed, so a path or word inside the quoted program is not seen.",
   "Shell expansion beyond ~ and $HOME is not evaluated: other variables, and strings assembled at run time (a base64 decode, a variable holding a command), so a path or command built that way is not seen.",

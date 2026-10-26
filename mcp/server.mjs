@@ -2713,19 +2713,7 @@ function runShell(cmd, timeoutMs, cwd = ROOT) {
 /** Does `file` (a repo-relative path) fall under path or exclude prefix `p`? */
 const pathUnder = (file, p) => file === p || file.startsWith(p.endsWith("/") ? p : `${p}/`);
 
-/**
- * Run every constraint rule: first self-test it against its own fixtures —
- * a `shouldMatch` line that fails to match, or a `shouldNotMatch` line that
- * matches, fails the rule outright and is never trusted to scan anything
- * (F-14) — then scan every file under its `paths` minus `exclude` that is
- * tracked or untracked-but-not-ignored (`git ls-files --cached --others
- * --exclude-standard`), line by line, except the untracked files in
- * `ignore` — those that were already there when the run started, which are
- * not the run's business (F-09). A new file an implementer has not yet
- * committed is scanned, so a regression cannot slip past a verify run made
- * before its commit (F-26 of the 2026-09-30 cleanflate feedback). Ignored
- * files never are. Line-based only; no multi-line patterns.
- */
+/** One constraint rule's pattern tested against one line. */
 const constraintTests = (c, line) => new RegExp(c.pattern, c.flags || "").test(line);
 
 /** Why a rule's own fixtures do not hold (`shouldMatch` line unmatched, `shouldNotMatch` line matched), or null. A rule with a failing fixture is never trusted to scan anything (F-14). */
@@ -2764,6 +2752,19 @@ function refuseProgressText(field, text, tool) {
   }
 }
 
+/**
+ * Run every constraint rule: first self-test it against its own fixtures —
+ * a `shouldMatch` line that fails to match, or a `shouldNotMatch` line that
+ * matches, fails the rule outright and is never trusted to scan anything
+ * (F-14) — then scan every file under its `paths` minus `exclude` that is
+ * tracked or untracked-but-not-ignored (`git ls-files --cached --others
+ * --exclude-standard`), line by line, except the untracked files in
+ * `ignore` — those that were already there when the run started, which are
+ * not the run's business (F-09). A new file an implementer has not yet
+ * committed is scanned, so a regression cannot slip past a verify run made
+ * before its commit (F-26 of the 2026-09-30 cleanflate feedback). Ignored
+ * files never are. Line-based only; no multi-line patterns.
+ */
 function checkConstraints(constraints, cwd = ROOT, ignore = []) {
   const skip = new Set(ignore);
   const progress = exists(P.progress) ? parseProgress() : null;
