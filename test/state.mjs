@@ -8,7 +8,7 @@ import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import {
   ROOT, finish, ok, eq, like, isError,
-  mkDir, specRepo, plannedRepo, withServer, useLegacyLayout, mkBareRemote, mkFakeGhBin,
+  mkDir, mkFakeGpg, specRepo, plannedRepo, withServer, useLegacyLayout, mkBareRemote, mkFakeGhBin,
   writeFile, readFile, hasFile, setState, markTasks, git, subject, planDoc, progressDoc,
 } from "./harness.mjs";
 
@@ -109,6 +109,46 @@ for (const missing of ["docs/PLAN.md", "docs/PROGRESS.md", "docs/kukulu.json"]) 
     const n = await call("kukulu_next");
     eq(n.stage, "plan", `missing ${missing} → back to plan`);
   });
+}
+
+// -------------------------------------------------------------- the plan-stage signing probe (B-04)
+
+function archivedSpecRepo(policy) {
+  const repo = specRepo("# Spec 2\n");
+  writeFile(repo, "docs/flights/x/SPEC.md", "# Spec 1\n");
+  writeFile(repo, "docs/flights/x/kukulu.json", JSON.stringify({ verify: ["true"], policies: { signing: policy } }) + "\n");
+  setState(repo, { archived: { slug: "x", dir: "docs/flights/x", at: "2026-01-01T00:00:00Z" } });
+  git(repo, ["config", "--local", "--unset", "commit.gpgsign"]);
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-qm", "chore: archived"]);
+  return repo;
+}
+
+/** The operator's own signing in a temp global config; `failing` makes the fake gpg refuse to sign. */
+function operatorSigning(failing) {
+  const gpg = mkFakeGpg(failing ? { failAfter: 0 } : {});
+  const file = path.join(path.dirname(gpg), "gitconfig");
+  fs.writeFileSync(file, `[commit]\n\tgpgsign = true\n[gpg]\n\tformat = openpgp\n\tprogram = ${gpg}\n[user]\n\tsigningkey = 0123456789ABCDEF\n`);
+  return { env: { GIT_CONFIG_GLOBAL: file } };
+}
+
+const PROBE_PREFIX = /^policies\.signing is 'required' and the signing probe failed: /;
+
+for (const [label, policy, failing, probeReason] of [
+  ["a required policy with a failing signer stops before planning", "required", true, true],
+  ["a required policy with a working signer gives the plan reason", "required", false, false],
+  ["an auto policy with a failing signer gives the plan reason", "auto", true, false],
+]) {
+  const repo = archivedSpecRepo(policy);
+  const cfgBefore = readFile(repo, ".git/config");
+  await withServer(repo, async ({ call }) => {
+    const n = await call("kukulu_next");
+    eq(n.stage, "plan", `${label}: the stage is plan`);
+    if (probeReason) like(n.reason, PROBE_PREFIX, "...with the probe failure as the reason");
+    else like(n.reason, /^no plan on disk/, "...with today's reason");
+    eq(git(repo, ["status", "--porcelain"]), "", "...and no file changed");
+    eq(readFile(repo, ".git/config"), cfgBefore, "...nor the local git config");
+  }, operatorSigning(failing));
 }
 
 // -------------------------------------------------------------- implement stage

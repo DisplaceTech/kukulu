@@ -14,6 +14,7 @@ All notable changes to this plugin. Format follows
 
 ### Fixed
 
+- Under `policies.signing: "required"`, `kukulu_next` reports a broken signer before the plan stage instead of after the planner's work (project-e F-03).
 - The local `commit.gpgsign false` an `auto` fallback writes is lifted at the next `kukulu_run_start`, so a recovered signing agent signs again and the next flight no longer runs unsigned without warning (project-f F-01, F-03; project-e F-06 to F-08).
 - A commit whose signer printed its own error (an SSH agent without the key) is now recognized as a signing failure, so `auto` falls back instead of failing the commit (project-e F-03).
 - The recursive rsync denial now names the protected path it reaches, not the destination (0.7.1 REVIEW note).

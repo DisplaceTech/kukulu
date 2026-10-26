@@ -63,6 +63,8 @@ The stage machine. Its answer is a pure function of disk state; it never sees a 
 
 **Arguments:** none.
 
+**Plan-stage signing probe.** When the stage is `plan` and `policies.signing` is `"required"` (read from `docs/kukulu.json`, else the archived `kukulu.json`) with `commit.gpgsign` true, it makes a signed and an unsigned commit of the empty tree (dangling objects only; no ref, config or state is touched). If the signed one fails, the stage stays `plan` and the `reason` becomes `policies.signing is 'required' and the signing probe failed: <line>. Fix the signing agent before planning, or set policies.signing to 'auto' or 'off'.`; the flight controller prints it and stops without starting the planner.
+
 **Returns:** `{ stage, agent, agentFallback, fallbackAgent, restartRequired, model, agentModel, agentModelExact, round, reviewRound, reason, gate, prompt, streams? }`.
 
 - `stage`: `plan` · `implement` · `review` · `summarize` · `done` · `halt`

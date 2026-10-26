@@ -171,6 +171,8 @@ A repository usually runs more than one flight. Three things make the second one
 
 A commit that fails for a reason git does not word as signing is checked with a signed and an unsigned probe on the empty tree, so an SSH signer's own error still counts as a signing failure.
 
+Under `"required"`, `kukulu_next` also probes the signer when it returns the `plan` stage, so a broken signer is reported before the planner works rather than when its commit fails; `/kukulu:go-flight` prints that reason and stops.
+
 When a fallback has set `state.signingOverride`, the next `kukulu_run_start` lifts the local `commit.gpgsign false` it wrote and probes the operator's own setting again, on a fresh run and on an already-started branch (where it commits the outcome as `chore: signing re-probed`); a repo-local `false` without `signingOverride` is the operator's choice and is never touched.
 
 At the end of a flight, `kukulu_pr_finalize` looks at the commits themselves, never at `state.signing`, to count them, but it holds the PR for signatures only when the policy expects them: `required`, or `auto` when signing was configured at run start (`state.signing` is not `none`, including after a fallback). Under `off`, or `auto` with signing never configured, it reports the counts, records no `awaitingSigning`, proceeds per `policies.finalize`, and says `signatures: "not required: …"`. `kukulu_run_start` and every stage prompt say up front which case applies (`signingNote`). Every commit since the merge base with `baseBranch` is checked with `git log --format='%H %G?'`. `N` (none) and `B` (bad) are unsigned; anything else, `E` included, counts as signed, because a machine without your public key still holds a signed commit.

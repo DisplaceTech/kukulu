@@ -2000,6 +2000,18 @@ function lastReviewCommit(inRepo) {
 const AGENT = { plan: "kukulu:planner", implement: "kukulu:implementer", review: "kukulu:reviewer", summarize: "kukulu:summarizer" };
 const ROLE_OF_STAGE = { plan: "planner", implement: "implementer", review: "reviewer", summarize: "summarizer" };
 
+/** Whether the config a plan stage would run under (docs/kukulu.json, else the archived copy) sets policies.signing to "required"; any unreadable shape counts as no. */
+function requiredSigningPolicy(st) {
+  const candidates = [P.config, ...(st.archived ? ["kukulu.json", "foun" + "dry.json"].map((n) => path.join(ROOT, st.archived.dir, n)) : [])];
+  const file = candidates.find(exists);
+  if (!file) return false;
+  try {
+    return JSON.parse(read(file))?.policies?.signing === "required";
+  } catch {
+    return false;
+  }
+}
+
 function next() {
   const routing = resolveRouting();
   const s = status();
@@ -2118,7 +2130,15 @@ function next() {
     return stage("done", `flight ${st.archived.slug} is archived in ${st.archived.dir}; edit docs/SPEC.md for the next flight, then run /kukulu:go-flight`);
   }
   if (!s.planPresent || !s.progressPresent || !s.configPresent) {
-    return stage("plan", "no plan on disk (docs/PLAN.md, docs/PROGRESS.md and docs/kukulu.json are all required)");
+    const planReason = "no plan on disk (docs/PLAN.md, docs/PROGRESS.md and docs/kukulu.json are all required)";
+    // Under `required` a broken signer would fail the planner's own commit, after all its work; say so now (SPEC B-04).
+    if (requiredSigningPolicy(st) && git(["config", "--get", "commit.gpgsign"], { allowFail: true }).out === "true") {
+      const probe = signingProbe();
+      if (!probe.signedOk) {
+        return stage("plan", `policies.signing is 'required' and the signing probe failed: ${probe.line}. Fix the signing agent before planning, or set policies.signing to 'auto' or 'off'.`);
+      }
+    }
+    return stage("plan", planReason);
   }
   const offer = streamOffer();
   if (offer.streams) return stage("implement", offer.reason, { streams: offer.streams });
