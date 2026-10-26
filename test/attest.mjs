@@ -600,6 +600,10 @@ async function summarizedFlight() {
       eq(manifest.denials.verdicts["false positive"] + "|" + manifest.denials.verdicts.unclassified + "|" + manifest.denials.total, "1|0|1", "the denial's verdict is counted");
       eq(manifest.human.verdicts + "|" + (manifest.human.instructions >= 1), "1|true", "the human entries are counted, the prompt among them");
       ok(JSON.stringify(manifest.coverage.knownLimits) === JSON.stringify(CR.KNOWN_LIMITS) && manifest.coverage.idleGapHours === 3, "the coverage section carries the known limits and the idle threshold");
+      eq(JSON.stringify(Object.keys(manifest.roles)), JSON.stringify(["planner", "implementer", "reviewer", "summarizer"]), "the manifest's roles name every role");
+      eq(JSON.stringify(Object.values(manifest.roles).map(({ assurance, ...rest }) => rest)), JSON.stringify(Object.values(entriesOf(repo)[0].data.roles)), "the manifest's roles repeat genesis's roles");
+      ok(Object.values(manifest.roles).every((r) => r.assurance === "configuration" && r.identity.source === "vendor-asserted"), "...with assurance configuration and identity vendor-asserted for the default routing");
+      eq(Object.keys(manifest).slice(5, 8).join(","), "genesis,roles,policy", "roles follows genesis in the manifest");
       eq(manifest.plugin.cleanroomHash, CR.policyHash(fs.readFileSync(path.join(ROOT, "mcp", "cleanroom.mjs"))), "the manifest's plugin object carries cleanroomHash");
       eq(Object.keys(manifest.plugin).join(","), "version,guardHash,loggerHash,hooksHash,cleanroomHash,verifierHash", "...after hooksHash");
       eq(manifest.selfTest.ok + "|" + manifest.selfTest.cases, "true|" + manifest.selfTest.cases, "the self-test result is recorded");

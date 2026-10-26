@@ -149,6 +149,7 @@ The manifest's fields, in the order it writes them:
 - `plugin`: the plugin `version` and the hashes of the guard, the logger, `hooks.json`, `mcp/cleanroom.mjs` (`cleanroomHash`) and the verifier. The verifier compares `plugin.cleanroomHash` with the genesis entry's; a bundle from 0.7.0 has neither, and it verifies with the note `plugin.cleanroomHash absent (bundle from 0.7.0 or earlier)` (or `genesis has no cleanroomHash (flight started on 0.7.0 or earlier); plugin.cleanroomHash not compared`).
 - `repo`: `baseBranch`, `base`, `head` and `branch`.
 - `genesis`: the first log entry, repeated.
+- `roles`: each role's `model`, `runner`, `endpoint`, `locality`, `identity` and `family` from the genesis entry, each with `assurance: "configuration"` (the roles are what the routing said, not what a runner reported or the proxy saw), or `null` for a flight that began on 0.7.x, whose genesis has no `roles`.
 - `policy`: its `path`, every distinct `hashes` value seen in the checkpoints in order, and the `current` one.
 - `chain`: the number of `entries`, the `first` hash and the `tip`.
 - `checkpoints`: each one's `seq`, `event`, `git`, `signature` and whether it verifies (`ok`).

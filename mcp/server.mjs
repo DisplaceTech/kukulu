@@ -3714,6 +3714,8 @@ function attest({ evidence } = {}) {
     repo: { baseBranch: cc.baseBranch, base, head, branch: gitFacts().branch },
     mode: "clean-room",
     genesis,
+    // A flight that began on 0.7.x has no roles in its genesis. "configuration" is the weakest assurance: the roles are what the routing said, not what a runner reported or the proxy saw.
+    roles: genesis.data?.roles ? Object.fromEntries(ROLES.map((role) => [role, { ...genesis.data.roles[role], assurance: "configuration" }])) : null,
     policy: { path: cc.cleanroom.policy, hashes: policyHashes, current: policyHash(policyBytes) },
     chain: { entries: entries.length, first: entries[0].hash, tip: entries[entries.length - 1].hash },
     checkpoints: checkpoints.map((e) => ({ seq: e.seq, event: e.data.event, git: e.data.git, signature: e.data.signature, ok: verifyCheckpoint(e, key.publicKey) })),
