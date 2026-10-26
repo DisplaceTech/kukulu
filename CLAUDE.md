@@ -82,7 +82,8 @@ The reviewer checks these by reading, because no line pattern can express them:
 - The clean-room guard fails closed: every path in `scripts/cleanroom-guard.mjs` that throws ends in a denial (exit 2), never exit 0.
 - `scripts/check-names.mjs` reports a private-name hit by file, line and denylist index only; no output ever contains the name.
 - `scripts/verify-attestation.mjs` duplicates the chain and signature code of `mcp/cleanroom.mjs` on purpose, and a test feeds both the same fixtures and asserts identical results.
-- ⚠️ ASSUMPTION values each live in one place: `policies.archive`'s default `false` only in `cfg()`; the "at least three" sweep only in the review-build skill; the 60-line budget only in the plan-build skill; `review.mutationFixRounds`' 2, `cleanroom.similarity.separationMargin`'s 0.0 and `cleanroom.idleGapHours`' 3 only in `cfgFrom`; the 50 ms hook budget only in `test/cleanroom.mjs`; 4000 only in `TARGET_MAX`.
+- `policies.archive`'s default `true` (an owner decision since 0.7.2, not an ⚠️ ASSUMPTION) is written only in `cfgFrom`.
+- ⚠️ ASSUMPTION values each live in one place: the "at least three" sweep only in the review-build skill; the 60-line budget only in the plan-build skill; `review.mutationFixRounds`' 2, `cleanroom.similarity.separationMargin`'s 0.0 and `cleanroom.idleGapHours`' 3 only in `cfgFrom`; the 50 ms hook budget only in `test/cleanroom.mjs`; 4000 only in `TARGET_MAX`.
 
 ## Task protocols
 
@@ -98,7 +99,7 @@ The reviewer checks these by reading, because no line pattern can express them:
 
 **Adding a `docs/kukulu.json` key.** Validate it in the config validator with a refusal for every bad shape. Add a row to `docs/operations.md`'s configuration table, and make sure `test/plugin.mjs`'s "config keys documented" loop covers it (it reads `cfg()`'s top-level keys; a nested key needs its own branch, like `policies` and `parallel`).
 
-**Signing tests.** Never depend on the developer's own git config. A failing signer is local `commit.gpgsign true`, `gpg.format openpgp` and `gpg.program /nonexistent-signing-agent` (as the existing run-policies tests do). A working signer is `test/harness.mjs`'s `mkFakeGpg()` plus `useFakeSigner(repo, path)` (added by P1-13). A test that unsets the local `commit.gpgsign` must give the server an isolated global config (`startServer(repo, { env: { GIT_CONFIG_GLOBAL: <temp file> } })`).
+**Signing tests.** Never depend on the developer's own git config. A failing signer is local `commit.gpgsign true`, `gpg.format openpgp` and `gpg.program /nonexistent-signing-agent` (as the existing run-policies tests do). A working signer is `test/harness.mjs`'s `mkFakeGpg()` plus `useFakeSigner(repo, path)` (added by P1-13). A test that unsets the local `commit.gpgsign` must give the server an isolated global config (`startServer(repo, { env: { GIT_CONFIG_GLOBAL: <temp file> } })`). A fake SSH signer is a script written into a temp directory that prints a recorded line from `test/fixtures/signing/` to stderr and exits 1, with repo-local `gpg.format ssh`, `gpg.ssh.program <script>`, `user.signingkey key::<literal public key>` and `commit.gpgsign true`; never a real key or a PEM.
 
 **Commit-failure tests.** To make a Kūkulu commit fail without signing, write an executable `.git/hooks/commit-msg` that exits 1 when the message starts with the subject under test (for example `progress:`). Assert that every file the tool wrote is byte-identical afterwards, that `git diff --cached --name-only` is empty, and that HEAD did not move.
 
@@ -106,7 +107,7 @@ The reviewer checks these by reading, because no line pattern can express them:
 
 **Measuring an assumption.** Before = the ⚠️ ASSUMPTION default from `docs/site/checks.json`; after = the value `node scripts/check-site.mjs --report` measures, with its headroom. Put both on the commit body's `Measurement:` line and in the progress log. Never change `docs/site/checks.json`; a new default is the human's call.
 
-**Changing a guard rule.** Every change to `evaluate` in `mcp/cleanroom.mjs` adds deny and allow cases to `test/fixtures/guard-cases.json` whose names end in `(<task id>)`, after a space. An existing fixture may change its `expect` or `reason` only when the task names that fixture's form, and the commit body lists every one it changed (`git diff <merge-base>..HEAD -- test/fixtures/guard-cases.json` is how the reviewer checks). The same commit updates the rule's text in `docs/cleanroom.md`. A fixture's `reason` is a regular expression; `__ROOT__` and `__HOME__` are substituted in `input` only, never in `policy` or `reason` (write a policy path repo-relative, and a reason path as `.*`). Run `node scripts/cleanroom-guard.mjs --self-test templates/cleanroom.example.json` before committing.
+**Changing a guard rule.** Every change to `evaluate` in `mcp/cleanroom.mjs` adds deny and allow cases to `test/fixtures/guard-cases.json` whose names end in `(<task id>)`, after a space. An existing fixture may change its `expect` or `reason` only when the task names that fixture's form, and the commit body lists every one it changed (`git diff <merge-base>..HEAD -- test/fixtures/guard-cases.json` is how the reviewer checks). The same commit updates the rule's text in `docs/cleanroom.md`. A fixture's `reason` is a regular expression; `__ROOT__` and `__HOME__` are substituted in `input` only, never in `policy` or `reason` (write a policy path repo-relative, and a reason path as `.*`). The file is indented with one space: append cases with a script that loads it and dumps it with `indent=1` and no ASCII escaping, so the diff stays one block per case. Run `node scripts/cleanroom-guard.mjs --self-test templates/cleanroom.example.json` before committing.
 
 **HANDOFF.md.** `kukulu_run_finish` uses `docs/HANDOFF.md` as the draft PR's body. When a flight's spec says its result must not be merged yet (the 0.5.0 flight's did, until a human had run a flight from the working tree), put that instruction in the first line, in bold.
 
@@ -197,3 +198,42 @@ Pipeline vocabulary (SPEC §6 B):
 - B-02's helper reads the same constraints, `from` activation and fixture self-test as `kukulu_verify`; it never runs a verify command.
 - B-03's merge happens only on a clean tracked tree, through `commitStaged`, with stage `implement` and task `-`; a conflict is `git merge --abort` plus a refusal, never a halt.
 - `policies.syncBase` defaults to `true` in `cfgFrom` only; it is an owner decision, not an ⚠️ ASSUMPTION.
+
+## Flight v0-7-2 notes
+
+This flight builds Kūkulu 0.7.2 (SPEC §1): a patch with no new tools, no removed tools and no renamed input fields. The plugin running the flight is the installed 0.7.1, read from the plugin cache, so none of the new behavior is active while the flight runs. Where earlier flights' notes disagree with these (their task ids included), these win for this flight.
+
+- Every task is serial. `baseBranch` is `main`; build branches are `build/<date>`. The draft PR targets `main`; the running 0.7.1 titles it `Build: <branch>`.
+- The tool count stays 25: `docs/mcp-tools.md`'s first line keeps "Twenty-five tools" and README keeps "The server exposes twenty-five tools."
+- `docs/HANDOFF.md` has no "do not merge" line (SPEC §6 E).
+- Never edit `docs/SPEC.md`, `docs/flights/`, `docs/plans/`, `site/` or `docs/site/`. The three gitignored feedback files of SPEC §1 are edited only by P3-04, only in their header, and never staged.
+- P0-01 is the only task that edits `agents/*.md`, and only their `model:` and `effort:` lines (the base commit `418b291` broke 44 assertions in the `plugin`, `state`, `routing` and `drive` suites, and `no-fable-default`). Until it lands, `npm test` and `kukulu_verify` fail on those checks alone.
+- This flight's `docs/kukulu.json` sets only `policies.archive: true`, because the running 0.7.1 defaults it to `false`. Do not add `prTitle` or any other key to it.
+- `CHANGELOG.md`: lines go under `## [Unreleased]`, `### Changed` or `### Fixed` only. There is no `### Breaking changes` heading, so this flight's own PR is not breaking (SPEC §6 E).
+- Write the macron letter in a `kukulu_task_done` log or a reason only inside the display name; spell it "the macron u" otherwise. In test source write the macron letter as a Unicode escape, or use an ASCII stand-in heading such as `# Widget 1.0 — Specification`.
+- Recorded `gh` output lives in `test/fixtures/gh/`, signer stderr in `test/fixtures/signing/`; commit them in the task that adds them. Extend `test/harness.mjs`'s `mkFakeGhBin` rather than writing a second fake `gh`.
+
+Signing vocabulary (SPEC §6 B):
+
+- `signingProbe()` (P1-01) returns `{ signedOk, unsignedOk, line }`: a `git commit-tree -S` and a `git commit-tree --no-gpg-sign` on the empty tree from `git hash-object -t tree /dev/null`, each bounded by `SIGNING_TIMEOUT_MS`; it writes only dangling objects. `commitStaged`, `probeSigning` and the plan-stage probe (P1-04) use it.
+- `state.signing` is `"on"`, `"off"`, `"none"`, `off (probe failed: …)` or `off (commit signing failed: …)`. `state.signingOverride: true` means the server wrote the local `commit.gpgsign false`; a local `false` without it is the operator's and is never touched.
+- `signaturesExpected(policy, signing)` and `signingNoteFor(signing)` (P1-03). The notes are "Commits in this run are unsigned and kukulu_pr_finalize will not wait for signatures." and "Commits from here on are unsigned; kukulu_pr_finalize will wait for signatures, so unlock the signing agent and call kukulu_run_start again to resume signing, or re-sign at the end."
+
+PR vocabulary (SPEC §6 C):
+
+- `prTitleFor(c, branch)` (P2-01): `prTitle`, else `<flight>: <spec title>`, else `Build: <branch>`, cut to 120 code points. `changelogVerdict()` (P2-04) reads `CHANGELOG.md`'s first `## [` entry.
+- The `gh pr merge` arguments stay one inline array literal with `"--auto"` right after `"merge"`; `--subject` goes after it (`no-sync-merge`).
+
+Guard vocabulary (SPEC §6 A, §3 principle 1):
+
+- The guard is a tripwire, not a sandbox. Change only the rule the task names; an unmodelled spelling is a known gap, not a defect.
+- Fixture `policy: "template"` loads `templates/cleanroom.example.json`. The always-protected set is `<root>/docs/cleanroom.json`, `<root>/.kukulu/cleanroom`, `<root>/.kukulu/state.json` and, once the plan exists, `<root>/docs/kukulu.json`, in `protectedPaths` order.
+- Reasons: `protected path: <abs path> (rsync --delete* can remove it from <dest>)`, `(rsync --remove-source-files removes it)`, `(rsync writes it into <dest>)` and `(<word> extracts into <dir>; the archive's contents cannot be known)`, where `<word>` is `tar`, `bsdtar` or `gtar` as written.
+
+Carried from the 0.7.1 summary:
+
+- During a merge git refuses `git commit -- <paths>`, so the server's merge commit is a no-pathspec commit (`commitStaged`'s `noPathspec`); an aborted merge has `withRollback` restore the clean-room log byte for byte.
+- `kukulu_verify`'s output is large because it lists every constraint result; the useful parts are `ok` and the `npm test` summary.
+- The targeted `cleanroom` suite reports a guard mutant only as the gate's self-test failure; to see which fixture caught it, run the guard self-test directly.
+
+SPEC.md wins over PLAN.md, and PLAN.md wins over code comments.
