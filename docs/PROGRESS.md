@@ -26,7 +26,7 @@ Started: 2026-10-26T14:17:50.269Z
 - [x] P3-03 kukulu_mutate says what kind of change it restored
 - [x] P3-04 CHANGELOG 0.7.2, the version and the feedback headers
 - [x] P3-05 Phase 3 end: push and record the manual check
-- [ ] R1-01 The PR's gitleaks check passes: allowlist the fake signer key in the suites that use it
+- [x] R1-01 The PR's gitleaks check passes: allowlist the fake signer key in the suites that use it
 - [ ] R1-02 Test B-02's kept fallback record and C-01's 120-character title cut
 - [ ] R1-03 Cover the remaining mcp/server.mjs mutation survivors (fresh-path none, prTitle code points, separators, gh fallback trigger)
 
@@ -117,3 +117,7 @@ Version 0.7.2 in package.json, plugin.json, VERSION and README badge; CHANGELOG 
 ### P3-05 — 5d20706
 
 Pushed. Manual check: NOT VERIFIED (human): on a machine with gh 2.45.0, kukulu_status reports the PR's checks with via: "gh api"
+
+### R1-01 — 32be844
+
+Allowlist paths widened to test/(harness|review|state|implement).mjs. Interpretation: review commit 79f3342 also quotes the key in docs/REVIEW.md (range scan flagged it); added a second allowlist scoped to that commit and the same value, since a docs path would break test/plugin.mjs's tests-only paths check. Local gitleaks range scan: no leaks; pre-commit passes; plugin suite passes. Push left to run_finish.
