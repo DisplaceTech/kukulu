@@ -23,7 +23,7 @@ Started: 2026-10-26T14:17:50.269Z
 - [x] P2-06 Phase 2 end: push and record the manual check
 - [x] P3-01 prChecks falls back to the REST API on an older gh
 - [x] P3-02 kukulu_mutate's filter takes a list
-- [~] P3-03 kukulu_mutate says what kind of change it restored
+- [x] P3-03 kukulu_mutate says what kind of change it restored
 - [ ] P3-04 CHANGELOG 0.7.2, the version and the feedback headers
 - [ ] P3-05 Phase 3 end: push and record the manual check
 
@@ -102,3 +102,7 @@ prChecksViaApi + ghJson helpers; trigger on non-zero exit with unknown-flag stde
 ### P3-02 — 2eceaaa
 
 filter array support in mutate(); schema type ["string","array"]; docs, CONTRIBUTING row, CHANGELOG. 5 review tests + 1 protocol test. Verify green (3843).
+
+### P3-03 — f2ee15b
+
+classifyChanges() reads git diff --raw -z before checkout; restoredChanges in undoMutationResidue and mutate result. 3 tests, docs, CHANGELOG. Could not identify project-f F-02's cause from here. Verify green (3855).
