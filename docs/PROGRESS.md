@@ -25,7 +25,7 @@ Started: 2026-10-26T21:19:36.125Z
 - [x] P2-06 run and stop, and docs/sandbox.md
 - [x] P2-07 Gate check 9 and the boundary in genesis
 - [x] P2-08 Commands run inside the boundary
-- [ ] P2-09 The enforcement level: known limits per level, the manifest and verifier check 11
+- [x] P2-09 The enforcement level: known limits per level, the manifest and verifier check 11
 - [ ] P2-10 Signing under the boundary
 - [ ] P2-11 Lockfile parsers, gate check 10 and the manifest's packages
 - [ ] P2-12 The guard denies adding a denied package
@@ -146,3 +146,8 @@ Interpretation: the writable-mount set is project + /home/kukulu + /run/kukulu (
 ### P2-08 — 8db035e
 
 server.mjs: gitArgv wraps every spawnSync("git") site (git(), signingProbe, commitStaged, classifyChanges, attest log, rebase, control-bundle rev-parse); runShell(cmd, timeoutMs, cwd, {inside}) wraps in engine exec with inner timeout when KUKULU_SANDBOX is set (guard self-tests pass inside:false); runStart refuses a stream inside. Tests in test/sandbox.mjs (168). docs: mcp-tools (verify, mutate, run_start), sandbox.md What runs where. Markdownlint caught an inserted paragraph before a --- rule (setext heading); fixed and amended before recording.
+
+### P2-09 — 75071d4
+
+cleanroom.mjs: ENFORCEMENT_LEVELS, KNOWN_LIMITS as 12 {id,text,levels}, knownLimitsFor (throws CleanroomError). Verifier duplicates table+function by hand; check 11 enforcement, --require-enforcement (usage error exit 2 on unknown), returns/--json enforcement, absent field reads as hook with a note. attest(): manifest.enforcement {level,[boundary,egress]}, coverage.knownLimits per level, roles assurance egress under container+proxy. Harness buildBundle opts.enforcement; fixture test/fixtures/bundles/v0-7-2 (public key + signatures only; fingerprint in test/fixtures/bundles/README.md). docs/cleanroom.md Known gaps is now a 12-row table. attest 275, cleanroom 1213 assertions.
+Interpretation: a manifest without an enforcement field is not compared against a known-limits list. .pre-commit-config.yaml now excludes test/fixtures/bundles/*/ from markdownlint (signed bytes cannot be reformatted).
