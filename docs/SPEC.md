@@ -1,46 +1,60 @@
-# Kūkulu 0.7.1 — Specification
+# Kūkulu 0.7.2 — Specification
 
-Version: 0.7.1 Status: draft for owner review
+Version: 0.7.2 Status: draft for owner review
 
-The Kūkulu planner reads this file in full and derives the build plan from it. The 0.7.0 spec is archived unchanged at [flights/v0-7-0/SPEC.md](flights/v0-7-0/SPEC.md); section ids written `0.7.0 D-nn` or `0.7.0 F-nn` refer to it. The plugin running this flight is the installed 0.7.0, read from the plugin cache. The flight edits the working tree, and nothing it changes affects the server running the flight.
+The Kūkulu planner reads this file in full and derives the build plan from it. The 0.7.1 spec is archived unchanged at [flights/v0-7-1/SPEC.md](flights/v0-7-1/SPEC.md); section ids written `0.7.1 A-nn` or `0.7.1 B-nn` refer to it. The plugin running this flight is the installed 0.7.1, read from the plugin cache. The flight edits the working tree, and nothing it changes affects the server running the flight.
 
-This is a cleanup patch release with no breaking changes and no new tools. It does three things. It states what the clean-room guard is (a tripwire, not a sandbox) and makes the code, the docs and the review loop agree. It closes the open spec issues from the 0.7.0 flight's `SUMMARY.md` and `REVIEW.md`. And it closes the friction that flight logged.
+This is a patch release with no new tools. It clears the friction that real flights logged between 2026-10-20 and 2026-10-25, before 0.8.0's larger flight runs on top of it. The guard closes the two known-gap candidates the 0.7.1 review named. Commit signing stops failing silently and stops outliving the run that turned it off. A flight's PR is titled after the flight and ends in a merge commit that names it. The release mechanics that every flight so far has done by hand become defaults. And the reviewer's tools work on an older `gh` and take more than one test path.
 
 ## Recommendation on size
 
-This release is one flight (`flight=v0-7-1`), three phases, all serial. Most tasks touch `mcp/server.mjs`, `mcp/cleanroom.mjs`, `test/fixtures/guard-cases.json`, `docs/cleanroom.md` or `CHANGELOG.md`. Two things keep the review loop short:
-
-- Principle 1 below says when a guard finding becomes a fix task. The 0.7.0 flight ran eleven review rounds, and nearly every one after round 2 was a newly found option spelling. That is no longer a fix task.
-- Every guard change here is a named rule with named fixtures (A-02 to A-05). None of them is "make the parser complete".
+This release is one flight (`flight=v0-7-2`), four phases, all serial. Each requirement names its function, its refusal text and its tests, and none of them asks for a parser to be completed. 0.7.1 principle 1 (the guard is a tripwire) carries over unchanged as principle 1 below, so a guard finding outside A-01 and A-02 is a known-gap candidate, not a fix task.
 
 ## 1. Overview
 
-Kūkulu is a Claude Code plugin. A dependency-free MCP server (`mcp/server.mjs`) holds the mechanics, and the skills (`skills/*/SKILL.md`) hold the judgment. Release 0.7.1 makes `KNOWN_LIMITS`, `docs/cleanroom.md`, the bundle manifest and the review-build skill say the same thing about the guard's limits. It also fixes four guard rules the 0.7.0 review flagged, pins `mcp/cleanroom.mjs` in the gate, and closes the five friction items in `docs/feedback/2026-10-20-kukulu.md`. Done means:
+Kūkulu is a Claude Code plugin. A dependency-free MCP server (`mcp/server.mjs`) holds the mechanics, and the skills (`skills/*/SKILL.md`) hold the judgment. Release 0.7.2 closes:
+
+- the items in `docs/feedback/2026-10-25-project-e.md`, `docs/feedback/2026-10-25-project-f.md` and `docs/feedback/2026-10-26-kukulu.md`;
+- a beta user's request for a PR title that names the flight;
+- the known-gap candidates and notes in the 0.7.1 flight's `SUMMARY.md`.
+
+Done means:
 
 - every requirement in §6 has its tests;
 - `npm run lint`, `pre-commit run --all-files`, `npm test`, `npm run check:site` and the guard self-test pass;
-- the version reads 0.7.1 everywhere;
+- the version reads 0.7.2 everywhere;
 - a draft PR is open against `main`.
 
-**Why a patch version.** No tool is added or removed, no tool's input schema loses or renames a field, and nothing that worked in 0.7.0 is refused, with two exceptions: the guard denies two command forms it allowed before (A-04), and a `kukulu_task_done` log that breaks an active constraint is refused (B-02). Both close holes rather than change contracts. One `docs/kukulu.json` key is added (`policies.syncBase`), and it is optional.
+**Why a patch version.** No tool is added or removed, and no tool's input schema loses or renames a field. Four things change for someone upgrading. None of them changes a contract:
 
-**Patent note.** Nothing in this release goes beyond U.S. Provisional Application No. 64/178,095, so no section carries a NEW MATTER marker. Signing the log's uncommitted tail would be new matter, and it is out of scope (§2). Write "patent pending", never "patented".
+- **Guard.** It denies rsync's deleting options on protected paths and treats `bsdtar` and `gtar` as `tar` (A-01, A-02). Both close holes.
+- **Defaults.** `policies.archive` now defaults to `true` (C-02). The default PR title becomes the flight's name (C-01).
+- **Signing.** `kukulu_pr_finalize` no longer waits for signatures that the signing policy never asked for (B-03).
+- **Loosened inputs.** `kukulu_mutate`'s `filter` also accepts a list (D-02). `kukulu_pr_finalize`'s `breaking` becomes optional when a CHANGELOG decides it (C-03).
+
+One `docs/kukulu.json` key is added (`prTitle`), and it is optional. The CHANGELOG lists all of this under Changed, with no "Breaking changes" heading.
+
+**Patent note.** Nothing in this release goes beyond U.S. Provisional Application No. 64/178,095, so no section carries a NEW MATTER marker. Write "patent pending", never "patented".
 
 ## 2. Goals and non-goals
 
-- Goal: `KNOWN_LIMITS`, `docs/cleanroom.md`'s Known gaps, the manifest's `coverage.knownLimits` and the review-build skill list the same limits, in the same order, and say when a guard finding becomes a fix task (A-01).
-- Goal: a bare read-family operand and the same operand written `./x` get the same decision (A-02).
-- Goal: `git add docs/*` and other git forms that write only the index are allowed (A-03).
-- Goal: `rsync` and `tar` extraction into a protected path are denied (A-04).
-- Goal: a denial that comes only from install's BSD reading names a real directory (A-05).
-- Goal: the gate, the genesis entry and the manifest pin `mcp/cleanroom.mjs` (A-06).
-- Goal: `kukulu_plan_commit({ renumber: true })` also rewrites the ids in the flight's own CLAUDE.md notes section (B-01).
-- Goal: a log or reason that an active constraint would flag is refused before it reaches `docs/PROGRESS.md` (B-02).
-- Goal: commits added to the base branch after the build branch was cut reach the build branch without anyone running `git merge` by hand (B-03).
-- Goal: the hard cap's documentation says what the code does (B-04).
-- Non-goal: signing the log's uncommitted tail (0.7.0 REVIEW spec issue "the log's uncommitted tail is unsigned"). It is new matter and stays out of scope.
-- Non-goal: FreeBSD-only and macOS-only options (install `-T`, `-M`; macOS cp `-S`). They are known gaps under principle 1.
-- Non-goal: any change under `site/` or `docs/site/`. The page already says "in the plugin since 0.7.0", which stays true.
+- Goal: rsync's deleting options cannot remove a protected path (A-01).
+- Goal: `bsdtar` and `gtar` get every decision `tar` gets (A-02).
+- Goal: the 0.7.1 review's advisory notes on the guard and the server are closed (A-03).
+- Goal: a commit that fails because it could not be signed is recognized as a signing failure, whatever the signer printed (B-01).
+- Goal: the local `commit.gpgsign false` that an `auto` fallback writes is lifted at the next run start, so a recovered signing agent signs again (B-02).
+- Goal: `kukulu_pr_finalize` waits for signatures only when the signing policy expects them, and `kukulu_run_start` says up front which case applies (B-03).
+- Goal: under `policies.signing` `required`, a broken signer is reported before the plan stage does its work (B-04).
+- Goal: the draft PR's title names the flight, and the merge commit's subject repeats it (C-01).
+- Goal: a flight archives itself by default (C-02).
+- Goal: the breaking-change verdict comes from the CHANGELOG when there is one (C-03).
+- Goal: a round cap the operator changes is recorded in PLAN.md's Decisions (C-04).
+- Goal: `prChecks` reports CI on a `gh` without `pr checks --json` (D-01).
+- Goal: `kukulu_mutate`'s `filter` takes several test paths (D-02).
+- Goal: `kukulu_mutate` says what kind of change it undid in each restored file (D-03).
+- Non-goal: a release tool (tagging, release notes, publishing). It is a new tool, which is 0.8.0's.
+- Non-goal: signing the log's uncommitted tail. It is new matter and stays out of scope.
+- Non-goal: any change under `site/` or `docs/site/`.
 - Non-goal: new tools, removed tools, or renamed input fields.
 - Non-goal: background jobs for long verify commands (cleanflate F-13, F-28). Still deferred.
 
@@ -48,26 +62,17 @@ Kūkulu is a Claude Code plugin. A dependency-free MCP server (`mcp/server.mjs`)
 
 Each is checkable by grep or test. Those marked `[rule:<id>]` are `constraints` in `docs/kukulu.json`. The rest are checked by the reviewer, by reading.
 
-1. **The guard is a tripwire, not a sandbox.** This is the amended 0.7.0 D-03 text, carried over as written. "These rules" are the guard rules of 0.7.0 D-03 as A-02 to A-04 amend them, documented in `docs/cleanroom.md`. "The fixture set" is `test/fixtures/guard-cases.json`. "D-05", "D-06", "D-08" and "D-10" are the 0.7.0 sections.
-
-   > **The guard is a tripwire, not a sandbox.** It judges a command by its text, so its wrapper and option parsing is best-effort. That covers the wrapper list, the options that take a value for wrappers and write-family commands, bundled short options, abbreviated long options, and operands that come after options. It follows the GNU coreutils, findutils and sudo on the CI images, and BSD/macOS forms where their manual pages differ. Neither the wrapper list nor the option tables can be proved complete across tool versions, so a spelling they do not model is a known gap, not a defect. What makes a bypass visible afterwards is the chain (D-05), the signed checkpoints (D-06) and the gate (D-08), not the guard. A review finding against the guard becomes a fix task only when:
-   >
-   > - it is a regression: a form denied at an earlier commit of the flight is allowed now;
-   > - it writes a D-10 protected path, or reads under `deny.paths`, with a command word and option spelling these rules or the fixture set already name; or
-   > - a rule above is missing for a whole command word it lists.
-   >
-   > Any other unmodelled spelling is a review note, and the reviewer adds its class to the known gaps below instead of queuing a task.
-
-   The pipeline never edits this file, so "adds its class to the known gaps below" works like this. The reviewer writes the class as a bullet under a `Known-gap candidates` heading in REVIEW.md's `## Spec issues`. The summarizer carries it into SUMMARY.md. The owner decides whether a later release adds it to `KNOWN_LIMITS`. The reviewer checks this rule by reading every guard finding in a fix round.
-2. **Mechanics live in the server, judgment in the skills.** A mechanical step (merging the base branch, checking a log against constraints, rewriting ids) is a server change with a test, never a skill sentence telling a model to do it by hand.
-3. **Every server behavior change has a test** in the suite that owns the tool (CONTRIBUTING.md's table). Every new refusal has a test that triggers it and asserts its message. Every guard change has deny and allow cases in `test/fixtures/guard-cases.json`, with names ending in `(<task id>)`.
-4. **Tools validate, then mutate.** A refusal comes before any file is written, and a tool whose final commit fails leaves the tree as it found it. A merge that conflicts is aborted, and the tree and HEAD are left as they were (B-03). The reviewer reads for this.
-5. **Config never silently defaults a bad value.** `policies.syncBase` is validated in `validatePolicies`, with the existing unknown-key refusal.
+1. **The guard is a tripwire, not a sandbox.** This is 0.7.1 principle 1, carried over as written, with its triage rule: a guard finding becomes a fix task only when it is a regression, writes a protected path or reads under `deny.paths` with a command word and option spelling these rules or the fixture set already name, or is a whole command word missing from a rule. Every other unmodelled spelling goes under REVIEW.md's `## Spec issues` → `Known-gap candidates`, and the summarizer carries it into SUMMARY.md. After A-01 and A-02 land, "already name" includes the rsync options and the two tar command words they add.
+2. **Mechanics live in the server, judgment in the skills.** Deriving the breaking verdict, recording a cap change, classifying a signing failure and titling the PR are server changes with tests, never skill sentences.
+3. **Every server behavior change has a test** in the suite that owns the tool (CONTRIBUTING.md's table). If no row names the tool, the task adds the row. Every new refusal has a test that triggers it and asserts its message. Every guard change has deny and allow cases in `test/fixtures/guard-cases.json`, with names ending in `(<task id>)`.
+4. **Tools validate, then mutate.** A refusal comes before any file is written, and a tool whose final commit fails leaves the tree as it found it. The signing probe (B-01, B-04) writes only a dangling commit object, never a ref, the index or the tree.
+5. **Config never silently defaults a bad value.** `prTitle` is validated in the config validator, with the existing unknown-key refusal.
 6. **No guard fixture changes its decision unless a task names it.** A task may add fixtures. It may change an existing fixture's `expect` or `reason` only when §6 names that fixture's form, and the commit body lists every one it changed. The reviewer checks with `git diff <merge-base>..HEAD -- test/fixtures/guard-cases.json`.
-7. **Every constraint in `docs/flights/v0-7-0/kukulu.json` carries over unchanged**, including the site rules, plus the one in §5.3.
-8. **Documentation moves with the code.** A task that changes a tool's behavior updates `docs/mcp-tools.md` in the same commit. A task that changes a guard rule updates `docs/cleanroom.md` in the same commit.
+7. **Every constraint in `docs/flights/v0-7-1/kukulu.json` carries over unchanged**, including the site rules and `progress-no-bare-macron`. None is added.
+8. **Documentation moves with the code.** A task that changes a tool's behavior updates `docs/mcp-tools.md` in the same commit. A task that changes a guard rule updates `docs/cleanroom.md` in the same commit. A task that adds or changes a config key or default updates `docs/operations.md` in the same commit.
 9. **Error messages are written for a model**: say what is wrong and what to do instead. Comments explain why.
-10. **No dependencies anywhere**, and tests never depend on an untracked file. Both are carried over from 0.7.0.
+10. **No dependencies anywhere**, and tests never depend on an untracked file. Recorded `gh` and signer output lives in `test/fixtures/`, never inline in a `test/*.mjs`.
+11. **Tests never touch the developer's signing setup.** A signer test uses `test/harness.mjs`'s fake signer or a fake program it writes into a temp directory, with repo-local git config, as CLAUDE.md's signing-tests protocol says.
 
 ## 4. Architecture
 
@@ -75,15 +80,14 @@ No module is added. These are the changes, by module:
 
 | Path | Changes |
 |---|---|
-| `mcp/cleanroom.mjs` | `KNOWN_LIMITS` (A-01); `evaluate`'s read-family word rule, git write-family subcommands, `rsync`/`tar`, the install message (A-02 to A-05) |
-| `mcp/server.mjs` | genesis and gate check 3 pin `mcp/cleanroom.mjs`, plus the manifest's `plugin.cleanroomHash` (A-06); `planCommit` (B-01); `taskDone`, `taskBlock`, `taskReopen`, `runHalt` text checks (B-02); `runStart` and serial `taskNext` base sync, `validatePolicies` (B-03); `flight_options` schema text (B-04) |
-| `scripts/verify-attestation.mjs` | reads `plugin.cleanroomHash` when present (A-06) |
-| `skills/review-build/SKILL.md` | guard-finding triage (A-01) |
-| `skills/summarize/SKILL.md` | carries known-gap candidates (A-01) |
-| `test/fixtures/guard-cases.json` | new cases (A-02 to A-05) |
+| `mcp/cleanroom.mjs` | rsync's deleting options (A-01); `bsdtar`/`gtar` (A-02); the recursive rsync denial's reason and the `KNOWN_LIMITS` comment (A-03) |
+| `mcp/server.mjs` | `commitStaged`'s failure classification (B-01); `probeSigning` and `runStart` (B-02, B-03); `prFinalize`'s signed check (B-03); `next` at the plan stage (B-04); `runFinish`'s PR title and `prFinalize`'s merge subject, the config validator (C-01); `cfgFrom`'s archive default (C-02); `prFinalize`'s breaking verdict (C-03); `flightOptions` (C-04); `prChecks` (D-01); `mutate` and `undoMutationResidue` (D-02, D-03); the `checkConstraints` comment (A-03) |
+| `skills/summarize/SKILL.md` | the Breaking call reads the CHANGELOG's verdict (C-03) |
+| `test/fixtures/guard-cases.json` | new cases (A-01, A-02) |
+| `test/fixtures/gh/`, `test/fixtures/signing/` | recorded `gh` output (D-01) and signer stderr (B-01) |
 | `docs/cleanroom.md`, `docs/mcp-tools.md`, `docs/operations.md`, `README.md`, `CHANGELOG.md` | as each requirement says |
 
-The commit helper and `run-command.mjs` do not change.
+`run-command.mjs`, the hooks and the verifier do not change.
 
 ## 5. Data and configuration
 
@@ -91,164 +95,257 @@ The commit helper and `run-command.mjs` do not change.
 
 | Key | Type | Default | Notes |
 |---|---|---|---|
-| `policies.syncBase` | boolean | `true` | B-03. When true, the server merges new base-branch commits into the build branch. The default is an owner decision, not an ⚠️ ASSUMPTION: the 0.7.0 flight showed what a stale base costs. A project that wants the old behavior sets `false`. |
+| `prTitle` | string | derived (C-01) | 1 to 120 characters, no newline. The title of the draft PR that `kukulu_run_finish` opens, and the subject of the merge commit. |
+| `policies.archive` | boolean | `true` (was `false`) | C-02. Owner decision: every release flight so far has needed the archive. It is no longer an ⚠️ ASSUMPTION, so CLAUDE.md's ASSUMPTION list drops it. |
 
-`baseBranch` for this flight is `main`, and build branches are `build/<date>`.
+`baseBranch` for this flight is `main`, and build branches are `build/<date>`. This flight's own `docs/kukulu.json` sets `policies.archive: true`, because the running 0.7.1 server still defaults it to `false`.
 
 ### 5.2 Tunables
 
-None added. Every 0.7.0 ⚠️ ASSUMPTION stays where it is, with its default unchanged.
+None added. The remaining ⚠️ ASSUMPTION defaults (`review.mutationFixRounds` 2, `cleanroom.similarity.separationMargin` 0.0, `cleanroom.idleGapHours` 3) stay where they are, unchanged.
 
-### 5.3 Constraints added to this flight's `docs/kukulu.json`
+### 5.3 Constraints
 
-- `progress-no-bare-macron`: in `docs/PROGRESS.md`, a macron u is allowed only inside the display name. Pattern `(?<!K)\u016b|\u016b(?!kulu)`, written so the JSON stays ASCII. `shouldMatch` gets a log line with the letter alone and one with it in a code span. `shouldNotMatch` gets the display name in prose. This is the rule B-02 uses to refuse the log line that broke 0.7.0 (feedback F-02). It needs no `from`: the planner's own PROGRESS.md must already pass it.
+The constraints in `docs/flights/v0-7-1/kukulu.json` carry over unchanged (principle 7). `no-sync-merge` still holds after C-01, because `--subject` goes inside the same inline argument array, after `--auto`.
 
 ## 6. Interfaces
 
-### A — The guard as a tripwire
+### A — The guard
 
-#### A-01 — one list of limits, one triage rule
+#### A-01 — rsync's deleting options (0.7.1 known-gap candidate)
 
-`KNOWN_LIMITS` becomes these eight strings, in this order, each ending in a period. The wording may be tightened, but not the substance:
+Today `rsync -d --delete empty/ docs/` removes `docs/cleanroom.json`. 0.7.1 A-04 judges only recursive calls as whole-destination writes, and `-d`/`--dirs` is not recursive. Two option families now write, whether the call is recursive or not:
 
-1. Interpreter escapes (`python3 -c`, `node -e`) are not parsed.
-2. Shell expansion beyond `~` and `$HOME` is not evaluated: other variables, and strings assembled at run time.
-3. Option and wrapper spellings the tables do not model are not recognized: the guard judges a command by its text, its wrapper and option parsing follows GNU coreutils, findutils and sudo (and BSD/macOS forms where their manual pages differ), and no table can be proved complete across tool versions.
-4. Commands that run a command from their arguments (`find -exec`, `watch`, `parallel`, `busybox`) and programs outside the fixed network and write lists (`unlink`, `shred`, `perl -i`, `cargo fetch`) are not recognized.
-5. `pathPatterns` regexes are matched on the paths a call names, not on the files a recursive read or a glob reaches below a directory.
-6. Subprocesses of a `make` target are not individual tool calls.
-7. MCP server internals are not tool calls.
-8. Hooks load at session start, so a session that writes the policy is not covered until the next one; the gate's liveness check catches a session with no hooks at all.
+- **Deleting the destination.** These options make the destination tree a write target as a whole: `--delete`, `--del`, and `--delete-before`, `--delete-during`, `--delete-delay`, `--delete-after`, `--delete-excluded` and `--delete-missing-args`. A call with any of them is denied when its destination equals or contains a protected path. The reason is `protected path: <abs path> (rsync --delete* can remove it from <dest>)`, with `<dest>` as the command wrote it.
+- **Removing the sources.** `--remove-source-files` makes every source operand a write target. A source that equals or contains a protected path is denied with `protected path: <abs path> (rsync --remove-source-files removes it)`.
 
-Entry 4 drops `rsync`, because A-04 now models it. `test/cleanroom.mjs` and `test/attest.mjs` assert eight entries. A new test asserts that `docs/cleanroom.md`'s `## Known gaps` section has exactly one bullet per entry, in the same order, and that each bullet contains the entry's first five words. That test reads `docs/cleanroom.md` through `git ls-files`. It also asserts that a bundle's `coverage.knownLimits` deep-equals `KNOWN_LIMITS`.
+`rsyncParts` reports both families alongside `recursive`. The option is matched as written, or as `--opt=value` for those that take one; rsync's own abbreviation rules are a known gap under `KNOWN_LIMITS` entry 3. `docs/cleanroom.md` rule 6's rsync sentence names both families. Required fixtures:
 
-`docs/cleanroom.md`:
+- denied: `rsync -d --delete empty/ docs/`, `rsync --dirs --delete-after empty/ .kukulu/`, `rsync -r --del empty/ ./` (the root contains the protected set), `rsync --remove-source-files docs/cleanroom.json build/`;
+- allowed: `rsync -a --delete src/ build/`, `rsync --remove-source-files build/a.o out/`, `rsync -d empty/ docs/` (no deleting option: 0.7.1 A-04's landing-path rule still judges it).
 
-- `## Known gaps` becomes a bulleted list of the eight entries, not a paragraph.
-- A new paragraph opens the guard section, before the rules: "The guard is a tripwire, not a sandbox", followed by principle 1's quoted text minus the triage bullets. Its section references become links into `docs/cleanroom.md`'s own sections for the chain, the checkpoints and the gate.
-- The triage rule goes in a short "When a guard gap is a defect" subsection, which says the same thing as principle 1.
+#### A-02 — `bsdtar` and `gtar` are `tar` (0.7.1 known-gap candidate)
 
-`skills/review-build/SKILL.md` gains a **Guard findings** paragraph after the clean-room paragraph. It applies when a finding's evidence is a command form the guard allows. The paragraph:
+Today `bsdtar -xf a.tar -C docs` is allowed, because only the command word `tar` has a rule. Wherever `mcp/cleanroom.mjs` names `tar`, the command words `bsdtar` and `gtar` get the same treatment: the write rule (0.7.1 A-04), the recursive-read list and `plain()`. A reason that names the command uses the word as written (`bsdtar writes …`). `docs/cleanroom.md` names the two aliases wherever it names `tar`. Required fixtures:
 
-- states the three conditions for a fix task;
-- tells the reviewer to check the regression case by running the form against the guard at the merge base (with `git show <merge-base>:mcp/cleanroom.mjs` into a temp copy, or `git worktree add` at the merge base in a temp directory);
-- puts every other unmodelled spelling under `## Spec issues` → `Known-gap candidates`, as one bullet with the class and one example.
+- denied: `bsdtar -xf a.tar -C docs`, `gtar xf a.tar -C .kukulu`, `bsdtar -cf docs/cleanroom.json src`;
+- allowed: `bsdtar -tf a.tar`, `gtar xf a.tar -C build`, `gtar cf build/a.tar docs`.
 
-`skills/summarize/SKILL.md` copies the `Known-gap candidates` bullets from the final REVIEW.md into SUMMARY.md's `## Spec issues`. Neither skill names a tool that does not exist.
+#### A-03 — the 0.7.1 review's advisory notes
 
-#### A-02 — bare and `./` read-family operands agree
+- The recursive rsync denial quotes the destination form. It now names the protected path it reaches, as every other `protected path:` reason does: `protected path: <abs path> (rsync writes it into <dest>)`. The fixture for `rsync -a evil/ .kukulu/` (0.7.1 A-04) may change its `reason`, and only that fixture's. The commit body lists it.
+- The doc comment above `KNOWN_LIMITS` in `mcp/cleanroom.mjs` cites "SPEC D-03". It should cite 0.7.1 A-01.
+- In `mcp/server.mjs`, `checkConstraints`'s doc comment sits above `const constraintTests`. It moves to directly above `function checkConstraints`, and `constraintTests` gets a one-line comment of its own.
 
-Today `cat zlib.txt` is allowed and `cat ./zlib.txt` is denied with `forbidden word in path argument` (0.7.0 REVIEW spec issue). The word clause that judges path-like tokens will now also judge every non-option operand of a read-family command that is not a pattern, script or program. Those are the same operands 0.7.0 R4-02 already resolves as paths for `deny.paths`. With this rule, `cat zlib.txt` is denied with the same reason as `./zlib.txt`. The pattern, script and program operands (grep/rg/ag/ack patterns, the sed script, the awk program, find's `-name`/`-path`/`-regex` values) stay text, so the eight cleanflate false-positive fixtures keep their decisions. Required fixtures:
+No test is needed beyond the fixture for the reason. These are comment and message changes.
 
-- denied: `cat zlib.txt`, `head -n 5 zlib.txt`, `less miniz.c`;
-- allowed: `grep -n zlib src/a.rs` (a pattern), `sed -n 's/zlib/x/p' src/a.rs` (a script), and `cat zlib.txt` under a policy whose `allow.paths` covers the repository root.
+### B — Signing
 
-#### A-03 — git forms that write only the index or nothing
+#### B-01 — a failed commit is classified by a probe, not by its text (project-e F-03)
 
-Today every git operand is a write-family operand, so `git add docs/*` is denied with `protected path … (can be named by the wildcard docs/*)`. This changes so that the pathspec operands of `git add`, `commit`, `diff`, `status`, `log`, `show`, `blame`, `ls-files` and `grep` are not write targets: those subcommands write only `.git/` or nothing. An exception: the value of `--output` (and `-o` where the subcommand defines it) on `diff`, `log` and `show` is still a write target. git's global options are skipped as they are now. Every other git subcommand stays write-family as it is now, including the 0.7.0 destructive and worktree-discard forms. Required fixtures:
+Today `commitStaged` treats a failed commit as a signing failure only when git's output matches `SIGNING_FAILURE`, or the commit timed out. An SSH-format signer prints its own error, and git adds `fatal: failed to write commit object`. That output most likely matched none of the words, which would explain project-e F-03. Under `auto` the commit then failed outright instead of falling back, and the planner's validated plan was left uncommitted.
 
-- allowed: `git add docs/*`, `git add docs/cleanroom.json` (staging a protected file is not writing it), `git commit -m x docs/a.md`, `git -C . diff docs/kukulu.json`;
-- denied: `git diff --output=docs/cleanroom.json`, `git checkout docs/cleanroom.json`, `git restore .kukulu`.
+The change: when a commit fails without timing out and its text does not match `SIGNING_FAILURE`, `commitStaged` asks a probe before giving up. The probe runs only when `commit.gpgsign` is in effect for the commit (`git config --get commit.gpgsign` is `true`). It makes two bounded `git commit-tree` calls on the empty tree (`4b825dc642cb6eb9a060e54bf8d69288fbee4904`, which works on an unborn branch), one with `-S` and one without:
 
-#### A-04 — `rsync` and `tar`
+- If the signed call fails and the unsigned one succeeds, the failure is a signing failure. The existing `auto` and `required` paths then run, with `line` set to the signed probe's first stderr line.
+- Otherwise the original `git commit failed: …` error stands.
 
-Today `rsync evil/cleanroom.json docs/` and `tar xf evil.tar -C docs` are allowed (0.7.0 REVIEW spec issue). This adds two write-family rules:
+`probeSigning` uses the same probe helper. Both calls write only dangling objects.
 
-- **`rsync`**: the last non-option operand is the destination, and every other operand is a source. As with `cp`, the guard judges the destination, each `<destination>/<basename>` landing path, and, when the destination equals or contains a protected path, the whole call. Options that take a value are skipped by the existing getopt-style scanner. `-e|--rsh` and `--rsync-path` take a value, and so do the `--exclude`/`--include`/`--filter` families, `--files-from`, `--backup-dir` and `--temp-dir`/`-T`. A remote operand (`host:path` or `rsync://`) is already a network command under `deny.network`, and that is unchanged.
-- **`tar`**: an extraction writes under its directory. Extraction is `-x`, `--extract` or `--get`, or an old-style first argument containing `x` (`xf`, `xvzf`). The directory is the value of `-C`/`--directory`, or the shell's cwd. An extraction whose directory equals or contains a protected path is denied `protected path` (the archive's contents cannot be known). In create, append and update modes (`-c`, `-r`, `-u` and their long forms), the `-f`/`--file` value is a write target.
+Tests in `test/implement.mjs` use a fake SSH signer written into a temp directory. It is a script that prints a line containing none of `SIGNING_FAILURE`'s words (recorded in `test/fixtures/signing/ssh-agent-missing-key.txt`) and exits 1. The repo is set to `gpg.format ssh`, `gpg.ssh.program <fake>`, `user.signingkey` a literal `key::` value and `commit.gpgsign true`, all repo-local.
 
-`docs/cleanroom.md` rule 6 names both. Required fixtures:
+- Under `auto`, `kukulu_plan_commit` commits unsigned, `state.signing` starts with `off (commit signing failed:` and quotes the fake's line, and one `signing` feedback entry is logged.
+- Under `required`, it refuses with the existing required message, quoting the line, and nothing is committed.
+- A commit that fails for a reason other than signing (a `commit-msg` hook that exits 1) still refuses with `git commit failed:`, and the probe does not turn it into a fallback.
 
-- denied: `rsync evil/cleanroom.json docs/`, `rsync -a evil/ .kukulu/`, `tar xf evil.tar -C docs`, `tar -x -f evil.tar --directory=.kukulu`, `cd docs && tar xf ../evil.tar`, `tar cf docs/cleanroom.json src`;
-- allowed: `rsync -a src/ build/`, `tar xf a.tar -C build`, `tar tf docs.tar` (a listing), `tar cf build/a.tar docs` (reading a protected path is not writing it).
+#### B-02 — the fallback's override does not outlive its run (project-f F-01, F-03)
 
-#### A-05 — install's BSD-only denial names its directory
+When an `auto` fallback fires, it writes `commit.gpgsign false` into the repo's local git config and sets `state.signingOverride`. Two things then go wrong:
 
-When only the BSD reading of `install -S` lands on a protected path, the denial reads `install writes it into null` (0.7.0 REVIEW Notes). The reason now names the directory of whichever reading found the target. Fixtures assert the exact reason for both readings: `protected path: <path> (install writes it into <dir>)`, with no `null`. On Linux CI, `install -S evil/cleanroom.json docs` is judged under both readings, as 0.7.0 R8-01 requires. If the probe in the task finds that it is allowed today, the task makes the BSD reading apply on every platform, says so in its commit's `Interpretation:` line, and adds that fixture as denied.
+- **The override outlives the flight.** `kukulu_flight_archive` carries `signingOverride` into the fresh state, but the next `kukulu_run_start`'s `probeSigning` reads the local `false` as "not configured" and records `signing: "none"`. The next flight then runs unsigned without one word of warning, which is what project-f's live state shows.
+- **A resumed run never re-probes.** `kukulu_run_start` on an already-started branch returns before probing, so a signing agent that has come back is never used again in that run.
 
-#### A-06 — the gate pins `mcp/cleanroom.mjs`
+The changes:
 
-Today gate check 3 hashes `scripts/cleanroom-guard.mjs`, `scripts/cleanroom-log.mjs` and `hooks/hooks.json`, but `evaluate` lives in `mcp/cleanroom.mjs` (0.7.0 REVIEW spec issue). The changes:
-
-- `pluginHashes()` adds `cleanroomHash`, the SHA-256 of `mcp/cleanroom.mjs` under `PLUGIN_ROOT`.
-- Genesis records it.
-- Gate check 3 compares it, with a failure that names the file.
-- The manifest's `plugin` object gains `cleanroomHash`.
-- `scripts/verify-attestation.mjs` reports a mismatch between the manifest's `plugin.cleanroomHash` and genesis's `cleanroomHash` under the existing check that compares plugin hashes.
-
-Old records stay readable:
-
-- A genesis entry without `cleanroomHash` (a flight started on 0.7.0) is not refused. Check 3 skips that one comparison, and the gate entry records `data.unpinned: ["mcp/cleanroom.mjs"]`.
-- A manifest without `plugin.cleanroomHash` verifies, with the note `verify-attestation: note: plugin.cleanroomHash absent (bundle from 0.7.0 or earlier)`.
-
-Tests cover all of these:
-
-- the pinned pass;
-- a doctored temp-plugin copy whose `mcp/cleanroom.mjs` changed after genesis (gate halts, naming the file);
-- a genesis without the key (gate passes, `unpinned` recorded);
-- the verifier on a bundle without the field (pass with the note) and with a mismatched field (fail).
-
-`test/attest.mjs`'s existing tamper tests keep passing. `docs/cleanroom.md`'s gate section names the fourth file.
-
-### B — Friction from the 0.7.0 flight
-
-#### B-01 — `renumber` reaches the flight notes (feedback F-01)
-
-`kukulu_plan_commit({ renumber: true })` rewrites ids in `docs/PLAN.md`, `docs/PROGRESS.md` and `docs/kukulu.json`'s `from` values. It will also rewrite them in CLAUDE.md, but only inside the section headed `## Flight <slug> notes`, where `<slug>` is `docs/kukulu.json`'s `flight`. That section runs from its heading to the next level-2 heading or the end of the file. It uses the same single-pass map, so ids are never chained. Ids outside that section are history (earlier flights' notes cite their own task ids) and stay as they are. If the section is absent, CLAUDE.md is untouched and the result's `notes` says `CLAUDE.md has no "## Flight <slug> notes" section; ids there were not renumbered`. CLAUDE.md joins the rollback set (it is already in `paths`). Tests:
-
-- a split id is renumbered inside the section;
-- the same id outside the section is unchanged;
-- the section ends at the next heading;
-- the missing-section note;
-- a failed commit leaves CLAUDE.md byte-identical.
-
-#### B-02 — text the project's rules would refuse never reaches PROGRESS.md (feedback F-02)
-
-Before writing, `kukulu_task_done`'s `log`, `kukulu_task_block`'s `reason`, `kukulu_task_reopen`'s `reason` and `kukulu_run_halt`'s `reason` are checked. The check runs the caller's string, as the server would render it into `docs/PROGRESS.md`, against every active constraint whose `paths` (minus `exclude`) cover `docs/PROGRESS.md`. These are the same constraints and the same `from` activation that `kukulu_verify` uses. A hit refuses with `<field> would break constraint <id> (<description>) in docs/PROGRESS.md at "<the matching text, at most 80 characters>"; rewrite it without that text and call <tool> again`, and nothing is written or committed. A constraint whose own fixtures fail is skipped here, because `kukulu_verify` reports it. No log-amend tool is added, since this release adds no tools. The refusal makes one unnecessary for this failure. Tests: one refusal per tool, with its message asserted; an inactive rule does not refuse; a rule scoped to other paths does not refuse; and HEAD and `docs/PROGRESS.md` are unchanged after each refusal. `docs/mcp-tools.md` adds the refusal to all four tools.
-
-#### B-03 — the base branch is synced into the build branch (feedback F-03)
-
-When `policies.syncBase` is true, `kukulu_run_start` (on an existing build branch) and serial `kukulu_task_next` (before choosing a task) check `git rev-list --count HEAD..<baseBranch>` against the local `baseBranch` ref. Nothing is fetched. If the count is greater than 0 and the tracked tree is clean, apart from the tolerated clean-room log:
-
-1. The server runs `git merge --no-ff --no-edit <baseBranch>` through the commit helper, so signing, clean-room trailers (stage `implement`, task `-`) and the checkpoint behave like any other server commit. The message is `chore: merge <baseBranch> into <branch>`.
-2. A conflict runs `git merge --abort`, leaves HEAD and the tree as they were, and refuses: `<baseBranch> has <n> commits this branch lacks and they conflict in <files>; resolve the merge by hand on <branch>, commit it, then call <tool> again, or set policies.syncBase to false`. It does not halt the flight. The implementer may call `kukulu_run_halt` with that reason.
-3. On success, the tool's result gains `baseSynced: { commits: <n>, merge: <sha> }`.
-
-Stream worktrees and `kukulu_task_next` with a `stream` never sync. A parallel flight syncs only at `kukulu_run_start`. In clean-room mode, the merged base commits have no `Kukulu-Stage` trailer, so `coverage.gaps` lists them as work outside the pipeline. That is the honest record, and `docs/cleanroom.md` says so.
+- `probeSigning` takes the state. When `state.signingOverride` is true, it unsets the local `commit.gpgsign` before reading the setting, as `resign` already does. It then probes the operator's own setting, and puts the override back if the probe falls back again. When the probe succeeds, `signingOverride` is deleted and `signing` is `"on"`.
+- The already-started path of `kukulu_run_start` re-probes when `signingOverride` is true, and only then. It records the new outcome. Its result gains `signing`, as the fresh path's already has. A re-probe never overwrites an `off (commit signing failed: …)` or `off (probe failed: …)` record with `"none"`: if the operator's setting is not configured, the earlier record stays.
+- A repo-local `commit.gpgsign false` that Kūkulu did not write (no `signingOverride`) is the operator's choice, and it is never touched.
 
 Tests in `test/implement.mjs`:
 
-- an ahead base is merged at `run_start` and at `task_next`;
-- an equal base does nothing;
-- a conflicting base refuses with the message, leaving HEAD and the tree byte-identical;
-- `syncBase: false` skips it;
-- a stream `task_next` never merges;
-- `validatePolicies` refuses a non-boolean.
+- An archived flight whose fallback fired, then a new flight with a working fake signer: `run_start` records `signing: "on"`, the local config no longer reads `false`, and the first commit is signed (`%G?` is not `N`).
+- The same with the signer still failing: `signing` starts with `off (probe failed:`, and the override is back.
+- A resumed run (already started) after the signer recovers: signs again.
+- An operator's own local `false` with no override: untouched, `signing: "none"`.
 
-`docs/operations.md` gets the configuration row, and `test/plugin.mjs`'s config-keys loop covers it through the existing `policies` branch.
+#### B-03 — finalize waits for signatures only when the policy expects them (owner decision)
 
-#### B-04 — round caps (feedback F-04, F-05; 0.7.0 REVIEW Notes)
+Today `kukulu_pr_finalize` holds the PR as a draft while any commit since the merge base is unsigned, whatever the signing policy is. So a project with `policies.signing: "off"`, or with `auto` and no signing configured, ends every flight "awaiting signing". From now on, finalize expects signatures when either:
 
-F-04 and F-05 are the round caps working as designed. A human raised them and resumed, which is what they are for. No cap mechanism changes. A-01's triage rule is the fix for why they fired: fix rounds that each found one more option spelling.
+- `policies.signing` is `required`; or
+- `policies.signing` is `auto` and `state.signing` is not `"none"`. That is, the operator's signing was configured when the run started, including a run that fell back to `off (…)` partway.
 
-The documentation is wrong, though. `kukulu_flight_options`'s schema says "a review numbered above this halts the flight", but the code (`reviewSubmit`) halts only a review that requests changes. An approving review above the cap ends the flight normally, as round 11 of 0.7.0 did with `maxRoundsHard` 10. The schema description, `docs/mcp-tools.md` and `docs/operations.md`'s Halts section will say: "a review numbered above this that requests changes halts the flight; an approving review ends it". Tests:
+When finalize does not expect signatures, the signed check still runs, and its counts are reported. The result gains `signatures: "not required: policies.signing is <policy>"`, or `"not required: signing is not configured"` for `auto` with `"none"`. No `awaitingSigning` is recorded, and the PR proceeds per `policies.finalize`. When it expects them, behavior is unchanged and `signatures` is `"required"`.
 
-- an APPROVED `kukulu_review_submit` at round `maxRoundsHard + 1` succeeds and sets no halt;
-- a CHANGES REQUESTED one at the same round halts with the existing message.
+`kukulu_run_start`'s result gains a `signingNote` whenever the outcome is not `"on"`. It says, in one sentence, whether finalize will wait:
 
-#### B-05 — the bundle's own SUMMARY (0.7.0 SUMMARY spec issue on E-03/F-05)
+- `off` or `none` under `off`/`auto`: "commits in this run are unsigned and kukulu_pr_finalize will not wait for signatures."
+- A fallback under `auto`: "commits from here on are unsigned; kukulu_pr_finalize will wait for signatures, so unlock the signing agent and call kukulu_run_start again to resume signing, or re-sign at the end."
 
-The bundle's `SUMMARY.md` predates the Attestation section that the summarize skill adds after `kukulu_attest`. That is true by construction: a file cannot contain the hash of the manifest that lists it. No mechanism changes. `docs/cleanroom.md`'s bundle section says: "the bundle's `SUMMARY.md` is the summary as attested; the Attestation section added afterwards cites the manifest's SHA-256 and lives only in the repository's copy". The summarize skill writes that section with the manifest hash from `kukulu_attest`'s result. If the skill already does, the task only checks it and cites the line.
+While `state.signing` is not `"on"`, `kukulu_next`'s `Run policies:` sentence ends with the same sentence. That way every stage prompt carries it, not only the implementer's `run_start` result.
 
-### C — Documentation and release
+Tests in `test/review.mjs`:
 
-- `docs/mcp-tools.md`: B-01, B-02, B-03 and B-04 changes on their tools, and `kukulu_attest`'s manifest field (A-06). Its first line still reads "Twenty-five tools".
-- `docs/operations.md`: the `policies.syncBase` row and the Halts wording (B-04).
-- `docs/cleanroom.md`: A-01 to A-06 and B-05, as each says.
-- `README.md`: the feature list's clean-room sentence calls the guard a tripwire whose bypasses the chain and gate make visible. There is no other change, and the tool count is unchanged.
-- `CHANGELOG.md` `## [0.7.1] — <date>`, renamed from `## [Unreleased]` by the release task, under Changed and Fixed. Each fixed item cites `kukulu F-nn` (from `docs/feedback/2026-10-20-kukulu.md`) or the 0.7.0 SUMMARY/REVIEW item. There is no "Breaking changes" heading. A-03 and A-04 go under Changed and say which forms are now allowed or denied.
-- The version reads `0.7.1` in `package.json`, `.claude-plugin/plugin.json` and `VERSION` in `mcp/server.mjs`.
-- `docs/feedback/2026-10-20-kukulu.md` gets an "Addressed in" header line pointing at this spec. The file is local and gitignored, so the task edits it only if it exists, and no test reads it.
+- `signing: "off"` with unsigned commits: ready, with `signatures` not required.
+- `auto` with `"none"`: same.
+- `auto` after a fallback: awaiting, as today.
+- `required` with an unsigned commit: awaiting, as today.
+
+`docs/mcp-tools.md` (both tools) and `docs/operations.md`'s signing section say this.
+
+#### B-04 — a broken signer is reported before the plan stage under `required` (project-e F-03)
+
+The planner's work is lost to a signer that was never going to work. Under `auto`, B-01 makes `kukulu_plan_commit` fall back instead. Under `required`, the refusal is correct, but it comes after the work.
+
+When `kukulu_next` returns stage `plan` and `policies.signing` is `required`, it runs B-01's probe. At the plan stage `docs/kukulu.json` usually does not exist yet, because the archive moved the previous flight's copy. So the policy is read from `docs/kukulu.json` if it exists, else from the previous flight's archived copy (`<state.archived.dir>/kukulu.json`), else the default, which is not `required`. That probe is side-effect free: it writes no config and no state. On failure, the stage is still `plan`, and the reason begins `policies.signing is 'required' and the signing probe failed: <line>. Fix the signing agent before planning, or set policies.signing to 'auto' or 'off'.` The go-flight skill stops on a reason with that prefix, instead of starting the planner. If the skill does not already stop on a reason it cannot act on, the task adds the one sentence.
+
+Tests in `test/state.mjs`: `required` with a failing fake signer gives that reason; `required` with a working one, and `auto` with a failing one, give today's plan reason.
+
+### C — The PR and the release
+
+#### C-01 — the PR title names the flight (beta user request)
+
+The request, verbatim: "would be cool to have an option for a custom PR title? … Thinking I have it flight, archive the flight, then merge commit...then if the pr title matches the flight name one could go through the history and more easily find the steps in plan and progress."
+
+Today `kukulu_run_finish` titles the PR `Build: <branch>`, or `Build: <branch> (review round <n>)`. `kukulu_pr_finalize` runs `gh pr merge --auto --<method>` with no subject, so the merge commit reads `Merge pull request #<n> from <owner>/build/<date>`. The changes:
+
+- **The title**, in order of preference:
+  1. `prTitle` from `docs/kukulu.json`, used as written.
+  2. Otherwise `<flight>: <spec title>`. `<flight>` is `docs/kukulu.json`'s `flight`, and `<spec title>` is `docs/SPEC.md`'s first level-1 heading with a trailing separator-plus-"Specification" removed (`/\s*[—–:-]\s*Spec(ification)?\s*$/i`). This spec's title is therefore `v0-7-2: Kūkulu 0.7.2`. Without a `flight`, the title is the spec title alone.
+  3. Without a spec heading, it is `Build: <branch>`, as today.
+
+  The round suffix is dropped. The title is cut to 120 characters.
+- **An existing PR's title is left alone.** `kukulu_run_finish` reuses an open PR as it does today. A human may retitle it, and finalize reads whatever the PR is called.
+- **The merge subject.** For `mergeMethod` `merge` or `squash`, `kukulu_pr_finalize` reads `gh pr view --json title,number` and passes `--subject "<title> (#<number>)"` in the same inline argument array, after `--auto`. For `rebase` there is no merge commit, so no subject is passed. If the `gh pr view` fails, the merge runs without `--subject`, and the result's `merge` text says `enabled (default subject: <gh's first line>)`.
+- `prTitle` is validated: a non-string, an empty string, more than 120 characters or a newline each refuses with `docs/kukulu.json prTitle must be 1 to 120 characters on one line; got <what>`.
+- `kukulu_run_finish`'s result gains `prTitle` when it opened a PR.
+
+Tests (`test/implement.mjs` for the title, `test/review.mjs` for the subject, `test/routing.mjs` for validation, all with the fake `gh` recording its arguments):
+
+- `prTitle` wins;
+- the derived title with the separator stripped, with and without `flight`;
+- the fallback without a heading;
+- no round suffix at round 2;
+- `--subject` for merge and squash, none for rebase;
+- the view-failure text;
+- each validation refusal.
+
+`docs/operations.md` gets the `prTitle` row, and `test/plugin.mjs`'s config-keys loop covers it.
+
+#### C-02 — archiving is the default
+
+`cfgFrom`'s `archive: c.policies?.archive ?? false` becomes `?? true`. It is still the only place the default is written. `docs/operations.md`'s row says `true` and why. CLAUDE.md's ASSUMPTION list drops `policies.archive`, and its "Constraints" reviewer bullet that names the `false` default changes to name `true` as an owner decision. A project that wants the old behavior sets `false`. The summarize stage already archives when `kukulu_summary_commit` reports `archive: true`, so no skill changes.
+
+Tests: `kukulu_config_show` and `kukulu_summary_commit` report `archive: true` with no `policies` block, and `false` when it is set. Every existing test that relied on the old default sets `archive: false` explicitly, or asserts the archive.
+
+#### C-03 — the CHANGELOG decides "breaking" (0.7.1 SUMMARY's Breaking call)
+
+In 0.7.1 the summarizer judged the flight breaking on its own, against both the SPEC and the CHANGELOG, which turned off auto-merge. The verdict now comes from the CHANGELOG when there is one.
+
+The newest entry is the text from `CHANGELOG.md`'s first heading that starts with `## [` up to the next level-2 heading. When `CHANGELOG.md` exists at the root and has such an entry:
+
+- The verdict is `true` exactly when that entry has a line matching `/^###\s+Breaking changes\s*$/i`.
+- `breaking` becomes optional.
+- If the caller passes a `breaking` that disagrees, `kukulu_pr_finalize` refuses before any write: `breaking: <value> disagrees with CHANGELOG.md's newest entry (<its heading line>), which <has|has no> a "### Breaking changes" section; the CHANGELOG decides. Call kukulu_pr_finalize again without breaking, and record the disagreement in SUMMARY.md's Breaking call as a note.`
+- The result gains `breakingSource: "changelog"`.
+
+Without a CHANGELOG or such an entry, today's behavior stands: `breaking` is required on the first call, and `breakingSource` is `"caller"`. A remembered `st.breaking` from an earlier call does not override the CHANGELOG.
+
+`skills/summarize/SKILL.md`'s Breaking call changes:
+
+- When the repository has `CHANGELOG.md`, the line states the CHANGELOG's verdict and its reason, plus `Note:` and the summarizer's disagreement if it has one. Its last call is `kukulu_pr_finalize({})`.
+- Otherwise the line and the `breaking` argument work as today.
+
+Tests in `test/review.mjs`:
+
+- an entry with the heading gives `true` and no auto-merge;
+- an entry without it gives `false`;
+- a disagreeing `breaking` refuses, with nothing written;
+- an agreeing `breaking` passes;
+- no CHANGELOG with no `breaking` gives the existing refusal;
+- `[Unreleased]` counts as the newest entry when it is first.
+
+#### C-04 — a cap the operator changes is in PLAN.md (0.7.1 SUMMARY note)
+
+In 0.7.1, `docs/kukulu.json` had `maxRounds: 6`, set through `kukulu_flight_options`, while PLAN.md's Decisions said the default 3 was kept. When `kukulu_flight_options` changes `maxRounds` or `maxRoundsHard` to a value that differs from the current one:
+
+- It appends one line per changed cap to PLAN.md's `## Decisions` section, at the end of that section: `- <YYYY-MM-DD>: <cap> set to <n> (was <old>) by the operator through kukulu_flight_options.`
+- If PLAN.md has no `## Decisions` heading, the section is appended at the end of the file.
+- PLAN.md joins the tool's rollback set and its commit.
+- An unchanged value writes nothing.
+
+This is the one sanctioned server write to PLAN.md outside `kukulu_plan_commit`, and CLAUDE.md's "never edit `docs/PLAN.md` by hand" is unaffected.
+
+Tests:
+
+- a raised cap appends the line and commits PLAN.md with the config;
+- an unchanged cap writes nothing;
+- a missing section is created;
+- a failed commit leaves PLAN.md byte-identical.
+
+### D — The reviewer's tools
+
+#### D-01 — `prChecks` on an older `gh` (kukulu F-01; project-e F-02, F-04, F-05)
+
+On gh 2.45.0, `gh pr checks --json` fails with `unknown flag: --json`, and `prChecks` returns `unknown: unknown flag: --json`. That has happened in four review rounds across three flights. When `pr checks --json` exits non-zero with stderr matching `/unknown flag:? --json/i`, `prChecks` falls back to the REST API, which works on every gh version:
+
+1. `gh pr view --json headRefOid` gives the head sha.
+2. `gh api repos/{owner}/{repo}/commits/<sha>/check-runs?per_page=100` gives the check runs.
+3. `gh api repos/{owner}/{repo}/commits/<sha>/status` gives the commit statuses.
+
+Each call is bounded by `CHECKS_TIMEOUT_MS`. The fallback maps each check to the same state words the JSON path uses:
+
+- **A check run** that is not `completed` is pending. A conclusion of `failure`, `cancelled`, `timed_out`, `action_required` or `startup_failure` fails, and any other conclusion passes. The link is `html_url`.
+- **A status** of `failure` or `error` fails, `pending` is pending, and `success` passes. The link is `target_url`.
+
+Any fallback call that fails returns `unknown: <first line>`, as the JSON path does. The return shape is unchanged, plus `via: "gh api"` when the fallback produced it.
+
+Recorded outputs go in `test/fixtures/gh/`: the `unknown flag` stderr, a `check-runs` body with one of each conclusion, and a `status` body. `test/state.mjs` drives the fake `gh` with them and asserts pass, fail (with the failing names and links), pending, none, and a failing `gh api`.
+
+#### D-02 — `filter` takes a list (project-e F-01)
+
+`kukulu_mutate`'s `filter` accepts a string, as today, or an array of 1 to 10 strings. Each string must match `MUTATION_FILTER`. The `{filter}` slot receives the strings single-quoted and space-separated, in the order given (`'tests/test_identity.py' 'tests/test_substitute.py'`).
+
+- An empty array, more than 10 entries or a non-string entry refuses: `filter must be a string or a list of 1 to 10 strings, each 1 to 200 characters from letters, digits and _ . : / -; got <what>`.
+- An invalid entry refuses with the existing message, naming that entry.
+- The schema gives `filter` both types, and its description says so.
+
+Tests: a two-entry list reaches the command as two quoted words (asserted through a targeted command that echoes its arguments into a file outside the repo); each refusal.
+
+#### D-03 — `kukulu_mutate` says what it restored (project-f F-02)
+
+project-f F-02 saw `restored: [.github/workflows/ci.yml, scripts/e2e/tui.sh]` after a `cargo test` that writes no files, with the content unchanged afterwards. `undoMutationResidue` restores whatever `git diff --name-only HEAD` lists, without saying how each path differed. A mode change, or a file deleted and recreated, looks the same as an edit.
+
+Before restoring, `undoMutationResidue` reads `git diff --raw HEAD -- <paths>` and classifies each path:
+
+- `mode` when only the mode differs;
+- `deleted` when the file is gone;
+- `content` otherwise (the type letter `M` with differing blob ids, or `T`).
+
+The result keeps `restored` (a list of paths) and gains `restoredChanges: [{ path, change }]` in the same order.
+
+If the review of this task can reproduce F-02's cause from that classification, the task records it in its commit's `Interpretation:` line. No other behavior changes. Tests: a command that `chmod`s a tracked file gives `mode`, one that edits gives `content`, and one that deletes gives `deleted`. The file is restored in every case.
+
+### E — Documentation and release
+
+- `docs/mcp-tools.md`: `kukulu_run_start` (B-02, B-03), `kukulu_pr_finalize` (B-03, C-01, C-03), `kukulu_next` (B-04), `kukulu_run_finish` (C-01), `kukulu_flight_options` (C-04), `kukulu_status` (D-01) and `kukulu_mutate` (D-02, D-03). Its first line still reads "Twenty-five tools".
+- `docs/operations.md`: the `prTitle` row, the `policies.archive` default, and the signing section (B-01 to B-04).
+- `docs/cleanroom.md`: A-01 and A-02.
+- `README.md`: no change unless a sentence states the archive default or the PR title. The tool count is unchanged.
+- `CHANGELOG.md` `## [0.7.2] — <date>`, renamed from `## [Unreleased]` by the release task, under Changed and Fixed. Each item cites its feedback item (`project-e F-03`, `kukulu F-01`) or "a beta user's request" (C-01). There is no "Breaking changes" heading, so under C-03 this flight's own PR is not breaking.
+- The version reads `0.7.2` in `package.json`, `.claude-plugin/plugin.json` and `VERSION` in `mcp/server.mjs`.
+- The three feedback files in §1 get an "Addressed in" header line pointing at this spec. They are local and gitignored, so the task edits them only if they exist, edits only the header, and never stages them. No test reads them.
+- `docs/HANDOFF.md` has no "do not merge" line.
 
 ## 7. Commands
 
@@ -258,74 +355,91 @@ Run from the repository root. Each exits non-zero on failure and runs today on a
 - hygiene: `pre-commit run --all-files` (about 4 s)
 - test: `npm test` (about 100 s; `timeoutMs: 900000`)
 - the guard self-test, as `extraVerify` on `scripts/cleanroom-guard.mjs`, `mcp/cleanroom.mjs`, `test/fixtures/guard-cases.json` and `templates/cleanroom.example.json`: `node scripts/cleanroom-guard.mjs --self-test templates/cleanroom.example.json`
-- site, as `extraVerify` on `site/`, `docs/site/` and the three site scripts: `npm run check:site` (the browser check stays available but is not required, since nothing under `site/` changes)
+- site, as `extraVerify` on `site/`, `docs/site/` and the three site scripts: `npm run check:site`
 - targeted mutation: `node test/{filter}.mjs` as `mutation.targeted.suite`
 
 ## 8. Phases
 
-### Phase 0 — The guard as a tripwire
+### Phase 0 — The guard
 
-A-01 to A-06. A-01 comes first, so the review of every later guard task applies principle 1. Ends with a push. Manual check: none needed beyond CI. `NOT VERIFIED (human)`: in a live clean-room session, `git add docs/*` is allowed and `rsync evil/cleanroom.json docs/` is denied.
+A-01 to A-03. Ends with a push. Manual check, `NOT VERIFIED (human)`: in a live clean-room session with `claude --plugin-dir .`, `rsync -d --delete empty/ docs/` and `bsdtar -xf a.tar -C docs` are denied.
 
-### Phase 1 — Pipeline friction
+### Phase 1 — Signing
 
-B-01 to B-05. Ends with a push. Manual check, `NOT VERIFIED (human)`: on a throwaway flight, commit to the base branch after the build branch is cut, then call `kukulu_task_next` and see the `chore: merge` commit.
+B-01 to B-04. Ends with a push. Manual check, `NOT VERIFIED (human)`: in a scratch repo, with the owner's real SSH signer and the agent socket pointed at the wrong agent, `kukulu_plan_commit` under `auto` commits unsigned and logs the fallback. Then, with the socket fixed, `kukulu_run_start` signs again.
 
-### Phase 2 — Documentation and release
+### Phase 2 — The PR and the release
 
-C. Version bump, CHANGELOG, `docs/HANDOFF.md`. There is no "do not merge" line: this release has nothing a human must run first.
+C-01 to C-04. Ends with a push. Manual check: this flight's own draft PR is titled `v0-7-2: Kūkulu 0.7.2`, once the release is installed. The running 0.7.1 server still opens it as `Build: <branch>`, so the check is on the next flight. `NOT VERIFIED (human)`.
+
+### Phase 3 — Reviewer tools, documentation and release
+
+D-01 to D-03, then E. Version bump, CHANGELOG, `docs/HANDOFF.md`. Manual check, `NOT VERIFIED (human)`: on a machine with gh 2.45.0, `kukulu_status` reports the PR's checks with `via: "gh api"`.
 
 ## 9. Open questions
 
 None block the build. Each is decided here, so the planner records it under `## Decisions` as given:
 
-1. **Where known-gap candidates go.** Into REVIEW.md's `## Spec issues`, then SUMMARY.md, because the pipeline never edits this spec or `KNOWN_LIMITS` without a task (principle 1).
-2. **Whether `policies.syncBase` defaults to true.** It does (§5.1). The 0.7.0 flight's stale base cost a typo on the page and a hand-written HANDOFF fix.
-3. **One flight.** `v0-7-1`, three phases, serial.
+1. **Whether finalize follows the signing policy.** It does (B-03): an owner decision of 2026-10-26.
+2. **The default PR title.** `<flight>: <spec title>` (C-01): an owner decision of 2026-10-26, over the slug alone and over keeping `Build: <branch>`.
+3. **Whether `policies.archive` defaults to true.** It does (C-02): an owner decision, after two release flights that both needed it.
+4. **The two known-gap candidates.** Fixed as rules (A-01, A-02), not added to `KNOWN_LIMITS`. Both are whole command words or options with one meaning, which principle 1's third condition covers.
+5. **One flight.** `v0-7-2`, four phases, serial.
+6. **The 0.7.1 SUMMARY's "Suggested CLAUDE.md additions"**: the guard-cases indentation, merge commits without pathspecs, `kukulu_verify`'s large output, and the running plugin. The planner carries the ones that still apply into this flight's notes section.
 
 ## Appendix A: item map
 
-### `docs/feedback/2026-10-20-kukulu.md`
+### `docs/feedback/2026-10-25-project-e.md`
 
 | Item | Disposition |
 |---|---|
-| F-01 `renumber` leaves CLAUDE.md ids | fixed, B-01 |
-| F-02 a `task_done` log broke check-names | fixed, B-02 and §5.3 (refusal, not a log-amend tool, since no tools are added) |
-| F-03 the base branch moved after the build branch was cut | fixed, B-03 |
-| F-04 review hit `maxRounds` while non-converging | declined as a mechanism change (the cap worked); root cause addressed by A-01; documentation fixed in B-04 |
-| F-05 review hit `maxRoundsHard` | as F-04 |
+| F-01 `kukulu_mutate`'s `filter` takes one path | fixed, D-02 |
+| F-02, F-04, F-05 `prChecks` fails on gh 2.45.0 | fixed, D-01 |
+| F-03 the plan commit dead-ended on an SSH signer | fixed, B-01 (`auto` falls back) and B-04 (`required` is told first) |
+| F-06, F-07, F-08 flights ended awaiting signing | addressed by B-02 (the override no longer leaves the next flight unsigned) and B-03 (no wait when the policy expects none). A flight whose configured signer failed mid-run still waits, by design, and `resign` covers it |
 
-### 0.7.0 `SUMMARY.md` and `REVIEW.md` spec issues
+### `docs/feedback/2026-10-25-project-f.md`
+
+| Item | Disposition |
+|---|---|
+| F-01 the first flight ended awaiting signing | as project-e F-06 |
+| F-02 `kukulu_mutate` reported restoring files no test touches | D-03 (classify what was restored); the cause is recorded if the classification shows it |
+| F-03 signing timed out and `auto` turned it off | the fallback worked as designed; B-02 makes the next run start sign again |
+
+### `docs/feedback/2026-10-26-kukulu.md`
+
+| Item | Disposition |
+|---|---|
+| F-01 `prChecks` fails on gh 2.45.0 | fixed, D-01 |
+
+### Beta user request
+
+| Item | Disposition |
+|---|---|
+| A custom PR title that matches the flight name | fixed, C-01 (default and `prTitle` override, plus the merge subject); C-02 makes the archive the request relies on the default |
+
+### 0.7.1 `SUMMARY.md` and `REVIEW.md`
 
 | Issue | Disposition |
 |---|---|
-| D-03 option parsing is best-effort; add to `KNOWN_LIMITS` | A-01, principle 1 |
-| `cat zlib.txt` allowed, `cat ./zlib.txt` denied | A-02 |
-| all of git is write-family (`git add docs/*` denied) | A-03 |
-| write lists incomplete (`rsync`, `tar -C`) | A-04 |
-| install's BSD-only denial reads `into null` (REVIEW Notes) | A-05 |
-| D-08 check 3 does not pin `mcp/cleanroom.mjs` | A-06 |
-| known gaps omit shell expansion | A-01 (entry 2; already in `KNOWN_LIMITS`, now in the docs list too) |
-| hard cap passed at round 11 with no halt (REVIEW Notes) | B-04 (documentation; behavior kept) |
-| the bundle's SUMMARY predates its Attestation section | B-05 |
-| §1 PR against `main` while `baseBranch` is `cleanroom` | resolved: `baseBranch` is `main` (§5.1) |
-| F-04 `--roots`/`--words` defaults superseded by `e7ef4d4` | resolved as built: required arguments, `--repo` defaulting to the log's repository; `docs/cleanroom.md` already says so. The uncommitted 0.7.0 SPEC edit recorded the same text, and the archive keeps the spec as committed |
-| the log's uncommitted tail is unsigned | out of scope: new matter (§2) |
-| FreeBSD-only install `-T`/`-M`, macOS cp `-S` | out of scope: known gaps under A-01 entry 3 |
-| PROGRESS.md's R10-01 log says 481 cases, not 469 | declined: archived flight files never change |
-| §1/G-01/G-02 base `cleanroom`; Appendix C changes 4, 8, 11; rule 16 vacuous for 8 and 12; `no-foundry-names` `from`; the retired-tools allowance; `mcp/cleanroom.mjs` writes; general mode at `run_start`; genesis generates the key; `docs/kukulu.json` protected once PLAN.md exists; lockdown inactive without PROGRESS.md; dirty-log tolerance and the log moving with the archive; the gate's write-before-refuse exception; the 50 ms budget beyond Node startup; `commits.txt` separator; `cleanroom.idleGapHours` in §5.1; `no-gnu-sed-inplace` excluding fixtures; `scripts-node-builtins` widening; B-03's review-history line; B-04's accent folding; B-05/Phase 2 overlap; G-02/G-03 wording; the eight cleanflate false positives listed explicitly | resolved as built in 0.7.0: each is how the code already behaves, and the archived spec plus `HANDOFF.md` record it. No task |
+| Known-gap candidate: rsync's deleting options | A-01 |
+| Known-gap candidate: `bsdtar`, `gtar` | A-02 |
+| Note: `checkConstraints`'s doc comment above `constraintTests` | A-03 |
+| Note: the `KNOWN_LIMITS` comment cites D-03 | A-03 |
+| Note: the recursive rsync denial quotes the destination | A-03 |
+| Note: `maxRounds: 6` in config, 3 in PLAN's Decisions | C-04 |
+| Breaking call contradicted the SPEC and CHANGELOG | C-03 |
+| Note: mutating `mcp/cleanroom.mjs` under the targeted `cleanroom` suite crashes on an unrelated `git checkout` | declined: the kill is real, and the note's workaround (run the guard self-test directly) stands. Revisit if a 0.8.0 review hits it |
+| Note: R1-01's "no merge in progress" assertion passes without `git merge --abort` | declined: the same test's tree and file assertions catch it |
+| The ten "edits the owner should make" to the 0.7.1 SPEC | resolved as built: the archived spec and SUMMARY record them, and archived flight files never change |
 
 ## Appendix B: interpretation choices made in writing this spec
 
 Each is a place where the brief allowed two readings:
 
-1. **The D-03 text as a principle.** It is quoted verbatim as principle 1. "Adds its class to the known gaps below" became a REVIEW.md bullet carried into SUMMARY.md, because the pipeline never edits this spec. The other reading was a doc-only fix task per candidate.
-2. **`KNOWN_LIMITS` versus the amended D-03 list.** The amended text listed six gaps, and the code has seven. Matching them takes the union of both, eight entries (A-01). The other reading cut the code to six and lost the `find -exec`/`rsync` and `pathPatterns` limits.
-3. **A-02's direction.** Both forms are denied (fail closed), not both allowed. A repository's `target/` directory can hold dependency sources under in-repo paths.
-4. **A-04's scope.** Only `rsync` and `tar`, which the review named, become rules. `unlink`, `shred`, `perl -i` and `cargo fetch` stay known gaps. The other reading made every listed program a rule.
-5. **When a guard finding is a regression.** The reviewer tests against the merge base, not only the previous round.
-6. **B-01's scope.** Only the current flight's notes section is renumbered, because the rest of CLAUDE.md cites earlier flights' ids.
-7. **B-02's mechanism.** The rules come from the project's constraints, not from running its lint commands, which would be slow and project-specific. Because of that, this repository needs §5.3's constraint for check-names' rule.
-8. **B-03's trigger points.** Sync happens at `kukulu_run_start` and serial `kukulu_task_next`, not at `kukulu_next` or review. In 0.7.0, F-03's commit landed mid-run, so `run_start` alone would have missed it. It refuses on a conflict instead of halting, so the implementer decides.
-9. **B-04.** The cap behavior is kept and the docs follow it, rather than also halting an approving review above the cap.
-10. **The FreeBSD/macOS exclusion.** It covers only the options REVIEW named. It is not a reason to drop principle 1's "BSD/macOS forms where their manual pages differ".
+1. **B-01's mechanism.** A probe decides, not a longer regex. Every signer's wording is different, and a regex would be one more table that cannot be proved complete. The probe costs two `commit-tree` calls, and only on a failed commit.
+2. **B-03's "expects".** `auto` with signing configured still waits after a mid-run fallback, because the operator asked for signed commits and some are not. Only a run that never had signing configured, or a policy of `off`, stops waiting.
+3. **C-01's reach.** The title is set when the PR is opened and never rewritten, so a human's retitle wins. The merge subject reads the PR's actual title for the same reason.
+4. **C-03's entry.** The first `## [` heading, so `[Unreleased]` counts while a flight is still writing it, and the release task's renamed heading counts after.
+5. **C-04's place.** PLAN.md's Decisions, written by the server. The other reading had the summarizer read the effective caps from state, which fixes SUMMARY.md but leaves PLAN.md wrong.
+6. **D-03's scope.** It classifies what was restored and does not try to prevent the restore. Until the cause is known, restoring is the safe default.
