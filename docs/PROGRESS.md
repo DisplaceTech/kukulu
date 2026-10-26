@@ -22,7 +22,7 @@ Started: 2026-10-26T14:17:50.269Z
 - [x] P2-05 kukulu_flight_options records a changed round cap in PLAN.md
 - [x] P2-06 Phase 2 end: push and record the manual check
 - [x] P3-01 prChecks falls back to the REST API on an older gh
-- [~] P3-02 kukulu_mutate's filter takes a list
+- [x] P3-02 kukulu_mutate's filter takes a list
 - [ ] P3-03 kukulu_mutate says what kind of change it restored
 - [ ] P3-04 CHANGELOG 0.7.2, the version and the feedback headers
 - [ ] P3-05 Phase 3 end: push and record the manual check
@@ -98,3 +98,7 @@ Pushed. Manual check: NOT VERIFIED (human): once 0.7.2 is installed, the next fl
 ### P3-01 — af6f4ff
 
 prChecksViaApi + ghJson helpers; trigger on non-zero exit with unknown-flag stderr. Interpretation: seven failing entries, not six (five run conclusions + failure + error statuses), per the stated mapping. Fixtures under test/fixtures/gh. Verify green (3836; pre-commit whitespace auto-fixed then rerun clean).
+
+### P3-02 — 2eceaaa
+
+filter array support in mutate(); schema type ["string","array"]; docs, CONTRIBUTING row, CHANGELOG. 5 review tests + 1 protocol test. Verify green (3843).
