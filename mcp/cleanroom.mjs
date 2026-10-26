@@ -144,7 +144,7 @@ export const ZERO_HASH = "0".repeat(64);
 // ⚠️ ASSUMPTION: a logged target longer than this is cut; cleanflate's log used the same bound.
 export const TARGET_MAX = 4000;
 
-const LOCK_WAIT_MS = 2000;
+const LOCK_WAIT_MS = 2 * 1000;
 const LOCK_RETRY_MS = 10;
 
 /** A string cut to TARGET_MAX characters; anything else passes through. */
