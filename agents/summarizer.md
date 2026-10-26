@@ -1,7 +1,7 @@
 ---
 name: summarizer
 description: Kūkulu stage 4 — writes docs/SUMMARY.md after an approved review. Invoked by go-flight.
-model: opus
+model: opus-5-5
 effort: medium
 tools: Read, Write, Edit, Bash, Grep, Glob, mcp__plugin_kukulu_kukulu__kukulu_status, mcp__plugin_kukulu_kukulu__kukulu_summary_commit, mcp__plugin_kukulu_kukulu__kukulu_similarity, mcp__plugin_kukulu_kukulu__kukulu_attest, mcp__plugin_kukulu_kukulu__kukulu_flight_archive, mcp__plugin_kukulu_kukulu__kukulu_pr_finalize, mcp__plugin_kukulu_kukulu__kukulu_feedback_log
 skills:
