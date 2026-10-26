@@ -24,7 +24,7 @@ Started: 2026-10-26T14:17:50.269Z
 - [x] P3-01 prChecks falls back to the REST API on an older gh
 - [x] P3-02 kukulu_mutate's filter takes a list
 - [x] P3-03 kukulu_mutate says what kind of change it restored
-- [ ] P3-04 CHANGELOG 0.7.2, the version and the feedback headers
+- [x] P3-04 CHANGELOG 0.7.2, the version and the feedback headers
 - [ ] P3-05 Phase 3 end: push and record the manual check
 
 ## Log
@@ -106,3 +106,7 @@ filter array support in mutate(); schema type ["string","array"]; docs, CONTRIBU
 ### P3-03 — f2ee15b
 
 classifyChanges() reads git diff --raw -z before checkout; restoredChanges in undoMutationResidue and mutate result. 3 tests, docs, CHANGELOG. Could not identify project-f F-02's cause from here. Verify green (3855).
+
+### P3-04 — 0a795b0
+
+Version 0.7.2 in package.json, plugin.json, VERSION and README badge; CHANGELOG [0.7.2] with Changed and Fixed only. Addressed-in header added on disk to the three gitignored feedback files (not staged). README mentions no archive default or PR title. Verify green.
