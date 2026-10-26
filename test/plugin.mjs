@@ -201,7 +201,7 @@ for (const name of ["plan-build", "implement"]) {
   like(readme, /^## Upgrading to 0\.7\.0$/m, "README has a 0.7.0 migration paragraph");
   like(readme, /\.foundry\/state\.json[\s\S]*\.kukulu\/[\s\S]*`FOUNDRY_\*` environment variables are no longer read/, "...naming the manual move and the unread FOUNDRY_ variables");
   like(readme, /\*\*Clean-room mode\*\*, opt-in with a policy file/, "README's feature list names clean-room mode");
-  like(readme, /thirteen suites/, "README counts thirteen suites");
+  like(readme, /fourteen suites/, "README counts fourteen suites");
   const tools = read("docs/mcp-tools.md");
   ok(tools.includes("`prChecks`") && tools.includes("`gate`") && /"source": "review"/.test(tools) && tools.includes("`constraints`"), "mcp-tools documents prChecks, gate and source (and the mutate constraints)");
   ok(!tools.includes("kukulu_migrate"), "mcp-tools has no kukulu_migrate");

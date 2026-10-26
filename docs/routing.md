@@ -88,7 +88,9 @@ A runner is a place a model is served from. Runners live in the global file unde
 | `.match` | non-empty array of strings | Prefixes of a role's model string. Two runners sharing a prefix are refused |
 | `.identities` | object | Optional. Exact model string to `{ weights, image? }`, each `sha256:<64 hex>` |
 
-Resolution: a role's model is served by the built-in `anthropic` runner (endpoint `https://api.anthropic.com`, locality `remote`) when it is an Anthropic alias or a `claude-*` id. Otherwise the configured runner whose `match` entry is the longest prefix of the model string wins. A model no runner matches resolves to runner `null`, endpoint `null` and locality `unknown`; `kukulu_config_show` and the routing table show runner `–` for it. A policy that requires a local runner fails closed on locality `unknown`.
+Resolution: a role's model is served by the built-in `anthropic` runner (endpoint `https://api.anthropic.com`, locality `remote`) when it is an Anthropic alias or a `claude-*` id. Otherwise the configured runner whose `match` entry is the longest prefix of the model string wins. To pin a model's identity, run `node scripts/model-identity.mjs <weights dir or files> [--image sha256:<digest>]` on the inference host, where the weights are, and paste its `weights:` line (and the image digest) into that runner's `identities` entry under the exact model string. The controller usually cannot read the weights, and hashing tens of gigabytes at every genesis would stall the server, so the digest is measured once, there. The script sorts the files by relative path, so the argument order does not matter, and it writes nothing.
+
+A model no runner matches resolves to runner `null`, endpoint `null` and locality `unknown`; `kukulu_config_show` and the routing table show runner `–` for it. A policy that requires a local runner fails closed on locality `unknown`.
 
 ## Routing through claude-code-router (v3)
 

@@ -19,6 +19,7 @@ Every behaviour change to the server therefore needs a test, because the thing u
 | `scripts/implement-guard.mjs` | The Stop / SubagentStop hook |
 | `scripts/lint.sh` | Dependency-free syntax and manifest lint |
 | `scripts/check-names.mjs` | Fails on a misplaced kahakō or an ASCII spelling of the display name in prose; run by `scripts/lint.sh` |
+| `scripts/model-identity.mjs` | Hashes a model's weight files into one digest, for the global config's `runners.<name>.identities`; run on the inference host |
 | `scripts/check-diagrams.mjs` | Parses every Mermaid block; CI-only, needs mermaid + jsdom |
 | `scripts/check-site.mjs` | Static checks for the site's SPEC rules 1–14, with `--self-test` and `--report`; run by `scripts/lint.sh` and `npm run check:site` |
 | `scripts/check-site-browser.mjs` | Layout, console and font checks in headless Chrome; needs Chrome or Chromium; `npm run check:site:browser` |
@@ -29,7 +30,7 @@ Every behaviour change to the server therefore needs a test, because the thing u
 | `templates/SPEC.md` | The spec skeleton users copy |
 | `templates/kukulu.config.example.json`, `templates/ccr/` | The global routing config and claude-code-router provider manifests |
 | `templates/constraints.example.json` | Three worked `docs/kukulu.json` `constraints` rules, with fixtures |
-| `test/` | Harness plus thirteen suites |
+| `test/` | Harness plus fourteen suites |
 | `docs/` | Architecture, tool reference, routing guide, spec guide, runbook |
 | `docs/plans/` | The task-by-task plan behind each release |
 | `docs/feedback/` | Stumbling blocks a real flight hit, feeding the next release plan; gitignored, local to the maintainer |
@@ -56,7 +57,7 @@ When `docs/feedback/.private-names` exists on your machine (gitignored; see [Fli
 
 ```bash
 npm run lint                    # node --check, bash -n, JSON parse, exec bits
-npm test                        # all thirteen suites
+npm test                        # all fourteen suites
 npm test -- guard protocol      # named suites only
 node test/state.mjs             # one suite, directly
 KEEP_REPO=1 npm test -- drive   # keep the temp repos for inspection
@@ -79,6 +80,7 @@ npm install --no-save mermaid jsdom && node scripts/check-diagrams.mjs
 | `guard` | The Stop / SubagentStop hook: scoping, blocking, counting, giving up, environment handling |
 | `cleanroom` | Clean-room mode: the policy loader and its refusals, the guard, the hash chain, checkpoints, the gate and scoring |
 | `attest` | The offline verifier (`scripts/verify-attestation.mjs`), attestation bundles, tamper detection, and pre-0.6.0 logs |
+| `bundles` | The bundle scripts: `scripts/model-identity.mjs`, and `publish-bundle.mjs` and `compare-bundles.mjs` once they exist |
 | `drive` | Complete flights end to end over real stdio: one serial, and parallel ones (a wave, `maxStreams: 1`, an overlapping partition) |
 
 Suites are plain Node programs that print TAP-ish lines and exit non-zero on failure. `test/harness.mjs` provides temp git repos, an MCP client, fixtures and the assertion helpers. Add assertions to the suite that owns the behaviour; add a new suite only for a new surface.

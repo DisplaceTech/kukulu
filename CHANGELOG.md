@@ -11,6 +11,7 @@ All notable changes to this plugin. Format follows
 - Runners in the global config (`runners`), and each role's runner, endpoint and locality in `kukulu_config_show` and the routing table (G-01, A-01).
 - Clean-room policy keys `runners.allow`, `runners.locality` and `roles.distinct` (G-01, G-03).
 - Clean-room gate check 8, `routing`, and each role's model, runner, identity and family in the genesis entry (G-01, G-02, G-03).
+- `scripts/model-identity.mjs`, which hashes a model's weight files into one reproducible digest for a runner's `identities` (G-02, A-03).
 
 ## [0.7.2] — 2026-10-26
 
