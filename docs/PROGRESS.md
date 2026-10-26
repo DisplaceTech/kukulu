@@ -25,7 +25,7 @@ Started: 2026-10-26T14:17:50.269Z
 - [x] P3-02 kukulu_mutate's filter takes a list
 - [x] P3-03 kukulu_mutate says what kind of change it restored
 - [x] P3-04 CHANGELOG 0.7.2, the version and the feedback headers
-- [ ] P3-05 Phase 3 end: push and record the manual check
+- [x] P3-05 Phase 3 end: push and record the manual check
 
 ## Log
 
@@ -110,3 +110,7 @@ classifyChanges() reads git diff --raw -z before checkout; restoredChanges in un
 ### P3-04 — 0a795b0
 
 Version 0.7.2 in package.json, plugin.json, VERSION and README badge; CHANGELOG [0.7.2] with Changed and Fixed only. Addressed-in header added on disk to the three gitignored feedback files (not staged). README mentions no archive default or PR title. Verify green.
+
+### P3-05 — 5d20706
+
+Pushed. Manual check: NOT VERIFIED (human): on a machine with gh 2.45.0, kukulu_status reports the PR's checks with via: "gh api"
