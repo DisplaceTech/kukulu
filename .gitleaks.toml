@@ -5,9 +5,18 @@ useDefault = true
 
 # The fake signing-key id used by the test harness's fake signer. It is a
 # fixture, not a credential, and it lives in history, so allowlist it
-# narrowly: only these two files, only this value.
+# narrowly: only the harness, review, state and implement suites, only this
+# value.
 [[allowlists]]
 description = "fake signer key id in test fixtures"
 condition = "AND"
-paths = ['''^test/(harness|review)\.mjs$''']
+paths = ['''^test/(harness|review|state|implement)\.mjs$''']
+regexes = ['''0123456789ABCDEF''']
+
+# Review round 1 (79f3342) quotes the same key in docs/REVIEW.md. History is
+# never rewritten, so allowlist that one commit and that one value.
+[[allowlists]]
+description = "fake signer key id quoted in the round 1 review"
+condition = "AND"
+commits = ["79f3342f71a2640b6694f59ea196290541b768f5"]
 regexes = ['''0123456789ABCDEF''']

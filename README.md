@@ -6,7 +6,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/License-Apache%202.0-blue" alt="Apache License 2.0" />
-  <img src="https://img.shields.io/badge/version-0.7.1-informational" alt="Version 0.7.1" />
+  <img src="https://img.shields.io/badge/version-0.7.2-informational" alt="Version 0.7.2" />
   <img src="https://img.shields.io/badge/Node-%E2%89%A5%2022-339933?logo=nodedotjs&logoColor=white" alt="Node 22 or later" />
   <img src="https://img.shields.io/badge/Claude%20Code-plugin-D97757" alt="Claude Code plugin" />
   <img src="https://img.shields.io/badge/dependencies-none-brightgreen" alt="No dependencies" />
@@ -58,7 +58,7 @@ You need Node ≥ 22, git, and Claude Code. Nothing to `npm install`.
 
    `/kukulu:go-flight` is the documented entry point, but Claude can also invoke the controller itself: asking it to "run the kukulu flight" reaches the same instructions. The option you will use most is the review depth, as in `/kukulu:go-flight max review rounds 6`.
 
-4. **Read `docs/SUMMARY.md`, then review the pull request.** With `policies.finalize: "auto"`, a flight whose commits are all signed and that isn't marked breaking gets its pull request marked ready and set to auto-merge once CI is green. A breaking flight, or one with an unsigned commit, is left for you to merge or sign. Kūkulu never merges synchronously; the only merge it asks for is GitHub's own `--auto`.
+4. **Read `docs/SUMMARY.md`, then review the pull request.** With `policies.finalize: "auto"`, a flight whose commits are all signed and that isn't marked breaking gets its pull request marked ready and set to auto-merge once CI is green. A breaking flight is left for you to merge, and so is one with an unsigned commit when the policy expects signatures (`policies.signing: "required"`, or `"auto"` with signing configured); under `"off"` finalize does not wait for signatures. Kūkulu never merges synchronously; the only merge it asks for is GitHub's own `--auto`.
 
 > **Optional: run a stage on a different model or backend.** By default the planner, reviewer and summarizer use `opus` and the implementer uses `sonnet`, all on your Anthropic account. To point a role somewhere else (`haiku`, a full model id, or a local or hosted model through [claude-code-router](https://github.com/musistudio/claude-code-router)), copy [`templates/kukulu.config.example.json`](./templates/kukulu.config.example.json) to `~/.config/kukulu/config.json`, edit the roles or pick a profile with `"profile": "local"`, and run `/kukulu:go-flight` again. It asks for one more restart only the first time it generates a role that can't be reached by name (a router or local model). [docs/routing.md](./docs/routing.md) has the details, including router setup.
 
@@ -226,7 +226,7 @@ The server exposes twenty-five tools.
 | `kukulu_similarity` | Score contamination against the configured control pairs inside the server and write `docs/SIMILARITY.md`; the summarizer calls it after the summary |
 | `kukulu_attest` | Write the signed attestation bundle for a clean-room flight into `docs/attestation/`, run the bundle's own verifier on it, and commit it only when it passes; the summarizer calls it after the summary |
 | `kukulu_flight_archive` | Move a summarized flight's artifacts into `docs/flights/<slug>/` (the spec stays), write a fresh state, commit and push |
-| `kukulu_pr_finalize` | End a flight: if every commit is signed, mark the draft PR ready and, unless `breaking`, enable auto-merge; otherwise keep it a draft and record `awaitingSigning`. `resign: true` is for a human |
+| `kukulu_pr_finalize` | End a flight: if every commit is signed, mark the draft PR ready and, unless `breaking`, enable auto-merge; otherwise, when the policy expects signatures, keep it a draft and record `awaitingSigning`. `resign: true` is for a human |
 | `kukulu_agents_sync` | Write `.claude/agents/kukulu-<role>.md` from the merged routing config; only changed files are written |
 | `kukulu_config_show` | The merged routing config with the source of every value. Read-only |
 

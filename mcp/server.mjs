@@ -90,7 +90,7 @@ const MCP_ALLOW_RULE = "mcp__plugin_kukulu_kukulu";
 const PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 // Keep in sync with .claude-plugin/plugin.json and package.json; test/plugin.mjs checks it.
-const VERSION = "0.7.1";
+const VERSION = "0.7.2";
 
 // ---------------------------------------------------------------- clean-room mode (SPEC D-06)
 
@@ -380,6 +380,34 @@ const SIGNING_TIMEOUT_MS = 30_000;
 const SIGNING_FAILURE = /gpg failed to sign|failed to sign|signing failed|cannot exec|pinentry|ssh-keygen|gpg:/i;
 
 /**
+ * Ask git itself whether signing is what breaks: one signed and one unsigned
+ * commit of the empty tree, neither reachable from any ref, so nothing in the
+ * repository changes but two dangling objects. A signer that words its own
+ * error (an SSH agent without the key) matches no text pattern, but it is the
+ * only thing that makes the signed call fail and the unsigned one succeed.
+ * `line` is the signed call's first non-empty stderr line.
+ */
+function signingProbe() {
+  const run = (args) =>
+    spawnSync("git", args, {
+      cwd: ROOT,
+      encoding: "utf8",
+      timeout: SIGNING_TIMEOUT_MS,
+      env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+    });
+  const tree = run(["hash-object", "-t", "tree", "/dev/null"]);
+  const treeId = (tree.stdout || "").trim();
+  if (tree.status !== 0 || !treeId) return { signedOk: false, unsignedOk: false, line: "signing probe failed" };
+  const signed = run(["commit-tree", "-S", treeId, "-m", "kukulu signing probe"]);
+  const unsigned = run(["commit-tree", "--no-gpg-sign", treeId, "-m", "kukulu signing probe"]);
+  const signedOk = signed.status === 0 && !signed.error;
+  const timedOut = signed.error?.code === "ETIMEDOUT" || Boolean(signed.signal);
+  const first = (signed.stderr || signed.stdout || "").split("\n").map((l) => l.trim()).find(Boolean);
+  const line = timedOut ? "timed out" : first || signed.error?.message || "signing probe failed";
+  return { signedOk, unsignedOk: unsigned.status === 0 && !unsigned.error, line };
+}
+
+/**
  * The one place the server runs `git commit`. A signing agent that wants a
  * pinentry would hang the server forever, so the commit is bounded and told
  * never to prompt. Under policies.signing "auto" a signing failure turns
@@ -414,10 +442,15 @@ function commitStaged(rels, message, opts = {}) {
   if (r.status === 0 && !r.error) return;
   const text = (r.stderr || r.stdout || "").trim();
   const timedOut = r.error?.code === "ETIMEDOUT" || Boolean(r.signal);
+  let line = timedOut ? "timed out" : text.split("\n")[0];
   if (!timedOut && !SIGNING_FAILURE.test(text)) {
-    throw new ToolError(`git commit failed: ${text || r.error?.message || "unknown error"}`);
+    // The text names no signer, so ask git: a failure only the signed commit shows is a signing failure all the same.
+    const probe = git(["config", "--get", "commit.gpgsign"], { allowFail: true }).out === "true" ? signingProbe() : null;
+    if (!probe || probe.signedOk || !probe.unsignedOk) {
+      throw new ToolError(`git commit failed: ${text || r.error?.message || "unknown error"}`);
+    }
+    line = probe.line;
   }
-  const line = timedOut ? "timed out" : text.split("\n")[0];
   let policy = "auto";
   try {
     policy = cfg().policies.signing;
@@ -868,6 +901,16 @@ function cfgFrom(c, planIds) {
   if (c.flight !== undefined && (typeof c.flight !== "string" || !FLIGHT_SLUG.test(c.flight))) {
     throw new ToolError(`docs/kukulu.json flight must be a slug matching ${FLIGHT_SLUG} (lowercase letters, digits and -, at most 40 characters)`);
   }
+  if (c.prTitle !== undefined) {
+    const t = c.prTitle;
+    const bad =
+      typeof t !== "string" ? JSON.stringify(t)
+      : t === "" ? '""'
+      : /[\n\r]/.test(t) ? "a newline"
+      : [...t].length > 120 ? `${[...t].length} characters`
+      : null;
+    if (bad !== null) throw new ToolError(`docs/kukulu.json prTitle must be 1 to 120 characters on one line; got ${bad}`);
+  }
   validateConstraints(c.constraints, planIds);
   validateParallel(c.parallel);
   validateMutation(c.mutation);
@@ -897,6 +940,7 @@ function cfgFrom(c, planIds) {
     guardCap: Number.isInteger(c.guardCap) ? c.guardCap : 60,
     constraints: c.constraints || [],
     flight: c.flight ?? null,
+    prTitle: c.prTitle ?? null,
     mutation: { targeted },
     // ⚠️ ASSUMPTION: the number of fix rounds that a surviving mutant alone may open, before it is only a note.
     review: { mutationFixRounds: c.review?.mutationFixRounds ?? 2 },
@@ -913,8 +957,8 @@ function cfgFrom(c, planIds) {
       push: c.policies?.push ?? true,
       pr: c.policies?.pr ?? "draft",
       feedback: c.policies?.feedback ?? true,
-      // ⚠️ ASSUMPTION: archiving a finished flight is opt-in until it has been proven in real flights.
-      archive: c.policies?.archive ?? false,
+      // An owner decision, not an assumption: two release flights needed the archive, so a finished flight archives itself unless this is false.
+      archive: c.policies?.archive ?? true,
       finalize: c.policies?.finalize ?? "auto",
       mergeMethod: c.policies?.mergeMethod ?? "merge",
       syncBase: c.policies?.syncBase ?? true,
@@ -1237,6 +1281,7 @@ function configShow() {
     agentsGenerated: generated,
     agentsStale: stale,
     permissionRule: mcpAllowRulePresent() ? "present" : "missing",
+    archive: cfg().policies.archive,
     table: routingTable(r),
   };
 }
@@ -1967,6 +2012,18 @@ function lastReviewCommit(inRepo) {
 const AGENT = { plan: "kukulu:planner", implement: "kukulu:implementer", review: "kukulu:reviewer", summarize: "kukulu:summarizer" };
 const ROLE_OF_STAGE = { plan: "planner", implement: "implementer", review: "reviewer", summarize: "summarizer" };
 
+/** Whether the config a plan stage would run under (docs/kukulu.json, else the archived copy) sets policies.signing to "required"; any unreadable shape counts as no. */
+function requiredSigningPolicy(st) {
+  const candidates = [P.config, ...(st.archived ? ["kukulu.json", "foun" + "dry.json"].map((n) => path.join(ROOT, st.archived.dir, n)) : [])];
+  const file = candidates.find(exists);
+  if (!file) return false;
+  try {
+    return JSON.parse(read(file))?.policies?.signing === "required";
+  } catch {
+    return false;
+  }
+}
+
 function next() {
   const routing = resolveRouting();
   const s = status();
@@ -2008,7 +2065,7 @@ function next() {
   // accurate even before this round's kukulu_run_start has recorded
   // state.policies (round 0, before the implementer's first call).
   let gateResult = null;
-  const policySentence = `Run policies: signing=${c.policies.signing}, push=${c.policies.push ? "on" : "off"}, pr=${c.policies.pr}.${cleanroomOn(c) ? ` ${CLEANROOM_SENTENCE}` : ""}`;
+  const policySentence = `Run policies: signing=${c.policies.signing}, push=${c.policies.push ? "on" : "off"}, pr=${c.policies.pr}.${cleanroomOn(c) ? ` ${CLEANROOM_SENTENCE}` : ""}${signingNoteFor(st.signing) ? ` ${signingNoteFor(st.signing)}` : ""}`;
   const stage = (name, reason, extra = {}) => {
     const info = agentInfo(name);
     return {
@@ -2085,7 +2142,15 @@ function next() {
     return stage("done", `flight ${st.archived.slug} is archived in ${st.archived.dir}; edit docs/SPEC.md for the next flight, then run /kukulu:go-flight`);
   }
   if (!s.planPresent || !s.progressPresent || !s.configPresent) {
-    return stage("plan", "no plan on disk (docs/PLAN.md, docs/PROGRESS.md and docs/kukulu.json are all required)");
+    const planReason = "no plan on disk (docs/PLAN.md, docs/PROGRESS.md and docs/kukulu.json are all required)";
+    // Under `required` a broken signer would fail the planner's own commit, after all its work; say so now (SPEC B-04).
+    if (requiredSigningPolicy(st) && git(["config", "--get", "commit.gpgsign"], { allowFail: true }).out === "true") {
+      const probe = signingProbe();
+      if (!probe.signedOk) {
+        return stage("plan", `policies.signing is 'required' and the signing probe failed: ${probe.line}. Fix the signing agent before planning, or set policies.signing to 'auto' or 'off'.`);
+      }
+    }
+    return stage("plan", planReason);
   }
   const offer = streamOffer();
   if (offer.streams) return stage("implement", offer.reason, { streams: offer.streams });
@@ -2129,11 +2194,26 @@ const PROMPTS = {
  * configured), or `"off (probe failed: <reason>)"` for `auto` falling back.
  * Throws under `required` when signing is not configured or the probe fails.
  */
-function probeSigning(signingPolicy) {
+function probeSigning(signingPolicy, st) {
   if (signingPolicy === "off") {
     git(["config", "--local", "commit.gpgsign", "false"]);
     return "off";
   }
+  // A fallback's local `false` hid the operator's own setting; lift it so the probe sees what the operator configured (SPEC B-02).
+  const lifted = st?.signingOverride === true;
+  if (lifted) git(["config", "--local", "--unset", "commit.gpgsign"], { allowFail: true });
+  try {
+    const outcome = probeConfigured(signingPolicy);
+    // On "none" the caller decides whether the override still stands.
+    if (lifted && outcome === "on") delete st.signingOverride;
+    return outcome;
+  } catch (e) {
+    if (lifted) git(["config", "--local", "commit.gpgsign", "false"], { allowFail: true });
+    throw e;
+  }
+}
+
+function probeConfigured(signingPolicy) {
   const configured = git(["config", "--get", "commit.gpgsign"], { allowFail: true }).out === "true";
   if (!configured) {
     if (signingPolicy === "required") {
@@ -2141,14 +2221,9 @@ function probeSigning(signingPolicy) {
     }
     return "none";
   }
-  const probe = spawnSync("git", ["commit-tree", "-S", "HEAD^{tree}", "-m", "kukulu signing probe"], {
-    cwd: ROOT,
-    encoding: "utf8",
-    timeout: SIGNING_TIMEOUT_MS,
-    env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
-  });
-  if (probe.status === 0 && !probe.error) return "on";
-  const errLine = (probe.stderr || probe.stdout || probe.error?.message || "signing probe failed").trim().split("\n")[0] || "signing probe failed";
+  const probe = signingProbe();
+  if (probe.signedOk) return "on";
+  const errLine = probe.line;
   if (signingPolicy === "required") {
     throw new ToolError(`policies.signing is 'required' but the signing probe failed: ${errLine}. Fix the signing agent or set policies.signing to 'off'.`);
   }
@@ -2199,6 +2274,27 @@ function syncBase(tool) {
   });
 }
 
+/**
+ * An already-started run whose signing fell back is re-probed at the next
+ * run start, so a recovered agent signs again (SPEC B-02). A "none" outcome
+ * never replaces the recorded fallback: the override goes back as it was.
+ */
+function reprobeSigning(c, st) {
+  if (st.signingOverride !== true || c.policies.signing === "off") return;
+  const outcome = probeSigning(c.policies.signing, st);
+  if (outcome === "none") {
+    git(["config", "--local", "commit.gpgsign", "false"], { allowFail: true });
+    return;
+  }
+  withRollback([P.state, P.feedback], () => {
+    st.signing = outcome;
+    if (outcome.startsWith("off (probe failed")) st.signingOverride = true;
+    saveState(st);
+    if (c.policies.feedback && outcome.startsWith("off (probe failed")) appendFeedback("implement", `Signing disabled for this run: ${outcome}`, "signing", "auto");
+    gitCommitIfChanged([P.state, P.feedback], "chore: signing re-probed", { stage: implementStage(st) });
+  });
+}
+
 function startRun({ sync = false } = {}) {
   requireGate(implementStage(loadState()));
   for (const [k, p] of Object.entries({ spec: P.spec, plan: P.plan, progress: P.progress, config: P.config })) {
@@ -2208,6 +2304,8 @@ function startRun({ sync = false } = {}) {
   const g = gitFacts();
   if (!g.inRepo) throw new ToolError("not a git repository");
   // A branch this call cuts from the base is already up to date; only an existing build branch can lag behind it.
+  // A fallback the base sync itself just made is not re-probed in the same call; only an override that was already there is.
+  const overrideBefore = loadState().signingOverride === true;
   const baseSynced = sync && g.branch && g.branch.startsWith(c.branchPrefix) ? syncBase("kukulu_run_start") : null;
   const withSync = (r) => (baseSynced ? { ...r, baseSynced } : r);
   const pr = parseProgress();
@@ -2217,7 +2315,8 @@ function startRun({ sync = false } = {}) {
   let basePush;
   if (exists(P.lock) && pr.branch && !pr.branch.startsWith("(")) {
     resetLockCounter();
-    return withSync({ alreadyStarted: true, branch, counts: counts(pr.tasks), round: st.round, policies: st.policies, signing: st.signing });
+    if (overrideBefore) reprobeSigning(c, st);
+    return withSync({ alreadyStarted: true, branch, counts: counts(pr.tasks), round: st.round, policies: st.policies, signing: st.signing, ...signingNoteField(st.signing) });
   }
   if (branch === c.baseBranch) {
     // Untracked files never block a run from starting: branching off HEAD
@@ -2268,8 +2367,9 @@ function startRun({ sync = false } = {}) {
   st.preexistingUntracked = preexistingUntracked;
   if (!cleanroomOn(c) && !st.cleanroom) st.cleanroom = { mode: "general" };
   st.policies = c.policies;
-  st.signing = probeSigning(c.policies.signing);
+  st.signing = probeSigning(c.policies.signing, st);
   if (st.signing.startsWith("off (probe failed")) st.signingOverride = true;
+  else if (st.signing === "none") delete st.signingOverride;
   st.implemented = false; st.reviewed = false; st.verdict = null;
   saveState(st);
   // Only the auto fallback is friction — an explicit "off" or an
@@ -2281,7 +2381,7 @@ function startRun({ sync = false } = {}) {
   checkpoint("run-start", implementStage(st), st);
   return gitCommitIfChanged([P.gitignore, P.progress, P.state, P.feedback, ...crPaths], st.round === 0 ? "chore: start implementation run" : `chore: start review-fix round ${st.round}`, { stage: implementStage(st) });
   });
-  return withSync({ alreadyStarted: false, branch, commit: sha, counts: counts(pr.tasks), round: st.round, policies: st.policies, signing: st.signing, basePush });
+  return withSync({ alreadyStarted: false, branch, commit: sha, counts: counts(pr.tasks), round: st.round, policies: st.policies, signing: st.signing, ...signingNoteField(st.signing), basePush });
 }
 
 /**
@@ -2713,19 +2813,7 @@ function runShell(cmd, timeoutMs, cwd = ROOT) {
 /** Does `file` (a repo-relative path) fall under path or exclude prefix `p`? */
 const pathUnder = (file, p) => file === p || file.startsWith(p.endsWith("/") ? p : `${p}/`);
 
-/**
- * Run every constraint rule: first self-test it against its own fixtures —
- * a `shouldMatch` line that fails to match, or a `shouldNotMatch` line that
- * matches, fails the rule outright and is never trusted to scan anything
- * (F-14) — then scan every file under its `paths` minus `exclude` that is
- * tracked or untracked-but-not-ignored (`git ls-files --cached --others
- * --exclude-standard`), line by line, except the untracked files in
- * `ignore` — those that were already there when the run started, which are
- * not the run's business (F-09). A new file an implementer has not yet
- * committed is scanned, so a regression cannot slip past a verify run made
- * before its commit (F-26 of the 2026-09-30 cleanflate feedback). Ignored
- * files never are. Line-based only; no multi-line patterns.
- */
+/** One constraint rule's pattern tested against one line. */
 const constraintTests = (c, line) => new RegExp(c.pattern, c.flags || "").test(line);
 
 /** Why a rule's own fixtures do not hold (`shouldMatch` line unmatched, `shouldNotMatch` line matched), or null. A rule with a failing fixture is never trusted to scan anything (F-14). */
@@ -2764,6 +2852,19 @@ function refuseProgressText(field, text, tool) {
   }
 }
 
+/**
+ * Run every constraint rule: first self-test it against its own fixtures —
+ * a `shouldMatch` line that fails to match, or a `shouldNotMatch` line that
+ * matches, fails the rule outright and is never trusted to scan anything
+ * (F-14) — then scan every file under its `paths` minus `exclude` that is
+ * tracked or untracked-but-not-ignored (`git ls-files --cached --others
+ * --exclude-standard`), line by line, except the untracked files in
+ * `ignore` — those that were already there when the run started, which are
+ * not the run's business (F-09). A new file an implementer has not yet
+ * committed is scanned, so a regression cannot slip past a verify run made
+ * before its commit (F-26 of the 2026-09-30 cleanflate feedback). Ignored
+ * files never are. Line-based only; no multi-line patterns.
+ */
 function checkConstraints(constraints, cwd = ROOT, ignore = []) {
   const skip = new Set(ignore);
   const progress = exists(P.progress) ? parseProgress() : null;
@@ -2905,20 +3006,48 @@ function recoverMutation() {
 const trackedChanges = () => git(["diff", "--name-only", "HEAD"]).out.split("\n").filter(Boolean).sort();
 
 /**
+ * What differs between HEAD and the working tree for each path: `deleted`, `mode`
+ * (same content, other permission bits) or `content` (anything else, a type change
+ * included). Read before the paths are restored (SPEC D-03).
+ */
+function classifyChanges(paths) {
+  const raw = spawnSync("git", ["diff", "--raw", "-z", "--abbrev=40", "HEAD", "--", ...paths], { cwd: ROOT, encoding: "utf8" }).stdout || "";
+  const parts = raw.split("\0");
+  const byPath = new Map();
+  for (let i = 0; i + 1 < parts.length; i += 2) {
+    const m = /^:(\d+) (\d+) ([0-9a-f]+) ([0-9a-f]+) (\w)/.exec(parts[i]);
+    if (!m) continue;
+    const [, oldMode, newMode, oldId, newIdRaw, type] = m;
+    let change = "content";
+    if (type === "D") change = "deleted";
+    else if (type === "M" && oldMode !== newMode) {
+      // The working-tree side of an unstaged change has no blob id yet; hash the file the way git would.
+      const newId = /^0+$/.test(newIdRaw) ? git(["hash-object", "--", parts[i + 1]], { allowFail: true }).out : newIdRaw;
+      if (newId === oldId) change = "mode";
+    }
+    byPath.set(parts[i + 1], change);
+  }
+  return paths.map((p) => ({ path: p, change: byPath.get(p) ?? "content" }));
+}
+
+/**
  * Put back everything a mutation's commands changed besides the mutated file
  * itself (F-10, F-14, F-17 of the 2026-09-30 cleanflate feedback: a killed
  * mutant made proptest write a regressions file). Only paths that were clean,
  * or did not exist, before the mutation are touched; ignored files never are.
- * Returns `{ restored, removed }`.
+
+ * Returns `{ restored, removed, restoredChanges }`; `restoredChanges` names
+ * what each restored path had been, in the same order as `restored`.
  */
 function undoMutationResidue(before) {
   const dirtyBefore = new Set(before.tracked);
   const untrackedBefore = new Set(before.untracked);
   const restored = trackedChanges().filter((p) => !dirtyBefore.has(p));
+  const restoredChanges = restored.length ? classifyChanges(restored) : [];
   if (restored.length) git(["checkout", "-q", "HEAD", "--", ...restored]);
   const removed = untrackedPaths().filter((p) => !untrackedBefore.has(p));
   for (const p of removed) fs.rmSync(path.join(ROOT, p), { force: true });
-  return { restored, removed };
+  return { restored, removed, restoredChanges };
 }
 
 function mutate({ file, find, replace, commands, timeoutMs, targeted, filter, confirmKill } = {}) {
@@ -2942,8 +3071,15 @@ function mutate({ file, find, replace, commands, timeoutMs, targeted, filter, co
     const names = Object.keys(cc.mutation.targeted);
     const legal = names.length ? `Configured names: ${names.join(", ")}.` : "No targeted commands are configured; add them under `mutation.targeted` in docs/kukulu.json.";
     if (typeof targeted !== "string" || !Object.hasOwn(cc.mutation.targeted, targeted)) throw new ToolError(`unknown targeted command ${JSON.stringify(targeted)}. ${legal}`);
-    if (typeof filter !== "string" || !MUTATION_FILTER.test(filter)) {
-      throw new ToolError(`filter must be 1 to 200 characters from letters, digits and _ . : / - (no spaces, quotes or shell characters); got ${JSON.stringify(filter)}`);
+    if (Array.isArray(filter)) {
+      if (!filter.length || filter.length > 10 || filter.some((f) => typeof f !== "string")) {
+        throw new ToolError(`filter must be a string or a list of 1 to 10 strings, each 1 to 200 characters from letters, digits and _ . : / -; got ${JSON.stringify(filter)}`);
+      }
+    }
+    for (const f of Array.isArray(filter) ? filter : [filter]) {
+      if (typeof f !== "string" || !MUTATION_FILTER.test(f)) {
+        throw new ToolError(`filter must be 1 to 200 characters from letters, digits and _ . : / - (no spaces, quotes or shell characters); got ${JSON.stringify(f)}`);
+      }
     }
   }
   const recovered = recoverMutation();
@@ -2974,7 +3110,7 @@ function mutate({ file, find, replace, commands, timeoutMs, targeted, filter, co
   let cmds;
   if (targeted !== undefined) {
     const t = cc.mutation.targeted[targeted];
-    cmds = [{ cmd: t.cmd.replace("{filter}", () => `'${filter}'`), timeoutMs: t.timeoutMs, exclusive: false, from: null }];
+    cmds = [{ cmd: t.cmd.replace("{filter}", () => (Array.isArray(filter) ? filter : [filter]).map((f) => `'${f}'`).join(" ")), timeoutMs: t.timeoutMs, exclusive: false, from: null }];
   } else if (commands) {
     const legal = new Map([...cc.verify, ...Object.values(cc.extraVerify).flat()].map((x) => [x.cmd, x]));
     const unknown = commands.filter((x) => !legal.has(x));
@@ -3053,6 +3189,7 @@ function mutate({ file, find, replace, commands, timeoutMs, targeted, filter, co
     results,
     constraints: scan,
     restored: residue.restored,
+    restoredChanges: residue.restoredChanges,
     removed: residue.removed,
     recoveredMutation: recovered,
   };
@@ -3101,6 +3238,7 @@ function runFinish() {
 
   const push = pushBranch(g.branch, st.policies.push);
   let pr_url = null;
+  let title = null;
   if (push === "pushed") {
     if (st.policies.pr === "none") {
       pr_url = "skipped: policy";
@@ -3108,7 +3246,7 @@ function runFinish() {
       const existing = spawnSync("gh", ["pr", "view", "--json", "url", "-q", ".url"], { cwd: ROOT, encoding: "utf8" });
       if (existing.status === 0 && existing.stdout.trim()) pr_url = existing.stdout.trim();
       else {
-        const title = st.round === 0 ? `Build: ${g.branch}` : `Build: ${g.branch} (review round ${st.round})`;
+        title = prTitleFor(c, g.branch);
         // --base, always: without it gh targets the repository's default
         // branch, not the one this flight branched from (F-24 of the
         // 2026-09-30 cleanflate feedback).
@@ -3125,10 +3263,23 @@ function runFinish() {
   const scan = checkConstraints(c.constraints, ROOT, st.preexistingUntracked);
   const failing = scan.results.filter((r) => !r.ok).map((r) => r.id);
   return {
-    branch: g.branch, base: g.base, head, handoffCommit, stateCommit, push, pr: pr_url, counts: cnt, round: st.round,
+    branch: g.branch, base: g.base, head, handoffCommit, stateCommit, push, pr: pr_url, ...(title !== null && pr_url?.startsWith("pr create failed") !== true ? { prTitle: title } : {}), counts: cnt, round: st.round,
     constraints: { ok: scan.ok, failing },
     readyLine: `READY FOR REVIEW — branch ${g.branch}, head ${head}, ${cnt.done} done / ${cnt.blocked} blocked / ${cnt.skipped} skipped of ${cnt.total}${failing.length ? `; constraints failing: ${failing.join(", ")}` : ""}`,
   };
+}
+
+/**
+ * The draft PR's title (SPEC C-01): `prTitle` as written, else the SPEC's
+ * first heading without its "Specification" suffix, prefixed with the flight
+ * slug when there is one, else `Build: <branch>`. At most 120 code points.
+ */
+function prTitleFor(c, branch) {
+  if (c.prTitle) return c.prTitle;
+  const heading = exists(P.spec) ? /^# (.+)$/m.exec(read(P.spec))?.[1] : undefined;
+  const topic = heading?.replace(/\s*[—–:-]\s*Spec(ification)?\s*$/i, "").trim();
+  const title = topic ? (c.flight ? `${c.flight}: ${topic}` : topic) : `Build: ${branch}`;
+  return [...title].slice(0, 120).join("");
 }
 
 const FLIGHT_OPTION_KEYS = ["maxRounds", "maxRoundsHard"];
@@ -3468,6 +3619,19 @@ function attest({ evidence } = {}) {
   return { dir: ATTEST_DIR, files: [...files.keys()].sort(), manifest: sha256Hex(manifestBytes), fingerprint: key.fingerprint, commit: result.commit, verify: result.verdict, push };
 }
 
+/** PLAN.md's text with `lines` after the last non-blank line of its `## Decisions` section, or a new section at the end when it has none. */
+function withDecisions(text, lines) {
+  const all = text.split("\n");
+  const head = all.findIndex((l) => /^## Decisions\s*$/.test(l));
+  if (head === -1) return `${text.replace(/\s*$/, "")}\n\n## Decisions\n\n${lines.join("\n")}\n`;
+  let end = all.findIndex((l, i) => i > head && l.startsWith("## "));
+  if (end === -1) end = all.length;
+  let last = end - 1;
+  while (last > head && all[last].trim() === "") last--;
+  all.splice(last + 1, 0, ...lines);
+  return all.join("\n");
+}
+
 function flightOptions(args = {}) {
   if (args.resume !== undefined && typeof args.resume !== "boolean") throw new ToolError("resume must be a boolean");
   const given = FLIGHT_OPTION_KEYS.filter((k) => args[k] !== undefined);
@@ -3493,9 +3657,14 @@ function flightOptions(args = {}) {
   const was = cfg();
   const before = Object.fromEntries(FLIGHT_OPTION_KEYS.map((k) => [k, was[k]]));
   for (const k of given) raw[k] = args[k];
-  const paths = [...(resume ? [P.config, P.state] : [P.config]), ...cleanroomPaths(st)];
+  // A cap the operator changes is a decision the plan should not contradict; the one server write to PLAN.md outside kukulu_plan_commit (SPEC C-04).
+  const decisions = exists(P.plan)
+    ? given.filter((k) => args[k] !== before[k]).map((k) => `- ${today()}: ${k} set to ${args[k]} (was ${before[k]}) by the operator through kukulu_flight_options.`)
+    : [];
+  const paths = [...(resume ? [P.config, P.state] : [P.config]), ...(decisions.length ? [P.plan] : []), ...cleanroomPaths(st)];
   return withRollback(paths, () => {
     write(P.config, `${JSON.stringify(raw, null, 2)}\n`);
+    if (decisions.length) write(P.plan, withDecisions(read(P.plan), decisions));
     humanEntry(st, "kukulu_flight_options", args);
     if (resume) {
       st.halted = null;
@@ -3754,6 +3923,45 @@ const CHECKS_FAIL = ["FAILURE", "ERROR", "CANCELLED", "TIMED_OUT", "ACTION_REQUI
 const CHECKS_PENDING = ["PENDING", "QUEUED", "IN_PROGRESS", "WAITING", "REQUESTED", "EXPECTED"];
 const CHECKS_TIMEOUT_MS = 30000;
 
+/** One bounded gh call for the REST fallback: `{ json }` or `{ why }`, never a throw. */
+function ghJson(args) {
+  const r = spawnSync("gh", args, { cwd: ROOT, encoding: "utf8", timeout: CHECKS_TIMEOUT_MS });
+  if (r.error) return { why: r.error.code === "ETIMEDOUT" ? `gh ${args[0]} timed out after ${CHECKS_TIMEOUT_MS} ms` : r.error.message };
+  if (r.status !== 0) return { why: (r.stderr || r.stdout || "").trim().split("\n")[0] || `gh ${args[0]} failed` };
+  try {
+    return { json: JSON.parse(r.stdout) };
+  } catch {
+    return { why: (r.stdout || "").trim().split("\n")[0] || `gh ${args[0]} printed no JSON` };
+  }
+}
+
+/** prChecks for a gh without `pr checks --json`: the head commit's check runs and statuses, in the same shape plus `via` (SPEC D-01). */
+function prChecksViaApi() {
+  const head = ghJson(["pr", "view", "--json", "headRefOid"]);
+  if (head.why) return `unknown: ${head.why}`;
+  const sha = head.json?.headRefOid;
+  if (typeof sha !== "string" || !sha) return "unknown: gh pr view printed no headRefOid";
+  const runs = ghJson(["api", `repos/{owner}/{repo}/commits/${sha}/check-runs?per_page=100`]);
+  if (runs.why) return `unknown: ${runs.why}`;
+  const statuses = ghJson(["api", `repos/{owner}/{repo}/commits/${sha}/status`]);
+  if (statuses.why) return `unknown: ${statuses.why}`;
+  const runFails = new Set(["failure", "cancelled", "timed_out", "action_required", "startup_failure"]);
+  const entries = [
+    ...(Array.isArray(runs.json?.check_runs) ? runs.json.check_runs : []).map((c) => ({
+      name: c.name, link: c.html_url, fail: c.status === "completed" && runFails.has(c.conclusion), pending: c.status !== "completed",
+    })),
+    ...(Array.isArray(statuses.json?.statuses) ? statuses.json.statuses : []).map((c) => ({
+      name: c.context, link: c.target_url, fail: c.state === "failure" || c.state === "error", pending: c.state === "pending",
+    })),
+  ];
+  const failing = entries.filter((e) => e.fail).map((e) => ({ name: e.name, link: e.link }));
+  let state = "pass";
+  if (!entries.length) state = "none";
+  else if (failing.length) state = "fail";
+  else if (entries.some((e) => e.pending)) state = "pending";
+  return { state, failing, via: "gh api" };
+}
+
 /**
  * The pull request's CI checks for `kukulu_status`: `null` when there is
  * nothing to ask (no origin, no gh, no pull request), else
@@ -3773,6 +3981,8 @@ function prChecks() {
   }
   const r = spawnSync("gh", ["pr", "checks", "--json", "name,state,link"], { cwd: ROOT, encoding: "utf8", timeout: CHECKS_TIMEOUT_MS });
   if (r.error) return `unknown: gh pr checks failed: ${r.error.code === "ETIMEDOUT" ? `timed out after ${CHECKS_TIMEOUT_MS} ms` : r.error.message}`;
+  // gh 2.45.0 has no --json on `pr checks`; the REST API answers the same question.
+  if (r.status !== 0 && /unknown flag:? --json/i.test(r.stderr || "")) return prChecksViaApi();
   let list;
   try {
     list = JSON.parse(r.stdout);
@@ -3825,6 +4035,25 @@ function nextSteps(mergeBase) {
   return `Unlock the signing agent, then tell the flight controller to finalize with re-signing: kukulu_pr_finalize({ resign: true }). Or by hand: git rebase -f --rebase-merges --gpg-sign ${mergeBase}, then git push --force-with-lease, then kukulu_pr_finalize({}).`;
 }
 
+/** Whether finalize holds the PR for signatures: always under `required`, and under `auto` unless signing was never configured (SPEC B-03). */
+function signaturesExpected(policy, signing) {
+  return policy === "required" || (policy === "auto" && signing !== "none");
+}
+
+/** What run_start and the stage prompts tell the agent about finalize's signature wait, or null when signing is on. */
+function signingNoteFor(signing) {
+  if (typeof signing !== "string" || signing === "on") return null;
+  if (signing === "off" || signing === "none") return "Commits in this run are unsigned and kukulu_pr_finalize will not wait for signatures.";
+  if (signing.startsWith("off (")) {
+    return "Commits from here on are unsigned; kukulu_pr_finalize will wait for signatures, so unlock the signing agent and call kukulu_run_start again to resume signing, or re-sign at the end.";
+  }
+  return null;
+}
+const signingNoteField = (signing) => {
+  const note = signingNoteFor(signing);
+  return note ? { signingNote: note } : {};
+};
+
 /**
  * Count the flight's commits that carry no valid-looking signature, judged
  * from the commits themselves, never from state.signing. `%G?` of N (none)
@@ -3856,6 +4085,22 @@ function finalizeConfig(st) {
   return cfg();
 }
 
+/**
+ * Whether CHANGELOG.md's newest entry has a "### Breaking changes" section:
+ * null without a CHANGELOG or an entry (a line starting `## [`), else
+ * `{ breaking, heading }`. The entry runs to the next `## ` line.
+ */
+function changelogVerdict() {
+  const file = path.join(ROOT, "CHANGELOG.md");
+  if (!exists(file)) return null;
+  const lines = read(file).split("\n");
+  const start = lines.findIndex((l) => l.startsWith("## ["));
+  if (start === -1) return null;
+  let end = lines.findIndex((l, i) => i > start && l.startsWith("## "));
+  if (end === -1) end = lines.length;
+  return { breaking: lines.slice(start + 1, end).some((l) => /^###\s+Breaking changes\s*$/i.test(l)), heading: lines[start] };
+}
+
 function prFinalize({ breaking, resign } = {}) {
   const st = loadState();
   let summarized = st.summarized === true;
@@ -3869,9 +4114,29 @@ function prFinalize({ breaking, resign } = {}) {
   if (!summarized) throw new ToolError("the summary is not committed yet; call kukulu_summary_commit first, then kukulu_pr_finalize");
   if (breaking !== undefined && typeof breaking !== "boolean") throw new ToolError("breaking must be a boolean");
   if (resign !== undefined && typeof resign !== "boolean") throw new ToolError("resign must be a boolean");
-  const brk = breaking !== undefined ? breaking : st.breaking;
+  // The CHANGELOG, when the repository keeps one, decides; a caller that disagrees is told so instead of being obeyed (SPEC C-03).
+  const verdict = changelogVerdict();
+  if (verdict && breaking !== undefined && breaking !== verdict.breaking) {
+    throw new ToolError(
+      `breaking: ${breaking} disagrees with CHANGELOG.md's newest entry (${verdict.heading}), which ${verdict.breaking ? "has" : "has no"} a "### Breaking changes" section; the CHANGELOG decides. Call kukulu_pr_finalize again without breaking, and record the disagreement in SUMMARY.md's Breaking call as a note.`,
+    );
+  }
+  const brk = verdict ? verdict.breaking : breaking !== undefined ? breaking : st.breaking;
+  const breakingSource = verdict ? "changelog" : "caller";
   if (typeof brk !== "boolean") throw new ToolError("breaking is required on the first call: pass true or false");
   const cc = finalizeConfig(st);
+  // A post-archive state has no signing of its own; the archived copy recorded it.
+  let recordedSigning = st.signing;
+  if (recordedSigning == null && st.archived) {
+    try {
+      recordedSigning = JSON.parse(read(path.join(ROOT, st.archived.dir, "state.json"))).signing;
+    } catch {
+      recordedSigning = undefined;
+    }
+  }
+  // A re-sign is the operator asking for signatures, whatever the policy says.
+  const expected = resign === true || signaturesExpected(cc.policies.signing, recordedSigning);
+  const signatures = expected ? "required" : cc.policies.signing === "off" ? "not required: policies.signing is off" : "not required: signing is not configured";
   const mb = git(["merge-base", cc.baseBranch, "HEAD"], { allowFail: true }).out;
   if (!mb) throw new ToolError(`cannot find a merge base with baseBranch '${cc.baseBranch}'; check out the build branch, or fix baseBranch in docs/kukulu.json`);
 
@@ -3894,7 +4159,7 @@ function prFinalize({ breaking, resign } = {}) {
       gitCommitIfChanged(paths, "chore: awaiting signing", { stage: "summarize" });
     });
     return {
-      signed: check.signed, unsigned: check.unsigned, ready: false, merge: "skipped: awaiting signing", breaking: brk,
+      signed: check.signed, unsigned: check.unsigned, ready: false, merge: "skipped: awaiting signing", signatures, breaking: brk, breakingSource,
       awaitingSigning: st.awaitingSigning, resigned: false,
       push: pushBranch(branch, cc.policies.push), pr: prState(cc.policies, cc.baseBranch), next: nextSteps(mb),
     };
@@ -3956,7 +4221,7 @@ function prFinalize({ breaking, resign } = {}) {
   }
 
   const before = signedCheck(mb);
-  if (before.unsigned) return awaiting(before);
+  if (before.unsigned && expected) return awaiting(before);
 
   st.breaking = brk;
   delete st.awaitingSigning;
@@ -3970,7 +4235,7 @@ function prFinalize({ breaking, resign } = {}) {
     gitCommitIfChanged([P.state], "chore: finalize flight", { stage: "summarize" });
   });
   const after = signedCheck(mb);
-  if (after.unsigned) return awaiting(after);
+  if (after.unsigned && expected) return awaiting(after);
 
   const push = pushBranch(branch, cc.policies.push);
   let pr = prState(cc.policies, cc.baseBranch);
@@ -3989,13 +4254,29 @@ function prFinalize({ breaking, resign } = {}) {
     else if (cc.policies.finalize === "ready") merge = "skipped: policy";
     else if (brk) merge = "skipped: breaking";
     else {
-      const m = spawnSync("gh", ["pr", "merge", "--auto", `--${cc.policies.mergeMethod}`], { cwd: ROOT, encoding: "utf8" });
-      merge = m.status === 0 ? "enabled" : `unavailable: ${firstLine(m)}${STOP_ASKING}`;
+      // The merge commit repeats the PR's own title and number; a rebase makes no merge commit, so it gets none (SPEC C-01).
+      let subjectArgs = [];
+      let subjectNote = "";
+      if (cc.policies.mergeMethod !== "rebase") {
+        const view = gh(["pr", "view", "--json", "title,number"]);
+        let info = null;
+        if (view.status === 0) {
+          try {
+            info = JSON.parse(view.stdout);
+          } catch {
+            info = null;
+          }
+        }
+        if (info && typeof info.title === "string" && info.title && Number.isInteger(info.number)) subjectArgs = ["--subject", `${info.title} (#${info.number})`];
+        else subjectNote = ` (default subject: ${view.status === 0 ? "gh returned no title or number" : firstLine(view)})`;
+      }
+      const m = spawnSync("gh", ["pr", "merge", "--auto", `--${cc.policies.mergeMethod}`, ...subjectArgs], { cwd: ROOT, encoding: "utf8" });
+      merge = m.status === 0 ? `enabled${subjectNote}` : `unavailable: ${firstLine(m)}${STOP_ASKING}`;
     }
     pr = prState(cc.policies, cc.baseBranch);
   }
   return {
-    signed: after.signed, unsigned: 0, ready: typeof pr === "object" ? pr.draft === false : false, merge, breaking: brk,
+    signed: after.signed, unsigned: after.unsigned, signatures, ready: typeof pr === "object" ? pr.draft === false : false, merge, breaking: brk, breakingSource,
     awaitingSigning: null, resigned, ...(resignPush !== undefined ? { resignPush } : {}), push, pr,
   };
 }
@@ -4377,7 +4658,7 @@ const TOOLS = [
   { name: "kukulu_status", description: "Everything the pipeline knows from disk: which docs exist, task counts by state, branch/base/head, lock, round, review verdict, review.mutationFixRounds, and the pull request's CI checks as prChecks (every gh call bounded to 30 s). Read-only.", inputSchema: S({}), fn: () => ({ ...status(), prChecks: prChecks() }) },
   { name: "kukulu_next", description: "Deterministic stage selection: returns { stage, agent, agentFallback, fallbackAgent, restartRequired, model, agentModel, agentModelExact, round, reason, prompt, streams? }. stage is plan | implement | review | summarize | done | halt. agentModel is the value to pass as the Agent tool's model when agentFallback is true (an alias, or null to pass none); agentModelExact is false when a full claude-* id was mapped to its family alias. restartRequired is true only when the routed model cannot be reached without relaunching the session. Read-only, except that when a parallel wave's partition is invalid it records once (state, one feedback entry, one commit, only on a build branch) that the wave runs serially. When streams is present, spawn one implementer per entry, all at once, and wait for all of them.", inputSchema: S({}), fn: next },
   { name: "kukulu_plan_commit", description: "Validate the plan as a whole and commit it: docs/PLAN.md, docs/PROGRESS.md, docs/kukulu.json and CLAUDE.md must exist and agree (task headings, numbering, dependencies, streams, config, from references). Every problem is listed at once, as numbered lines and as structuredContent.problems [{ check, id?, message }]; nothing is committed while any remain. With renumber: true (only before any run has started) it first renumbers split ids everywhere. On success it commits 'plan: derive build plan from SPEC' and returns { commit, tasks, phases, waves, renumbered }. For the planner, as its last step.", inputSchema: S({ renumber: { type: "boolean", description: "rewrite split or out-of-sequence task ids (such as P1-02a) to a clean P<n>-01.. sequence everywhere they appear, then validate and commit; refused once a run has started" } }), fn: planCommit },
-  { name: "kukulu_run_start", description: "Begin (or resume) an implementation run: create/reuse the build branch, arm the implement guard lock, stamp Branch/Started in PROGRESS.md, commit. Idempotent. With stream, also create (or resume) that stream's git worktree for a parallel wave, run parallel.setup in it, and return its cwd: do all of that stream's work inside cwd.", inputSchema: S({ stream: { type: "string", description: "a stream of the current parallel wave, when kukulu_next handed you one" } }), fn: runStart },
+  { name: "kukulu_run_start", description: "Begin (or resume) an implementation run: create/reuse the build branch, arm the implement guard lock, stamp Branch/Started in PROGRESS.md, commit. Idempotent. The result carries signingNote when commits are or will be unsigned and says whether kukulu_pr_finalize will wait for signatures. With stream, also create (or resume) that stream's git worktree for a parallel wave, run parallel.setup in it, and return its cwd: do all of that stream's work inside cwd.", inputSchema: S({ stream: { type: "string", description: "a stream of the current parallel wave, when kukulu_next handed you one" } }), fn: runStart },
   { name: "kukulu_task_next", description: "Select the next task (first [~], else first [ ]), auto-skip tasks whose dependencies are blocked, mark it [~], and return its PLAN.md text plus dependency log entries. Returns { done: true } when none remain.", inputSchema: S({ stream: { type: "string", description: "restrict to this stream's tasks (parallel waves only)" } }), fn: taskNext },
   { name: "kukulu_task_done", description: "Mark a task [x] and append its log entry stamped with HEAD's sha. Requires HEAD's commit subject to start with '<id>:' and a clean tree. Commits PROGRESS.md.", inputSchema: S({ stream: { type: "string", description: "the stream this task belongs to, when working in a parallel wave" }, id: { type: "string" }, log: { type: "string", description: "Log entry body, under 15 lines" } }, ["id", "log"]), fn: taskDone },
   { name: "kukulu_task_block", description: "Give up on a task: hard-reset uncommitted changes, mark it [!], log BLOCKED: <reason>, commit PROGRESS.md.", inputSchema: S({ stream: { type: "string", description: "the stream this task belongs to, when working in a parallel wave" }, id: { type: "string" }, reason: { type: "string", description: "what you tried / what fails / what you think the fix is" } }, ["id", "reason"]), fn: taskBlock },
@@ -4436,7 +4717,7 @@ const TOOLS = [
   },
   {
     name: "kukulu_mutate",
-    description: "Mutation-test one file: apply one exact find/replace to a clean tracked file, run the verify commands that file triggers (verify plus matching extraVerify), always restore the file, undo anything else the commands changed (tracked files that were clean, untracked files that are new), and commit nothing. Returns { file, killed, verdict, results, restored, removed, recoveredMutation }; killed is true when at least one command failed. For reviewers checking that a test fails without the mechanic it covers — never edit source by hand instead.",
+    description: "Mutation-test one file: apply one exact find/replace to a clean tracked file, run the verify commands that file triggers (verify plus matching extraVerify), always restore the file, undo anything else the commands changed (tracked files that were clean, untracked files that are new), and commit nothing. Returns { file, killed, verdict, results, restored, restoredChanges, removed, recoveredMutation }; killed is true when at least one command failed. For reviewers checking that a test fails without the mechanic it covers — never edit source by hand instead.",
     inputSchema: S(
       {
         file: { type: "string", description: "repo-relative path of a tracked, clean text file" },
@@ -4444,7 +4725,7 @@ const TOOLS = [
         replace: { type: "string", description: "the mutated text (\"\" deletes the match)" },
         commands: { type: "array", items: { type: "string" }, description: "optional: run only these configured verify/extraVerify commands, each spelled exactly as in docs/kukulu.json" },
         targeted: { type: "string", description: "optional: the name of a docs/kukulu.json mutation.targeted command to run instead of the verify commands; pass with filter, never with commands" },
-        filter: { type: "string", description: "with targeted: the test name or path substituted for {filter} (letters, digits and _ . : / - only)" },
+        filter: { type: ["string", "array"], items: { type: "string" }, description: "with targeted: one test name or path, or a list of up to 10, substituted for {filter}, each single-quoted and space-separated (letters, digits and _ . : / - only)" },
         timeoutMs: { type: "integer", minimum: 1, description: "optional: cap every command's timeout for this call (never raises a configured one), for a mutant you suspect hangs" },
         confirmKill: { type: "boolean", description: "optional: when the mutant is killed, re-run each failed command once on the unmutated tree; a command that fails there too makes the result inconclusive, not a kill" },
       },
@@ -4484,7 +4765,7 @@ const TOOLS = [
     fn: attest,
   },
   { name: "kukulu_flight_archive", description: "Archive a summarized flight so the repository can run its next flight: move PLAN, PROGRESS, HANDOFF, REVIEW, SUMMARY, kukulu.json, .kukulu/state.json and .kukulu/feedback.jsonl into docs/flights/<slug>/ and docs/attestation/ into docs/flights/<slug>/attestation/ (copying SPEC.md, which stays), write a fresh state.json, commit 'chore: archive flight <slug>' and push per policy. slug defaults to the 'flight' key in docs/kukulu.json. Refused unless the flight is summarized, no run is armed, and the tree is clean. All-or-nothing. Returns { slug, dir, moved, copied, commit, push }.", inputSchema: S({ slug: { type: "string", description: "lowercase letters, digits and - (at most 40 characters); defaults to docs/kukulu.json's flight" } }), fn: flightArchive },
-  { name: "kukulu_pr_finalize", description: "End a flight. Checks that every commit since the merge base with baseBranch is signed (judged from the commits, not from state): if so, marks the draft PR ready and, unless breaking is true, enables auto-merge (gh pr merge --auto, never an immediate merge), per policies.finalize and policies.mergeMethod. If any commit is unsigned the PR stays a draft, state.awaitingSigning is recorded, the steps are appended to SUMMARY.md, and kukulu_next reports done until it is resolved. breaking is required on the first call. Returns { signed, unsigned, ready, merge, breaking, awaitingSigning, resigned, push, pr, next? }; merge is enabled, skipped: breaking, skipped: policy, skipped: no pull request, skipped: awaiting signing or unavailable: <why>.", inputSchema: S({ breaking: { type: "boolean", description: "whether this flight is a breaking change, so its PR must not auto-merge; required on the first call, remembered after" }, resign: { type: "boolean", description: "HUMAN-INITIATED ONLY: never pass this on your own. Re-sign every commit of the branch (git rebase -f --rebase-merges --gpg-sign), force-push with lease, then finalize. For an operator who has unlocked the signing agent after an awaiting-signing result" } }), fn: prFinalize },
+  { name: "kukulu_pr_finalize", description: "End a flight. Checks that every commit since the merge base with baseBranch is signed (judged from the commits, not from state): if so, or if the policy does not expect signatures (policies.signing off, or auto with signing never configured; the result says so in signatures), marks the draft PR ready and, unless breaking is true, enables auto-merge (gh pr merge --auto, never an immediate merge), per policies.finalize and policies.mergeMethod. If any commit is unsigned and signatures are expected the PR stays a draft, state.awaitingSigning is recorded, the steps are appended to SUMMARY.md, and kukulu_next reports done until it is resolved. breaking is required on the first call unless CHANGELOG.md decides it. Returns { signed, unsigned, ready, merge, signatures, breaking, breakingSource, awaitingSigning, resigned, push, pr, next? }; signatures is required or not required: <why>; merge is enabled, skipped: breaking, skipped: policy, skipped: no pull request, skipped: awaiting signing or unavailable: <why>.", inputSchema: S({ breaking: { type: "boolean", description: "whether this flight is a breaking change, so its PR must not auto-merge; optional when CHANGELOG.md decides (its newest entry has or lacks a Breaking changes section; a disagreeing value is refused), required on the first call otherwise, remembered after" }, resign: { type: "boolean", description: "HUMAN-INITIATED ONLY: never pass this on your own. Re-sign every commit of the branch (git rebase -f --rebase-merges --gpg-sign), force-push with lease, then finalize. For an operator who has unlocked the signing agent after an awaiting-signing result" } }), fn: prFinalize },
   {
     name: "kukulu_agents_sync",
     description: "Generate .claude/agents/kukulu-<role>.md from the merged routing config (plugin defaults < global file < profile < docs/kukulu.json roles). Writes only files whose content changed, excludes them from git, and returns the resolved per-role table. `restartRequired` is true only when this is the directory's first population and a changed role's model cannot be named directly by the Agent tool. Also ensures the MCP allow rule in .claude/settings.local.json (`permissions` in the result), without which a subagent's first kukulu_status call is denied under any permission mode.",

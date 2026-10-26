@@ -23,6 +23,42 @@ const pluginAgent = (role) => splitFrontmatter(readFile(ROOT, `agents/${role}.md
 /** A fresh directory to hold a global-config fixture, separate from any project repo. */
 const cfgDir = () => mkDir("kukulu-cfg-");
 
+// ---------------------------------------------------------------- policies.archive default (C-02)
+
+for (const [config, want, label] of [[{}, true, "config_show reports archive true by default"], [{ policies: { archive: false } }, false, "...and false when it is set"]]) {
+  const repo = plannedRepo({ config });
+  await withServer(repo, async ({ call }) => {
+    eq((await call("kukulu_config_show")).archive, want, label);
+  });
+}
+
+// ---------------------------------------------------------------- prTitle validation (C-01)
+
+for (const [value, got, label] of [
+  [42, "42", "a number"],
+  ["", '""', "an empty string"],
+  ["x".repeat(121), "121 characters", "121 characters"],
+  ["a\nb", "a newline", "a newline"],
+]) {
+  const repo = plannedRepo({ config: { prTitle: value } });
+  await withServer(repo, async ({ call }) => {
+    isError(await call("kukulu_status"), new RegExp(`docs/kukulu\\.json prTitle must be 1 to 120 characters on one line; got ${got}$`), `prTitle: ${label} is refused`);
+  });
+}
+{
+  const repo = plannedRepo({ config: { prTitle: "x".repeat(120) } });
+  await withServer(repo, async ({ call }) => {
+    ok(!(await call("kukulu_status")).error, "a 120-character prTitle is accepted");
+  });
+}
+
+{
+  const repo = plannedRepo({ config: { prTitle: "\u{1F600}".repeat(61) } });
+  await withServer(repo, async ({ call }) => {
+    ok(!(await call("kukulu_status")).error, "a prTitle of 61 astral characters is accepted, counted in code points");
+  });
+}
+
 // ---------------------------------------------------------------- defaults, no global file
 
 {

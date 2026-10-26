@@ -4,6 +4,30 @@ All notable changes to this plugin. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.2] — 2026-10-26
+
+### Changed
+
+- `kukulu_config_show` reports the resolved `archive` policy.
+- `kukulu_mutate`'s `filter` also accepts a list of up to 10 test paths (project-e F-01).
+- `kukulu_pr_finalize` takes its breaking verdict from `CHANGELOG.md`'s newest entry when there is one, and `breaking` is optional then (0.7.1 SUMMARY's Breaking call).
+- `policies.archive` now defaults to `true`; set it to `false` to keep a finished flight in place (owner decision).
+- The merge commit's subject is the PR's title and number (a beta user's request).
+- The draft PR is titled `<flight>: <spec title>` (new optional key `prTitle` overrides it) instead of `Build: <branch>` (a beta user's request).
+- `kukulu_pr_finalize` waits for signatures only under `required`, or `auto` with signing configured; `kukulu_run_start` returns a `signingNote` and every stage prompt carries it (owner decision; project-e F-06 to F-08, project-f F-01).
+- rsync's deleting options (`--delete`, `--del`, `--delete-*`) now deny a destination that equals or contains a protected path, and `--remove-source-files` denies a protected source (0.7.1 known-gap candidate).
+- `bsdtar` and `gtar` now get every guard decision `tar` gets (0.7.1 known-gap candidate).
+
+### Fixed
+
+- `kukulu_mutate` says whether each restored file differed in mode, content or by deletion (`restoredChanges`; project-f F-02).
+- `kukulu_status`'s `prChecks` works on a gh without `pr checks --json` (gh 2.45.0) through the REST API (kukulu F-01; project-e F-02, F-04, F-05).
+- A round cap changed through `kukulu_flight_options` is recorded in PLAN.md's Decisions, so the plan no longer claims the default (0.7.1 SUMMARY note).
+- Under `policies.signing: "required"`, `kukulu_next` reports a broken signer before the plan stage instead of after the planner's work (project-e F-03).
+- The local `commit.gpgsign false` an `auto` fallback writes is lifted at the next `kukulu_run_start`, so a recovered signing agent signs again and the next flight no longer runs unsigned without warning (project-f F-01, F-03; project-e F-06 to F-08).
+- A commit whose signer printed its own error (an SSH agent without the key) is now recognized as a signing failure, so `auto` falls back instead of failing the commit (project-e F-03).
+- The recursive rsync denial now names the protected path it reaches, not the destination (0.7.1 REVIEW note).
+
 ## [0.7.1] — 2026-10-20
 
 ### Changed

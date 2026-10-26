@@ -267,6 +267,7 @@ like(read("skills/pull-feedback/SKILL.md"), /how many items came from each/, "..
   like(sum, /kukulu_flight_archive/, "the summarize skill archives when policies.archive is true");
   like(sum, /archive: true/, "...keyed on the archive field of the summary result");
   like(sum, /kukulu_pr_finalize\(\{ breaking \}\)/, "the summarize skill ends with kukulu_pr_finalize");
+  ok(/CHANGELOG\.md/.test(sum.split("Breaking call")[1] || "") && sum.includes("kukulu_pr_finalize({})"), "the summarize skill lets the CHANGELOG decide breaking");
   like(sum, /Never pass `resign`/, "...and never passes resign");
   for (const status of ["AWAITING SIGNING", "AUTO-MERGE ON", "READY"]) like(sum, new RegExp(status), `...its final message can say ${status}`);
   like(sum, /Codebase notes/, "the summarize skill lifts Codebase notes");
@@ -300,6 +301,7 @@ eq((AGENT_MAP.match(/kukulu:/g) || []).length, agentNames.length, "the stage tab
 // ---------------------------------------------------------------- the flight controller
 
 const goFlight = read("skills/go-flight/SKILL.md");
+like(goFlight, /policies\.signing is 'required' and the signing probe failed/, "go-flight stops on a required-signing probe failure");
 const fmGo = frontmatter(goFlight);
 const allowed = String(fmGo["allowed-tools"]).split(",").map((s) => s.trim());
 const toolNames = Array.from(serverSrc.matchAll(/name: "(kukulu_[a-z_]+)"/g), (m) => m[1]);

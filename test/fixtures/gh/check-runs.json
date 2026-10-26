@@ -1,0 +1,59 @@
+{
+ "total_count": 9,
+ "check_runs": [
+  {
+   "name": "run-success",
+   "status": "completed",
+   "conclusion": "success",
+   "html_url": "https://ci.invalid/run-success"
+  },
+  {
+   "name": "run-failure",
+   "status": "completed",
+   "conclusion": "failure",
+   "html_url": "https://ci.invalid/run-failure"
+  },
+  {
+   "name": "run-cancelled",
+   "status": "completed",
+   "conclusion": "cancelled",
+   "html_url": "https://ci.invalid/run-cancelled"
+  },
+  {
+   "name": "run-timed_out",
+   "status": "completed",
+   "conclusion": "timed_out",
+   "html_url": "https://ci.invalid/run-timed_out"
+  },
+  {
+   "name": "run-action_required",
+   "status": "completed",
+   "conclusion": "action_required",
+   "html_url": "https://ci.invalid/run-action_required"
+  },
+  {
+   "name": "run-startup_failure",
+   "status": "completed",
+   "conclusion": "startup_failure",
+   "html_url": "https://ci.invalid/run-startup_failure"
+  },
+  {
+   "name": "run-neutral",
+   "status": "completed",
+   "conclusion": "neutral",
+   "html_url": "https://ci.invalid/run-neutral"
+  },
+  {
+   "name": "run-skipped",
+   "status": "completed",
+   "conclusion": "skipped",
+   "html_url": "https://ci.invalid/run-skipped"
+  },
+  {
+   "name": "run-in_progress",
+   "status": "in_progress",
+   "conclusion": null,
+   "html_url": "https://ci.invalid/run-in_progress"
+  }
+ ]
+}

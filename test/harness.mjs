@@ -137,6 +137,9 @@ case "$1" in --version) exit 0 ;; esac
 if [ "$1 $2" = "pr view" ]; then
   if [ ! -f "$dir/pr.json" ]; then echo "no pull requests found for branch" >&2; exit 1; fi
   case " $* " in
+    *" title"*) if [ -f "$dir/view-title-fails" ]; then cat "$dir/view-title-fails" >&2; exit 1; fi ;;
+  esac
+  case " $* " in
     *" -q "*) sed -n 's/.*"url":"\\([^"]*\\)".*/\\1/p' "$dir/pr.json" ;;
     *) cat "$dir/pr.json" ;;
   esac
@@ -144,21 +147,34 @@ if [ "$1 $2" = "pr view" ]; then
 fi
 if [ "$1 $2" = "pr create" ]; then
   base=main
+  title=
   while [ $# -gt 0 ]; do
     if [ "$1" = "--base" ]; then base=$2; fi
+    if [ "$1" = "--title" ]; then title=$2; fi
     shift
   done
-  printf '{"url":"https://github.invalid/pull/1","state":"OPEN","isDraft":true,"baseRefName":"%s"}\\n' "$base" > "$dir/pr.json"
+  esc=$(printf '%s' "$title" | sed 's/\\\\/\\\\\\\\/g; s/"/\\\\"/g')
+  printf '{"number":1,"url":"https://github.invalid/pull/1","state":"OPEN","isDraft":true,"baseRefName":"%s","headRefOid":"0123456789abcdef0123456789abcdef01234567","title":"%s"}\\n' "$base" "$esc" > "$dir/pr.json"
   echo https://github.invalid/pull/1
   exit 0
 fi
 if [ "$1 $2" = "pr checks" ]; then
+  if [ -f "$dir/checks-stderr" ]; then cat "$dir/checks-stderr" >&2; fi
   if [ -f "$dir/checks.json" ]; then cat "$dir/checks.json"; else echo "[]"; fi
   if [ -f "$dir/checks-exit" ]; then exit "$(cat "$dir/checks-exit")"; fi
   exit 0
 fi
 if [ "$1 $2" = "pr ready" ]; then
   if [ -f "$dir/pr.json" ]; then sed 's/"isDraft":true/"isDraft":false/' "$dir/pr.json" > "$dir/pr.json.tmp" && mv "$dir/pr.json.tmp" "$dir/pr.json"; fi
+  exit 0
+fi
+if [ "$1" = "api" ]; then
+  if [ -f "$dir/api-fails" ]; then cat "$dir/api-fails" >&2; exit 1; fi
+  case "$2" in
+    *check-runs*) cat "$dir/api-check-runs.json" ;;
+    */status) cat "$dir/api-status.json" ;;
+    *) exit 1 ;;
+  esac
   exit 0
 fi
 if [ "$1 $2" = "pr merge" ]; then

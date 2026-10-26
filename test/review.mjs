@@ -3,6 +3,7 @@
 // so the tool is strict about what a finding must carry before it counts.
 
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import {
@@ -636,6 +637,26 @@ const untouched = (repo, head) => {
   });
 }
 
+// restoredChanges names what kind of change each restored path had (D-03).
+for (const [cmd, want, label] of [
+  ["chmod +x tests/regressions.txt", "mode", "a chmod residue is classified as mode"],
+  ["echo more >> tests/regressions.txt", "content", "an edit residue is classified as content"],
+  ["rm tests/regressions.txt", "deleted", "a deletion residue is classified as deleted"],
+]) {
+  const repo = mutationRepo({ config: { verify: [`${cmd}; node test/add.test.mjs`] } });
+  writeFile(repo, "tests/regressions.txt", "# seeds\n");
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-qm", "regressions file"]);
+  const mode = git(repo, ["ls-files", "-s", "tests/regressions.txt"]).split(" ")[0];
+  await withServer(repo, async ({ call }) => {
+    const r = await call("kukulu_mutate", { file: "src/add.mjs", find: "a + b", replace: "a - b" });
+    eq(JSON.stringify(r.restoredChanges), JSON.stringify([{ path: "tests/regressions.txt", change: want }]), label);
+    eq(readFile(repo, "tests/regressions.txt"), "# seeds\n", "...and the file is back to HEAD's content");
+    eq(git(repo, ["status", "--porcelain"]), "", "...and its mode is HEAD's too (the tree is clean)");
+    eq(mode, "100644", "...a regular file");
+  });
+}
+
 // A per-call timeout only ever shortens the configured one (cleanflate F-06).
 {
   const repo = mutationRepo({ config: { verify: [{ cmd: "sleep 30", timeoutMs: 600000 }] } });
@@ -772,6 +793,23 @@ const untouched = (repo, head) => {
   await withServer(repo, async ({ call }) => {
     const r = await call("kukulu_mutate", { file: "src/add.mjs", find: "a + b", replace: "a - b", targeted: "unit", filter: "tests\\Unit\\FooTest" });
     like(r.results[0].stdoutTail, /tests\\Unit\\FooTest/, "a targeted filter is passed as one single-quoted word (backslashes arrive verbatim)");
+  });
+}
+
+{
+  // A list reaches the command as separate quoted words, in order (D-02).
+  const out = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "kukulu-filter-")), "args.txt");
+  const repo = mutationRepo({ config: { mutation: { targeted: { unit: { cmd: `printf '%s\\n' {filter} > ${out}` } } } } });
+  await withServer(repo, async ({ call }) => {
+    const base = { file: "src/add.mjs", find: "a + b", replace: "a - b", targeted: "unit" };
+    await call("kukulu_mutate", { ...base, filter: ["tests/A.php", "tests/B.php"] });
+    eq(fs.readFileSync(out, "utf8"), "tests/A.php\ntests/B.php\n", "a two-entry filter reaches the command as two quoted words");
+    const shape = /filter must be a string or a list of 1 to 10 strings, each 1 to 200 characters from letters, digits and _ \. : \/ -; got /;
+    isError(await call("kukulu_mutate", { ...base, filter: [] }), shape, "an empty filter list refuses");
+    isError(await call("kukulu_mutate", { ...base, filter: Array.from({ length: 11 }, (_, i) => `t${i}`) }), shape, "an 11-entry filter list refuses");
+    isError(await call("kukulu_mutate", { ...base, filter: ["ok", 5] }), shape, "a non-string filter entry refuses");
+    isError(await call("kukulu_mutate", { ...base, filter: ["ok", "a;b"] }), /filter must be 1 to 200 characters.*got "a;b"/, "an invalid filter entry refuses naming it");
+    eq(readFile(repo, "src/add.mjs"), ADD_SRC, "...and the file is unchanged");
   });
 }
 
@@ -973,7 +1011,7 @@ const snapshot = (repo) => Object.fromEntries(ARCHIVE_FILES.map((f) => [f, hasFi
   });
 }
 
-for (const [archive, want] of [[undefined, false], [true, true]]) {
+for (const [archive, want] of [[undefined, true], [true, true], [false, false]]) {
   const repo = reviewableRepo({ verdict: "APPROVED", config: archive === undefined ? {} : { policies: { archive } } });
   await withServer(repo, async ({ call }) => {
     await call("kukulu_review_submit", { verdict: "APPROVED" });
@@ -984,7 +1022,7 @@ for (const [archive, want] of [[undefined, false], [true, true]]) {
 
 // ---------------------------------------------------------------- pr_finalize (S-14)
 
-const DRAFT_PR = '{"url":"https://github.invalid/pull/1","state":"OPEN","isDraft":true,"baseRefName":"main"}\n';
+const DRAFT_PR = '{"number":1,"url":"https://github.invalid/pull/1","state":"OPEN","isDraft":true,"baseRefName":"main","title":"Widget thing"}\n';
 
 /** A summarized build branch with a bare origin and a fake gh holding a draft PR. `signed` signs every commit on it. */
 function finalizeRepo({ signed = false, policies = {}, summarized = true } = {}) {
@@ -1047,12 +1085,12 @@ const ghCalls = (ghDir) => readFile(ghDir, "calls.log").split("\n").filter(Boole
 }
 
 for (const [label, args, policies, expect, mergeFails] of [
-  ["auto, not breaking", { breaking: false }, {}, { calls: ["pr ready", "pr merge --auto --merge"], merge: "enabled", ready: true }],
-  ["squash", { breaking: false }, { mergeMethod: "squash" }, { calls: ["pr ready", "pr merge --auto --squash"], merge: "enabled", ready: true }],
+  ["auto, not breaking", { breaking: false }, {}, { calls: ["pr ready", "pr merge --auto --merge --subject Widget thing (#1)"], merge: "enabled", ready: true }],
+  ["squash", { breaking: false }, { mergeMethod: "squash" }, { calls: ["pr ready", "pr merge --auto --squash --subject Widget thing (#1)"], merge: "enabled", ready: true }],
   ["breaking", { breaking: true }, {}, { calls: ["pr ready"], merge: "skipped: breaking", ready: true }],
   ["finalize ready", { breaking: false }, { finalize: "ready" }, { calls: ["pr ready"], merge: "skipped: policy", ready: true }],
   ["finalize draft", { breaking: false }, { finalize: "draft" }, { calls: [], merge: "skipped: policy", ready: false }],
-  ["merge unavailable", { breaking: false }, {}, { calls: ["pr ready", "pr merge --auto --merge"], merge: 'unavailable: auto-merge is not allowed; set policies.finalize to "ready" to stop asking', ready: true }, "auto-merge is not allowed\nsecond line\n"],
+  ["merge unavailable", { breaking: false }, {}, { calls: ["pr ready", "pr merge --auto --merge --subject Widget thing (#1)"], merge: 'unavailable: auto-merge is not allowed; set policies.finalize to "ready" to stop asking', ready: true }, "auto-merge is not allowed\nsecond line\n"],
 ]) {
   const { repo, ghDir, opts } = finalizeRepo({ signed: true, policies });
   if (mergeFails) writeFile(ghDir, "merge-fails", mergeFails);
@@ -1066,6 +1104,115 @@ for (const [label, args, policies, expect, mergeFails] of [
     eq(calls.join("|"), expect.calls.join("|"), "...and the gh calls are exactly those");
     ok(calls.every((c) => !c.startsWith("pr merge") || c.includes("--auto")), "...no merge without --auto");
   }, opts);
+}
+
+// ---------------------------------------------------------------- the CHANGELOG decides breaking (C-03)
+
+const changelog = (...entries) => `# Changelog\n\n${entries.join("\n")}`;
+const BREAKING_ENTRY = "## [0.2.0] - 2026-01-01\n\n### Changed\n\n- x\n\n### Breaking changes\n\n- y\n";
+const PLAIN_ENTRY = "## [0.2.0] - 2026-01-01\n\n### Changed\n\n- x\n";
+
+async function finalizeWithChangelog(text, args) {
+  const { repo, opts } = finalizeRepo({ signed: true });
+  if (text !== null) {
+    writeFile(repo, "CHANGELOG.md", text);
+    git(repo, ["add", "-A"]);
+    git(repo, ["commit", "-qm", "docs: changelog"]);
+  }
+  let out;
+  await withServer(repo, async ({ call }) => {
+    const headBefore = git(repo, ["rev-parse", "HEAD"]);
+    const stateBefore = readFile(repo, ".kukulu/state.json");
+    const summaryBefore = readFile(repo, "docs/SUMMARY.md");
+    out = { repo, res: await call("kukulu_pr_finalize", args), unchanged: () => git(repo, ["rev-parse", "HEAD"]) === headBefore && readFile(repo, ".kukulu/state.json") === stateBefore && readFile(repo, "docs/SUMMARY.md") === summaryBefore };
+  }, opts);
+  return out;
+}
+
+{
+  const { res } = await finalizeWithChangelog(changelog(BREAKING_ENTRY, "## [0.1.0] - 2025-01-01\n\n### Added\n\n- z\n"), {});
+  eq(res.breaking + "|" + res.merge + "|" + res.breakingSource, "true|skipped: breaking|changelog", "a CHANGELOG entry with Breaking changes is breaking");
+}
+{
+  const { res } = await finalizeWithChangelog(changelog(PLAIN_ENTRY, "## [0.1.0]\n\n### Breaking changes\n\n- old\n"), {});
+  eq(res.breaking + "|" + res.merge + "|" + res.breakingSource, "false|enabled|changelog", "an entry without it is not breaking");
+}
+{
+  const { repo, opts } = finalizeRepo({ signed: true });
+  writeFile(repo, "CHANGELOG.md", changelog(PLAIN_ENTRY));
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-qm", "docs: changelog"]);
+  const head = git(repo, ["rev-parse", "HEAD"]);
+  const state = readFile(repo, ".kukulu/state.json");
+  const summary = readFile(repo, "docs/SUMMARY.md");
+  await withServer(repo, async ({ call }) => {
+    isError(await call("kukulu_pr_finalize", { breaking: true }), /^breaking: true disagrees with CHANGELOG\.md's newest entry \(## \[0\.2\.0\] - 2026-01-01\), which has no a "### Breaking changes" section; the CHANGELOG decides\. Call kukulu_pr_finalize again without breaking, and record the disagreement in SUMMARY\.md's Breaking call as a note\.$/, "a disagreeing breaking refuses");
+    ok(git(repo, ["rev-parse", "HEAD"]) === head && readFile(repo, ".kukulu/state.json") === state && readFile(repo, "docs/SUMMARY.md") === summary, "...and writes nothing");
+  }, opts);
+}
+eq((await finalizeWithChangelog(changelog(BREAKING_ENTRY), { breaking: true })).res.breakingSource, "changelog", "an agreeing breaking passes");
+{
+  const { repo, opts } = finalizeRepo({ signed: true });
+  await withServer(repo, async ({ call }) => {
+    isError(await call("kukulu_pr_finalize", {}), /breaking is required on the first call/, "no CHANGELOG and no breaking gives the existing refusal");
+  }, opts);
+}
+eq((await finalizeWithChangelog(changelog("## [Unreleased]\n\n### Breaking changes\n\n- y\n\n" + PLAIN_ENTRY), {})).res.breaking, true, "[Unreleased] counts as the newest entry when it is first");
+
+// ---------------------------------------------------------------- finalize waits only when signatures are expected (B-03)
+
+for (const [label, policies, stateExtra, wantSignatures, wantAwait] of [
+  ["finalize does not wait under signing off", { signing: "off" }, {}, "not required: policies.signing is off", false],
+  ["finalize does not wait under auto with no signing configured", { signing: "auto" }, { signing: "none" }, "not required: signing is not configured", false],
+  ["finalize still waits under auto after a fallback", { signing: "auto" }, { signing: "off (commit signing failed: x)" }, "required", true],
+  ["finalize still waits under required", { signing: "required" }, {}, "required", true],
+]) {
+  const { repo, opts } = finalizeRepo({ policies });
+  setState(repo, stateExtra);
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-q", "--allow-empty", "-m", "chore: state"]);
+  await withServer(repo, async ({ call }) => {
+    const r = await call("kukulu_pr_finalize", { breaking: false });
+    eq(r.signatures, wantSignatures, `${label}: signatures is ${wantSignatures}`);
+    if (wantAwait) {
+      ok(Boolean(r.awaitingSigning), "...awaiting signing is recorded");
+      eq(r.merge, "skipped: awaiting signing", "...and merge is skipped");
+    } else {
+      eq(r.awaitingSigning, null, "...awaitingSigning is null");
+      ok(r.unsigned > 0, "...the unsigned commits are still counted");
+      eq(r.ready, true, "...and the PR is marked ready");
+    }
+  }, opts);
+}
+
+{
+  const { repo, opts } = finalizeRepo({ policies: { signing: "auto" } });
+  writeFile(repo, "docs/flights/x/state.json", JSON.stringify({ summarized: true, signing: "none" }) + "\n");
+  setState(repo, { summarized: false, archived: { slug: "x", dir: "docs/flights/x" } });
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-qm", "chore: post-archive state"]);
+  await withServer(repo, async ({ call }) => {
+    const r = await call("kukulu_pr_finalize", { breaking: false });
+    eq(r.signatures + "|" + r.awaitingSigning, "not required: signing is not configured|null", "finalize reads signing from the archived state");
+  }, opts);
+}
+
+{
+  const calls = async (policies, extra) => {
+    const { repo, ghDir, opts } = finalizeRepo({ signed: true, policies });
+    if (extra) extra(ghDir);
+    let r;
+    await withServer(repo, async ({ call }) => {
+      r = await call("kukulu_pr_finalize", { breaking: false });
+    }, opts);
+    return { r, merges: ghCalls(ghDir).filter((c) => c.startsWith("pr merge")) };
+  };
+  eq((await calls({})).merges.join("|"), "pr merge --auto --merge --subject Widget thing (#1)", "finalize passes the PR title as the merge subject");
+  eq((await calls({ mergeMethod: "squash" })).merges.join("|"), "pr merge --auto --squash --subject Widget thing (#1)", "...for squash too");
+  eq((await calls({ mergeMethod: "rebase" })).merges.join("|"), "pr merge --auto --rebase", "...and no subject for rebase");
+  const failed = await calls({}, (ghDir) => writeFile(ghDir, "view-title-fails", "title lookup refused\nsecond line\n"));
+  eq(failed.r.merge, "enabled (default subject: title lookup refused)", "a failed title lookup merges with the default subject: merge says so");
+  eq(failed.merges.join("|"), "pr merge --auto --merge", "...and passes no --subject");
 }
 
 for (const [verify, want] of [["err", 0], ["bad", 2]]) {

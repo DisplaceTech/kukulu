@@ -11,7 +11,7 @@ import {
   finish, ok, eq, like, isError,
   mkDir, plannedRepo, withServer, readFile, writeFile, hasFile, subject, useLegacyLayout,
   commitTask, markTasks, setState, git, mkBareRemote, mkFailingGhBin, mkFakeGhBin,
-  headingSpacingProblems, planDoc, progressDoc, DEFAULT_TASKS,
+  headingSpacingProblems, planDoc, progressDoc, DEFAULT_TASKS, specRepo, mkFakeGpg, useFakeSigner,
 } from "./harness.mjs";
 
 const TODAY = new Date().toISOString().slice(0, 10);
@@ -851,6 +851,59 @@ for (const [bad, re] of [
   });
 }
 
+// ---------------------------------------------------------------- the draft PR's title (C-01)
+
+/** Runs one flight to run_finish with the fake gh and returns the finish result and the title gh was given. */
+async function prTitleFor({ spec = "# Widget 1.0 \u2014 Specification\n", config = {}, round = 0 } = {}) {
+  const repo = plannedRepo({ config });
+  writeFile(repo, "docs/SPEC.md", spec);
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-qm", "spec heading"]);
+  git(repo, ["remote", "add", "origin", mkBareRemote()]);
+  const ghDir = mkFakeGhBin();
+  let out;
+  await withServer(repo, async ({ call }) => {
+    if (round) setState(repo, { round });
+    await call("kukulu_run_start");
+    await call("kukulu_task_next");
+    commitTask(repo, "P0-01", "Create hello", { "hello.txt": "hi\n" });
+    await call("kukulu_task_done", { id: "P0-01", log: "x" });
+    await call("kukulu_task_block", { id: "P0-02", reason: "x / y / z" });
+    await call("kukulu_task_next");
+    writeFile(repo, "docs/HANDOFF.md", "# handoff\n");
+    const r = await call("kukulu_run_finish");
+    const m = /--title (.*) --body-file/.exec(readFile(ghDir, "calls.log"));
+    out = { r, title: m ? m[1] : null };
+  }, { env: { PATH: `${ghDir}:${process.env.PATH}` } });
+  return out;
+}
+
+{
+  const { title } = await prTitleFor({ config: { prTitle: "Custom title", flight: "w-1" } });
+  eq(title, "Custom title", "prTitle wins");
+}
+{
+  const { r, title } = await prTitleFor({ config: { flight: "w-1" } });
+  eq(title, "w-1: Widget 1.0", "the derived title strips the Specification suffix");
+  eq(r.prTitle, "w-1: Widget 1.0", "run_finish returns prTitle when it opened a PR");
+}
+eq((await prTitleFor()).title, "Widget 1.0", "...and is the spec title alone without a flight");
+eq((await prTitleFor({ spec: "no heading here\n" })).title.startsWith("Build: build/"), true, "without a spec heading the title is Build: <branch>");
+eq((await prTitleFor({ config: { flight: "w-1" }, round: 2 })).title, "w-1: Widget 1.0", "the title has no round suffix at round 2");
+
+{
+  const topic = "Caf\u00e9 " + "long ".repeat(40).trim();
+  const { r, title } = await prTitleFor({ spec: `# ${topic} \u2014 Specification\n`, config: { flight: "w-1" } });
+  const expected = [...`w-1: ${topic}`].slice(0, 120).join("");
+  eq([...expected].length, 120, "a derived PR title is cut to 120 characters: the fixture is longer than the cut");
+  eq(title, expected, "...gh gets exactly the first 120 code points");
+  eq(r.prTitle, expected, "...and run_finish returns the same prTitle");
+}
+
+for (const heading of ["Widget 1.0 \u2013 Specification", "Widget 1.0: Specification", "Widget 1.0 - Spec"]) {
+  eq((await prTitleFor({ spec: `# ${heading}\n`, config: { flight: "w-1" } })).title, "w-1: Widget 1.0", `the derived title strips an en dash, colon or hyphen separator and a bare Spec: ${JSON.stringify(heading)}`);
+}
+
 // The draft PR targets baseBranch, not the repository's default branch, and
 // the summary reports the PR it finds (2026-09-30 cleanflate F-24, F-25).
 {
@@ -1077,6 +1130,201 @@ function failingSignerRepo(config) {
     const r = spawnSync("git", ["config", "--local", "--get", "commit.gpgsign"], { cwd: repo, encoding: "utf8" });
     ok(r.status !== 0 && r.stdout === "", "...and local commit.gpgsign is unset again, not left at false");
   }, { env: { GIT_CONFIG_GLOBAL: globalCfg } });
+}
+
+// ---------------------------------------------------------------- a signer that words its own error (B-01)
+
+const SSH_ERROR = fs.readFileSync(new URL("./fixtures/signing/ssh-agent-missing-key.txt", import.meta.url), "utf8").trim();
+
+/** A repo with an uncommitted plan and an SSH signer that prints the fixture's error and fails. */
+function sshSignerRepo(policy) {
+  const repo = specRepo();
+  const plan = plannedRepo({ config: { policies: { signing: policy } } });
+  for (const f of ["docs/PLAN.md", "docs/PROGRESS.md", "docs/kukulu.json", "CLAUDE.md"]) writeFile(repo, f, readFile(plan, f));
+  const dir = mkDir("kukulu-ssh-");
+  const signer = path.join(dir, "fake-ssh-keygen");
+  fs.writeFileSync(signer, `#!/bin/sh\nprintf '%s\\n' '${SSH_ERROR}' >&2\nexit 1\n`);
+  fs.chmodSync(signer, 0o755);
+  git(repo, ["config", "--local", "gpg.format", "ssh"]);
+  git(repo, ["config", "--local", "gpg.ssh.program", signer]);
+  git(repo, ["config", "--local", "user.signingkey", "key::ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKukuluTestKeyOnly"]);
+  git(repo, ["config", "--local", "commit.gpgsign", "true"]);
+  return repo;
+}
+
+{
+  const repo = sshSignerRepo("auto");
+  await withServer(repo, async ({ call }) => {
+    const r = await call("kukulu_plan_commit");
+    ok(Boolean(r.commit), "an SSH signer's own error falls back under auto: kukulu_plan_commit succeeds");
+    eq(subject(repo), "plan: derive build plan from SPEC", "...with the plan subject");
+    eq(git(repo, ["log", "-1", "--format=%G?"]), "N", "...unsigned");
+    const st = JSON.parse(readFile(repo, ".kukulu/state.json"));
+    like(st.signing, /^off \(commit signing failed:/, "...state.signing records the fallback");
+    ok(st.signing.includes(SSH_ERROR), "...and the signer's own text");
+    const entries = readFile(repo, ".kukulu/feedback.jsonl").trim().split("\n").map((l) => JSON.parse(l));
+    eq(entries.length + "|" + entries[0].category, "1|signing", "...with exactly one signing feedback entry");
+  });
+}
+
+{
+  const repo = sshSignerRepo("required");
+  const head = git(repo, ["rev-parse", "HEAD"]);
+  await withServer(repo, async ({ call }) => {
+    const e = await call("kukulu_plan_commit");
+    isError(e, /policies\.signing is 'required' and the commit could not be signed:/, "an SSH signer's own error refuses under required");
+    ok(JSON.stringify(e).includes(SSH_ERROR), "...naming the signer's text");
+    eq(git(repo, ["rev-parse", "HEAD"]), head, "...HEAD did not move");
+    eq(git(repo, ["diff", "--cached", "--name-only"]), "", "...and nothing is staged");
+  });
+}
+
+{
+  const repo = specRepo();
+  const plan = plannedRepo({ config: { policies: { signing: "auto" } } });
+  for (const f of ["docs/PLAN.md", "docs/PROGRESS.md", "docs/kukulu.json", "CLAUDE.md"]) writeFile(repo, f, readFile(plan, f));
+  useFakeSigner(repo, mkFakeGpg());
+  const hook = path.join(repo, ".git", "hooks", "commit-msg");
+  fs.mkdirSync(path.dirname(hook), { recursive: true });
+  fs.writeFileSync(hook, "#!/bin/sh\nif head -n1 \"$1\" | grep -q '^plan:'; then echo \"rejected by test hook\" >&2; exit 1; fi\n");
+  fs.chmodSync(hook, 0o755);
+  await withServer(repo, async ({ call }) => {
+    isError(await call("kukulu_plan_commit"), /^git commit failed:/, "a commit that fails for another reason is not turned into a fallback");
+    ok(!hasFile(repo, ".kukulu/state.json") || !/signing/.test(JSON.parse(readFile(repo, ".kukulu/state.json")).signing ?? ""), "...state.signing is unchanged");
+    eq(git(repo, ["config", "--local", "commit.gpgsign"]), "true", "...and local commit.gpgsign still reads true");
+  });
+}
+
+// ---------------------------------------------------------------- the fallback's override is lifted (B-02)
+
+/** The operator's own signing, in a temp global git config; the repo-local `false` is what a fallback would have left. */
+function operatorSigning(gpg) {
+  const cfgFile = path.join(mkDir("kukulu-gitcfg-"), "gitconfig");
+  fs.writeFileSync(cfgFile, `[commit]\n\tgpgsign = true\n[gpg]\n\tformat = openpgp\n[gpg "openpgp"]\n\tprogram = ${gpg}\n[user]\n\tsigningkey = 0123456789ABCDEF\n`);
+  return { env: { GIT_CONFIG_GLOBAL: cfgFile } };
+}
+const stateOf = (repo) => JSON.parse(readFile(repo, ".kukulu/state.json"));
+
+{
+  const repo = plannedRepo();
+  setState(repo, { signingOverride: true, signing: "off (probe failed: x)" });
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-qm", "chore: post-archive state"]);
+  await withServer(repo, async ({ call }) => {
+    const r = await call("kukulu_run_start");
+    eq(r.signing, "on", "an archived flight's override is lifted when the signer works: signing is on");
+    const g = spawnSync("git", ["config", "--local", "--get", "commit.gpgsign"], { cwd: repo, encoding: "utf8" });
+    ok(g.stdout.trim() !== "false", "...local commit.gpgsign no longer reads false");
+    ok(!("signingOverride" in stateOf(repo)), "...signingOverride is gone");
+    ok(git(repo, ["cat-file", "-p", "HEAD"]).includes("gpgsig"), "...and the run-start commit is signed");
+  }, operatorSigning(mkFakeGpg()));
+}
+
+{
+  const repo = plannedRepo();
+  setState(repo, { signingOverride: true, signing: "off (probe failed: x)" });
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-qm", "chore: post-archive state"]);
+  await withServer(repo, async ({ call }) => {
+    const r = await call("kukulu_run_start");
+    like(r.signing, /^off \(probe failed:/, "an archived flight's override comes back when the signer still fails");
+    eq(git(repo, ["config", "--local", "commit.gpgsign"]), "false", "...local commit.gpgsign reads false again");
+    eq(stateOf(repo).signingOverride, true, "...and signingOverride stays");
+  }, operatorSigning(mkFakeGpg({ failAfter: 0 })));
+}
+
+{
+  const repo = plannedRepo();
+  const gpg = mkFakeGpg();
+  await withServer(repo, async ({ call }) => {
+    await call("kukulu_run_start");
+    setState(repo, { signingOverride: true, signing: "off (commit signing failed: timed out)" });
+    git(repo, ["add", "-A"]);
+    git(repo, ["commit", "-qm", "chore: simulated fallback"]);
+    const r = await call("kukulu_run_start");
+    eq(r.alreadyStarted + "|" + r.signing, "true|on", "a resumed run re-probes after the signer recovers");
+    eq(subject(repo), "chore: signing re-probed", "...committing the new record");
+    ok(git(repo, ["cat-file", "-p", "HEAD"]).includes("gpgsig"), "...signed");
+    ok(!("signingOverride" in stateOf(repo)), "...with the override gone");
+  }, operatorSigning(gpg));
+}
+
+{
+  const repo = plannedRepo();
+  setState(repo, { signingOverride: true, signing: "off (probe failed: x)" });
+  git(repo, ["config", "--local", "commit.gpgsign", "false"]);
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-qm", "chore: post-archive state"]);
+  const emptyGlobal = path.join(mkDir("kukulu-gitcfg-"), "gitconfig");
+  fs.writeFileSync(emptyGlobal, "");
+  await withServer(repo, async ({ call }) => {
+    const r = await call("kukulu_run_start");
+    eq(r.signing, "none", "an archived flight's override with no operator signing records none: signing is none");
+    ok(!("signingOverride" in stateOf(repo)), "...and drops the override");
+    const g = spawnSync("git", ["config", "--local", "--get", "commit.gpgsign"], { cwd: repo, encoding: "utf8" });
+    eq(g.stdout.trim(), "", "...and local commit.gpgsign is unset");
+  }, { env: { GIT_CONFIG_GLOBAL: emptyGlobal } });
+}
+
+{
+  const repo = plannedRepo();
+  const emptyGlobal = path.join(mkDir("kukulu-gitcfg-"), "gitconfig");
+  fs.writeFileSync(emptyGlobal, "");
+  const fallback = "off (commit signing failed: timed out)";
+  await withServer(repo, async ({ call }) => {
+    await call("kukulu_run_start");
+    setState(repo, { signingOverride: true, signing: fallback });
+    git(repo, ["config", "--local", "commit.gpgsign", "false"]);
+    git(repo, ["add", "-A"]);
+    git(repo, ["commit", "-qm", "chore: simulated fallback"]);
+    const head = git(repo, ["rev-parse", "HEAD"]);
+    const r = await call("kukulu_run_start");
+    eq(r.alreadyStarted + "|" + r.signing, "true|" + fallback, "a resumed run with no operator signing keeps the fallback record");
+    eq(stateOf(repo).signing, fallback, "...state.signing is unchanged");
+    eq(stateOf(repo).signingOverride, true, "...signingOverride is still true");
+    const lg = spawnSync("git", ["config", "--local", "--get", "commit.gpgsign"], { cwd: repo, encoding: "utf8" });
+    eq(lg.stdout.trim(), "false", "...local commit.gpgsign reads false again");
+    eq(git(repo, ["rev-parse", "HEAD"]), head, "...and HEAD did not move (no re-probe commit)");
+  }, { env: { GIT_CONFIG_GLOBAL: emptyGlobal } });
+}
+
+{
+  const repo = plannedRepo();
+  git(repo, ["config", "--local", "commit.gpgsign", "false"]);
+  await withServer(repo, async ({ call }) => {
+    const r = await call("kukulu_run_start");
+    eq(r.signing, "none", "an operator's own local false is left alone: signing is none");
+    eq(git(repo, ["config", "--local", "commit.gpgsign"]), "false", "...and local commit.gpgsign still reads false");
+  });
+}
+
+// ---------------------------------------------------------------- the signing note (B-03)
+
+const NOTE_UNSIGNED = "Commits in this run are unsigned and kukulu_pr_finalize will not wait for signatures.";
+const NOTE_FALLBACK = "Commits from here on are unsigned; kukulu_pr_finalize will wait for signatures, so unlock the signing agent and call kukulu_run_start again to resume signing, or re-sign at the end.";
+
+{
+  const repo = plannedRepo({ config: { policies: { signing: "off" } } });
+  await withServer(repo, async ({ call }) => {
+    eq((await call("kukulu_run_start")).signingNote, NOTE_UNSIGNED, "run_start says commits are unsigned and finalize will not wait");
+  });
+}
+
+{
+  const repo = failingSignerRepo({ policies: { signing: "auto" } });
+  await withServer(repo, async ({ call }) => {
+    eq((await call("kukulu_run_start")).signingNote, NOTE_FALLBACK, "run_start says finalize will wait after a fallback");
+  });
+}
+
+{
+  const repo = plannedRepo();
+  git(repo, ["config", "--local", "--unset", "commit.gpgsign"]);
+  await withServer(repo, async ({ call }) => {
+    const r = await call("kukulu_run_start");
+    eq(r.signing, "on", "run_start has no signingNote when signing is on: signing is on");
+    ok(!("signingNote" in r), "...and there is no signingNote");
+  }, operatorSigning(mkFakeGpg()));
 }
 
 // ---------------------------------------------------------------- rollback

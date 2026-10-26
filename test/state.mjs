@@ -8,7 +8,7 @@ import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import {
   ROOT, finish, ok, eq, like, isError,
-  mkDir, specRepo, plannedRepo, withServer, useLegacyLayout, mkBareRemote, mkFakeGhBin,
+  mkDir, mkFakeGpg, specRepo, plannedRepo, withServer, useLegacyLayout, mkBareRemote, mkFakeGhBin,
   writeFile, readFile, hasFile, setState, markTasks, git, subject, planDoc, progressDoc,
 } from "./harness.mjs";
 
@@ -111,7 +111,63 @@ for (const missing of ["docs/PLAN.md", "docs/PROGRESS.md", "docs/kukulu.json"]) 
   });
 }
 
+// -------------------------------------------------------------- the plan-stage signing probe (B-04)
+
+function archivedSpecRepo(policy) {
+  const repo = specRepo("# Spec 2\n");
+  writeFile(repo, "docs/flights/x/SPEC.md", "# Spec 1\n");
+  writeFile(repo, "docs/flights/x/kukulu.json", JSON.stringify({ verify: ["true"], policies: { signing: policy } }) + "\n");
+  setState(repo, { archived: { slug: "x", dir: "docs/flights/x", at: "2026-01-01T00:00:00Z" } });
+  git(repo, ["config", "--local", "--unset", "commit.gpgsign"]);
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-qm", "chore: archived"]);
+  return repo;
+}
+
+/** The operator's own signing in a temp global config; `failing` makes the fake gpg refuse to sign. */
+function operatorSigning(failing) {
+  const gpg = mkFakeGpg(failing ? { failAfter: 0 } : {});
+  const file = path.join(path.dirname(gpg), "gitconfig");
+  fs.writeFileSync(file, `[commit]\n\tgpgsign = true\n[gpg]\n\tformat = openpgp\n\tprogram = ${gpg}\n[user]\n\tsigningkey = 0123456789ABCDEF\n`);
+  return { env: { GIT_CONFIG_GLOBAL: file } };
+}
+
+const PROBE_PREFIX = /^policies\.signing is 'required' and the signing probe failed: /;
+
+for (const [label, policy, failing, probeReason] of [
+  ["a required policy with a failing signer stops before planning", "required", true, true],
+  ["a required policy with a working signer gives the plan reason", "required", false, false],
+  ["an auto policy with a failing signer gives the plan reason", "auto", true, false],
+]) {
+  const repo = archivedSpecRepo(policy);
+  const cfgBefore = readFile(repo, ".git/config");
+  await withServer(repo, async ({ call }) => {
+    const n = await call("kukulu_next");
+    eq(n.stage, "plan", `${label}: the stage is plan`);
+    if (probeReason) like(n.reason, PROBE_PREFIX, "...with the probe failure as the reason");
+    else like(n.reason, /^no plan on disk/, "...with today's reason");
+    eq(git(repo, ["status", "--porcelain"]), "", "...and no file changed");
+    eq(readFile(repo, ".git/config"), cfgBefore, "...nor the local git config");
+  }, operatorSigning(failing));
+}
+
 // -------------------------------------------------------------- implement stage
+
+{
+  const note = "Commits in this run are unsigned and kukulu_pr_finalize will not wait for signatures.";
+  const repo = plannedRepo();
+  setState(repo, { signing: "none" });
+  await withServer(repo, async ({ call }) => {
+    const n = await call("kukulu_next");
+    ok(n.prompt.trimEnd().endsWith(note), "the Run policies sentence carries the signing note");
+  });
+  const on = plannedRepo();
+  setState(on, { signing: "on" });
+  await withServer(on, async ({ call }) => {
+    const n = await call("kukulu_next");
+    ok(!n.prompt.includes("kukulu_pr_finalize will"), "...and not when signing is on");
+  });
+}
 
 await withServer(plannedRepo(), async ({ call }) => {
   const s = await call("kukulu_status");
@@ -296,6 +352,49 @@ for (const [body, expected, label] of [
 }
 
 // -------------------------------------------------------------- flight options (2026-09-30 cleanflate F-20)
+
+{
+  const today = new Date().toISOString().slice(0, 10);
+  const line = (k, n, was) => `- ${today}: ${k} set to ${n} (was ${was}) by the operator through kukulu_flight_options.`;
+  const repo = plannedRepo();
+  await withServer(repo, async ({ call }) => {
+    await call("kukulu_flight_options", { maxRounds: 5, maxRoundsHard: 8 });
+    const plan = readFile(repo, "docs/PLAN.md");
+    ok(plan.includes(`## Decisions\n\n- none\n${line("maxRounds", 5, 3)}\n${line("maxRoundsHard", 8, 6)}\n\n## Phase 0`), "a raised cap is recorded in PLAN.md's Decisions, before the next heading");
+    eq(git(repo, ["show", "--name-only", "--format=", "HEAD"]).split("\n").sort().join(","), "docs/PLAN.md,docs/kukulu.json", "...and PLAN.md is in the same commit as docs/kukulu.json");
+    const before = readFile(repo, "docs/PLAN.md");
+    await call("kukulu_flight_options", { maxRounds: 5 });
+    eq(readFile(repo, "docs/PLAN.md"), before, "an unchanged cap writes nothing to PLAN.md");
+  });
+}
+
+{
+  const repo = plannedRepo();
+  writeFile(repo, "docs/PLAN.md", readFile(repo, "docs/PLAN.md").replace("## Decisions\n\n- none\n\n", ""));
+  git(repo, ["commit", "-qam", "plan without decisions"]);
+  await withServer(repo, async ({ call }) => {
+    await call("kukulu_flight_options", { maxRounds: 4 });
+    const plan = readFile(repo, "docs/PLAN.md");
+    ok(plan.endsWith(`\n\n## Decisions\n\n- ${new Date().toISOString().slice(0, 10)}: maxRounds set to 4 (was 3) by the operator through kukulu_flight_options.\n`), "a missing Decisions section is created");
+  });
+}
+
+{
+  const repo = plannedRepo();
+  const hook = path.join(repo, ".git", "hooks", "commit-msg");
+  fs.mkdirSync(path.dirname(hook), { recursive: true });
+  fs.writeFileSync(hook, "#!/bin/sh\nif head -n1 \"$1\" | grep -q '^chore: flight options'; then echo rejected >&2; exit 1; fi\n");
+  fs.chmodSync(hook, 0o755);
+  const plan = readFile(repo, "docs/PLAN.md");
+  const cfgText = readFile(repo, "docs/kukulu.json");
+  const head = git(repo, ["rev-parse", "HEAD"]);
+  await withServer(repo, async ({ call }) => {
+    isError(await call("kukulu_flight_options", { maxRounds: 9 }), /commit failed/, "a failed flight-options commit is an error");
+    eq(readFile(repo, "docs/PLAN.md") + "|" + readFile(repo, "docs/kukulu.json"), plan + "|" + cfgText, "...PLAN.md and kukulu.json are byte-identical");
+    eq(git(repo, ["diff", "--cached", "--name-only"]), "", "...nothing is staged");
+    eq(git(repo, ["rev-parse", "HEAD"]), head, "...and HEAD did not move");
+  });
+}
 
 {
   const repo = plannedRepo();
@@ -539,7 +638,7 @@ for (const [config, re, label] of [
   };
   const ghWith = (list, exit) => {
     const dir = mkFakeGhBin();
-    writeFile(dir, "pr.json", '{"url":"https://github.invalid/pull/1","state":"OPEN","isDraft":true,"baseRefName":"main"}\n');
+    writeFile(dir, "pr.json", '{"url":"https://github.invalid/pull/1","state":"OPEN","isDraft":true,"baseRefName":"main","headRefOid":"0123456789abcdef0123456789abcdef01234567"}\n');
     if (list !== undefined) writeFile(dir, "checks.json", typeof list === "string" ? list : JSON.stringify(list));
     if (exit !== undefined) writeFile(dir, "checks-exit", String(exit));
     return dir;
@@ -555,6 +654,37 @@ for (const [config, re, label] of [
   eq((await checks(withOrigin(), ghEnv(ghWith([{ name: "slow", state: "IN_PROGRESS", link: "u" }], 8)))).state, "pending", "...pending");
   eq(JSON.stringify(await checks(withOrigin(), ghEnv(ghWith([])))), JSON.stringify({ state: "none", failing: [] }), "...none for an empty list");
   like(await checks(withOrigin(), ghEnv(ghWith("no checks reported", 1))), /^unknown: /, "...unknown when gh pr checks prints no JSON");
+
+  {
+    // An older gh (2.45.0) has no `pr checks --json`; the REST API answers instead (D-01). Bodies come from recorded fixtures.
+    const fx = (name) => fs.readFileSync(path.join(ROOT, "test", "fixtures", "gh", name), "utf8");
+    const runsAll = JSON.parse(fx("check-runs.json"));
+    const statusAll = JSON.parse(fx("status.json"));
+    const apiGh = (runs, statuses) => {
+      const dir = ghWith(undefined, 1);
+      writeFile(dir, "checks-stderr", fx("pr-checks-unknown-flag.txt"));
+      writeFile(dir, "api-check-runs.json", JSON.stringify({ ...runsAll, check_runs: runs }));
+      writeFile(dir, "api-status.json", JSON.stringify({ ...statusAll, statuses }));
+      return dir;
+    };
+    const named = (list, names) => list.filter((x) => names.includes(x.name ?? x.context));
+    const fail = await checks(withOrigin(), ghEnv(apiGh(runsAll.check_runs, statusAll.statuses)));
+    eq(fail.state + "|" + fail.via, "fail|gh api", "prChecks falls back to gh api and reports a failure");
+    eq(fail.failing.map((f) => `${f.name} ${f.link}`).sort().join(","), ["failure", "cancelled", "timed_out", "action_required", "startup_failure"].map((c) => `run-${c} https://ci.invalid/run-${c}`).concat(["failure", "error"].map((c) => `status-${c} https://ci.invalid/status-${c}`)).sort().join(","), "...failing names and links exactly the failing runs and statuses");
+    {
+      const loose = apiGh(runsAll.check_runs, statusAll.statuses);
+      writeFile(loose, "checks-stderr", fx("pr-checks-unknown-flag.txt").replace("unknown flag:", "Unknown flag"));
+      eq((await checks(withOrigin(), ghEnv(loose))).via, "gh api", "prChecks falls back on an unknown flag message without the colon or in another case");
+    }
+    const pass = await checks(withOrigin(), ghEnv(apiGh(named(runsAll.check_runs, ["run-success", "run-neutral", "run-skipped"]), named(statusAll.statuses, ["status-success"]))));
+    eq(JSON.stringify(pass), JSON.stringify({ state: "pass", failing: [], via: "gh api" }), "...reports pass");
+    const pending = await checks(withOrigin(), ghEnv(apiGh(named(runsAll.check_runs, ["run-success", "run-in_progress"]), named(statusAll.statuses, ["status-success", "status-pending"]))));
+    eq(pending.state, "pending", "...reports pending");
+    eq((await checks(withOrigin(), ghEnv(apiGh([], [])))).state, "none", "...reports none");
+    const broken = apiGh(runsAll.check_runs, statusAll.statuses);
+    writeFile(broken, "api-fails", "HTTP 502: bad gateway\nsecond line\n");
+    eq(await checks(withOrigin(), ghEnv(broken)), "unknown: HTTP 502: bad gateway", "a failing gh api call is unknown");
+  }
 
   {
     // A gh that never answers `pr view` must not hang the synchronous server: the 30 s bound turns it into unknown.

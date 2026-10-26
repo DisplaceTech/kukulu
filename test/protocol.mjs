@@ -80,6 +80,7 @@ ok(describedOk, "every tool carries a description the model can act on");
 ok(leakedOk, "tools/list does not leak the server-side handler");
 
 const byName = Object.fromEntries(list.map((t) => [t.name, t]));
+eq(JSON.stringify(byName.kukulu_mutate.inputSchema.properties.filter.type), JSON.stringify(["string", "array"]), "kukulu_mutate's filter takes a string or a list");
 eq(byName.kukulu_status.inputSchema.required, undefined, "read-only tools take no required arguments");
 eq(byName.kukulu_task_done.inputSchema.required.join(","), "id,log", "task_done requires id and log");
 eq(byName.kukulu_task_block.inputSchema.required.join(","), "id,reason", "task_block requires id and reason");

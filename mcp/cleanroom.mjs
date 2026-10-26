@@ -952,9 +952,24 @@ export function evaluate(policy, hookInput, env) {
       }
       // 6d'. rsync and tar are not write-family as a whole: their sources and archives are only read, so each gets a rule of its own (SPEC A-04).
       if (word === "rsync") {
-        const { operands, recursive } = rsyncParts(rest);
+        const { operands, recursive, deletes, removesSources } = rsyncParts(rest);
         if (operands.length > 1) {
           const dest = operands[operands.length - 1];
+          // The deleting options remove whatever the destination holds, recursive or not, so a destination that contains a protected path is a write target.
+          if (deletes) {
+            const forms = writeForms(tokenPath(dest));
+            const q = protectedList.find((p) => forms.some((x) => underPrefix(p, x)));
+            if (q) return denied(`protected path: ${q.replace(/\/$/, "")} (rsync --delete* can remove it from ${dest})`);
+          }
+          if (removesSources) {
+            for (const src of operands.slice(0, -1)) {
+              const forms = writeForms(tokenPath(src));
+              const q = protectedList.find((p) => forms.some((x) => underPrefix(p, x)));
+              if (q) return denied(`protected path: ${q.replace(/\/$/, "")} (rsync --remove-source-files removes it)`);
+              const f = forms.find((x) => protectedList.some((p) => underPrefix(x, p)));
+              if (f) return denied(`protected path: ${f} (rsync --remove-source-files removes it)`);
+            }
+          }
           const landed = operands.slice(0, -1).map((src) => {
             const trimmed = src.replace(/\/+$/, "");
             const base = path.basename(trimmed);
@@ -962,21 +977,26 @@ export function evaluate(policy, hookInput, env) {
           });
           for (const target of [dest, ...landed]) {
             const forms = writeForms(tokenPath(target));
-            const f = forms.find((x) => protectedList.some((q) => underPrefix(x, q) || (recursive && target === dest && underPrefix(q, x))));
+            const f = forms.find((x) => protectedList.some((q) => underPrefix(x, q)));
             if (f) return denied(`protected path: ${f} (rsync writes it into ${dest})`);
+            // A recursive call into a directory that holds a protected path names that path, not the directory.
+            if (recursive && target === dest) {
+              const held = protectedList.find((q) => forms.some((x) => underPrefix(q, x)));
+              if (held) return denied(`protected path: ${held.replace(/\/$/, "")} (rsync writes it into ${dest})`);
+            }
             const w = wildcardNames(forms, protectedList);
             if (w) return denied(`protected path: ${w} (can be named by the wildcard ${target})`);
           }
         }
       }
-      if (word === "tar") {
+      if (TAR_WORDS.has(word)) {
         const { extract, writesArchive, dirs, file } = tarParts(rest);
         if (extract) {
           // The archive's contents cannot be known, so an extraction into a directory that holds or sits in a protected path is denied.
           const dir = dirs.reduce((base, d) => canonicalPaths(tokenPath(d), { cwd: base, home })[0], shellCwd);
           const forms = [dir, ...writeForms(dir)];
           const hit = protectedList.find((q) => forms.some((x) => underPrefix(q, x) || underPrefix(x, q)));
-          if (hit) return denied(`protected path: ${hit} (tar extracts into ${dirs.length ? dirs[dirs.length - 1] : "."}; the archive's contents cannot be known)`);
+          if (hit) return denied(`protected path: ${hit} (${word} extracts into ${dirs.length ? dirs[dirs.length - 1] : "."}; the archive's contents cannot be known)`);
         }
         if (writesArchive && file !== null && file !== "-") {
           const forms = writeForms(tokenPath(file));
@@ -1282,10 +1302,15 @@ const RSYNC_SPEC = {
   ),
 };
 
-/** rsync's operands and whether the call is recursive (`-r`, `-a`, in a bundle such as `-av`, or `--recursive`/`--archive` by unique prefix). */
+// rsync's deleting options, and the one that removes sources; matched whole (before any `=`), never by abbreviation (KNOWN_LIMITS entry 3).
+const RSYNC_DELETES = new Set(["--delete", "--del", "--delete-before", "--delete-during", "--delete-delay", "--delete-after", "--delete-excluded", "--delete-missing-args"]);
+
+/** rsync's operands, whether the call is recursive (`-r`, `-a`, in a bundle such as `-av`, or `--recursive`/`--archive` by unique prefix), and whether it deletes at the destination or removes its sources. */
 function rsyncParts(rest) {
   const operands = [];
   let recursive = false;
+  let deletes = false;
+  let removesSources = false;
   for (let i = 0; i < rest.length; i++) {
     const t = rest[i];
     if (t === "--") {
@@ -1299,6 +1324,8 @@ function rsyncParts(rest) {
     const opt = scanOption(t, RSYNC_SPEC);
     if (t.startsWith("--")) {
       const given = t.split("=")[0];
+      if (RSYNC_DELETES.has(given)) deletes = true;
+      if (given === "--remove-source-files") removesSources = true;
       const hits = ["--recursive", "--archive"].filter((n) => n.startsWith(given));
       if (given.length > 2 && hits.length === 1) recursive = true;
     } else {
@@ -1308,8 +1335,11 @@ function rsyncParts(rest) {
     }
     if (opt && opt.value === null) i++;
   }
-  return { operands, recursive };
+  return { operands, recursive, deletes, removesSources };
 }
+
+// BSD and GNU tar under their other names parse the same options.
+const TAR_WORDS = new Set(["tar", "bsdtar", "gtar"]);
 
 // tar's short options that take a value, and its long options (a unique prefix names one; tar accepts abbreviations).
 const TAR_SPEC = { short: new Set("fCTXbHKLNVg"), long: new Set() };
@@ -1500,7 +1530,7 @@ function recursiveOperands(word, rest) {
     return list.length ? list : ["."];
   }
   if (word === "cp") return flagged(/^-[A-Za-z]*[rRa][A-Za-z]*$/, /^--(?:recursive|archive)$/) ? plain(rest) : null;
-  if (word === "tar" || word === "rsync") return plain(rest);
+  if (TAR_WORDS.has(word) || word === "rsync") return plain(rest);
   return null;
 }
 
@@ -1709,7 +1739,7 @@ function redirectTargets(segment) {
 
 // ---------------------------------------------------------------- coverage gaps
 
-/** What the guard cannot see, stated in every bundle's manifest as coverage.knownLimits (SPEC D-03). */
+/** What the guard cannot see, stated in every bundle's manifest as coverage.knownLimits (0.7.1 SPEC A-01). */
 export const KNOWN_LIMITS = [
   "Interpreter escapes (python3 -c, node -e) are not parsed, so a path or word inside the quoted program is not seen.",
   "Shell expansion beyond ~ and $HOME is not evaluated: other variables, and strings assembled at run time (a base64 decode, a variable holding a command), so a path or command built that way is not seen.",

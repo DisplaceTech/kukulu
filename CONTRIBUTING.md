@@ -69,9 +69,9 @@ npm install --no-save mermaid jsdom && node scripts/check-diagrams.mjs
 |---|---|
 | `plugin` | Manifests, agent and skill frontmatter, hook wiring, cross-references, documentation links, diagram style, CI pinning |
 | `protocol` | JSON-RPC framing, handshake, tool discovery, error mapping |
-| `state` | `kukulu_status` and every branch of the `kukulu_next` decision table; `kukulu_plan_commit` (every check, `renumber`) |
+| `state` | `kukulu_status` and every branch of the `kukulu_next` decision table; `kukulu_plan_commit` (every check, `renumber`); `kukulu_flight_options` (the Decisions line, rollback) |
 | `implement` | `run_start`, `task_next`, `task_done`, `task_block`, `verify`, `run_finish`; the commit helper's signing fallback |
-| `review` | `review_submit` and `summary_commit`, including every refusal and rollback on a failed commit; `kukulu_flight_archive`; `kukulu_pr_finalize` |
+| `review` | `review_submit` and `summary_commit`, including every refusal and rollback on a failed commit; `kukulu_flight_archive`; `kukulu_pr_finalize`; `kukulu_mutate` |
 | `routing` | Config merge and precedence, `kukulu_agents_sync`, `kukulu_config_show`, every refusal |
 | `constraints` | `docs/kukulu.json` constraints, fixture self-tests, the scan, every refusal |
 | `feedback` | `kukulu_feedback_log`, `.kukulu/feedback.jsonl`, and the `policies.feedback` opt-out |
