@@ -3583,6 +3583,19 @@ function attest({ evidence } = {}) {
   return { dir: ATTEST_DIR, files: [...files.keys()].sort(), manifest: sha256Hex(manifestBytes), fingerprint: key.fingerprint, commit: result.commit, verify: result.verdict, push };
 }
 
+/** PLAN.md's text with `lines` after the last non-blank line of its `## Decisions` section, or a new section at the end when it has none. */
+function withDecisions(text, lines) {
+  const all = text.split("\n");
+  const head = all.findIndex((l) => /^## Decisions\s*$/.test(l));
+  if (head === -1) return `${text.replace(/\s*$/, "")}\n\n## Decisions\n\n${lines.join("\n")}\n`;
+  let end = all.findIndex((l, i) => i > head && l.startsWith("## "));
+  if (end === -1) end = all.length;
+  let last = end - 1;
+  while (last > head && all[last].trim() === "") last--;
+  all.splice(last + 1, 0, ...lines);
+  return all.join("\n");
+}
+
 function flightOptions(args = {}) {
   if (args.resume !== undefined && typeof args.resume !== "boolean") throw new ToolError("resume must be a boolean");
   const given = FLIGHT_OPTION_KEYS.filter((k) => args[k] !== undefined);
@@ -3608,9 +3621,14 @@ function flightOptions(args = {}) {
   const was = cfg();
   const before = Object.fromEntries(FLIGHT_OPTION_KEYS.map((k) => [k, was[k]]));
   for (const k of given) raw[k] = args[k];
-  const paths = [...(resume ? [P.config, P.state] : [P.config]), ...cleanroomPaths(st)];
+  // A cap the operator changes is a decision the plan should not contradict; the one server write to PLAN.md outside kukulu_plan_commit (SPEC C-04).
+  const decisions = exists(P.plan)
+    ? given.filter((k) => args[k] !== before[k]).map((k) => `- ${today()}: ${k} set to ${args[k]} (was ${before[k]}) by the operator through kukulu_flight_options.`)
+    : [];
+  const paths = [...(resume ? [P.config, P.state] : [P.config]), ...(decisions.length ? [P.plan] : []), ...cleanroomPaths(st)];
   return withRollback(paths, () => {
     write(P.config, `${JSON.stringify(raw, null, 2)}\n`);
+    if (decisions.length) write(P.plan, withDecisions(read(P.plan), decisions));
     humanEntry(st, "kukulu_flight_options", args);
     if (resume) {
       st.halted = null;

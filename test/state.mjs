@@ -354,6 +354,49 @@ for (const [body, expected, label] of [
 // -------------------------------------------------------------- flight options (2026-09-30 cleanflate F-20)
 
 {
+  const today = new Date().toISOString().slice(0, 10);
+  const line = (k, n, was) => `- ${today}: ${k} set to ${n} (was ${was}) by the operator through kukulu_flight_options.`;
+  const repo = plannedRepo();
+  await withServer(repo, async ({ call }) => {
+    await call("kukulu_flight_options", { maxRounds: 5, maxRoundsHard: 8 });
+    const plan = readFile(repo, "docs/PLAN.md");
+    ok(plan.includes(`## Decisions\n\n- none\n${line("maxRounds", 5, 3)}\n${line("maxRoundsHard", 8, 6)}\n\n## Phase 0`), "a raised cap is recorded in PLAN.md's Decisions, before the next heading");
+    eq(git(repo, ["show", "--name-only", "--format=", "HEAD"]).split("\n").sort().join(","), "docs/PLAN.md,docs/kukulu.json", "...and PLAN.md is in the same commit as docs/kukulu.json");
+    const before = readFile(repo, "docs/PLAN.md");
+    await call("kukulu_flight_options", { maxRounds: 5 });
+    eq(readFile(repo, "docs/PLAN.md"), before, "an unchanged cap writes nothing to PLAN.md");
+  });
+}
+
+{
+  const repo = plannedRepo();
+  writeFile(repo, "docs/PLAN.md", readFile(repo, "docs/PLAN.md").replace("## Decisions\n\n- none\n\n", ""));
+  git(repo, ["commit", "-qam", "plan without decisions"]);
+  await withServer(repo, async ({ call }) => {
+    await call("kukulu_flight_options", { maxRounds: 4 });
+    const plan = readFile(repo, "docs/PLAN.md");
+    ok(plan.endsWith(`\n\n## Decisions\n\n- ${new Date().toISOString().slice(0, 10)}: maxRounds set to 4 (was 3) by the operator through kukulu_flight_options.\n`), "a missing Decisions section is created");
+  });
+}
+
+{
+  const repo = plannedRepo();
+  const hook = path.join(repo, ".git", "hooks", "commit-msg");
+  fs.mkdirSync(path.dirname(hook), { recursive: true });
+  fs.writeFileSync(hook, "#!/bin/sh\nif head -n1 \"$1\" | grep -q '^chore: flight options'; then echo rejected >&2; exit 1; fi\n");
+  fs.chmodSync(hook, 0o755);
+  const plan = readFile(repo, "docs/PLAN.md");
+  const cfgText = readFile(repo, "docs/kukulu.json");
+  const head = git(repo, ["rev-parse", "HEAD"]);
+  await withServer(repo, async ({ call }) => {
+    isError(await call("kukulu_flight_options", { maxRounds: 9 }), /commit failed/, "a failed flight-options commit is an error");
+    eq(readFile(repo, "docs/PLAN.md") + "|" + readFile(repo, "docs/kukulu.json"), plan + "|" + cfgText, "...PLAN.md and kukulu.json are byte-identical");
+    eq(git(repo, ["diff", "--cached", "--name-only"]), "", "...nothing is staged");
+    eq(git(repo, ["rev-parse", "HEAD"]), head, "...and HEAD did not move");
+  });
+}
+
+{
   const repo = plannedRepo();
   await withServer(repo, async ({ call }) => {
     isError(await call("kukulu_flight_options", {}), /pass at least one of maxRounds, maxRoundsHard/, "an empty options call is refused");
