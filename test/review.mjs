@@ -984,7 +984,7 @@ for (const [archive, want] of [[undefined, false], [true, true]]) {
 
 // ---------------------------------------------------------------- pr_finalize (S-14)
 
-const DRAFT_PR = '{"url":"https://github.invalid/pull/1","state":"OPEN","isDraft":true,"baseRefName":"main"}\n';
+const DRAFT_PR = '{"number":1,"url":"https://github.invalid/pull/1","state":"OPEN","isDraft":true,"baseRefName":"main","title":"Widget thing"}\n';
 
 /** A summarized build branch with a bare origin and a fake gh holding a draft PR. `signed` signs every commit on it. */
 function finalizeRepo({ signed = false, policies = {}, summarized = true } = {}) {
@@ -1047,12 +1047,12 @@ const ghCalls = (ghDir) => readFile(ghDir, "calls.log").split("\n").filter(Boole
 }
 
 for (const [label, args, policies, expect, mergeFails] of [
-  ["auto, not breaking", { breaking: false }, {}, { calls: ["pr ready", "pr merge --auto --merge"], merge: "enabled", ready: true }],
-  ["squash", { breaking: false }, { mergeMethod: "squash" }, { calls: ["pr ready", "pr merge --auto --squash"], merge: "enabled", ready: true }],
+  ["auto, not breaking", { breaking: false }, {}, { calls: ["pr ready", "pr merge --auto --merge --subject Widget thing (#1)"], merge: "enabled", ready: true }],
+  ["squash", { breaking: false }, { mergeMethod: "squash" }, { calls: ["pr ready", "pr merge --auto --squash --subject Widget thing (#1)"], merge: "enabled", ready: true }],
   ["breaking", { breaking: true }, {}, { calls: ["pr ready"], merge: "skipped: breaking", ready: true }],
   ["finalize ready", { breaking: false }, { finalize: "ready" }, { calls: ["pr ready"], merge: "skipped: policy", ready: true }],
   ["finalize draft", { breaking: false }, { finalize: "draft" }, { calls: [], merge: "skipped: policy", ready: false }],
-  ["merge unavailable", { breaking: false }, {}, { calls: ["pr ready", "pr merge --auto --merge"], merge: 'unavailable: auto-merge is not allowed; set policies.finalize to "ready" to stop asking', ready: true }, "auto-merge is not allowed\nsecond line\n"],
+  ["merge unavailable", { breaking: false }, {}, { calls: ["pr ready", "pr merge --auto --merge --subject Widget thing (#1)"], merge: 'unavailable: auto-merge is not allowed; set policies.finalize to "ready" to stop asking', ready: true }, "auto-merge is not allowed\nsecond line\n"],
 ]) {
   const { repo, ghDir, opts } = finalizeRepo({ signed: true, policies });
   if (mergeFails) writeFile(ghDir, "merge-fails", mergeFails);
@@ -1104,6 +1104,24 @@ for (const [label, policies, stateExtra, wantSignatures, wantAwait] of [
     const r = await call("kukulu_pr_finalize", { breaking: false });
     eq(r.signatures + "|" + r.awaitingSigning, "not required: signing is not configured|null", "finalize reads signing from the archived state");
   }, opts);
+}
+
+{
+  const calls = async (policies, extra) => {
+    const { repo, ghDir, opts } = finalizeRepo({ signed: true, policies });
+    if (extra) extra(ghDir);
+    let r;
+    await withServer(repo, async ({ call }) => {
+      r = await call("kukulu_pr_finalize", { breaking: false });
+    }, opts);
+    return { r, merges: ghCalls(ghDir).filter((c) => c.startsWith("pr merge")) };
+  };
+  eq((await calls({})).merges.join("|"), "pr merge --auto --merge --subject Widget thing (#1)", "finalize passes the PR title as the merge subject");
+  eq((await calls({ mergeMethod: "squash" })).merges.join("|"), "pr merge --auto --squash --subject Widget thing (#1)", "...for squash too");
+  eq((await calls({ mergeMethod: "rebase" })).merges.join("|"), "pr merge --auto --rebase", "...and no subject for rebase");
+  const failed = await calls({}, (ghDir) => writeFile(ghDir, "view-title-fails", "title lookup refused\nsecond line\n"));
+  eq(failed.r.merge, "enabled (default subject: title lookup refused)", "a failed title lookup merges with the default subject: merge says so");
+  eq(failed.merges.join("|"), "pr merge --auto --merge", "...and passes no --subject");
 }
 
 for (const [verify, want] of [["err", 0], ["bad", 2]]) {

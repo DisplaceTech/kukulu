@@ -4134,8 +4134,24 @@ function prFinalize({ breaking, resign } = {}) {
     else if (cc.policies.finalize === "ready") merge = "skipped: policy";
     else if (brk) merge = "skipped: breaking";
     else {
-      const m = spawnSync("gh", ["pr", "merge", "--auto", `--${cc.policies.mergeMethod}`], { cwd: ROOT, encoding: "utf8" });
-      merge = m.status === 0 ? "enabled" : `unavailable: ${firstLine(m)}${STOP_ASKING}`;
+      // The merge commit repeats the PR's own title and number; a rebase makes no merge commit, so it gets none (SPEC C-01).
+      let subjectArgs = [];
+      let subjectNote = "";
+      if (cc.policies.mergeMethod !== "rebase") {
+        const view = gh(["pr", "view", "--json", "title,number"]);
+        let info = null;
+        if (view.status === 0) {
+          try {
+            info = JSON.parse(view.stdout);
+          } catch {
+            info = null;
+          }
+        }
+        if (info && typeof info.title === "string" && info.title && Number.isInteger(info.number)) subjectArgs = ["--subject", `${info.title} (#${info.number})`];
+        else subjectNote = ` (default subject: ${view.status === 0 ? "gh returned no title or number" : firstLine(view)})`;
+      }
+      const m = spawnSync("gh", ["pr", "merge", "--auto", `--${cc.policies.mergeMethod}`, ...subjectArgs], { cwd: ROOT, encoding: "utf8" });
+      merge = m.status === 0 ? `enabled${subjectNote}` : `unavailable: ${firstLine(m)}${STOP_ASKING}`;
     }
     pr = prState(cc.policies, cc.baseBranch);
   }

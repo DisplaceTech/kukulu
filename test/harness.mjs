@@ -137,6 +137,9 @@ case "$1" in --version) exit 0 ;; esac
 if [ "$1 $2" = "pr view" ]; then
   if [ ! -f "$dir/pr.json" ]; then echo "no pull requests found for branch" >&2; exit 1; fi
   case " $* " in
+    *" title"*) if [ -f "$dir/view-title-fails" ]; then cat "$dir/view-title-fails" >&2; exit 1; fi ;;
+  esac
+  case " $* " in
     *" -q "*) sed -n 's/.*"url":"\\([^"]*\\)".*/\\1/p' "$dir/pr.json" ;;
     *) cat "$dir/pr.json" ;;
   esac
