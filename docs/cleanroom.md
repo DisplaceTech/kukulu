@@ -35,6 +35,11 @@ A project without the policy file pays nothing: both hooks exit at once, before 
 | `roles.distinct` | no, `"none"` | `"none"`, `"model"` or `"family"`: how far apart the implementer's and reviewer's models must be. `family` compares `familyOf` of the normalized model strings |
 | `mode` | no, `"clean-room"` | `"clean-room"` or `"control-positive"`. A control flight is given the prior art on purpose; its bundle can never pass as a clean-room one (see [Control mode](#control-mode)) |
 | `control.priorArt` | with `mode` `"control-positive"` only | Non-empty array of prefixes, resolved like `deny.paths`. Refused in clean-room mode, required in control mode |
+| `enforcement` | no, `"hook"` | `"hook"` or `"container+proxy"`: the level the flight must run under. `"container+proxy+audit"` is refused as the next release's level |
+| `sandbox.image` | with `container+proxy` only | `<name>@sha256:<64 hex>`. Required under `container+proxy`, refused under `hook`; a tag alone is refused. The all-zero digest in `templates/cleanroom.local-only.example.json` is a placeholder that `doctor` replaces |
+| `sandbox.mounts` | no, `[]` | `{ path, mode }` with `mode` exactly `"ro"`; the project is the only read-write mount |
+| `sandbox.egress` | no, `[]` | `host:port` strings the proxy allows besides the flight's runner endpoints, until lockdown |
+| `deny.packages` | no, `{}` | Prior-art package names per ecosystem (`cargo`, `npm`, `pypi`), each a non-empty array |
 | `protected` | no, `[]` | Extra prefixes that no write tool or write-family Bash command may touch, in addition to the always-protected set |
 
 ### What the guard decides
@@ -90,7 +95,7 @@ A positive-control flight (`"mode": "control-positive"`) is the same flight with
 | `seq` | 1-based, dense |
 | `prev` | the previous entry's `hash`; 64 zeros for `seq` 1 |
 | `at` | UTC ISO-8601 with milliseconds |
-| `kind` | `genesis`, `allowed`, `denied`, `human`, `gate`, `checkpoint`, `score`, `attest` or `resume` |
+| `kind` | `genesis`, `allowed`, `denied`, `human`, `gate`, `checkpoint`, `score`, `attest`, `resume`, `egress`, `stage` or `usage` (the last three are recorded by the sandbox's proxy, `kukulu_next` and the subagent hook respectively) |
 | `stage` | `plan`, `implement`, `fix`, `review`, `summarize`, `controller` or `null` |
 | `task` | the first in-progress task, else `null` |
 | `role` | the agent type, `session` for the main session, `operator` for a person |

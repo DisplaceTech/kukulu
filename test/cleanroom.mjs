@@ -19,7 +19,7 @@ import {
   splitSegments, shellWords, commandWord, isPathLike, tokenPath, canonicalPaths,
   evaluate, lockdownActive, NETWORK_COMMANDS, READ_FAMILY, WRITE_FAMILY, protectedPaths,
   coverageGaps, KNOWN_LIMITS,
-  normalizeModel, familyOf, controlPaths,
+  normalizeModel, familyOf, controlPaths, LOG_SOCKET_TIMEOUT_MS,
   generateKey, loadKey, keyFingerprint, CHECKPOINT_KEYS, signCheckpoint, verifyCheckpoint,
 } from "../mcp/cleanroom.mjs";
 
@@ -72,6 +72,38 @@ const pattern = (extra = {}) => ({ id: "p", pattern: "/build/", shouldMatch: ["/
   eq(normalizeModel("OpenRouter/deepseek/deepseek-v4-pro"), "deepseek-v4-pro", "normalizeModel strips every provider prefix");
   eq(normalizeModel("Prov,Mixed/Model-X"), "model-x", "...whether the separator is a slash or a comma");
   ok(familyOf("alpha-1") !== familyOf("beta-1"), "two unknown strings are their own families");
+}
+
+// ---------------------------------------------------------------- enforcement, sandbox and packages (P2-01)
+
+{
+  const digest = "sha256:" + "a".repeat(64);
+  const boxed = (extra = {}) => base({ enforcement: "container+proxy", sandbox: { image: `kukulu-sandbox@${digest}` }, ...extra });
+  const d = loadPolicy('{"version":1}');
+  eq(d.enforcement + "|" + JSON.stringify(d.sandbox) + "|" + JSON.stringify(d.deny.packages), 'hook|{"image":null,"mounts":[],"egress":[]}|{}', "defaults fill enforcement, sandbox and deny.packages");
+  eq(refusal(base({ enforcement: "container+proxy+audit" })), 'policy enforcement "container+proxy+audit" is 0.9.0\'s level; this release cannot run it', "container+proxy+audit is refused as 0.9.0's level");
+  eq(refusal(base({ enforcement: "vm" })), 'policy enforcement must be "hook" or "container+proxy" (got "vm")', "a bad enforcement refuses");
+  eq(refusal(base({ enforcement: "container+proxy" })), 'policy sandbox.image is required when enforcement is "container+proxy": the image as <name>@sha256:<digest>', "sandbox.image is required under container+proxy");
+  eq(refusal(base({ sandbox: { image: `x@${digest}` } })), 'policy sandbox.image is only legal when enforcement is "container+proxy"', "sandbox.image is refused under hook");
+  eq(refusal(boxed({ sandbox: { image: "kukulu-sandbox:latest" } })), 'policy sandbox.image must be <name>@sha256:<64 hex>; a tag alone (got "kukulu-sandbox:latest") does not pin the image', "a tag-only image refuses");
+  eq(refusal(boxed({ sandbox: { image: `kukulu-sandbox@${digest}`, mounts: [{ path: "tools/o", mode: "rw" }] } })), 'policy sandbox.mounts[0].mode must be "ro"; the project is the only read-write mount', "a read-write mount refuses");
+  eq(refusal(boxed({ sandbox: { image: `kukulu-sandbox@${digest}`, egress: ["example.com"] } })), "policy sandbox.egress[0] must be host:port", "a bad egress entry refuses");
+  like(refusal(boxed({ sandbox: { image: `kukulu-sandbox@${digest}`, other: 1 } })), /policy sandbox has an unknown key 'other'/, "an unknown sandbox key refuses");
+  like(refusal(base({ deny: { packages: { gem: ["x"] } } })), /policy deny\.packages has an unknown key 'gem'; the legal keys are cargo, npm, pypi/, "an unknown package ecosystem refuses");
+  like(refusal(base({ deny: { packages: { cargo: [] } } })), /policy deny\.packages\.cargo must be a non-empty array/, "an empty package list refuses");
+  const ok1 = loadPolicy(JSON.stringify(boxed({ sandbox: { image: `kukulu-sandbox@${digest}`, mounts: [{ path: "tools/o", mode: "ro" }], egress: ["example.com:443"] }, deny: { packages: { cargo: ["flate2"] } } })));
+  eq(ok1.sandbox.mounts[0].path + "|" + ok1.sandbox.egress[0] + "|" + ok1.deny.packages.cargo[0], "tools/o|example.com:443|flate2", "a full container policy loads");
+  const log = path.join(mkDir("kukulu-kinds-"), "log.jsonl");
+  for (const kind of ["egress", "stage", "usage"]) {
+    appendEntry(log, { kind, stage: "implement", role: "session", data: { x: 1 } });
+  }
+  eq(readEntries(log).map((e) => e.kind).join(","), "egress,stage,usage", "appendEntry accepts egress, stage and usage");
+  eq(KINDS.slice(-3).join(","), "egress,stage,usage", "KINDS gains them after resume");
+  eq(LOG_SOCKET_TIMEOUT_MS, 2000, "LOG_SOCKET_TIMEOUT_MS is exported");
+  const local = loadPolicy(fs.readFileSync(path.join(ROOT, "templates", "cleanroom.local-only.example.json"), "utf8"));
+  eq(local.enforcement + "|" + local.runners.locality + "|" + local.roles.distinct + "|" + local.sandbox.image.endsWith("0".repeat(64)), "container+proxy|local|family|true", "the local-only template loads");
+  const st = spawnSync(process.execPath, [path.join(ROOT, "scripts", "cleanroom-guard.mjs"), "--self-test", path.join(ROOT, "templates", "cleanroom.local-only.example.json")], { encoding: "utf8" });
+  eq(st.status, 0, "the local-only template passes the guard self-test");
 }
 
 // ---------------------------------------------------------------- control mode (P1-01)
@@ -245,7 +277,7 @@ const sample = (n) => ({ kind: "allowed", stage: "implement", task: "P0-01", rol
   eq(entryHash(second.prev, (({ hash, ...r }) => r)(second)), second.hash, "the hash is SHA-256 of prev, a newline and the canonical entry");
   eq(readEntries(log).length, 2, "readEntries returns both");
   eq(readEntries(path.join(path.dirname(log), "absent.jsonl")).length, 0, "...and none for an absent file");
-  eq(KINDS.length, 9, "there are nine entry kinds");
+  eq(KINDS.length, 12, "there are twelve entry kinds");
   eq(logPathFor("/p", {}), path.join("/p", ".kukulu", "cleanroom", "log.jsonl"), "the log lives under .kukulu/cleanroom/");
   eq(logPathFor("/p", { KUKULU_CLEANROOM_LOG: "/tmp/x.jsonl" }), "/tmp/x.jsonl", "...unless KUKULU_CLEANROOM_LOG says otherwise");
   let refused = null;

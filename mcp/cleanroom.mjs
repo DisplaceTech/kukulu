@@ -16,12 +16,14 @@ export class CleanroomError extends Error {
 }
 
 const TASK_ID = /^[PR]\d+-\d+$/;
-const POLICY_KEYS = ["version", "deny", "allow", "lockdown", "protected", "runners", "roles", "mode", "control"];
+const POLICY_KEYS = ["version", "deny", "allow", "lockdown", "protected", "runners", "roles", "mode", "control", "enforcement", "sandbox"];
+const SANDBOX_KEYS = ["image", "mounts", "egress"];
+const PACKAGE_ECOSYSTEMS = ["cargo", "npm", "pypi"];
 const CONTROL_KEYS = ["priorArt"];
 const RUNNERS_KEYS = ["allow", "locality"];
 const ROLES_KEYS = ["distinct"];
 const RUNNER_NAME = /^[a-z0-9][a-z0-9-]{0,39}$/;
-const DENY_KEYS = ["tools", "network", "paths", "pathPatterns", "words", "commandPatterns"];
+const DENY_KEYS = ["tools", "network", "paths", "pathPatterns", "words", "commandPatterns", "packages"];
 const ALLOW_KEYS = ["paths", "urls"];
 const LOCKDOWN_KEYS = ["after"];
 const PATTERN_KEYS = ["id", "pattern", "flags", "shouldMatch", "shouldNotMatch"];
@@ -150,9 +152,49 @@ export function loadPolicy(text) {
     throw new CleanroomError('policy control.priorArt is only legal when mode is "control-positive" (mode is "clean-room")');
   }
 
+  const enforcement = raw.enforcement ?? "hook";
+  if (enforcement === "container+proxy+audit") throw new CleanroomError('policy enforcement "container+proxy+audit" is 0.9.0\'s level; this release cannot run it');
+  if (enforcement !== "hook" && enforcement !== "container+proxy") {
+    throw new CleanroomError(`policy enforcement must be "hook" or "container+proxy" (got ${JSON.stringify(raw.enforcement)})`);
+  }
+  const sandbox = raw.sandbox === undefined ? {} : raw.sandbox;
+  if (!isObject(sandbox)) throw new CleanroomError("policy sandbox must be an object");
+  onlyKeys(sandbox, SANDBOX_KEYS, "sandbox");
+  if (enforcement === "container+proxy" && sandbox.image === undefined) {
+    throw new CleanroomError('policy sandbox.image is required when enforcement is "container+proxy": the image as <name>@sha256:<digest>');
+  }
+  if (enforcement === "hook" && sandbox.image !== undefined) throw new CleanroomError('policy sandbox.image is only legal when enforcement is "container+proxy"');
+  if (sandbox.image !== undefined && (typeof sandbox.image !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._/-]*@sha256:[0-9a-f]{64}$/.test(sandbox.image))) {
+    throw new CleanroomError(`policy sandbox.image must be <name>@sha256:<64 hex>; a tag alone (got ${JSON.stringify(sandbox.image)}) does not pin the image`);
+  }
+  if (sandbox.mounts !== undefined && !Array.isArray(sandbox.mounts)) throw new CleanroomError("policy sandbox.mounts must be an array of { path, mode }");
+  const mounts = (sandbox.mounts ?? []).map((m, i) => {
+    if (!isObject(m)) throw new CleanroomError(`policy sandbox.mounts[${i}] must be an object { path, mode }`);
+    onlyKeys(m, ["path", "mode"], `sandbox.mounts[${i}]`);
+    if (typeof m.path !== "string" || !m.path) throw new CleanroomError(`policy sandbox.mounts[${i}].path must be a non-empty string`);
+    if (m.mode !== "ro") throw new CleanroomError(`policy sandbox.mounts[${i}].mode must be "ro"; the project is the only read-write mount`);
+    return { path: m.path, mode: "ro" };
+  });
+  if (sandbox.egress !== undefined && !Array.isArray(sandbox.egress)) throw new CleanroomError("policy sandbox.egress must be an array of host:port strings");
+  const egress = (sandbox.egress ?? []).map((e, i) => {
+    if (typeof e !== "string" || !/^[A-Za-z0-9.-]+:\d{1,5}$/.test(e)) throw new CleanroomError(`policy sandbox.egress[${i}] must be host:port`);
+    return e;
+  });
+  const packages = {};
+  if (deny.packages !== undefined) {
+    if (!isObject(deny.packages)) throw new CleanroomError("policy deny.packages must be an object keyed by ecosystem (cargo, npm, pypi)");
+    onlyKeys(deny.packages, PACKAGE_ECOSYSTEMS, "deny.packages");
+    for (const [eco, names] of Object.entries(deny.packages)) packages[eco] = stringArray(names, `deny.packages.${eco}`);
+    for (const [eco, names] of Object.entries(packages)) {
+      if (!names.length) throw new CleanroomError(`policy deny.packages.${eco} must be a non-empty array of non-empty strings`);
+    }
+  }
+
   return {
     version: 1,
     mode,
+    enforcement,
+    sandbox: { image: sandbox.image ?? null, mounts, egress },
     control: { priorArt: control.priorArt ? control.priorArt.slice() : [] },
     deny: {
       tools: stringArray(deny.tools, "deny.tools"),
@@ -161,6 +203,7 @@ export function loadPolicy(text) {
       pathPatterns: patternList(deny.pathPatterns, "deny.pathPatterns"),
       words: stringArray(deny.words, "deny.words"),
       commandPatterns: patternList(deny.commandPatterns, "deny.commandPatterns"),
+      packages,
     },
     allow: {
       paths: stringArray(allow.paths, "allow.paths"),
@@ -210,7 +253,10 @@ export function policyHash(bytes) {
 // ---------------------------------------------------------------- the hash chain
 
 export const ENTRY_KEYS = ["seq", "prev", "at", "kind", "stage", "task", "role", "model", "session", "tool", "target", "decision", "reason"];
-export const KINDS = ["genesis", "allowed", "denied", "human", "gate", "checkpoint", "score", "attest", "resume"];
+export const KINDS = ["genesis", "allowed", "denied", "human", "gate", "checkpoint", "score", "attest", "resume", "egress", "stage", "usage"];
+
+// ⚠️ ASSUMPTION: how long a hook waits for the log socket before it fails closed.
+export const LOG_SOCKET_TIMEOUT_MS = 2000;
 export const ZERO_HASH = "0".repeat(64);
 
 // ⚠️ ASSUMPTION: a logged target longer than this is cut; cleanflate's log used the same bound.

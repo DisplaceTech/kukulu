@@ -16,6 +16,7 @@ All notable changes to this plugin. Format follows
 - The offline verifier reports a passing control bundle as `CONTROL (positive)` and exits 3, never as a pass; `--expect clean-room|control-positive` names the mode a bundle must have, and the genesis and manifest record `mode` (G-04, B-01).
 - A verified control bundle can be the positive similarity pair by reference: `cleanroom.similarity` pairs gain `control`, which `kukulu_similarity` verifies and records in `similarity.json` (G-04, B-02).
 - `scripts/publish-bundle.mjs`, which writes a publishable copy of a verified bundle with `SHA256SUMS` and `VERIFY.txt` and re-checks one, and `docs/publishing.md` (G-05, B-03).
+- Clean-room policy keys `enforcement`, `sandbox.image`, `sandbox.mounts`, `sandbox.egress` and `deny.packages`, the log kinds `egress`, `stage` and `usage`, and `templates/cleanroom.local-only.example.json` (G-06, G-08).
 
 ## [0.7.2] — 2026-10-26
 
