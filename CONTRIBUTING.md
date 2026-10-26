@@ -20,6 +20,7 @@ Every behaviour change to the server therefore needs a test, because the thing u
 | `scripts/lint.sh` | Dependency-free syntax and manifest lint |
 | `scripts/check-names.mjs` | Fails on a misplaced kahakō or an ASCII spelling of the display name in prose; run by `scripts/lint.sh` |
 | `scripts/model-identity.mjs` | Hashes a model's weight files into one digest, for the global config's `runners.<name>.identities`; run on the inference host |
+| `scripts/publish-bundle.mjs` | Writes a publishable copy of a verified attestation bundle with `SHA256SUMS` and `VERIFY.txt`, and re-checks one with `--check` |
 | `scripts/check-diagrams.mjs` | Parses every Mermaid block; CI-only, needs mermaid + jsdom |
 | `scripts/check-site.mjs` | Static checks for the site's SPEC rules 1–14, with `--self-test` and `--report`; run by `scripts/lint.sh` and `npm run check:site` |
 | `scripts/check-site-browser.mjs` | Layout, console and font checks in headless Chrome; needs Chrome or Chromium; `npm run check:site:browser` |

@@ -272,6 +272,7 @@ Everything is on disk and committed, so `/kukulu:go-flight` can be re-run from a
 ## Documentation map
 
 - [**docs/architecture.md**](./docs/architecture.md): why the pipeline is split this way, what each stage may and may not do, and where state lives
+- [**docs/publishing.md**](./docs/publishing.md): publishing an attestation bundle with `scripts/publish-bundle.mjs`, and re-checking a published copy
 - [**docs/mcp-tools.md**](./docs/mcp-tools.md): every tool, argument, return field and refusal
 - [**docs/routing.md**](./docs/routing.md): per-role model routing, covering the global config file, profiles, and running stages through a router like claude-code-router
 - [**docs/writing-specs.md**](./docs/writing-specs.md): how to write a `SPEC.md` the planner can turn into a usable plan
