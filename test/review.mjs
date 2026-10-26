@@ -1068,6 +1068,59 @@ for (const [label, args, policies, expect, mergeFails] of [
   }, opts);
 }
 
+// ---------------------------------------------------------------- the CHANGELOG decides breaking (C-03)
+
+const changelog = (...entries) => `# Changelog\n\n${entries.join("\n")}`;
+const BREAKING_ENTRY = "## [0.2.0] - 2026-01-01\n\n### Changed\n\n- x\n\n### Breaking changes\n\n- y\n";
+const PLAIN_ENTRY = "## [0.2.0] - 2026-01-01\n\n### Changed\n\n- x\n";
+
+async function finalizeWithChangelog(text, args) {
+  const { repo, opts } = finalizeRepo({ signed: true });
+  if (text !== null) {
+    writeFile(repo, "CHANGELOG.md", text);
+    git(repo, ["add", "-A"]);
+    git(repo, ["commit", "-qm", "docs: changelog"]);
+  }
+  let out;
+  await withServer(repo, async ({ call }) => {
+    const headBefore = git(repo, ["rev-parse", "HEAD"]);
+    const stateBefore = readFile(repo, ".kukulu/state.json");
+    const summaryBefore = readFile(repo, "docs/SUMMARY.md");
+    out = { repo, res: await call("kukulu_pr_finalize", args), unchanged: () => git(repo, ["rev-parse", "HEAD"]) === headBefore && readFile(repo, ".kukulu/state.json") === stateBefore && readFile(repo, "docs/SUMMARY.md") === summaryBefore };
+  }, opts);
+  return out;
+}
+
+{
+  const { res } = await finalizeWithChangelog(changelog(BREAKING_ENTRY, "## [0.1.0] - 2025-01-01\n\n### Added\n\n- z\n"), {});
+  eq(res.breaking + "|" + res.merge + "|" + res.breakingSource, "true|skipped: breaking|changelog", "a CHANGELOG entry with Breaking changes is breaking");
+}
+{
+  const { res } = await finalizeWithChangelog(changelog(PLAIN_ENTRY, "## [0.1.0]\n\n### Breaking changes\n\n- old\n"), {});
+  eq(res.breaking + "|" + res.merge + "|" + res.breakingSource, "false|enabled|changelog", "an entry without it is not breaking");
+}
+{
+  const { repo, opts } = finalizeRepo({ signed: true });
+  writeFile(repo, "CHANGELOG.md", changelog(PLAIN_ENTRY));
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-qm", "docs: changelog"]);
+  const head = git(repo, ["rev-parse", "HEAD"]);
+  const state = readFile(repo, ".kukulu/state.json");
+  const summary = readFile(repo, "docs/SUMMARY.md");
+  await withServer(repo, async ({ call }) => {
+    isError(await call("kukulu_pr_finalize", { breaking: true }), /^breaking: true disagrees with CHANGELOG\.md's newest entry \(## \[0\.2\.0\] - 2026-01-01\), which has no a "### Breaking changes" section; the CHANGELOG decides\. Call kukulu_pr_finalize again without breaking, and record the disagreement in SUMMARY\.md's Breaking call as a note\.$/, "a disagreeing breaking refuses");
+    ok(git(repo, ["rev-parse", "HEAD"]) === head && readFile(repo, ".kukulu/state.json") === state && readFile(repo, "docs/SUMMARY.md") === summary, "...and writes nothing");
+  }, opts);
+}
+eq((await finalizeWithChangelog(changelog(BREAKING_ENTRY), { breaking: true })).res.breakingSource, "changelog", "an agreeing breaking passes");
+{
+  const { repo, opts } = finalizeRepo({ signed: true });
+  await withServer(repo, async ({ call }) => {
+    isError(await call("kukulu_pr_finalize", {}), /breaking is required on the first call/, "no CHANGELOG and no breaking gives the existing refusal");
+  }, opts);
+}
+eq((await finalizeWithChangelog(changelog("## [Unreleased]\n\n### Breaking changes\n\n- y\n\n" + PLAIN_ENTRY), {})).res.breaking, true, "[Unreleased] counts as the newest entry when it is first");
+
 // ---------------------------------------------------------------- finalize waits only when signatures are expected (B-03)
 
 for (const [label, policies, stateExtra, wantSignatures, wantAwait] of [

@@ -12,6 +12,7 @@ All notable changes to this plugin. Format follows
 
 ### Changed
 
+- `kukulu_pr_finalize` takes its breaking verdict from `CHANGELOG.md`'s newest entry when there is one, and `breaking` is optional then (0.7.1 SUMMARY's Breaking call).
 - `policies.archive` now defaults to `true`; set it to `false` to keep a finished flight in place (owner decision).
 - The merge commit's subject is the PR's title and number (a beta user's request).
 - The draft PR is titled `<flight>: <spec title>` (new optional key `prTitle` overrides it) instead of `Build: <branch>` (a beta user's request).

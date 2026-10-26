@@ -267,6 +267,7 @@ like(read("skills/pull-feedback/SKILL.md"), /how many items came from each/, "..
   like(sum, /kukulu_flight_archive/, "the summarize skill archives when policies.archive is true");
   like(sum, /archive: true/, "...keyed on the archive field of the summary result");
   like(sum, /kukulu_pr_finalize\(\{ breaking \}\)/, "the summarize skill ends with kukulu_pr_finalize");
+  ok(/CHANGELOG\.md/.test(sum.split("Breaking call")[1] || "") && sum.includes("kukulu_pr_finalize({})"), "the summarize skill lets the CHANGELOG decide breaking");
   like(sum, /Never pass `resign`/, "...and never passes resign");
   for (const status of ["AWAITING SIGNING", "AUTO-MERGE ON", "READY"]) like(sum, new RegExp(status), `...its final message can say ${status}`);
   like(sum, /Codebase notes/, "the summarize skill lifts Codebase notes");

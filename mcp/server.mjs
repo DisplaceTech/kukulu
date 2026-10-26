@@ -3990,6 +3990,22 @@ function finalizeConfig(st) {
   return cfg();
 }
 
+/**
+ * Whether CHANGELOG.md's newest entry has a "### Breaking changes" section:
+ * null without a CHANGELOG or an entry (a line starting `## [`), else
+ * `{ breaking, heading }`. The entry runs to the next `## ` line.
+ */
+function changelogVerdict() {
+  const file = path.join(ROOT, "CHANGELOG.md");
+  if (!exists(file)) return null;
+  const lines = read(file).split("\n");
+  const start = lines.findIndex((l) => l.startsWith("## ["));
+  if (start === -1) return null;
+  let end = lines.findIndex((l, i) => i > start && l.startsWith("## "));
+  if (end === -1) end = lines.length;
+  return { breaking: lines.slice(start + 1, end).some((l) => /^###\s+Breaking changes\s*$/i.test(l)), heading: lines[start] };
+}
+
 function prFinalize({ breaking, resign } = {}) {
   const st = loadState();
   let summarized = st.summarized === true;
@@ -4003,7 +4019,15 @@ function prFinalize({ breaking, resign } = {}) {
   if (!summarized) throw new ToolError("the summary is not committed yet; call kukulu_summary_commit first, then kukulu_pr_finalize");
   if (breaking !== undefined && typeof breaking !== "boolean") throw new ToolError("breaking must be a boolean");
   if (resign !== undefined && typeof resign !== "boolean") throw new ToolError("resign must be a boolean");
-  const brk = breaking !== undefined ? breaking : st.breaking;
+  // The CHANGELOG, when the repository keeps one, decides; a caller that disagrees is told so instead of being obeyed (SPEC C-03).
+  const verdict = changelogVerdict();
+  if (verdict && breaking !== undefined && breaking !== verdict.breaking) {
+    throw new ToolError(
+      `breaking: ${breaking} disagrees with CHANGELOG.md's newest entry (${verdict.heading}), which ${verdict.breaking ? "has" : "has no"} a "### Breaking changes" section; the CHANGELOG decides. Call kukulu_pr_finalize again without breaking, and record the disagreement in SUMMARY.md's Breaking call as a note.`,
+    );
+  }
+  const brk = verdict ? verdict.breaking : breaking !== undefined ? breaking : st.breaking;
+  const breakingSource = verdict ? "changelog" : "caller";
   if (typeof brk !== "boolean") throw new ToolError("breaking is required on the first call: pass true or false");
   const cc = finalizeConfig(st);
   // A post-archive state has no signing of its own; the archived copy recorded it.
@@ -4040,7 +4064,7 @@ function prFinalize({ breaking, resign } = {}) {
       gitCommitIfChanged(paths, "chore: awaiting signing", { stage: "summarize" });
     });
     return {
-      signed: check.signed, unsigned: check.unsigned, ready: false, merge: "skipped: awaiting signing", signatures, breaking: brk,
+      signed: check.signed, unsigned: check.unsigned, ready: false, merge: "skipped: awaiting signing", signatures, breaking: brk, breakingSource,
       awaitingSigning: st.awaitingSigning, resigned: false,
       push: pushBranch(branch, cc.policies.push), pr: prState(cc.policies, cc.baseBranch), next: nextSteps(mb),
     };
@@ -4157,7 +4181,7 @@ function prFinalize({ breaking, resign } = {}) {
     pr = prState(cc.policies, cc.baseBranch);
   }
   return {
-    signed: after.signed, unsigned: after.unsigned, signatures, ready: typeof pr === "object" ? pr.draft === false : false, merge, breaking: brk,
+    signed: after.signed, unsigned: after.unsigned, signatures, ready: typeof pr === "object" ? pr.draft === false : false, merge, breaking: brk, breakingSource,
     awaitingSigning: null, resigned, ...(resignPush !== undefined ? { resignPush } : {}), push, pr,
   };
 }
@@ -4646,7 +4670,7 @@ const TOOLS = [
     fn: attest,
   },
   { name: "kukulu_flight_archive", description: "Archive a summarized flight so the repository can run its next flight: move PLAN, PROGRESS, HANDOFF, REVIEW, SUMMARY, kukulu.json, .kukulu/state.json and .kukulu/feedback.jsonl into docs/flights/<slug>/ and docs/attestation/ into docs/flights/<slug>/attestation/ (copying SPEC.md, which stays), write a fresh state.json, commit 'chore: archive flight <slug>' and push per policy. slug defaults to the 'flight' key in docs/kukulu.json. Refused unless the flight is summarized, no run is armed, and the tree is clean. All-or-nothing. Returns { slug, dir, moved, copied, commit, push }.", inputSchema: S({ slug: { type: "string", description: "lowercase letters, digits and - (at most 40 characters); defaults to docs/kukulu.json's flight" } }), fn: flightArchive },
-  { name: "kukulu_pr_finalize", description: "End a flight. Checks that every commit since the merge base with baseBranch is signed (judged from the commits, not from state): if so, or if the policy does not expect signatures (policies.signing off, or auto with signing never configured; the result says so in signatures), marks the draft PR ready and, unless breaking is true, enables auto-merge (gh pr merge --auto, never an immediate merge), per policies.finalize and policies.mergeMethod. If any commit is unsigned and signatures are expected the PR stays a draft, state.awaitingSigning is recorded, the steps are appended to SUMMARY.md, and kukulu_next reports done until it is resolved. breaking is required on the first call. Returns { signed, unsigned, ready, merge, signatures, breaking, awaitingSigning, resigned, push, pr, next? }; signatures is required or not required: <why>; merge is enabled, skipped: breaking, skipped: policy, skipped: no pull request, skipped: awaiting signing or unavailable: <why>.", inputSchema: S({ breaking: { type: "boolean", description: "whether this flight is a breaking change, so its PR must not auto-merge; required on the first call, remembered after" }, resign: { type: "boolean", description: "HUMAN-INITIATED ONLY: never pass this on your own. Re-sign every commit of the branch (git rebase -f --rebase-merges --gpg-sign), force-push with lease, then finalize. For an operator who has unlocked the signing agent after an awaiting-signing result" } }), fn: prFinalize },
+  { name: "kukulu_pr_finalize", description: "End a flight. Checks that every commit since the merge base with baseBranch is signed (judged from the commits, not from state): if so, or if the policy does not expect signatures (policies.signing off, or auto with signing never configured; the result says so in signatures), marks the draft PR ready and, unless breaking is true, enables auto-merge (gh pr merge --auto, never an immediate merge), per policies.finalize and policies.mergeMethod. If any commit is unsigned and signatures are expected the PR stays a draft, state.awaitingSigning is recorded, the steps are appended to SUMMARY.md, and kukulu_next reports done until it is resolved. breaking is required on the first call unless CHANGELOG.md decides it. Returns { signed, unsigned, ready, merge, signatures, breaking, breakingSource, awaitingSigning, resigned, push, pr, next? }; signatures is required or not required: <why>; merge is enabled, skipped: breaking, skipped: policy, skipped: no pull request, skipped: awaiting signing or unavailable: <why>.", inputSchema: S({ breaking: { type: "boolean", description: "whether this flight is a breaking change, so its PR must not auto-merge; optional when CHANGELOG.md decides (its newest entry has or lacks a Breaking changes section; a disagreeing value is refused), required on the first call otherwise, remembered after" }, resign: { type: "boolean", description: "HUMAN-INITIATED ONLY: never pass this on your own. Re-sign every commit of the branch (git rebase -f --rebase-merges --gpg-sign), force-push with lease, then finalize. For an operator who has unlocked the signing agent after an awaiting-signing result" } }), fn: prFinalize },
   {
     name: "kukulu_agents_sync",
     description: "Generate .claude/agents/kukulu-<role>.md from the merged routing config (plugin defaults < global file < profile < docs/kukulu.json roles). Writes only files whose content changed, excludes them from git, and returns the resolved per-role table. `restartRequired` is true only when this is the directory's first population and a changed role's model cannot be named directly by the Agent tool. Also ensures the MCP allow rule in .claude/settings.local.json (`permissions` in the result), without which a subagent's first kukulu_status call is denied under any permission mode.",

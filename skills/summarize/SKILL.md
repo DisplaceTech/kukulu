@@ -21,7 +21,7 @@ Add these to the list, after the sections above:
 
 9. **Suggested CLAUDE.md additions**: every item under `## Codebase notes` in `docs/HANDOFF.md` (project lessons such as a framework footgun), lifted as proposed additions to the project's `CLAUDE.md`. Write "None" when there are none.
 10. **Advisory mutation survivors**: the survivors the reviewer put under `## Notes` in `docs/REVIEW.md` as lying outside the round's diff, carried over verbatim. Write "None" when there are none.
-11. **Breaking call**: one line, `Breaking: yes|no — <reason>`. It is `yes` when `docs/SPEC.md` or `CHANGELOG.md` lists breaking changes for this work, or when the flight changed a public interface, a config default, or behavior an existing user relies on. When unsure, it is `yes`.
+11. **Breaking call**: one line, `Breaking: yes|no — <reason>`. It is `yes` when `docs/SPEC.md` or `CHANGELOG.md` lists breaking changes for this work, or when the flight changed a public interface, a config default, or behavior an existing user relies on. When unsure, it is `yes`. When the repository has a `CHANGELOG.md`, the CHANGELOG decides: the line states its verdict and the reason (`yes` when the newest entry has a `### Breaking changes` section, `no` when it has none), followed by `Note:` and your own disagreement if you have one.
 
 Pass the whole document as `content` to `kukulu_summary_commit`. The tool writes `docs/SUMMARY.md` itself and commits it as `chore: build summary`, marks the flight complete, and returns `pr` (the branch's pull request as `{ url, state, draft, base }`, or `"none"`, `"skipped: policy"` or `"unknown: <why>"`) and `archive`. Never call `Write` or `Edit`, or use a shell redirect, for `docs/SUMMARY.md`: the tool does it, and a refused `Write` is then not a problem you can have. A PR object with `expectedBase` targets the wrong branch; say so.
 
@@ -31,12 +31,12 @@ Pass the whole document as `content` to `kukulu_summary_commit`. The tool writes
 
 If the result has `archive: true` (`policies.archive`), call `kukulu_flight_archive` with no arguments. It moves the flight's artifacts into `docs/flights/<slug>/`. If it refuses, print the refusal and go on to the last call anyway.
 
-Your last tool call is `kukulu_pr_finalize({ breaking })`, with `breaking` true or false from your Breaking call. It marks the draft PR ready and, unless the flight is breaking, turns on auto-merge; it never merges anything itself. Never pass `resign`: re-signing history is for a human to ask for, after unlocking their signing agent, and no agent may ask on its own.
+Your last tool call is `kukulu_pr_finalize({})` when the repository has a `CHANGELOG.md` (the tool reads the verdict from its newest entry and refuses a `breaking` that disagrees), else `kukulu_pr_finalize({ breaking })`, with `breaking` true or false from your Breaking call. It marks the draft PR ready and, unless the flight is breaking, turns on auto-merge; it never merges anything itself. Never pass `resign`: re-signing history is for a human to ask for, after unlocking their signing agent, and no agent may ask on its own.
 
 Print a final message starting with `FLIGHT COMPLETE`, then the merge line, then exactly one status:
 
 - `AWAITING SIGNING` followed by the tool's `next` text verbatim, when `awaitingSigning` is set;
-- otherwise `AUTO-MERGE ON` when `merge` is `"enabled"`;
+- otherwise `AUTO-MERGE ON` when `merge` starts with `enabled`;
 - otherwise `READY` when `ready` is true;
 - otherwise `PR UNCHANGED: <merge>`.
 
