@@ -566,3 +566,35 @@ Derived from docs/SPEC.md v0.7.2 on 2026-10-26. SPEC.md wins over this file.
 - B-04 does not say what happens under `required` when `commit.gpgsign` is not set. Resolution: no probe and today's plan reason, because B-01's probe runs only when signing is in effect; `kukulu_run_start` still refuses.
 - D-03 describes "differing blob ids" from `git diff --raw HEAD`, whose working-tree id is always zeros. Resolution: the working-tree blob is hashed for the comparison.
 - §5.1 calls `policies.archive`'s `true` an owner decision and asks CLAUDE.md to drop it from the ASSUMPTION list. The 0.7.1 SUMMARY's "Assumptions still in play" listed it too; it is history and stays.
+
+## Review fixes (round 1)
+
+### R1-01: The PR's gitleaks check passes: allowlist the fake signer key in the suites that use it
+
+**Goal:** The secret-scan workflow's gitleaks check passes on this PR's commit range, by extending .gitleaks.toml's narrow fake-signer allowlist to test/state.mjs and test/implement.mjs, which write the same fake key 0123456789ABCDEF (lines added in 9c1e707 and b080d17).
+**Files touched:** .gitleaks.toml
+**Design constraints:** Keep the allowlist narrow: the same `condition = "AND"`, the same `regexes = ['''0123456789ABCDEF''']`, and only the paths widened to `^test/(harness|review|state|implement)\.mjs$`. Update the comment above it to name the four suites. Never rewrite history. Never add a `.gitleaksignore` or disable the generic-api-key rule. No other file changes.
+**Acceptance tests:** The CI check named `gitleaks` (secret-scan workflow, step "Scan a pull request's commits") passes on the pushed branch. Locally, `gitleaks git --no-banner --redact --log-opts="$(git merge-base main HEAD)..HEAD" .` reports no leaks; today it reports 2: test/state.mjs:131 at 9c1e707 and test/implement.mjs:1150 at b080d17. `pre-commit run --all-files` still passes.
+**Out of scope:** Refactoring the tests to share the harness's fake-signer config; any other gitleaks rule or path; CI workflow files.
+**Verification:** kukulu_verify, plus the local `gitleaks git` range scan above (gitleaks is on PATH as /usr/local/bin/gitleaks). Push, so that round 2's prChecks shows gitleaks passing.
+**Depends on:** none
+
+### R1-02: Test B-02's kept fallback record and C-01's 120-character title cut
+
+**Goal:** The two SPEC requirements no test covers get tests in test/implement.mjs. B-02: on an already-started run, a re-probe whose operator signing is not configured keeps the earlier off (...) record and puts the local commit.gpgsign false back. C-01: the derived PR title is cut to 120 characters.
+**Files touched:** test/implement.mjs
+**Design constraints:** SPEC B-02 ("A re-probe never overwrites an off (commit signing failed: ...) or off (probe failed: ...) record with \"none\": if the operator's setting is not configured, the earlier record stays") and C-01 ("The title is cut to 120 characters"); CLAUDE.md signing-tests protocol: give the server an isolated, empty GIT_CONFIG_GLOBAL temp file, and never touch the developer's signing. Write any non-ASCII character in the test source as a Unicode escape. Change mcp/server.mjs only if a new test exposes a real bug, and then say so in the commit body.
+**Acceptance tests:** (1) In test/implement.mjs, "a resumed run with no operator signing keeps the fallback record". Setup: an already-started run with state signingOverride: true and signing "off (commit signing failed: timed out)", a repo-local commit.gpgsign false, and an empty temp GIT_CONFIG_GLOBAL. Call kukulu_run_start. Assert: alreadyStarted is true; signing equals "off (commit signing failed: timed out)"; state.json's signing is unchanged and signingOverride is still true; `git config --local --get commit.gpgsign` reads false; HEAD did not move (no chore: signing re-probed commit). It must fail if reprobeSigning's `git config --local commit.gpgsign false` put-back is removed, and if its `outcome === "none"` branch is skipped. (2) "a derived PR title is cut to 120 characters". Setup: a SPEC heading whose derived `<flight>: <title>` exceeds 120 code points and contains at least one non-ASCII character before position 120. Assert: the `--title` that the fake gh records in calls.log, and run_finish's prTitle, are exactly the first 120 code points. It must fail if prTitleFor returns the title uncut.
+**Out of scope:** Any change to signing or title behavior; the fresh-path and validation survivors (the next task).
+**Verification:** kukulu_verify. Check each new test against its mutant with kukulu_mutate (targeted suite, filter implement).
+**Depends on:** none
+
+### R1-03: Cover the remaining mcp/server.mjs mutation survivors (fresh-path none, prTitle code points, separators, gh fallback trigger)
+
+**Goal:** Every mutant of mcp/server.mjs that survived round 1's sampling, beyond the two SPEC gaps of the previous task, is killed by a test in the suite that owns the tool.
+**Files touched:** test/implement.mjs, test/routing.mjs, test/state.mjs
+**Design constraints:** PLAN Decisions for B-02 (a fresh run whose lifted override finds no operator signing records "none" and deletes signingOverride), C-01 (lengths counted in code points) and SPEC D-01 (`/unknown flag:? --json/i`). CLAUDE.md signing-tests protocol. Recorded gh output stays in test/fixtures/gh/: derive any stderr variant at runtime from pr-checks-unknown-flag.txt, never inline a new recorded body. Write astral characters in test source as \u{...} escapes. No change to mcp/server.mjs unless a test exposes a bug.
+**Acceptance tests:** Survivors to kill: (a) Mutant: deleting `else if (st.signing === "none") delete st.signingOverride;` in startRun. Test in test/implement.mjs, "an archived flight's override with no operator signing records none and drops the override": a post-archive state with signingOverride: true, a local commit.gpgsign false and an empty GIT_CONFIG_GLOBAL; run_start returns signing "none", state has no signingOverride, and the local commit.gpgsign is unset. (b) Mutant: `[...t].length > 120` changed to `t.length > 120` in cfgFrom's prTitle check. Test in test/routing.mjs, "a prTitle of 61 astral characters is accepted, counted in code points": 61 copies of \u{1F600} is 122 UTF-16 units. (c) Mutant: the separator class `[—–:-]` narrowed to the em dash. Tests in test/implement.mjs, "the derived title strips an en dash, colon or hyphen separator and a bare Spec": headings `# Widget 1.0 – Specification`, `# Widget 1.0: Specification` and `# Widget 1.0 - Spec` each give `w-1: Widget 1.0`. (d) Mutant: `/unknown flag:? --json/i` narrowed to `/unknown flag: --json/`. Test in test/state.mjs, "prChecks falls back on an unknown flag message without the colon or in another case": the fixture's stderr with `unknown flag:` rewritten at runtime to `Unknown flag` still gives via: "gh api".
+**Out of scope:** Behavior changes; mutants in other files; widening D-01's trigger.
+**Verification:** kukulu_verify. For each of (a) to (d), kukulu_mutate with the same find/replace, targeted suite and filter implement, routing or state, reports killed.
+**Depends on:** R1-02

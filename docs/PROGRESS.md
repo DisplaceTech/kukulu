@@ -26,6 +26,9 @@ Started: 2026-10-26T14:17:50.269Z
 - [x] P3-03 kukulu_mutate says what kind of change it restored
 - [x] P3-04 CHANGELOG 0.7.2, the version and the feedback headers
 - [x] P3-05 Phase 3 end: push and record the manual check
+- [ ] R1-01 The PR's gitleaks check passes: allowlist the fake signer key in the suites that use it
+- [ ] R1-02 Test B-02's kept fallback record and C-01's 120-character title cut
+- [ ] R1-03 Cover the remaining mcp/server.mjs mutation survivors (fresh-path none, prTitle code points, separators, gh fallback trigger)
 
 ## Log
 

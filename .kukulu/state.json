@@ -1,8 +1,8 @@
 {
-  "round": 0,
-  "implemented": true,
-  "reviewed": false,
-  "verdict": null,
+  "round": 1,
+  "implemented": false,
+  "reviewed": true,
+  "verdict": "CHANGES REQUESTED",
   "summarized": false,
   "halted": null,
   "preexistingUntracked": [],
@@ -17,7 +17,21 @@
     "syncBase": true
   },
   "signing": "on",
-  "rounds": [],
+  "rounds": [
+    {
+      "round": 1,
+      "fixTasks": 3,
+      "unblocked": 0,
+      "verdict": "CHANGES REQUESTED",
+      "nonConverging": false,
+      "sources": {
+        "review": 2,
+        "mutation": 1,
+        "blocked": 0
+      },
+      "at": "2026-10-26T17:14:07.239Z"
+    }
+  ],
   "archived": {
     "slug": "v0-7-1",
     "dir": "docs/flights/v0-7-1",
