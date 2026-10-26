@@ -8,7 +8,7 @@ import os from "node:os";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import {
-  finish, ok, eq, like, isError, ROOT, plannedRepo, cleanroomRepo, withServer, runHook, mkDir, writeFile, readFile, hasFile, git, subject, testKeyFor, addPlan, commitTask, setState, tempPlugin, markTasks, startServer, logCall,
+  finish, ok, eq, like, isError, ROOT, plannedRepo, cleanroomRepo, withServer, runHook, mkDir, writeFile, readFile, hasFile, git, subject, testKeyFor, addPlan, commitTask, setState, tempPlugin, markTasks, startServer, logCall, buildBundle,
 } from "./harness.mjs";
 import { spawn, spawnSync } from "node:child_process";
 import { createHash as sha, generateKeyPairSync } from "node:crypto";
@@ -1714,6 +1714,60 @@ eq(LANGUAGES.join(","), "rust,c,cpp,go,python,javascript,typescript,java,php", "
     const noList = generalRepo(SIM({ identExclusions: "docs/idents.txt" }));
     await withServer(noList, async ({ call }) => {
       isError(await call("kukulu_similarity"), /identExclusions names docs\/idents\.txt, which does not exist/, "...for a missing exclusion list");
+    });
+  }
+
+  // the positive pair's control bundle (P1-03)
+  {
+    const leftRepo = mkDir("kukulu-control-left-");
+    fs.cpSync(FIX("b"), leftRepo, { recursive: true });
+    git(leftRepo, ["init", "-q", "-b", "main"]);
+    git(leftRepo, ["config", "user.email", "t@example.com"]);
+    git(leftRepo, ["config", "user.name", "T"]);
+    git(leftRepo, ["add", "-A"]);
+    git(leftRepo, ["commit", "-qm", "control result"]);
+    const headSha = git(leftRepo, ["rev-parse", "HEAD"]);
+    const bundle = (opts) => buildBundle(path.join(mkDir("kukulu-control-bundle-"), "bundle"), opts);
+    const withControl = (control, left = leftRepo) => SIM({ pairs: SIM().pairs.map((p) => (p.role === "positive" ? { ...p, left, control } : p)) });
+
+    const good = bundle({ mode: "control-positive", head: headSha });
+    const repo = generalRepo(withControl(good.dir));
+    await withServer(repo, async ({ call }) => {
+      const r = await call("kukulu_similarity");
+      ok(!r.error, "a positive pair referencing a verified control bundle scores" + (r.error ? ": " + r.error : ""));
+      const json = JSON.parse(readFile(repo, ".kukulu/cleanroom/similarity.json"));
+      const positive = json.config.pairs.find((p) => p.role === "positive");
+      eq(positive.control.manifest, createHash("sha256").update(fs.readFileSync(path.join(good.dir, "manifest.json"))).digest("hex"), "similarity.json records the control manifest's SHA-256");
+      eq(positive.control.head + "|" + positive.control.fingerprint, `${headSha}|${good.fingerprint}`, "...the head and the signer's fingerprint");
+      eq(json.config.pairs.find((p) => p.role === "negative").control, undefined, "...and no control on the other pairs");
+    });
+
+    const clean = bundle({ head: headSha });
+    const wrongMode = generalRepo(withControl(clean.dir));
+    await withServer(wrongMode, async ({ call }) => {
+      const e = await call("kukulu_similarity");
+      isError(e, /^the positive pair's control bundle .* does not verify as a positive control: mode: the bundle is clean-room, expected control-positive/, "a clean-room bundle as control refuses");
+      ok(!hasFile(wrongMode, "docs/SIMILARITY.md"), "...before any write");
+    });
+
+    const stale = bundle({ mode: "control-positive", head: "c".repeat(40) });
+    const mismatch = generalRepo(withControl(stale.dir));
+    await withServer(mismatch, async ({ call }) => {
+      isError(await call("kukulu_similarity"), new RegExp(`the positive pair's left side .* is at ${headSha}, but the control bundle was made at ${"c".repeat(40)}; check out the control flight's result there`), "a head mismatch refuses");
+    });
+
+    const missing = generalRepo(withControl(path.join(mkDir("kukulu-nobundle-"), "none")));
+    await withServer(missing, async ({ call }) => {
+      isError(await call("kukulu_similarity"), /does not verify as a positive control: verify\.mjs is missing from it/, "a control directory without a bundle refuses");
+    });
+
+    const onTest = plannedRepo({ config: { cleanroom: { similarity: SIM({ pairs: SIM().pairs.map((p) => (p.role === "test" ? { ...p, control: "x" } : p)) }) } } });
+    await withServer(onTest, async ({ call }) => {
+      isError(await call("kukulu_status"), /pairs\[2\]\.control is only legal on the pair with role "positive"/, "control on a test pair refuses at config load");
+    });
+    const emptyControl = plannedRepo({ config: { cleanroom: { similarity: withControl("") } } });
+    await withServer(emptyControl, async ({ call }) => {
+      isError(await call("kukulu_status"), /pairs\[1\]\.control must be a non-empty string: the directory of a verified control bundle/, "an empty control refuses");
     });
   }
 

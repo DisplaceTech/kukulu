@@ -400,7 +400,7 @@ const sha256Of = (bytes) => createHash("sha256").update(bytes).digest("hex");
  * `opts.checkpointKey` signs the second checkpoint instead (to build a bad one),
  * `opts.policyText` is the policy. `opts.clock()` replaces the time entries are stamped with,
  * `opts.extra(log)` appends more entries (after the first checkpoint), `opts.commits` is commits.txt,
- * `opts.gaps` and `opts.idleGapHours` are the manifest's coverage, `opts.cleanroomHash` (default none, the 0.7.0 shape) is pinned in the genesis entry and the manifest's plugin object, `opts.similarity` is a similarity.json's text, `opts.mode` (default `clean-room`) is the genesis's and the manifest's mode.
+ * `opts.gaps` and `opts.idleGapHours` are the manifest's coverage, `opts.cleanroomHash` (default none, the 0.7.0 shape) is pinned in the genesis entry and the manifest's plugin object, `opts.similarity` is a similarity.json's text, `opts.mode` (default `clean-room`) is the genesis's and the manifest's mode, `opts.head` the manifest's `repo.head`.
  * The manifest's denials are counted from the entries here, independently of the verifier. Returns `{ dir, key, fingerprint, manifest, entries }`.
  */
 export function buildBundle(dir, opts = {}) {
@@ -472,7 +472,7 @@ export function buildBundle(dir, opts = {}) {
     version: 1,
     flight: "bundle-test",
     plugin: { version: "0.7.0", guardHash, loggerHash, hooksHash, ...(opts.cleanroomHash ? { cleanroomHash: opts.cleanroomHash } : {}), verifierHash: sha256Of(verifierBytes) },
-    repo: { baseBranch: "main", base: "a".repeat(40), head: "b".repeat(40), branch: "build/test" },
+    repo: { baseBranch: "main", base: "a".repeat(40), head: opts.head ?? "b".repeat(40), branch: "build/test" },
     mode: opts.mode ?? "clean-room",
     genesis: entries[0],
     policy: { path: "docs/cleanroom.json", hashes: [policyHash], current: policyHash },

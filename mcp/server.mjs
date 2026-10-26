@@ -811,12 +811,16 @@ function validateSimilarity(sim) {
   sim.pairs.forEach((p, i) => {
     const at = `${where}.pairs[${i}]`;
     if (!isObj(p)) throw new ToolError(`${at} must be an object { id, role, left, right }`);
-    for (const k of Object.keys(p)) if (!["id", "role", "left", "right"].includes(k)) throw new ToolError(`${at} has an unknown key '${k}'`);
+    for (const k of Object.keys(p)) if (!["id", "role", "left", "right", "control"].includes(k)) throw new ToolError(`${at} has an unknown key '${k}'`);
     if (typeof p.id !== "string" || !PAIR_ID.test(p.id)) throw new ToolError(`${at}.id must be a slug (lowercase letters, digits and -, at most 40 characters)`);
     if (seen.has(p.id)) throw new ToolError(`${where}.pairs defines the id '${p.id}' more than once`);
     seen.add(p.id);
     if (!PAIR_ROLES.includes(p.role)) throw new ToolError(`${at}.role must be one of ${PAIR_ROLES.join(", ")} (got ${JSON.stringify(p.role)})`);
     roles[p.role]++;
+    if (p.control !== undefined) {
+      if (p.role !== "positive") throw new ToolError(`${at}.control is only legal on the pair with role "positive"`);
+      if (!nonEmptyString(p.control)) throw new ToolError(`${at}.control must be a non-empty string: the directory of a verified control bundle`);
+    }
     for (const side of ["left", "right"]) {
       if (!nonEmptyString(p[side])) throw new ToolError(`${at}.${side} must be a non-empty string: a directory (absolute, ~, repo-relative) or "subject"`);
       if (p[side] === "subject" && sim.subject === undefined) throw new ToolError(`${at}.${side} is "subject", but ${where}.subject is not set`);
@@ -850,7 +854,7 @@ function normalizeSimilarity(sim) {
   if (sim === undefined) return null;
   return {
     subject: sim.subject ?? [],
-    pairs: sim.pairs.map((p) => ({ id: p.id, role: p.role, left: p.left, right: p.right })),
+    pairs: sim.pairs.map((p) => ({ id: p.id, role: p.role, left: p.left, right: p.right, ...(p.role === "positive" ? { control: p.control ?? null } : {}) })),
     languages: sim.languages ?? DEFAULT_SIMILARITY_LANGUAGES,
     // ⚠️ ASSUMPTION: the n-gram sizes, identifier and comment bounds come from cleanflate-bench; the margin is strict "pos > neg" until measured.
     ngram: sim.ngram ?? [5, 10],
@@ -3467,6 +3471,40 @@ function walkFiles(dir) {
 }
 
 /**
+ * Check the positive pair's control bundle (SPEC B-02): the bundle's own verifier, run with
+ * --expect control-positive, must pass, and the pair's left side must be at the commit the control
+ * flight was made at. Returns what similarity.json records, or null when the pair names no bundle.
+ */
+function verifyControlBundle(sim) {
+  const positive = sim.pairs.find((p) => p.role === "positive");
+  if (!positive?.control) return null;
+  const dir = similarityDirs(positive.control, sim)[0];
+  const refuse = (why) => new ToolError(`the positive pair's control bundle ${dir} does not verify as a positive control: ${why}`);
+  const verifier = path.join(dir, "verify.mjs");
+  if (!exists(verifier)) throw refuse("verify.mjs is missing from it");
+  const run = spawnSync(process.execPath, [verifier, dir, "--expect", "control-positive", "--json"], { encoding: "utf8", timeout: GATE_SELF_TEST_MS });
+  let verdict = null;
+  try {
+    verdict = JSON.parse(run.stdout);
+  } catch {
+    verdict = null;
+  }
+  if (run.status !== 0 || !verdict?.ok) {
+    const first = verdict?.reasons?.[0];
+    throw refuse(first ? `${first.check}: ${first.reason}` : (run.stderr || "").trim().split("\n")[0] || `exit ${run.status}`);
+  }
+  const manifestBytes = fs.readFileSync(path.join(dir, "manifest.json"));
+  const manifest = JSON.parse(manifestBytes.toString("utf8"));
+  const left = positive.left === "subject" ? ROOT : similarityDirs(positive.left, sim)[0];
+  const at = spawnSync("git", ["-C", left, "rev-parse", "HEAD"], { encoding: "utf8" });
+  const head = at.status === 0 ? at.stdout.trim() : null;
+  if (head !== manifest.repo?.head) {
+    throw new ToolError(`the positive pair's left side ${left} is at ${head ?? "no commit"}, but the control bundle was made at ${manifest.repo?.head}; check out the control flight's result there`);
+  }
+  return { manifest: sha256Hex(manifestBytes), head: manifest.repo.head, fingerprint: manifest.signer.fingerprint };
+}
+
+/**
  * Score the configured pairs (SPEC E-03). Runs only inside the server: no agent
  * tool ever reads the comparison corpus, the agents get numbers back, and every
  * byte the scorer read is hashed into the chain (E-03a). Refused while an
@@ -3479,6 +3517,9 @@ function similarity() {
   if (exists(P.lock)) throw new ToolError(`an implementation run is armed (${rel(P.lock)} exists); kukulu_similarity is a summarize-stage tool, so run it after kukulu_run_finish`);
   const st = loadState();
   if (st.verdict !== "APPROVED") throw new ToolError("the flight is not reviewed APPROVED yet; score contamination after the review approves the build");
+
+  // A positive pair that names a control bundle is checked before any file is read: the bundle must verify as a control flight, and the left side must be the tree it was made at.
+  const controlRecord = verifyControlBundle(sim);
 
   // Resolve and read every side once.
   const sides = new Map();
@@ -3550,7 +3591,8 @@ function similarity() {
     }
   }
   const skipped = unmapped.size;
-  const json = `${JSON.stringify({ config: sim, files, rows, verdict, limits: LIMITS, at: new Date().toISOString() }, null, 2)}\n`;
+  const recorded = controlRecord ? { ...sim, pairs: sim.pairs.map((p) => (p.id === positive.id ? { ...p, control: controlRecord } : p)) } : sim;
+  const json = `${JSON.stringify({ config: recorded, files, rows, verdict, limits: LIMITS, at: new Date().toISOString() }, null, 2)}\n`;
   const jsonPath = path.join(P.stateDir, "cleanroom", "similarity.json");
 
   // docs/SIMILARITY.md carries no timestamp, so the same inputs give the same bytes.

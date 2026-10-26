@@ -14,6 +14,7 @@ All notable changes to this plugin. Format follows
 - `scripts/model-identity.mjs`, which hashes a model's weight files into one reproducible digest for a runner's `identities` (G-02, A-03).
 - Positive-control mode in the clean-room policy and the guard: `mode` and `control.priorArt` (G-04, B-01).
 - The offline verifier reports a passing control bundle as `CONTROL (positive)` and exits 3, never as a pass; `--expect clean-room|control-positive` names the mode a bundle must have, and the genesis and manifest record `mode` (G-04, B-01).
+- A verified control bundle can be the positive similarity pair by reference: `cleanroom.similarity` pairs gain `control`, which `kukulu_similarity` verifies and records in `similarity.json` (G-04, B-02).
 
 ## [0.7.2] — 2026-10-26
 
