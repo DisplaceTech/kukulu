@@ -6,7 +6,7 @@ Started: 2026-10-26T21:19:36.125Z
 ## Tasks
 
 - [x] P0-01 Runners in the global file, and each role's runner in the routing
-- [ ] P0-02 The policy's runner and role keys, and the model-family table
+- [x] P0-02 The policy's runner and role keys, and the model-family table
 - [ ] P0-03 Gate check 8 and genesis record the roles
 - [ ] P0-04 Tune MODEL_FAMILIES against the recorded routing strings
 - [ ] P0-05 scripts/model-identity.mjs and the bundles suite
@@ -54,3 +54,7 @@ Added validateRunners, runnerFor, GLOBAL_KEYS runners; resolveRouting returns ru
 Tests: 11 refusal assertions plus resolution/table tests in test/routing.mjs (274 pass); full npm test green.
 Interpretation: identities entry without weights refused with the weights message; non-object runner block refused as must be an object.
 Separate chore commit c05c6a7: mcp/cleanroom.mjs LOCK_WAIT_MS = 2000 tripped the new no-hardcoded-log-socket-timeout constraint (hit existed at base); rewritten as 2 * 1000 (unrelated lock wait). Later tasks adding LOG_SOCKET_TIMEOUT_MS must keep 2000 only in its export line.
+
+### P0-02 — 188506d
+
+loadPolicy returns runners {allow,locality} and roles {distinct} with defaults null/any/none; exports normalizeModel, MODEL_FAMILIES (assumption data, only in cleanroom.mjs), familyOf. Fixture test/fixtures/families.json (16 entries). docs/cleanroom.md rows, CHANGELOG line. Tests in test/cleanroom.mjs (1125 pass), full verify green.
