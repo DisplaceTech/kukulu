@@ -12,7 +12,7 @@ Started: 2026-10-26T21:19:36.125Z
 - [x] P0-05 scripts/model-identity.mjs and the bundles suite
 - [x] P0-06 The manifest records each role's identity
 - [x] P0-07 Phase 0 end: push and record the manual check
-- [ ] P1-01 Control mode in the policy and the guard
+- [x] P1-01 Control mode in the policy and the guard
 - [ ] P1-02 Control mode in genesis, the manifest and the verifier
 - [ ] P1-03 The control bundle is the positive pair
 - [ ] P1-04 scripts/publish-bundle.mjs and docs/publishing.md
@@ -81,3 +81,8 @@ attest() manifest gains roles after genesis (genesis.data.roles each plus assura
 
 Push: pushed build branch to origin. Empty phase-end commit.
 Manual check: NOT VERIFIED (human): with the owner's real global file holding the Spark and Mac runners, kukulu_config_show reports each role's runner; a throwaway clean-room flight with runners.locality "local" and the default routing refuses at its first kukulu_next; with profile B routing it writes a genesis whose roles name both runners and the Spark model's measured weights digest from scripts/model-identity.mjs run on the Spark.
+
+### P1-01 — bb158aa
+
+loadPolicy: mode (clean-room|control-positive), control.priorArt with all refusals; policy now carries mode and control. controlPaths exported. evaluate: read-only exemption from deny.paths/pathPatterns/deny.words for paths under priorArt (read tools; Bash read-family words; recursive/glob reach). 8 new fixtures (P1-01), none changed; guard self-test 532 cases. docs/cleanroom.md: policy rows and ## Control mode. Verify green (4005 assertions).
+Interpretation: exemption reads-only; a path is control only if every canonical form is under a priorArt entry.
