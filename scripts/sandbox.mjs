@@ -9,7 +9,7 @@ import path from "node:path";
 import { createHash } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { appendEntry, loadPolicy, CleanroomError } from "../mcp/cleanroom.mjs";
+import { appendEntry, loadPolicy, lockdownActive, logPathFor, CleanroomError } from "../mcp/cleanroom.mjs";
 
 const PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const USAGE = "usage: node scripts/sandbox.mjs doctor\n       node scripts/sandbox.mjs run [-- <harness arguments>]\n       node scripts/sandbox.mjs stop\n";
@@ -356,21 +356,29 @@ function readRunners(root, pluginRoot, env) {
 
 const ENGINES = ["docker", "podman"];
 
+/** The engine to use: the one named, else the first of docker, podman whose `--version` exits 0. */
+function pickEngine(engineOption, env) {
+  for (const name of engineOption ? [engineOption] : ENGINES) {
+    const r = spawnSync(name, ["--version"], { encoding: "utf8", env });
+    if (r.status === 0) return { engine: name, version: (r.stdout || "").split("\n")[0].trim() };
+  }
+  return null;
+}
+
+/** Is the image with exactly this id present? An image of another id under the same name is not the pinned one. */
+function imagePresent(engine, image, env) {
+  const r = spawnSync(engine, ["image", "inspect", "--format", "{{.Id}}", image], { encoding: "utf8", env });
+  return r.status === 0 && (r.stdout || "").trim() === image;
+}
+
 function doctor({ root, pluginRoot, env, engineOption, out }) {
   const problems = [];
   const line = (text) => out.write(`${text}\n`);
   const spawnEnv = { ...env };
 
-  let engine = null;
-  let version = null;
-  for (const name of engineOption ? [engineOption] : ENGINES) {
-    const r = spawnSync(name, ["--version"], { encoding: "utf8", env: spawnEnv });
-    if (r.status === 0) {
-      engine = name;
-      version = (r.stdout || "").split("\n")[0].trim();
-      break;
-    }
-  }
+  const picked = pickEngine(engineOption, spawnEnv);
+  const engine = picked?.engine ?? null;
+  const version = picked?.version ?? null;
   if (engine) line(`engine: ${engine} (${version})`);
   else problems.push("no container engine: install docker or podman");
 
@@ -393,7 +401,7 @@ function doctor({ root, pluginRoot, env, engineOption, out }) {
 
   let present = false;
   if (engine) {
-    present = spawnSync(engine, ["image", "inspect", "--format", "{{.Id}}", plan.image], { encoding: "utf8", env: spawnEnv }).status === 0;
+    present = imagePresent(engine, plan.image, spawnEnv);
     line(`image: ${plan.imageName} ${present ? "present" : "missing"} (${plan.image})`);
   }
   line("mounts:");
@@ -438,6 +446,141 @@ function doctor({ root, pluginRoot, env, engineOption, out }) {
   return 0;
 }
 
+// ---------------------------------------------------------------- run and stop (SPEC C-01)
+
+const readProgress = (root) => {
+  try {
+    return fs.readFileSync(path.join(root, "docs", "PROGRESS.md"), "utf8");
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * Start the three listeners and the container in the foreground; stop the listeners when it exits.
+ * Returns a promise of the exit code. Every refusal comes before anything is started.
+ */
+async function runSandbox({ root, pluginRoot, env, engineOption, harnessArgs, stderr }) {
+  const refuse = (text) => {
+    stderr.write(`${text}\n`);
+    return 1;
+  };
+  let loaded;
+  try {
+    loaded = loadProjectPolicy(root);
+  } catch (e) {
+    return refuse(e instanceof Error ? e.message : String(e));
+  }
+  const { policy, policyPath } = loaded;
+  if (policy.enforcement !== "container+proxy") {
+    return refuse(`scripts/sandbox.mjs run needs policy enforcement "container+proxy" (this policy says "${policy.enforcement}"); under hook enforcement run the session as usual`);
+  }
+  const picked = pickEngine(engineOption, env);
+  if (!picked) return refuse("no container engine: install docker or podman");
+  const { engine } = picked;
+  const projectId = projectIdFor(root);
+  const runtimeDir = runtimeDirFor(projectId, env);
+  const plan = planFor({ policy, root, pluginRoot, runtimeDir, projectId, engine, harnessArgs, tty: Boolean(process.stdin.isTTY), env, policyPath });
+  if (!imagePresent(engine, plan.image, env)) {
+    return refuse(`sandbox.image ${plan.imageName}@${plan.image} is not present; build it (doctor prints the command) or fix the digest`);
+  }
+  const created = new Set([path.join(root, ".kukulu"), path.join(root, ".claude")]);
+  for (const p of [...plan.readOnly, ...plan.mounts, ...plan.priorArt]) {
+    if (created.has(p)) fs.mkdirSync(p, { recursive: true });
+    else if (!fs.existsSync(p)) return refuse(`${p} does not exist; run needs every mount source on the host`);
+  }
+  const running = spawnSync(engine, ["inspect", plan.name], { encoding: "utf8", env });
+  if (running.status === 0) {
+    let state = null;
+    try {
+      state = JSON.parse(running.stdout)?.[0]?.State?.Running;
+    } catch {
+      state = null;
+    }
+    if (state) return refuse(`container ${plan.name} is already running; run node scripts/sandbox.mjs stop first`);
+  }
+  let roles;
+  try {
+    roles = readRunners(root, pluginRoot, env);
+  } catch (e) {
+    return refuse(`cannot read the runners from the server: ${e.message}`);
+  }
+  const endpoints = [];
+  for (const [, r] of Object.entries(roles)) {
+    const hp = r.endpoint ? hostPortOf(r.endpoint) : null;
+    if (hp) endpoints.push({ runner: r.runner, ...hp });
+  }
+
+  fs.mkdirSync(runtimeDir, { recursive: true, mode: 0o700 });
+  const hooksEmpty = path.join(runtimeDir, "hooks-empty");
+  fs.mkdirSync(hooksEmpty, { recursive: true });
+  const logPath = logPathFor(root, env);
+  const controller = startControllerSocket({ socketPath: path.join(runtimeDir, "controller.sock"), root, pluginRoot, containerName: plan.name, engine, hooksPath: hooksEmpty, env });
+  const logSocket = startLogSocket({ socketPath: path.join(runtimeDir, "log.sock"), logPath });
+  const proxy = startProxy({
+    socketPath: path.join(runtimeDir, "proxy.sock"),
+    decide: (host, port) => egressDecision({ policy, endpoints, lockdown: lockdownActive(policy, readProgress(root)), host, port }),
+    record: (r) => {
+      try {
+        appendEntry(logPath, { kind: "egress", stage: "controller", role: "session", tool: null, target: r.target, decision: r.decision, reason: r.reason, ...(r.data ? { data: r.data } : {}) });
+      } catch {
+        // an unwritable log must not take the proxy down; the gate sees the missing entries
+      }
+    },
+  });
+  const listeners = [controller, logSocket, proxy];
+  await Promise.all(listeners.map((l) => l.listening));
+  const runFile = path.join(runtimeDir, "run.json");
+  fs.writeFileSync(runFile, `${JSON.stringify({ pid: process.pid, name: plan.name, startedAt: new Date().toISOString() })}\n`);
+
+  const child = spawn(engine, containerArgs(plan), { stdio: "inherit", env });
+  const onSignal = () => {
+    spawnSync(engine, ["stop", plan.name], { encoding: "utf8", env });
+  };
+  process.on("SIGINT", onSignal);
+  process.on("SIGTERM", onSignal);
+  const status = await new Promise((resolve) => {
+    child.on("error", (e) => {
+      stderr.write(`cannot start ${engine}: ${e.message}\n`);
+      resolve(1);
+    });
+    child.on("exit", (code) => resolve(code ?? 1));
+  });
+  process.off("SIGINT", onSignal);
+  process.off("SIGTERM", onSignal);
+  await Promise.all(listeners.map((l) => l.close()));
+  fs.rmSync(runFile, { force: true });
+  return status;
+}
+
+/** Stop the project's container and the `run` that is serving it. */
+function stopSandbox({ root, env, stdout, stderr }) {
+  const picked = pickEngine(null, env);
+  if (!picked) {
+    stderr.write("no container engine: install docker or podman\n");
+    return 1;
+  }
+  const projectId = projectIdFor(root);
+  // A container that is not running is not an error.
+  spawnSync(picked.engine, ["stop", `kukulu-${projectId}`], { encoding: "utf8", env });
+  const runFile = path.join(runtimeDirFor(projectId, env), "run.json");
+  try {
+    const { pid } = JSON.parse(fs.readFileSync(runFile, "utf8"));
+    if (Number.isInteger(pid) && pid !== process.pid) {
+      try {
+        process.kill(pid, "SIGTERM");
+      } catch {
+        // already gone
+      }
+    }
+  } catch {
+    // no run.json: nothing was serving
+  }
+  fs.rmSync(runFile, { force: true });
+  stdout.write("sandbox stop: ok\n");
+  return 0;
+}
+
 export function main(argv, { platform = process.platform, env = process.env, cwd = process.cwd(), stdout = process.stdout, stderr = process.stderr } = {}) {
   if (platform === "darwin") {
     stderr.write("scripts/sandbox.mjs runs on Linux; on macOS run it inside a Linux VM that holds the project (see docs/sandbox.md)\n");
@@ -459,9 +602,27 @@ export function main(argv, { platform = process.platform, env = process.env, cwd
     }
     return doctor({ root: path.resolve(env.KUKULU_PROJECT_DIR || cwd), pluginRoot: PLUGIN_ROOT, env, engineOption, out: stdout });
   }
-  // run and stop are filled in by the task that builds them.
+  if (command === "run") {
+    const at = rest.indexOf("--");
+    const options = at >= 0 ? rest.slice(0, at) : rest;
+    const harnessArgs = at >= 0 ? rest.slice(at + 1) : [];
+    let engineOption = null;
+    for (let i = 0; i < options.length; i++) {
+      if (options[i] === "--engine") engineOption = options[++i];
+      else {
+        stderr.write(USAGE);
+        return 2;
+      }
+    }
+    if (engineOption !== null && !ENGINES.includes(engineOption)) {
+      stderr.write(`sandbox: --engine takes docker or podman (got ${JSON.stringify(engineOption)})\n`);
+      return 2;
+    }
+    return runSandbox({ root: path.resolve(env.KUKULU_PROJECT_DIR || cwd), pluginRoot: PLUGIN_ROOT, env, engineOption, harnessArgs, stderr });
+  }
+  if (command === "stop" && rest.length === 0) return stopSandbox({ root: path.resolve(env.KUKULU_PROJECT_DIR || cwd), env, stdout, stderr });
   stderr.write(USAGE);
   return 2;
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) process.exit(main(process.argv.slice(2)));
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) process.exit(await main(process.argv.slice(2)));

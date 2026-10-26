@@ -92,3 +92,44 @@ The project is the only read-write mount. Everything else the container sees of 
 | each `control.priorArt` path | the prior art a control flight is given |
 
 Two more mounts are not the project's: the runtime directory, which holds the three sockets and is mounted at `/run/kukulu`, and a named volume for the container's home, `kukulu-<id>-home`, so the harness's login and caches survive a restart without touching the host.
+
+## Running a flight
+
+1. `node scripts/sandbox.mjs doctor` until it says `sandbox doctor: ok`.
+2. Commit the policy (with `"enforcement": "container+proxy"` and the pinned `sandbox.image`) on the base branch, as for any clean-room flight.
+3. Put the git identity in the repository's own `.git/config` (`git config user.name`, `git config user.email`) before the flight. Inside the container there is no global git config, and the flight's commits need an author.
+4. `node scripts/sandbox.mjs run [-- <harness arguments>]` starts the three listeners and the container in the foreground. Everything after `--` goes to the harness. It refuses, with nothing started, under hook enforcement, with no container engine, when the pinned image is not present (the image's id must equal the digest in the policy), when a mount source is missing on the host, and when a container for this project is already running. When the container exits, the listeners stop and `run` returns its exit status.
+5. `node scripts/sandbox.mjs stop` stops the container and the `run` serving it.
+
+The runtime directory is `$XDG_RUNTIME_DIR/kukulu/<id>/` (else `~/.cache/kukulu/run/<id>/`), mode 0700, with the three sockets, an empty `hooks-empty/` directory that git's hooks are pointed at, and `run.json` (`pid`, `name`, `startedAt`). `<id>` is the first 16 hex characters of the SHA-256 of the project's real path, so two checkouts never share a container.
+
+A sandboxed flight is serial: the container is the one place work happens, so a parallel wave does not apply.
+
+## macOS
+
+The launcher refuses on macOS: its sockets and its mounts assume a Linux kernel. Run it inside a Linux machine that holds both the project and the checkpoint key (a Lima, OrbStack or colima machine), and drive the flight from there. Keeping the key in the machine, outside the container, is the point; do not mount the key into the container.
+
+## What an agent inside can and cannot do
+
+Can: read and write the project, run the tools the image carries, call every Kūkulu tool through the relay, and reach the runner endpoints the proxy allows. Cannot: reach any other host or any literal IP, read the signing key, change the policy, the plugin, `.kukulu/`, `.claude/`, `.git/config`, `.git/hooks` or `.git/info`, or append to the log except through the log socket. It is a boundary around the flight, not a proof of clean-room work: [cleanroom.md](./cleanroom.md#what-the-guard-decides) lists what is still only a tripwire.
+
+## A worked local-only flight
+
+Profile B: the Mac plans and reviews, the Spark implements. The global file `~/.config/kukulu/config.json` names both runners and routes the roles:
+
+```json
+{
+  "runners": {
+    "spark": { "endpoint": "http://spark.tailnet.ts.net:8000", "locality": "local", "match": ["spark/"] },
+    "mac": { "endpoint": "http://mac.tailnet.ts.net:11434", "locality": "local", "match": ["mac/"] }
+  },
+  "roles": {
+    "planner": { "model": "mac/qwen3.8-27b" },
+    "implementer": { "model": "spark/nemotron-3.5-super-nvfp4" },
+    "reviewer": { "model": "mac/qwen3.8-27b" },
+    "summarizer": { "model": "mac/qwen3.8-27b" }
+  }
+}
+```
+
+The policy is `templates/cleanroom.local-only.example.json` with the image digest replaced by `doctor`'s line. `runners.locality: "local"` makes the gate refuse a role that resolves to a remote runner, `roles.distinct: "family"` makes it refuse an implementer and reviewer from one model family, and `enforcement: "container+proxy"` makes `run` the only way to start the flight. Run `doctor`, then `run`.

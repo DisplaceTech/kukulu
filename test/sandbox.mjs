@@ -5,7 +5,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
-import { finish, ok, eq, like, ROOT, cleanroomRepo, plannedRepo, setState, startServer, withServer, mkFakeDocker, mkDir, writeFile } from "./harness.mjs";
+import { finish, ok, eq, like, ROOT, cleanroomRepo, plannedRepo, setState, startServer, withServer, mkFakeDocker, mkDir, writeFile, readFile } from "./harness.mjs";
 import net from "node:net";
 import { startControllerSocket, startLogSocket, startProxy, egressDecision, hostPortOf, planFor, containerArgs, projectIdFor, runtimeDirFor, main as sandboxMain } from "../scripts/sandbox.mjs";
 import { startBridge } from "../scripts/sandbox-entry.mjs";
@@ -350,6 +350,9 @@ const exchange = (target, bytes, { until = null, then = null } = {}) => new Prom
   like(missing.out, /^sandbox doctor: 1 problem\(s\)$/m, "...ending with the problem count");
 
   fs.rmSync(path.join(dockerDir, "image-missing"));
+  const mismatch = runDoctor(repo, dockerDir);
+  like(mismatch.out, /^image: kukulu-sandbox missing /m, "doctor treats an image of another id as missing");
+  writeFile(dockerDir, "image-inspect.txt", `${digest}\n`);
   const present = runDoctor(repo, dockerDir);
   eq(present.code, 0, "doctor passes with the image present");
   eq(present.out.trimEnd().split("\n").at(-1), "sandbox doctor: ok", "...ending with sandbox doctor: ok");
@@ -370,6 +373,89 @@ const exchange = (target, bytes, { until = null, then = null } = {}) => new Prom
   const noEngine = runDoctor(repo, mkDir("kukulu-noengine-"), ["doctor"], { PATH: "/nonexistent" });
   like(noEngine.out, /^problem: no container engine: install docker or podman$/m, "doctor reports no container engine");
   eq(runDoctor(repo, dockerDir, ["doctor", "--engine", "lxc"]).code, 2, "an unknown --engine is a usage error");
+}
+
+// ---------------------------------------------------------------- run and stop (P2-06)
+
+{
+  const digest = "sha256:" + "a".repeat(64);
+  const policyText = (extra = {}) => JSON.stringify({ version: 1, enforcement: "container+proxy", sandbox: { image: `kukulu-sandbox@${digest}` }, ...extra });
+  const xdg = shortDir();
+  const sandboxRun = async (repo, dockerDir, argv, envExtra = {}) => {
+    const out = [];
+    const err = [];
+    const code = await sandboxMain(argv, {
+      platform: "linux",
+      cwd: repo,
+      env: { PATH: `${dockerDir}:${process.env.PATH}`, HOME: process.env.HOME, XDG_RUNTIME_DIR: xdg, KUKULU_CONFIG: path.join(repo, ".kukulu-test-no-global.json"), KUKULU_PROFILE: "", ...envExtra },
+      stdout: { write: (t) => out.push(t) },
+      stderr: { write: (t) => err.push(t) },
+    });
+    return { code, out: out.join(""), err: err.join("") };
+  };
+  const dockerWith = (files = {}) => {
+    const dir = mkFakeDocker();
+    writeFile(dir, "image-inspect.txt", `${digest}\n`);
+    for (const [name, body] of Object.entries(files)) writeFile(dir, name, body);
+    return dir;
+  };
+  const calls = (dir) => (fs.existsSync(path.join(dir, "calls.log")) ? fs.readFileSync(path.join(dir, "calls.log"), "utf8") : "");
+  const started = (dir) => /^run /m.test(calls(dir));
+
+  const hook = cleanroomRepo();
+  const hookDocker = dockerWith();
+  const underHook = await sandboxRun(hook, hookDocker, ["run"]);
+  eq(underHook.code, 1, "run refuses under hook enforcement");
+  eq(underHook.err, 'scripts/sandbox.mjs run needs policy enforcement "container+proxy" (this policy says "hook"); under hook enforcement run the session as usual\n', "...with the exact line");
+  ok(!started(hookDocker) && calls(hookDocker) === "", "...and nothing started: the engine was not even asked");
+
+  const repo = cleanroomRepo({ policy: policyText() });
+  const noImage = dockerWith({ "image-missing": "" });
+  const missing = await sandboxRun(repo, noImage, ["run"]);
+  eq(missing.code + "|" + missing.err, `1|sandbox.image kukulu-sandbox@${digest} is not present; build it (doctor prints the command) or fix the digest\n`, "run refuses a missing image");
+  ok(!started(noImage), "...starting nothing");
+  const wrongId = dockerWith({ "image-inspect.txt": "sha256:" + "b".repeat(64) + "\n" });
+  const wrong = await sandboxRun(repo, wrongId, ["run"]);
+  like(wrong.err, /^sandbox\.image kukulu-sandbox@sha256:a{64} is not present/, "run refuses a digest mismatch");
+  ok(!started(wrongId), "...starting nothing");
+
+  const busy = dockerWith({ "inspect.json": readFile(ROOT, "test/fixtures/docker/inspect.json").replaceAll("__ROOT__", repo) });
+  const running = await sandboxRun(repo, busy, ["run"]);
+  eq(running.code, 1, "run refuses a running container");
+  like(running.err, /^container kukulu-[0-9a-f]{16} is already running; run node scripts\/sandbox\.mjs stop first\n$/, "...with the stop hint");
+  ok(!started(busy), "...starting nothing");
+
+  const withMount = cleanroomRepo({ policy: policyText({ sandbox: { image: `kukulu-sandbox@${digest}`, mounts: [{ path: "tools/oracle", mode: "ro" }] } }) });
+  const mountDocker = dockerWith();
+  const noMount = await sandboxRun(withMount, mountDocker, ["run"]);
+  eq(noMount.code, 1, "run refuses a missing mount source");
+  eq(noMount.err, `${withMount}/tools/oracle does not exist; run needs every mount source on the host\n`, "...naming it");
+  ok(!started(mountDocker), "...starting nothing");
+
+  const good = dockerWith();
+  const ran = await sandboxRun(repo, good, ["run", "--", "--model", "x"]);
+  eq(ran.code, 0, "run returns the container's exit status");
+  const id = projectIdFor(repo);
+  const runtime = path.join(xdg, "kukulu", id);
+  const runLine = calls(good).split("\n").find((l) => l.startsWith("run "));
+  const plan = planFor({ policy: loadPolicy(policyText()), root: repo, pluginRoot: ROOT, runtimeDir: runtime, projectId: id, engine: "docker", harnessArgs: ["--model", "x"], tty: Boolean(process.stdin.isTTY), env: { HOME: process.env.HOME }, policyPath: path.join(repo, "docs", "cleanroom.json") });
+  eq(runLine, containerArgs(plan).join(" "), "run starts the container with exactly the containerArgs line");
+  eq(fs.readFileSync(path.join(good, "runtime-listing.txt"), "utf8").split("\n").filter(Boolean).sort().join(","), "controller.sock,hooks-empty,log.sock,proxy.sock,run.json", "...while the three sockets and run.json existed");
+  ok(!fs.existsSync(path.join(runtime, "controller.sock")) && !fs.existsSync(path.join(runtime, "log.sock")) && !fs.existsSync(path.join(runtime, "proxy.sock")), "...and the sockets are gone after");
+  ok(!fs.existsSync(path.join(runtime, "run.json")), "...and so is run.json");
+  eq((fs.statSync(runtime).mode & 0o777).toString(8), "700", "the runtime directory is mode 0700");
+  ok(fs.existsSync(path.join(repo, ".kukulu")) && fs.existsSync(path.join(repo, ".claude")), "run creates .kukulu and .claude when absent");
+
+  const failing = dockerWith({ "run-exit": "3" });
+  eq((await sandboxRun(repo, failing, ["run"])).code, 3, "run returns a non-zero container status");
+
+  const stopDocker = dockerWith();
+  const stopped = await sandboxRun(repo, stopDocker, ["stop"]);
+  eq(stopped.code + "|" + stopped.out, "0|sandbox stop: ok\n", "stop prints ok");
+  eq(calls(stopDocker).trimEnd().split("\n").at(-1), `stop kukulu-${id}`, "...after stopping the container");
+  const stopTwice = await sandboxRun(repo, dockerWith({}), ["stop"]);
+  eq(stopTwice.code, 0, "stop of a container that is not running is not an error");
+  eq((await sandboxRun(repo, dockerWith(), ["stop", "extra"])).code, 2, "stop with an argument is a usage error");
 }
 
 finish();

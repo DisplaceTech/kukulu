@@ -229,7 +229,7 @@ printf -- '-----BEGIN PGP SIGNATURE-----\\n\\nZmFrZQ==\\n-----END PGP SIGNATURE-
  * A fake container engine for the sandbox tests: a directory holding an executable `docker` script to
  * put first on PATH. It appends every invocation to `<dir>/calls.log` and answers from files in the
  * directory: `version.txt`, `image-inspect.txt`, `image-missing`, `inspect.json`, `run-exit` and
- * `exec-output`; `exec` otherwise runs the trailing `sh -c <command>` locally in the `-w` directory.
+ * `exec-output` (`run` also writes the runtime directory's listing to `runtime-listing.txt`); `exec` otherwise runs the trailing `sh -c <command>` locally in the `-w` directory.
  * Recorded output lives in `test/fixtures/docker/`; tests copy what they need in. Returns the directory.
  */
 export function mkFakeDocker() {
@@ -253,6 +253,10 @@ case "$1" in
     if [ -f "$D/inspect.json" ]; then cat "$D/inspect.json"; exit 0; fi
     exit 1 ;;
   run)
+    # Record what the runtime directory (mounted at /run/kukulu) holds while the container "runs".
+    for a in "$@"; do
+      case "$a" in *:/run/kukulu) ls "\${a%%:/run/kukulu}" > "$D/runtime-listing.txt" 2>&1 ;; esac
+    done
     if [ -f "$D/run-exit" ]; then exit "$(cat "$D/run-exit")"; fi
     exit 0 ;;
   exec)

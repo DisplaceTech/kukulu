@@ -245,6 +245,11 @@ Environment variables:
 | `KUKULU_CLEANROOM_KEY` | `cleanroom.signingKey` | Path of the checkpoint-signing key; wins over the config key |
 | `KUKULU_CLEANROOM_LOG` | `.kukulu/cleanroom/log.jsonl` | Where the clean-room hash chain is written; for tests and the guard's self-test only |
 | `KUKULU_PROFILE` | the global file's own `"profile"` key, if any | Which profile in the global file to apply; wins over the file's own choice |
+| `KUKULU_SANDBOX` | unset | The sandbox's container name (`kukulu-<project id>`); set by `scripts/sandbox.mjs` on the server it runs outside the container, never by hand. `kukulu_status` reports it as `sandbox` |
+| `KUKULU_SANDBOX_ENGINE` | unset | `docker` or `podman`: the engine the sandbox uses; set by `scripts/sandbox.mjs`, never by hand |
+| `KUKULU_SANDBOX_HOOKS_PATH` | unset | The empty directory git's hooks are redirected to for the server's own git calls while the sandbox runs; set by `scripts/sandbox.mjs`, never by hand |
+| `KUKULU_CONTROLLER_SOCKET` | unset | Inside the sandbox, the Unix socket the MCP relay connects to; set by `scripts/sandbox.mjs`, never by hand |
+| `KUKULU_LOG_SOCKET` | unset | Inside the sandbox, the Unix socket the two clean-room hooks send log entries to; set by `scripts/sandbox.mjs`, never by hand |
 
 Flights archived before 0.6.0 keep their configuration file under its old name, and finalizing one still reads it; an archive is a record and is never rewritten.
 
