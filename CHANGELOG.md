@@ -13,6 +13,7 @@ All notable changes to this plugin. Format follows
 
 ### Fixed
 
+- A commit whose signer printed its own error (an SSH agent without the key) is now recognized as a signing failure, so `auto` falls back instead of failing the commit (project-e F-03).
 - The recursive rsync denial now names the protected path it reaches, not the destination (0.7.1 REVIEW note).
 
 ## [0.7.1] — 2026-10-20

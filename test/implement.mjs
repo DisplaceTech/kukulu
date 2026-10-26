@@ -11,7 +11,7 @@ import {
   finish, ok, eq, like, isError,
   mkDir, plannedRepo, withServer, readFile, writeFile, hasFile, subject, useLegacyLayout,
   commitTask, markTasks, setState, git, mkBareRemote, mkFailingGhBin, mkFakeGhBin,
-  headingSpacingProblems, planDoc, progressDoc, DEFAULT_TASKS,
+  headingSpacingProblems, planDoc, progressDoc, DEFAULT_TASKS, specRepo, mkFakeGpg, useFakeSigner,
 } from "./harness.mjs";
 
 const TODAY = new Date().toISOString().slice(0, 10);
@@ -1077,6 +1077,69 @@ function failingSignerRepo(config) {
     const r = spawnSync("git", ["config", "--local", "--get", "commit.gpgsign"], { cwd: repo, encoding: "utf8" });
     ok(r.status !== 0 && r.stdout === "", "...and local commit.gpgsign is unset again, not left at false");
   }, { env: { GIT_CONFIG_GLOBAL: globalCfg } });
+}
+
+// ---------------------------------------------------------------- a signer that words its own error (B-01)
+
+const SSH_ERROR = fs.readFileSync(new URL("./fixtures/signing/ssh-agent-missing-key.txt", import.meta.url), "utf8").trim();
+
+/** A repo with an uncommitted plan and an SSH signer that prints the fixture's error and fails. */
+function sshSignerRepo(policy) {
+  const repo = specRepo();
+  const plan = plannedRepo({ config: { policies: { signing: policy } } });
+  for (const f of ["docs/PLAN.md", "docs/PROGRESS.md", "docs/kukulu.json", "CLAUDE.md"]) writeFile(repo, f, readFile(plan, f));
+  const dir = mkDir("kukulu-ssh-");
+  const signer = path.join(dir, "fake-ssh-keygen");
+  fs.writeFileSync(signer, `#!/bin/sh\nprintf '%s\\n' '${SSH_ERROR}' >&2\nexit 1\n`);
+  fs.chmodSync(signer, 0o755);
+  git(repo, ["config", "--local", "gpg.format", "ssh"]);
+  git(repo, ["config", "--local", "gpg.ssh.program", signer]);
+  git(repo, ["config", "--local", "user.signingkey", "key::ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKukuluTestKeyOnly"]);
+  git(repo, ["config", "--local", "commit.gpgsign", "true"]);
+  return repo;
+}
+
+{
+  const repo = sshSignerRepo("auto");
+  await withServer(repo, async ({ call }) => {
+    const r = await call("kukulu_plan_commit");
+    ok(Boolean(r.commit), "an SSH signer's own error falls back under auto: kukulu_plan_commit succeeds");
+    eq(subject(repo), "plan: derive build plan from SPEC", "...with the plan subject");
+    eq(git(repo, ["log", "-1", "--format=%G?"]), "N", "...unsigned");
+    const st = JSON.parse(readFile(repo, ".kukulu/state.json"));
+    like(st.signing, /^off \(commit signing failed:/, "...state.signing records the fallback");
+    ok(st.signing.includes(SSH_ERROR), "...and the signer's own text");
+    const entries = readFile(repo, ".kukulu/feedback.jsonl").trim().split("\n").map((l) => JSON.parse(l));
+    eq(entries.length + "|" + entries[0].category, "1|signing", "...with exactly one signing feedback entry");
+  });
+}
+
+{
+  const repo = sshSignerRepo("required");
+  const head = git(repo, ["rev-parse", "HEAD"]);
+  await withServer(repo, async ({ call }) => {
+    const e = await call("kukulu_plan_commit");
+    isError(e, /policies\.signing is 'required' and the commit could not be signed:/, "an SSH signer's own error refuses under required");
+    ok(JSON.stringify(e).includes(SSH_ERROR), "...naming the signer's text");
+    eq(git(repo, ["rev-parse", "HEAD"]), head, "...HEAD did not move");
+    eq(git(repo, ["diff", "--cached", "--name-only"]), "", "...and nothing is staged");
+  });
+}
+
+{
+  const repo = specRepo();
+  const plan = plannedRepo({ config: { policies: { signing: "auto" } } });
+  for (const f of ["docs/PLAN.md", "docs/PROGRESS.md", "docs/kukulu.json", "CLAUDE.md"]) writeFile(repo, f, readFile(plan, f));
+  useFakeSigner(repo, mkFakeGpg());
+  const hook = path.join(repo, ".git", "hooks", "commit-msg");
+  fs.mkdirSync(path.dirname(hook), { recursive: true });
+  fs.writeFileSync(hook, "#!/bin/sh\nif head -n1 \"$1\" | grep -q '^plan:'; then echo \"rejected by test hook\" >&2; exit 1; fi\n");
+  fs.chmodSync(hook, 0o755);
+  await withServer(repo, async ({ call }) => {
+    isError(await call("kukulu_plan_commit"), /^git commit failed:/, "a commit that fails for another reason is not turned into a fallback");
+    ok(!hasFile(repo, ".kukulu/state.json") || !/signing/.test(JSON.parse(readFile(repo, ".kukulu/state.json")).signing ?? ""), "...state.signing is unchanged");
+    eq(git(repo, ["config", "--local", "commit.gpgsign"]), "true", "...and local commit.gpgsign still reads true");
+  });
 }
 
 // ---------------------------------------------------------------- rollback

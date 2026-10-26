@@ -169,6 +169,8 @@ A repository usually runs more than one flight. Three things make the second one
 - `"off"` never signs and records `off`.
 - `"required"` refuses to start without working signing, and a commit that cannot be signed throws and leaves the tree as it found it (every file the tool wrote is restored, nothing stays staged), so the same call can be made again once the agent is back.
 
+A commit that fails for a reason git does not word as signing is checked with a signed and an unsigned probe on the empty tree, so an SSH signer's own error still counts as a signing failure.
+
 At the end of a flight, `kukulu_pr_finalize` looks at the commits themselves, never at `state.signing`: every commit since the merge base with `baseBranch` is checked with `git log --format='%H %G?'`. `N` (none) and `B` (bad) are unsigned; anything else, `E` included, counts as signed, because a machine without your public key still holds a signed commit.
 
 - **All signed.** The draft PR is marked ready and, per `policies.finalize`, set to auto-merge. `"auto"` (the default) does both unless the flight is `breaking`; `"ready"` only marks it ready; `"draft"` leaves it alone. `policies.mergeMethod` (`"merge"`, `"squash"` or `"rebase"`) is the method passed to `gh pr merge --auto`. If auto-merge cannot be enabled the PR is left ready and the result says `unavailable: <why>`.

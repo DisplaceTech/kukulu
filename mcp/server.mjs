@@ -380,6 +380,34 @@ const SIGNING_TIMEOUT_MS = 30_000;
 const SIGNING_FAILURE = /gpg failed to sign|failed to sign|signing failed|cannot exec|pinentry|ssh-keygen|gpg:/i;
 
 /**
+ * Ask git itself whether signing is what breaks: one signed and one unsigned
+ * commit of the empty tree, neither reachable from any ref, so nothing in the
+ * repository changes but two dangling objects. A signer that words its own
+ * error (an SSH agent without the key) matches no text pattern, but it is the
+ * only thing that makes the signed call fail and the unsigned one succeed.
+ * `line` is the signed call's first non-empty stderr line.
+ */
+function signingProbe() {
+  const run = (args) =>
+    spawnSync("git", args, {
+      cwd: ROOT,
+      encoding: "utf8",
+      timeout: SIGNING_TIMEOUT_MS,
+      env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+    });
+  const tree = run(["hash-object", "-t", "tree", "/dev/null"]);
+  const treeId = (tree.stdout || "").trim();
+  if (tree.status !== 0 || !treeId) return { signedOk: false, unsignedOk: false, line: "signing probe failed" };
+  const signed = run(["commit-tree", "-S", treeId, "-m", "kukulu signing probe"]);
+  const unsigned = run(["commit-tree", "--no-gpg-sign", treeId, "-m", "kukulu signing probe"]);
+  const signedOk = signed.status === 0 && !signed.error;
+  const timedOut = signed.error?.code === "ETIMEDOUT" || Boolean(signed.signal);
+  const first = (signed.stderr || signed.stdout || "").split("\n").map((l) => l.trim()).find(Boolean);
+  const line = timedOut ? "timed out" : first || signed.error?.message || "signing probe failed";
+  return { signedOk, unsignedOk: unsigned.status === 0 && !unsigned.error, line };
+}
+
+/**
  * The one place the server runs `git commit`. A signing agent that wants a
  * pinentry would hang the server forever, so the commit is bounded and told
  * never to prompt. Under policies.signing "auto" a signing failure turns
@@ -414,10 +442,15 @@ function commitStaged(rels, message, opts = {}) {
   if (r.status === 0 && !r.error) return;
   const text = (r.stderr || r.stdout || "").trim();
   const timedOut = r.error?.code === "ETIMEDOUT" || Boolean(r.signal);
+  let line = timedOut ? "timed out" : text.split("\n")[0];
   if (!timedOut && !SIGNING_FAILURE.test(text)) {
-    throw new ToolError(`git commit failed: ${text || r.error?.message || "unknown error"}`);
+    // The text names no signer, so ask git: a failure only the signed commit shows is a signing failure all the same.
+    const probe = git(["config", "--get", "commit.gpgsign"], { allowFail: true }).out === "true" ? signingProbe() : null;
+    if (!probe || probe.signedOk || !probe.unsignedOk) {
+      throw new ToolError(`git commit failed: ${text || r.error?.message || "unknown error"}`);
+    }
+    line = probe.line;
   }
-  const line = timedOut ? "timed out" : text.split("\n")[0];
   let policy = "auto";
   try {
     policy = cfg().policies.signing;
@@ -2141,14 +2174,9 @@ function probeSigning(signingPolicy) {
     }
     return "none";
   }
-  const probe = spawnSync("git", ["commit-tree", "-S", "HEAD^{tree}", "-m", "kukulu signing probe"], {
-    cwd: ROOT,
-    encoding: "utf8",
-    timeout: SIGNING_TIMEOUT_MS,
-    env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
-  });
-  if (probe.status === 0 && !probe.error) return "on";
-  const errLine = (probe.stderr || probe.stdout || probe.error?.message || "signing probe failed").trim().split("\n")[0] || "signing probe failed";
+  const probe = signingProbe();
+  if (probe.signedOk) return "on";
+  const errLine = probe.line;
   if (signingPolicy === "required") {
     throw new ToolError(`policies.signing is 'required' but the signing probe failed: ${errLine}. Fix the signing agent or set policies.signing to 'off'.`);
   }
