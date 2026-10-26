@@ -17,7 +17,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import {
-  CleanroomError, loadPolicy, policyHash, appendEntry, readEntries, logPathFor, generateKey, loadKey, signCheckpoint, verifyCheckpoint, verifyChain, evaluate, lockdownActive, normalizeModel, familyOf, controlPaths, ZERO_HASH, scorePair, position, verdictOf, LIMITS, coverageGaps, KNOWN_LIMITS, summarizeEntries, signBytes,
+  CleanroomError, loadPolicy, policyHash, appendEntry, readEntries, logPathFor, generateKey, loadKey, signCheckpoint, verifyCheckpoint, verifyChain, evaluate, lockdownActive, normalizeModel, familyOf, controlPaths, ZERO_HASH, scorePair, position, verdictOf, LIMITS, coverageGaps, knownLimitsFor, summarizeEntries, signBytes,
 } from "./cleanroom.mjs";
 
 /**
@@ -3891,15 +3891,24 @@ function attest({ evidence } = {}) {
   const policyHashes = [];
   for (const e of checkpoints) if (!policyHashes.includes(e.data.policyHash)) policyHashes.push(e.data.policyHash);
   const idleGapHours = cc.cleanroom.idleGapHours;
+  // 0.7.x genesis entries record no enforcement level: they were hook flights.
+  const level = genesis.data?.enforcement ?? "hook";
+  const egress = {};
+  for (const e of entries) {
+    if (e.kind !== "egress") continue;
+    egress[e.target] ??= { allowed: 0, denied: 0 };
+    egress[e.target][e.decision === "allowed" ? "allowed" : "denied"] += 1;
+  }
   const manifest = {
     version: 1,
     flight: cc.flight ?? gitFacts().branch,
     plugin: { version: VERSION, ...hashes, verifierHash: sha256Hex(verifierBytes) },
     repo: { baseBranch: cc.baseBranch, base, head, branch: gitFacts().branch },
     mode: genesis.data?.mode ?? "clean-room",
+    enforcement: { level, ...(level === "container+proxy" ? { boundary: genesis.data.boundary, egress } : {}) },
     genesis,
-    // A flight that began on 0.7.x has no roles in its genesis. "configuration" is the weakest assurance: the roles are what the routing said, not what a runner reported or the proxy saw.
-    roles: genesis.data?.roles ? Object.fromEntries(ROLES.map((role) => [role, { ...genesis.data.roles[role], assurance: "configuration" }])) : null,
+    // A flight that began on 0.7.x has no roles in its genesis. "configuration" is the weakest assurance: the roles are what the routing said; "egress" means the proxy also saw the traffic to the runner.
+    roles: genesis.data?.roles ? Object.fromEntries(ROLES.map((role) => [role, { ...genesis.data.roles[role], assurance: level === "container+proxy" ? "egress" : "configuration" }])) : null,
     policy: { path: cc.cleanroom.policy, hashes: policyHashes, current: policyHash(policyBytes) },
     chain: { entries: entries.length, first: entries[0].hash, tip: entries[entries.length - 1].hash },
     checkpoints: checkpoints.map((e) => ({ seq: e.seq, event: e.data.event, git: e.data.git, signature: e.data.signature, ok: verifyCheckpoint(e, key.publicKey) })),
@@ -3907,7 +3916,7 @@ function attest({ evidence } = {}) {
     calls: counts.calls,
     human: counts.human,
     selfTest: { ok: true, cases: Number(/\((\d+) cases\)/.exec(selfTest.stdoutTail || "")?.[1] ?? 0), at: new Date().toISOString() },
-    coverage: { gaps: coverageGaps(entries, gl.stdout.split("\n"), { idleGapHours }), knownLimits: KNOWN_LIMITS, idleGapHours },
+    coverage: { gaps: coverageGaps(entries, gl.stdout.split("\n"), { idleGapHours }), knownLimits: knownLimitsFor(level), idleGapHours },
     similarity: files.has("similarity.json") ? { sha256: sha256Hex(files.get("similarity.json")) } : null,
     files: [...files].map(([name, bytes]) => ({ path: name, sha256: sha256Hex(bytes), bytes: bytes.length })),
     signer: { fingerprint: key.fingerprint, publicKey: "publisher.pub" },

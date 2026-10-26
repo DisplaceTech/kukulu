@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "deny": {
+    "tools": ["WebSearch"],
+    "network": true,
+    "paths": ["~/.cargo/registry/", "~/.cargo/git/", "/usr/include/zlib.h"],
+    "pathPatterns": [
+      { "id": "build-script-output", "pattern": "/target/([^/]+/)*build/", "shouldMatch": ["/home/u/p/target/debug/build/x"], "shouldNotMatch": ["/home/u/p/target/debug/deps/x"] }
+    ],
+    "words": ["zlib", "miniz", "flate2", "libdeflate", "libz-sys", "libz_sys", "zopfli"],
+    "commandPatterns": [
+      { "id": "no-profiling-oracle", "pattern": "^(perf|objdump|gdb|lldb|valgrind)\\b.*\\b(oracle|libz|zlib)\\b", "shouldMatch": ["perf record target/release/oracle"], "shouldNotMatch": ["perf record target/release/examples/profile_decode"] }
+    ]
+  },
+  "allow": {
+    "paths": ["crates/cleanflate/", "crates/oracle/", "docs/"],
+    "urls": ["https://www.rfc-editor.org/rfc/rfc1951.txt"]
+  },
+  "lockdown": { "after": "P0-10" },
+  "protected": ["tools/"]
+}

@@ -18,7 +18,7 @@ import {
   tokenize, LANGUAGES, scorePair, position, verdictOf, LIMITS, BANDS,
   splitSegments, shellWords, commandWord, isPathLike, tokenPath, canonicalPaths,
   evaluate, lockdownActive, NETWORK_COMMANDS, READ_FAMILY, WRITE_FAMILY, protectedPaths,
-  coverageGaps, KNOWN_LIMITS,
+  coverageGaps, KNOWN_LIMITS, knownLimitsFor,
   normalizeModel, familyOf, controlPaths, LOG_SOCKET_TIMEOUT_MS,
   generateKey, loadKey, keyFingerprint, CHECKPOINT_KEYS, signCheckpoint, verifyCheckpoint,
 } from "../mcp/cleanroom.mjs";
@@ -1906,7 +1906,8 @@ eq(LANGUAGES.join(","), "rust,c,cpp,go,python,javascript,typescript,java,php", "
   let refused = null;
   try { coverageGaps([], [], { idleGapHours: 0 }); } catch (x) { refused = x; }
   ok(refused instanceof CleanroomError && /idleGapHours, a positive number/.test(refused.message), "coverageGaps refuses a limit that is not a positive number");
-  ok(KNOWN_LIMITS.length === 8 && KNOWN_LIMITS.every((l) => typeof l === "string" && l.endsWith(".")), "KNOWN_LIMITS is the eight fixed strings");
+  ok(KNOWN_LIMITS.length === 12 && KNOWN_LIMITS.every((l) => typeof l.id === "string" && l.text.endsWith(".") && l.levels.length > 0), "KNOWN_LIMITS is the twelve { id, text, levels } entries");
+  eq(JSON.stringify(knownLimitsFor("hook")) + "|" + knownLimitsFor("container+proxy").length, JSON.stringify(KNOWN_LIMITS.filter((l) => l.levels.includes("hook")).map((l) => l.text)) + "|5", "knownLimitsFor returns the texts for a level, in order");
   const tracked = spawnSync("git", ["ls-files", "docs/cleanroom.md"], { cwd: ROOT, encoding: "utf8" }).stdout.trim() === "docs/cleanroom.md";
   ok(tracked, "docs/cleanroom.md is tracked");
   if (tracked) {
@@ -1915,9 +1916,10 @@ eq(LANGUAGES.join(","), "rust,c,cpp,go,python,javascript,typescript,java,php", "
     const start = lines.indexOf("## Known gaps");
     let end = lines.findIndex((l, i) => i > start && l.startsWith("## "));
     if (end < 0) end = lines.length;
-    const bullets = lines.slice(start + 1, end).filter((l) => l.startsWith("- "));
+    const rows = lines.slice(start + 1, end).filter((l) => /^\| `[a-z-]+` \|/.test(l));
     const first5 = (t) => t.replace(/`/g, "").split(/\s+/).slice(0, 5).join(" ");
-    ok(bullets.length === 8 && bullets.every((b, i) => b.slice(2).replace(/`/g, "").includes(first5(KNOWN_LIMITS[i]))), "docs/cleanroom.md's Known gaps lists KNOWN_LIMITS one bullet each, in order");
+    ok(rows.length === 12 && rows.every((r, i) => r.startsWith(`| \`${KNOWN_LIMITS[i].id}\` |`) && r.replace(/`/g, "").includes(first5(KNOWN_LIMITS[i].text))), "docs/cleanroom.md's Known gaps lists KNOWN_LIMITS one table row each, in order");
+    ok(rows.every((r, i) => r.endsWith(`| ${KNOWN_LIMITS[i].levels.includes("hook") ? "yes" : "no"} | ${KNOWN_LIMITS[i].levels.includes("container+proxy") ? "yes" : "no"} |`)), "...with each level column");
     const g = lines.indexOf("### What the guard decides");
     const para = lines.slice(g + 1).find((l) => l.trim() !== "") ?? "";
     ok(para.startsWith("The guard is a tripwire, not a sandbox."), "docs/cleanroom.md opens the guard section with the tripwire paragraph");

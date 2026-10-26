@@ -37,8 +37,8 @@ const logLines = (dir) => fs.readFileSync(path.join(dir, "log.jsonl"), "utf8").s
   like(wrong.stdout, /verify-attestation: FAIL \(1 reason\)\n$/, "...and counting one reason");
   const j = run(b.dir, "--json");
   const parsed = JSON.parse(j.stdout);
-  eq(j.stdout.trim().split("\n").length + "|" + parsed.ok + "|" + Object.keys(parsed).sort().join(","), "1|true|checks,mode,notes,ok,reasons", "--json prints one object");
-  eq(Object.keys(parsed.checks).join(","), "manifest,signature,chain,checkpoints,policy,guard,mode,denials,coverage,similarity", "...with a result for each of the ten checks");
+  eq(j.stdout.trim().split("\n").length + "|" + parsed.ok + "|" + Object.keys(parsed).sort().join(","), "1|true|checks,enforcement,mode,notes,ok,reasons", "--json prints one object");
+  eq(Object.keys(parsed.checks).join(","), "manifest,signature,chain,checkpoints,policy,guard,mode,denials,coverage,similarity,enforcement", "...with a result for each of the eleven checks");
   eq(run(b.dir, "--json").status, 0, "...and exits 0 on a pass");
   const bad = JSON.parse(run(b.dir, "--json", "--key", "sha256:" + "1".repeat(64)).stdout);
   eq(bad.ok + "|" + bad.reasons[0].check, "false|signature", "--json carries the reasons too");
@@ -300,6 +300,73 @@ const logLines = (dir) => fs.readFileSync(path.join(dir, "log.jsonl"), "utf8").s
   eq(tampered.status, 1, "a manifest edited without re-signing fails");
   like(tampered.stdout, /signature: manifest\.sig does not verify/, "...on signature");
   like(tampered.stdout, /mode: the manifest says clean-room/, "...and on mode");
+}
+
+// ---------------------------------------------------------------- check 11: the enforcement level (P2-09)
+
+{
+  for (const level of ["hook", "container+proxy", "container+proxy+audit"]) {
+    eq(JSON.stringify(V.knownLimitsFor(level)), JSON.stringify(CR.knownLimitsFor(level)), `knownLimitsFor(${level}) is identical in both copies`);
+  }
+  eq(CR.knownLimitsFor("hook").length + "|" + CR.knownLimitsFor("container+proxy").length, "10|5", "knownLimitsFor gives ten texts for hook and five for container+proxy");
+  eq(JSON.stringify(V.KNOWN_LIMITS), JSON.stringify(CR.KNOWN_LIMITS), "the two tables are identical");
+  eq(CR.KNOWN_LIMITS.map((l) => l.id).join(","), "interpreter,expansion,spellings,indirect,patterns,make,mcp,session,training,packages,config-writable,tls", "the twelve limits have the documented ids, in order");
+  let thrownBy = [];
+  for (const mod of [CR, V]) {
+    try { mod.knownLimitsFor("vm"); } catch (e) { thrownBy.push(e.message); }
+  }
+  eq(thrownBy.length + "|" + (thrownBy[0] === thrownBy[1]), "2|true", "an unknown level throws in both copies, with the same message");
+  ok(CR.ENFORCEMENT_LEVELS.join() === V.ENFORCEMENT_LEVELS.join() && CR.ENFORCEMENT_LEVELS[0] === "hook", "...and both name the levels in rank order");
+
+  const hook = fresh();
+  const need = run(hook.dir, "--require-enforcement", "container+proxy");
+  eq(need.status, 1, "a hook bundle with --require-enforcement container+proxy fails");
+  like(need.stdout, /enforcement: the bundle was built under hook, below the required container\+proxy/, "...with the level reason");
+  eq(run(hook.dir, "--require-enforcement", "hook").status, 0, "...and passes --require-enforcement hook");
+  eq(run(hook.dir, "--require-enforcement", "vm").status, 2, "an unknown --require-enforcement value is a usage error");
+  like(run(hook.dir, "--require-enforcement", "vm").stderr, /--require-enforcement takes hook, container\+proxy, container\+proxy\+audit/, "...saying what it takes");
+  eq(run(hook.dir, "--require-enforcement").status, 2, "--require-enforcement without a value is a usage error");
+  const hj = JSON.parse(run(hook.dir, "--json").stdout);
+  eq(hj.enforcement, "hook", "--json carries enforcement");
+
+  const egressEntries = (log) => {
+    const base = { stage: "controller", role: "session", tool: null };
+    CR.appendEntry(log, { kind: "egress", ...base, target: "spark.test:8000", decision: "allowed", reason: "runner endpoint spark", data: { bytesUp: 1, bytesDown: 2, ms: 3 } });
+    CR.appendEntry(log, { kind: "egress", ...base, target: "spark.test:8000", decision: "allowed", reason: "runner endpoint spark", data: { bytesUp: 1, bytesDown: 2, ms: 3 } });
+    CR.appendEntry(log, { kind: "egress", ...base, target: "example.com:443", decision: "denied", reason: "not allowed by this flight's policy" });
+  };
+  const boxed = fresh({ enforcement: "container+proxy", extra: egressEntries });
+  const passed = run(boxed.dir, "--require-enforcement", "container+proxy");
+  eq(passed.status, 0, "a container+proxy bundle built from the recorded inspect fixture passes --require-enforcement container+proxy");
+  eq(JSON.stringify(boxed.manifest.enforcement.egress), '{"spark.test:8000":{"allowed":2,"denied":0},"example.com:443":{"allowed":0,"denied":1}}', "...its manifest carries the egress summary");
+  const jb = JSON.parse(run(boxed.dir, "--json").stdout);
+  eq(jb.enforcement + "|" + jb.ok, "container+proxy|true", "...and --json says container+proxy");
+  const above = run(boxed.dir, "--require-enforcement", "container+proxy+audit");
+  eq(above.status, 1, "...and fails --require-enforcement container+proxy+audit");
+  like(above.stdout, /enforcement: the bundle was built under container\+proxy, below the required container\+proxy\+audit/, "...with the level reason");
+  ok(boxed.manifest.coverage.knownLimits.length === 5 && !boxed.manifest.coverage.knownLimits.some((t) => /Interpreter escapes/.test(t)), "...and lists five known limits, not the hook-only ones");
+
+  const edited = fresh({ enforcement: "container+proxy", extra: egressEntries });
+  rewriteManifest(edited.dir, edited.key, (m) => { m.enforcement.egress["spark.test:8000"].allowed = 9; });
+  like(run(edited.dir).stdout, /enforcement: the egress summary differs from the log's: /, "an edited egress summary fails check 11");
+  const noBoundary = fresh({ enforcement: "container+proxy", extra: egressEntries });
+  rewriteManifest(noBoundary.dir, noBoundary.key, (m) => { m.enforcement.boundary = { engine: "docker" }; });
+  like(run(noBoundary.dir).stdout, /enforcement: the manifest's boundary differs from the genesis entry's/, "a manifest boundary that is not the genesis's fails check 11");
+  const limits = fresh({ enforcement: "container+proxy", extra: egressEntries });
+  rewriteManifest(limits.dir, limits.key, (m) => { m.coverage.knownLimits = CR.knownLimitsFor("hook"); });
+  like(run(limits.dir).stdout, /enforcement: coverage\.knownLimits is not the known-limit list for level container\+proxy/, "a manifest whose knownLimits do not match its level fails check 11");
+  const bad = fresh();
+  rewriteManifest(bad.dir, bad.key, (m) => { m.enforcement = { level: "vm" }; });
+  like(run(bad.dir).stdout, /enforcement: the manifest's level "vm" is not one of hook, container\+proxy, container\+proxy\+audit/, "an unknown level in the manifest fails check 11");
+  const failedGate = fresh({ enforcement: "container+proxy", extra: (log) => CR.appendEntry(log, { kind: "gate", stage: "controller", role: "session", data: { failed: "boundary", reason: "network is bridge, but the policy requires none" } }) });
+  like(run(failedGate.dir).stdout, /enforcement: entry \d+: a gate failed the boundary check: network is bridge/, "a gate that failed the boundary check fails check 11");
+
+  const legacy = path.join(ROOT, "test", "fixtures", "bundles", "v0-7-2");
+  const old = run(legacy, "--key", "sha256:0561a28f9799e9f209ffbddfc810e9da44f81017d4aafde13db056232c013d8d");
+  eq(old.status, 0, "the 0.7.2 bundle in test/fixtures verifies");
+  like(old.stdout, /verify-attestation: note: enforcement absent \(bundle from 0\.7\.x\); read as hook\n/, "...with the absent-enforcement note");
+  eq(JSON.parse(run(legacy, "--json").stdout).enforcement, "hook", "...and reads as hook in --json");
+  eq(run(legacy, "--require-enforcement", "container+proxy").status, 1, "...and a 0.7.2 bundle fails a container+proxy requirement");
 }
 
 // ---------------------------------------------------------------- check 8: the denials
@@ -614,7 +681,7 @@ async function summarizedFlight() {
       ok(manifest.coverage.gaps.length === count && manifest.coverage.gaps.every((g) => g.kind === "unsigned-commit"), "the gaps are the unsigned commits of this unsigned test repository, and nothing else (" + count + ")");
 
       ok(r.verify.ok === true && r.verify.reasons.length === 0, "the verifier's PASS is returned");
-      eq(Object.keys(r.verify.checks).join(","), "manifest,signature,chain,checkpoints,policy,guard,mode,denials,coverage,similarity", "...with all ten checks run");
+      eq(Object.keys(r.verify.checks).join(","), "manifest,signature,chain,checkpoints,policy,guard,mode,denials,coverage,similarity,enforcement", "...with all eleven checks run");
       eq(r.fingerprint, manifest.signer.fingerprint, "the result carries the signer's fingerprint");
       const cli = spawnSync(process.execPath, [VERIFIER, dir, "--key", r.fingerprint], { encoding: "utf8" });
       eq(cli.status, 0, "the CLI passes the committed bundle with the right --key");
@@ -636,11 +703,13 @@ async function summarizedFlight() {
       eq(manifest.repo.head, head, "the manifest names the commit it was made at");
       eq(manifest.denials.verdicts["false positive"] + "|" + manifest.denials.verdicts.unclassified + "|" + manifest.denials.total, "1|0|1", "the denial's verdict is counted");
       eq(manifest.human.verdicts + "|" + (manifest.human.instructions >= 1), "1|true", "the human entries are counted, the prompt among them");
-      ok(JSON.stringify(manifest.coverage.knownLimits) === JSON.stringify(CR.KNOWN_LIMITS) && manifest.coverage.idleGapHours === 3, "the coverage section carries the known limits and the idle threshold");
+      ok(JSON.stringify(manifest.coverage.knownLimits) === JSON.stringify(CR.knownLimitsFor("hook")) && manifest.coverage.idleGapHours === 3, "the coverage section carries the known limits and the idle threshold");
       eq(JSON.stringify(Object.keys(manifest.roles)), JSON.stringify(["planner", "implementer", "reviewer", "summarizer"]), "the manifest's roles name every role");
       eq(JSON.stringify(Object.values(manifest.roles).map(({ assurance, ...rest }) => rest)), JSON.stringify(Object.values(entriesOf(repo)[0].data.roles)), "the manifest's roles repeat genesis's roles");
       ok(Object.values(manifest.roles).every((r) => r.assurance === "configuration" && r.identity.source === "vendor-asserted"), "...with assurance configuration and identity vendor-asserted for the default routing");
-      eq(Object.keys(manifest).slice(5, 8).join(","), "genesis,roles,policy", "roles follows genesis in the manifest");
+      eq(Object.keys(manifest).slice(5, 9).join(","), "enforcement,genesis,roles,policy", "enforcement follows mode, and roles follows genesis, in the manifest");
+      eq(JSON.stringify(manifest.enforcement), '{"level":"hook"}', "a hook flight's manifest records enforcement level hook");
+      ok(Object.values(manifest.roles).every((r) => r.assurance === "configuration"), "...and roles with assurance configuration");
       eq(manifest.plugin.cleanroomHash, CR.policyHash(fs.readFileSync(path.join(ROOT, "mcp", "cleanroom.mjs"))), "the manifest's plugin object carries cleanroomHash");
       eq(Object.keys(manifest.plugin).join(","), "version,guardHash,loggerHash,hooksHash,cleanroomHash,verifierHash", "...after hooksHash");
       eq(manifest.selfTest.ok + "|" + manifest.selfTest.cases, "true|" + manifest.selfTest.cases, "the self-test result is recorded");

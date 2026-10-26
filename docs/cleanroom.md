@@ -170,8 +170,9 @@ The manifest's fields, in the order it writes them:
 - `version` (1), `flight`, `mode` (`clean-room`) and `at`.
 - `plugin`: the plugin `version` and the hashes of the guard, the logger, `hooks.json`, `mcp/cleanroom.mjs` (`cleanroomHash`) and the verifier. The verifier compares `plugin.cleanroomHash` with the genesis entry's; a bundle from 0.7.0 has neither, and it verifies with the note `plugin.cleanroomHash absent (bundle from 0.7.0 or earlier)` (or `genesis has no cleanroomHash (flight started on 0.7.0 or earlier); plugin.cleanroomHash not compared`).
 - `repo`: `baseBranch`, `base`, `head` and `branch`.
+- `enforcement`: `{ level }`, the level from the genesis (`hook` when a 0.7.x genesis records none); under `container+proxy` also `boundary`, the genesis's, and `egress`, an object keyed by `host:port` with `{ allowed, denied }` counts from the `egress` entries.
 - `genesis`: the first log entry, repeated.
-- `roles`: each role's `model`, `runner`, `endpoint`, `locality`, `identity` and `family` from the genesis entry, each with `assurance: "configuration"` (the roles are what the routing said, not what a runner reported or the proxy saw), or `null` for a flight that began on 0.7.x, whose genesis has no `roles`.
+- `roles`: each role's `model`, `runner`, `endpoint`, `locality`, `identity` and `family` from the genesis entry, each with `assurance`: `"configuration"` (the roles are what the routing said, not what a runner reported or the proxy saw) or, under `container+proxy`, `"egress"` (the proxy also saw the traffic to the runner), or `null` for a flight that began on 0.7.x, whose genesis has no `roles`.
 - `policy`: its `path`, every distinct `hashes` value seen in the checkpoints in order, and the `current` one.
 - `chain`: the number of `entries`, the `first` hash and the `tip`.
 - `checkpoints`: each one's `seq`, `event`, `git`, `signature` and whether it verifies (`ok`).
@@ -192,17 +193,17 @@ The manifest's fields, in the order it writes them:
 - `idle`: two consecutive entries of one stage more than `cleanroom.idleGapHours` apart.
 - `unsigned-commit`: a commit whose signature code is `N` (none) or `B` (bad).
 
-`coverage.knownLimits` is the fixed list under [Known gaps](#known-gaps): what no log of tool calls can show.
+`coverage.knownLimits` is the list under [Known gaps](#known-gaps) for the bundle's enforcement level: what no log of tool calls can show.
 
 ## Verifying offline
 
 ```text
-node docs/attestation/verify.mjs docs/attestation --key sha256:<fingerprint> [--expect clean-room|control-positive]
+node docs/attestation/verify.mjs docs/attestation --key sha256:<fingerprint> [--expect clean-room|control-positive] [--require-enforcement <level>]
 ```
 
-`--key` is the signer's fingerprint, which you got from the publisher by some other route than the bundle (the bundle can carry any key it likes). Without it the bundle is only self-consistent, and the report says so with `verify-attestation: note: signer: self-consistent, fingerprint not checked against an out-of-band value`. `--json` prints the result as one object (`ok`, `mode`, `reasons`, `notes`, `checks`) instead of text. `--expect` names the mode the bundle must have. Exit status is 0 for a pass, 1 for a failure, 2 for a usage error and 3 for a passing control bundle (`CONTROL (positive)`, see [Control mode](#control-mode)) when `--expect control-positive` was not given. The verifier needs Node 22 or later, nothing else: no network, no git, no packages. The copy in the bundle and `scripts/verify-attestation.mjs` are the same file.
+`--key` is the signer's fingerprint, which you got from the publisher by some other route than the bundle (the bundle can carry any key it likes). Without it the bundle is only self-consistent, and the report says so with `verify-attestation: note: signer: self-consistent, fingerprint not checked against an out-of-band value`. `--json` prints the result as one object (`ok`, `mode`, `enforcement`, `reasons`, `notes`, `checks`) instead of text. `--expect` names the mode the bundle must have, and `--require-enforcement` the lowest enforcement level (`hook`, `container+proxy` or `container+proxy+audit`) it may have been built under. Exit status is 0 for a pass, 1 for a failure, 2 for a usage error and 3 for a passing control bundle (`CONTROL (positive)`, see [Control mode](#control-mode)) when `--expect control-positive` was not given. The verifier needs Node 22 or later, nothing else: no network, no git, no packages. The copy in the bundle and `scripts/verify-attestation.mjs` are the same file.
 
-It runs ten checks in order and reports every failure, not only the first:
+It runs eleven checks in order and reports every failure, not only the first:
 
 1. `manifest`: `manifest.json` parses, its `version` is 1, and every listed file exists with the listed SHA-256 and size.
 2. `signature`: `manifest.sig` verifies over `manifest.json` with `publisher.pub`, and the key's fingerprint is the one you asked for.
@@ -214,6 +215,7 @@ It runs ten checks in order and reports every failure, not only the first:
 8. `denials`: the denial and verdict counts, recounted from the log.
 9. `coverage`: the gaps, recomputed and printed.
 10. `similarity`: `similarity.json` hashes to the manifest's value, when there is one.
+11. `enforcement`: the manifest's level is `hook`, `container+proxy` or `container+proxy+audit`; under `container+proxy` the genesis has a `boundary` and the manifest's equals it, the `egress` summary equals a recount from the log's `egress` entries, and no gate failed the boundary check; and `coverage.knownLimits` is the list for the level. With `--require-enforcement <level>`, a bundle built below that level fails with `enforcement: the bundle was built under <level>, below the required <level>`. A manifest with no `enforcement` field, as every 0.7.x bundle, reads as `hook` with the note `enforcement absent (bundle from 0.7.x); read as hook`.
 
 A passing bundle prints its notes and then one line:
 
@@ -257,13 +259,19 @@ legacy log: no hash chain or signatures; integrity rests on the git history that
 
 ## Known gaps
 
-The guard sees tool calls, not what a command does. Each of these is a limit of the method, not a bug:
+The guard sees tool calls, not what a command does. Each of these is a limit of the method, not a bug. `coverage.knownLimits` in a bundle's manifest lists the texts that apply at the bundle's enforcement level, so the list is shorter under `container+proxy`:
 
-- Interpreter escapes (`python3 -c`, `node -e`) are not parsed, so a path or word inside the quoted program is not seen.
-- Shell expansion beyond `~` and `$HOME` is not evaluated: other variables, and strings assembled at run time (a base64 decode, a variable holding a command), so a path or command built that way is not seen.
-- Option and wrapper spellings the tables do not model are not recognized: the guard judges a command by its text, its wrapper and option parsing follows GNU coreutils, findutils and sudo (and BSD/macOS forms where their manual pages differ), and no table can be proved complete across tool versions.
-- Commands that run a command from their arguments (`find -exec`, `watch`, `parallel`, `busybox`) and programs outside the fixed network and write lists (`unlink`, `shred`, `perl -i`, `cargo fetch`) are not recognized.
-- `pathPatterns` regexes are matched on the paths a call names, not on the files a recursive read or a glob reaches below a directory.
-- Subprocesses of a `make` target are not individual tool calls, so what they read is not logged.
-- MCP server internals are not tool calls, so what a server reads on its own is not logged.
-- Hooks load at session start, so a session that writes the policy is not covered until the next one; the gate's liveness check catches a session with no hooks at all.
+| id | Limit | hook | container+proxy |
+|---|---|---|---|
+| `interpreter` | Interpreter escapes (`python3 -c`, `node -e`) are not parsed, so a path or word inside the quoted program is not seen. | yes | no |
+| `expansion` | Shell expansion beyond `~` and `$HOME` is not evaluated: other variables, and strings assembled at run time (a base64 decode, a variable holding a command), so a path or command built that way is not seen. | yes | no |
+| `spellings` | Option and wrapper spellings the tables do not model are not recognized: the guard judges a command by its text, its wrapper and option parsing follows GNU coreutils, findutils and sudo (and BSD/macOS forms where their manual pages differ), and no table can be proved complete across tool versions. | yes | no |
+| `indirect` | Commands that run a command from their arguments (`find -exec`, `watch`, `parallel`, `busybox`) and programs outside the fixed network and write lists (`unlink`, `shred`, `perl -i`, `cargo fetch`) are not recognized. | yes | no |
+| `patterns` | `pathPatterns` regexes are matched on the paths a call names, not on the files a recursive read or a glob reaches below a directory. | yes | no |
+| `make` | Subprocesses of a `make` target are not individual tool calls, so what they read is not logged. | yes | no |
+| `mcp` | MCP server internals are not tool calls, so what a server reads on its own is not logged. | yes | no |
+| `session` | Hooks load at session start, so a session that writes the policy is not covered until the next one; the gate's liveness check catches a session with no hooks at all. | yes | yes |
+| `training` | What a model learned in training is outside every boundary; the similarity score, not the log, measures it. | yes | yes |
+| `packages` | Packages named in a lockfile are outside the claim; `deny.packages` and the gate keep named prior-art packages out of the lockfiles and the cache, and the manifest lists what the lockfiles name. | yes | yes |
+| `config-writable` | Inside the boundary `docs/kukulu.json` stays writable, because the planner writes it; only the guard protects it after the plan exists. | no | yes |
+| `tls` | The proxy sees host and port, not paths or content inside TLS; whatever an allowed host serves is reachable. | no | yes |

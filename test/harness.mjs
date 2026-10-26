@@ -455,7 +455,7 @@ const sha256Of = (bytes) => createHash("sha256").update(bytes).digest("hex");
  * `opts.checkpointKey` signs the second checkpoint instead (to build a bad one),
  * `opts.policyText` is the policy. `opts.clock()` replaces the time entries are stamped with,
  * `opts.extra(log)` appends more entries (after the first checkpoint), `opts.commits` is commits.txt,
- * `opts.gaps` and `opts.idleGapHours` are the manifest's coverage, `opts.cleanroomHash` (default none, the 0.7.0 shape) is pinned in the genesis entry and the manifest's plugin object, `opts.similarity` is a similarity.json's text, `opts.mode` (default `clean-room`) is the genesis's and the manifest's mode, `opts.head` the manifest's `repo.head`.
+ * `opts.gaps` and `opts.idleGapHours` are the manifest's coverage, `opts.cleanroomHash` (default none, the 0.7.0 shape) is pinned in the genesis entry and the manifest's plugin object, `opts.similarity` is a similarity.json's text, `opts.mode` (default `clean-room`) is the genesis's and the manifest's mode, `opts.head` the manifest's `repo.head`, `opts.enforcement` (`hook` by default, or `container+proxy`, which records a boundary built from `test/fixtures/docker/inspect.json` in the genesis and the manifest, and an egress summary counted from the entries) the enforcement level.
  * The manifest's denials are counted from the entries here, independently of the verifier. Returns `{ dir, key, fingerprint, manifest, entries }`.
  */
 export function buildBundle(dir, opts = {}) {
@@ -485,7 +485,13 @@ export function buildBundle(dir, opts = {}) {
     );
     return CR.appendEntry(log, { kind: "checkpoint", stage: "implement", ...base, data });
   };
-  CR.appendEntry(log, { kind: "genesis", stage: "controller", ...base, data: { mode: opts.mode ?? "clean-room", policyHash, guardHash, loggerHash, hooksHash, ...(opts.cleanroomHash ? { cleanroomHash: opts.cleanroomHash } : {}), pluginVersion: "0.7.0", keyFingerprint: key.fingerprint, baseBranch: "main", head: "a".repeat(40) } });
+  const level = opts.enforcement ?? "hook";
+  let boundary = null;
+  if (level === "container+proxy") {
+    const c = JSON.parse(fs.readFileSync(path.join(ROOT, "test", "fixtures", "docker", "inspect.json"), "utf8").replaceAll("__ROOT__", "/work/proj"))[0];
+    boundary = { engine: "docker", image: c.Image, network: c.HostConfig.NetworkMode, mounts: c.Mounts.map((m) => ({ source: m.Source, destination: m.Destination, rw: m.RW })).sort((a, b) => (a.destination < b.destination ? -1 : 1)) };
+  }
+  CR.appendEntry(log, { kind: "genesis", stage: "controller", ...base, data: { mode: opts.mode ?? "clean-room", enforcement: level, ...(boundary ? { boundary } : {}), policyHash, guardHash, loggerHash, hooksHash, ...(opts.cleanroomHash ? { cleanroomHash: opts.cleanroomHash } : {}), pluginVersion: "0.7.0", keyFingerprint: key.fingerprint, baseBranch: "main", head: "a".repeat(40) } });
   CR.appendEntry(log, { kind: "gate", stage: "controller", ...base, data: { checks: 7, ok: true } });
   CR.appendEntry(log, { kind: "allowed", stage: "implement", task: "P0-01", ...base, tool: "Read", target: "/p/a.rs", decision: "allowed" });
   CR.appendEntry(log, { kind: "denied", stage: "implement", task: "P0-01", ...base, tool: "Read", target: "/usr/include/zlib.h", decision: "denied", reason: "denied path: /usr/include/zlib.h (deny.paths)" });
@@ -506,6 +512,13 @@ export function buildBundle(dir, opts = {}) {
     if (m) classified.set(Number(m[1]), m[2]);
   }
   for (const d of denied) verdicts[classified.get(d.seq) ?? "unclassified"] += 1;
+
+  const egress = {};
+  for (const e of entries) {
+    if (e.kind !== "egress") continue;
+    egress[e.target] ??= { allowed: 0, denied: 0 };
+    egress[e.target][e.decision === "allowed" ? "allowed" : "denied"] += 1;
+  }
 
   const sources = {
     "policy.json": policyText,
@@ -529,6 +542,7 @@ export function buildBundle(dir, opts = {}) {
     plugin: { version: "0.7.0", guardHash, loggerHash, hooksHash, ...(opts.cleanroomHash ? { cleanroomHash: opts.cleanroomHash } : {}), verifierHash: sha256Of(verifierBytes) },
     repo: { baseBranch: "main", base: "a".repeat(40), head: opts.head ?? "b".repeat(40), branch: "build/test" },
     mode: opts.mode ?? "clean-room",
+    enforcement: { level, ...(boundary ? { boundary, egress } : {}) },
     genesis: entries[0],
     policy: { path: "docs/cleanroom.json", hashes: [policyHash], current: policyHash },
     chain: { entries: entries.length, first: entries[0].hash, tip: entries.at(-1).hash },
@@ -537,7 +551,7 @@ export function buildBundle(dir, opts = {}) {
     calls: { total: 3, byTool: { Read: 2, Bash: 1 }, byStage: { implement: 3 }, readCapable: 3 },
     human: { instructions: 1, interventions: 0, verdicts: 0 },
     selfTest: { ok: true, cases: 164, at: "2026-01-01T00:00:00.000Z" },
-    coverage: { gaps: opts.gaps ?? [], knownLimits: [], idleGapHours: opts.idleGapHours ?? 4 },
+    coverage: { gaps: opts.gaps ?? [], knownLimits: CR.knownLimitsFor(level), idleGapHours: opts.idleGapHours ?? 4 },
     similarity: opts.similarity === undefined ? null : { sha256: sha256Of(opts.similarity) },
     files: listed.map((name) => {
       const bytes = fs.readFileSync(path.join(dir, name));

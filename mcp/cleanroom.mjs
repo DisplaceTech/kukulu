@@ -1868,17 +1868,33 @@ function redirectTargets(segment) {
 
 // ---------------------------------------------------------------- coverage gaps
 
-/** What the guard cannot see, stated in every bundle's manifest as coverage.knownLimits (0.7.1 SPEC A-01). */
+/** The enforcement levels in rank order: a bundle built under a lower one is weaker (SPEC C-06). */
+export const ENFORCEMENT_LEVELS = ["hook", "container+proxy", "container+proxy+audit"];
+
+/**
+ * The places the log does not vouch for the work, each with the enforcement levels it still applies to (SPEC C-06). The list
+ * shrinks at the higher level. scripts/verify-attestation.mjs duplicates this table and knownLimitsFor on purpose.
+ */
 export const KNOWN_LIMITS = [
-  "Interpreter escapes (python3 -c, node -e) are not parsed, so a path or word inside the quoted program is not seen.",
-  "Shell expansion beyond ~ and $HOME is not evaluated: other variables, and strings assembled at run time (a base64 decode, a variable holding a command), so a path or command built that way is not seen.",
-  "Option and wrapper spellings the tables do not model are not recognized: the guard judges a command by its text, its wrapper and option parsing follows GNU coreutils, findutils and sudo (and BSD/macOS forms where their manual pages differ), and no table can be proved complete across tool versions.",
-  "Commands that run a command from their arguments (find -exec, watch, parallel, busybox) and programs outside the fixed network and write lists (unlink, shred, perl -i, cargo fetch) are not recognized.",
-  "pathPatterns regexes are matched on the paths a call names, not on the files a recursive read or a glob reaches below a directory.",
-  "Subprocesses of a make target are not individual tool calls, so what they read is not logged.",
-  "MCP server internals are not tool calls, so what a server reads on its own is not logged.",
-  "Hooks load at session start, so a session that writes the policy is not covered until the next one; the gate's liveness check catches a session with no hooks at all.",
+  { id: "interpreter", text: "Interpreter escapes (python3 -c, node -e) are not parsed, so a path or word inside the quoted program is not seen.", levels: ["hook"] },
+  { id: "expansion", text: "Shell expansion beyond ~ and $HOME is not evaluated: other variables, and strings assembled at run time (a base64 decode, a variable holding a command), so a path or command built that way is not seen.", levels: ["hook"] },
+  { id: "spellings", text: "Option and wrapper spellings the tables do not model are not recognized: the guard judges a command by its text, its wrapper and option parsing follows GNU coreutils, findutils and sudo (and BSD/macOS forms where their manual pages differ), and no table can be proved complete across tool versions.", levels: ["hook"] },
+  { id: "indirect", text: "Commands that run a command from their arguments (find -exec, watch, parallel, busybox) and programs outside the fixed network and write lists (unlink, shred, perl -i, cargo fetch) are not recognized.", levels: ["hook"] },
+  { id: "patterns", text: "pathPatterns regexes are matched on the paths a call names, not on the files a recursive read or a glob reaches below a directory.", levels: ["hook"] },
+  { id: "make", text: "Subprocesses of a make target are not individual tool calls, so what they read is not logged.", levels: ["hook"] },
+  { id: "mcp", text: "MCP server internals are not tool calls, so what a server reads on its own is not logged.", levels: ["hook"] },
+  { id: "session", text: "Hooks load at session start, so a session that writes the policy is not covered until the next one; the gate's liveness check catches a session with no hooks at all.", levels: ["hook", "container+proxy"] },
+  { id: "training", text: "What a model learned in training is outside every boundary; the similarity score, not the log, measures it.", levels: ["hook", "container+proxy"] },
+  { id: "packages", text: "Packages named in a lockfile are outside the claim; deny.packages and the gate keep named prior-art packages out of the lockfiles and the cache, and the manifest lists what the lockfiles name.", levels: ["hook", "container+proxy"] },
+  { id: "config-writable", text: "Inside the boundary docs/kukulu.json stays writable, because the planner writes it; only the guard protects it after the plan exists.", levels: ["container+proxy"] },
+  { id: "tls", text: "The proxy sees host and port, not paths or content inside TLS; whatever an allowed host serves is reachable.", levels: ["container+proxy"] },
 ];
+
+/** The known-limit texts that apply at an enforcement level, in order. */
+export function knownLimitsFor(level) {
+  if (!ENFORCEMENT_LEVELS.includes(level)) throw new CleanroomError(`enforcement level must be one of ${ENFORCEMENT_LEVELS.join(", ")} (got ${JSON.stringify(level)})`);
+  return KNOWN_LIMITS.filter((l) => l.levels.includes(level)).map((l) => l.text);
+}
 
 /**
  * The places the log does not vouch for the work, from the entries and the
