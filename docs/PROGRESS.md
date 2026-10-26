@@ -22,7 +22,7 @@ Started: 2026-10-26T21:19:36.125Z
 - [x] P2-03 The log socket, and its round-trip budget
 - [x] P2-04 The egress proxy, the bridge, and its overhead
 - [x] P2-05 containerArgs, the plan, the Containerfile, the fake docker and doctor
-- [ ] P2-06 run and stop, and docs/sandbox.md
+- [x] P2-06 run and stop, and docs/sandbox.md
 - [ ] P2-07 Gate check 9 and the boundary in genesis
 - [ ] P2-08 Commands run inside the boundary
 - [ ] P2-09 The enforcement level: known limits per level, the manifest and verifier check 11
@@ -132,3 +132,8 @@ Interpretation: 403 carries Content-Length too; CONNECT to an unreachable upstre
 
 scripts/sandbox.mjs: projectIdFor, runtimeDirFor, planFor (extra optional policyPath), containerArgs (exact list, no other flag), doctor (+ --engine). templates/sandbox/Containerfile, mkFakeDocker in test/harness.mjs, test/fixtures/docker/{version.txt,inspect.json,README.md}. inspect.json: container kukulu-0123456789abcdef, plugin root /opt/kukulu, root as __ROOT__ (P2-06/P2-07 tests substitute). docs/sandbox.md: Building the image, doctor, The mount list. test/sandbox.mjs 94 assertions. Verify green (4180).
 Interpretation: doctor treats enforcement hook / missing sandbox.image as problems; missing image is one problem (plus build/paste lines).
+
+### P2-06 — 0d473c9
+
+scripts/sandbox.mjs: run (async, all refusals in the specified order before anything starts, listeners + container, cleanup, SIGINT/SIGTERM stop) and stop. imagePresent now compares ids (doctor too). mkFakeDocker run writes runtime-listing.txt for the mid-run socket check. docs/sandbox.md completed (Running a flight, macOS, What an agent inside can/cannot do, worked local-only flight); operations.md env table. test/sandbox.mjs 120 assertions; verify green (4206).
+Interpretation: main returns a promise for run only; CLI awaits it.
