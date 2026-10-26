@@ -1,96 +1,81 @@
 # Review: Kūkulu 0.7.2 build (build/2026-10-26)
 
-Round: 1
+Round: 2
 
 ## Verdict
 
-CHANGES REQUESTED
+APPROVED
 
-Every constraint passes and `kukulu_verify` is green: lint, pre-commit, and `npm test` with 3855 assertions in 13 suites. The pull request's own CI does not pass, though. The `gitleaks` check fails on two commits of this branch. Mutation sampling also found two SPEC requirements with no test, plus four more mechanics in `mcp/server.mjs` that no test covers.
+The round 1 fix tasks (R1-01, R1-02, R1-03) do what their tasks asked, and categories 1 to 3 are clean across the branch:
+
+- Every constraint passes.
+- `kukulu_verify` is green: lint, pre-commit, and `npm test` with 3871 assertions in 13 suites.
+- The pull request's CI is green, including `gitleaks`.
+- Every mutant that survived round 1 is now killed by the test written for it.
 
 ## Findings
 
-### 1. Category 3: the PR's `gitleaks` CI check fails (P1-02, P1-04)
+None.
 
-- **Where:** `test/state.mjs:131` (added in 9c1e707, P1-04) and `test/implement.mjs:1190` (line 1150 when added in b080d17, P1-02).
-- **What is wrong:** both lines write a temp gitconfig containing the fake signer key `signingkey = 0123456789ABCDEF`, and gitleaks' `generic-api-key` rule flags them. `.gitleaks.toml` allowlists that value only in `^test/(harness|review)\.mjs$`. `kukulu_status` reports `prChecks: fail` with `gitleaks` failing (secret-scan workflow run 40362080213, "Scan a pull request's commits"). I reproduced it locally: `gitleaks git --no-banner --redact --log-opts="450fbfd..HEAD" .` scans 41 commits and finds 2 leaks.
-- **Why local verify missed it:** the pre-commit `gitleaks` hook only scans staged changes, and `pre-commit run --all-files` has nothing staged, so it passes. CI scans the commit range.
-- **What would break:** the PR can never go green. With `finalize: auto`, auto-merge waits forever on a required check.
-- **Minimal fix:** the findings are already in history, so changing the test lines alone cannot clear the PR scan. Widen the narrow allowlist's `paths` to cover the two suites, `^test/(harness|review|state|implement)\.mjs$`, and keep the `0123456789ABCDEF` regex and the `AND` condition. Update its comment to match.
+## CI (prChecks)
 
-### 2. Category 3: B-02's "the earlier record stays" is untested (P1-02)
+When the review started, `kukulu_status` reported `prChecks: pending` with nothing failing. `gitleaks`, both lint jobs, the site checks, mermaid and Cloudflare Pages had already passed; the five `test` jobs were still running.
 
-- **Where:** `mcp/server.mjs` `reprobeSigning`, the `outcome === "none"` branch (around line 2283).
-- **What is wrong:** SPEC B-02 says a re-probe on an already-started run "never overwrites an `off (commit signing failed: …)` or `off (probe failed: …)` record with `"none"`". It also says the override goes back when the operator's setting is not configured. Two mutants survive `node test/implement.mjs`:
-  - removing the `git config --local commit.gpgsign false` put-back;
-  - replacing `if (outcome === "none")` with `if (false)`, which records `"none"` over the fallback and commits it.
-- **Missing test:** an already-started run with `signingOverride: true`, `signing: "off (commit signing failed: …)"`, the local `false`, and no operator signing in global config.
+All four workflows on 327b356 have since finished with success: `secret-scan` (run 40389148651), `lint`, `site`, and `ci` (run 40389148525, 9m44s). The `gitleaks` failure from round 1 (runs 40362080213 and 40366708432) is gone.
 
-### 3. Category 3: C-01's 120-character cut on the derived title is untested (P2-01)
+I also ran the range scan locally, `gitleaks git --no-banner --redact --log-opts="$(git merge-base main HEAD)..HEAD" .`. It scanned 51 commits and found no leaks.
 
-- **Where:** `mcp/server.mjs` `prTitleFor`, `return [...title].slice(0, 120).join("");`.
-- **What is wrong:** SPEC C-01 says "The title is cut to 120 characters". Replacing the line with `return title;` survives `node test/implement.mjs`. No test uses a heading longer than 120 characters.
+## Fix round review
 
-### 4. Category 3: other mechanics in `mcp/server.mjs` no test covers (P1-02, P2-01, P3-01)
+**R1-01 (32be844), `.gitleaks.toml`:**
 
-These mutants also survived their owning suite (one task for the file, source `mutation`):
+- The path allowlist is widened to `^test/(harness|review|state|implement)\.mjs$`. It still uses `condition = "AND"` and the same one-value regex, and its comment was updated.
+- The task said "no other file changes" and "only the paths widened". The commit also adds a second allowlist, scoped to the single commit 79f3342 (full sha checked) and the same value. The reason is that the round 1 review quoted the fake key in `docs/REVIEW.md`, and the range scan flagged that.
+- It stays inside the task's file, it is as narrow as gitleaks allows, and the commit body records it as an interpretation. Widening the paths to `docs/` instead would have broken `test/plugin.mjs`'s tests-only paths check.
+- I accept it. This review avoids quoting the value for the same reason.
 
-- **Fresh-path `"none"` outcome:** deleting `else if (st.signing === "none") delete st.signingOverride;` in `startRun` survives `implement`. PLAN's B-02 decision says a fresh run whose lifted override finds no operator signing records `"none"` and drops `signingOverride`.
-- **Code points in `prTitle` validation:** changing `[...t].length > 120` to `t.length > 120` survives `routing`. PLAN's C-01 decision counts code points, but every test title is ASCII.
-- **Separator strip:** narrowing `/\s*[—–:-]\s*Spec(ification)?\s*$/i` to the em dash alone survives `implement`. Only `# Widget 1.0 — Specification` is tested, never `–`, `:`, `-` or `Spec`.
-- **Fallback trigger:** changing `/unknown flag:? --json/i` to `/unknown flag: --json/` survives `state`. The optional colon and the case-insensitivity that SPEC D-01 names are never exercised.
+**R1-02 (c373104), `test/implement.mjs`:**
 
-### Mutants killed (evidence that the rest is covered)
+- The resumed-run test sets up the fallback record exactly as the task specified, with an empty `GIT_CONFIG_GLOBAL` (signing-tests protocol). It asserts all five of the task's conditions.
+- The 120-code-point test puts a non-ASCII character before the cut. It asserts both the `--title` gh received and `run_finish`'s `prTitle`.
 
-- **`mcp/cleanroom.mjs`, guard self-test:**
-  - the `RSYNC_DELETES` match;
-  - the `--remove-source-files` under-protected-path branch;
-  - `gtar` dropped from `TAR_WORDS`;
-  - `recursiveOperands` back to `word === "tar"`.
-- **`mcp/server.mjs`, `implement` suite:**
-  - B-01's probe gate (`if (true)`);
-  - B-02's override unset.
-- **`mcp/server.mjs`, `review` suite:**
-  - `signaturesExpected` ignoring `"none"`;
-  - the rebase no-subject rule;
-  - the CHANGELOG entry ending at the next level-2 heading;
-  - D-03's `mode` classification;
-  - D-02's space-joined filter.
-- **`mcp/server.mjs`, `state` suite:**
-  - `startup_failure` in the run-failure set;
-  - C-04's insertion point;
-  - B-04 reading the archived `kukulu.json`.
-- **`mcp/server.mjs`, `routing` suite:** the `archive` default of `true`.
+**R1-03 (6efeb5b), `test/implement.mjs`, `test/routing.mjs`, `test/state.mjs`:**
+
+- There are four tests, as specified.
+- The stderr variant is derived at runtime from `test/fixtures/gh/pr-checks-unknown-flag.txt`, so no recorded body is inlined.
+- The astral and non-ASCII characters are written as escapes.
+
+`git diff 79f3342..HEAD` touches no file under `mcp/`, `skills/`, `agents/`, `hooks/`, `site/`, `docs/site/`, `docs/plans/`, `docs/flights/` or `docs/SPEC.md`. Nothing was edited in `.gitignore`, `.gitattributes` or CI config.
+
+## Mutation sampling (round 2)
+
+The last fix round changed only test files and `.gitleaks.toml`. So the meaningful check was to re-apply every round 1 survivor in `mcp/server.mjs` against the suite now meant to catch it. I used `kukulu_mutate` with the targeted suite and `confirmKill: true`. All seven were killed, and each confirm re-run passed on the unmutated tree:
+
+- **`reprobeSigning`, `if (outcome === "none")` changed to `if (false)`:** killed by `implement`, "a resumed run with no operator signing keeps the fallback record" and three of its follow-ups.
+- **`reprobeSigning`, the local `commit.gpgsign false` put-back deleted:** killed by `implement`, "...local commit.gpgsign reads false again".
+- **`startRun`, `else if (st.signing === "none") delete st.signingOverride;` deleted:** killed by `implement`, "...and drops the override".
+- **`prTitleFor`, the 120-code-point cut replaced by `return title;`:** killed by `implement`, "...gh gets exactly the first 120 code points" and "...and run_finish returns the same prTitle".
+- **`prTitleFor`, the separator class narrowed to the em dash:** killed by `implement`, all three "the derived title strips an en dash, colon or hyphen separator and a bare Spec" cases.
+- **`cfgFrom`, `[...t].length > 120` changed to `t.length > 120`:** killed by `routing`, "a prTitle of 61 astral characters is accepted, counted in code points".
+- **`prChecks`, `/unknown flag:? --json/i` narrowed to `/unknown flag: --json/`:** killed by `state`, "prChecks falls back on an unknown flag message without the colon or in another case".
+
+The round 1 review's other kills, in `mcp/cleanroom.mjs` and in the rest of `mcp/server.mjs`, cover code this round did not change.
 
 ## Constraints and boundaries
 
-- All 28 constraints pass. No rule's fixture fails, and I found no violation the rules missed.
-- **Refusals before writes:**
-  - C-03's disagreement refusal comes before the `resign` path and any write.
-  - C-04 adds `docs/PLAN.md` to `withRollback` only when a line is written, and its rollback test is in `test/state.mjs`.
-  - B-04's probe writes no ref, config or state, which the test asserts against `.git/config` byte for byte.
-- `no-sync-merge` holds: `--subject` is spread into the one inline array after `--auto`.
-- No edits to `.gitignore`, `.gitattributes`, editor config or CI config.
-- Nothing under `site/`, `docs/site/`, `docs/flights/`, `docs/plans/` or `docs/SPEC.md` changed.
-- **Guard fixtures:** the only change to an existing fixture is the `reason` of `rsync -a evil/ .kukulu/ (P0-05)`, as A-03 permits. Every other change is an addition with a `(P0-02)` or `(P0-03)` suffix.
-- **Guard regression check:** P0-04 split the landing-path test into a landing-path check followed by a recursive-containment check. For the destination, the decision set is the same as at the merge base. Only the reason differs, as A-03 asks.
-
-## Interpretation choices (HANDOFF.md)
-
-All are consistent with SPEC:
-
-- P3-01's seven failing entries follow SPEC D-01's mapping exactly: five conclusions plus `failure` and `error`. PLAN's "six" was the planner's miscount.
-- P2-03's `archive` field on `kukulu_config_show` is what SPEC C-02's test needs.
-- P1-03's "`resign: true` expects signatures" and the archived-state read match Appendix B item 2 and PLAN's B-03 decision.
+- All 28 constraints in `docs/kukulu.json` pass, with no fixture failure.
+- No fix-round line violates a rule the mechanical checks cannot express.
+- The round 1 review's boundary findings still hold, since no non-test source changed:
+  - refusals come before writes;
+  - `no-sync-merge` keeps one inline array;
+  - the guard fixtures changed only as A-03 permits.
 
 ## Spec issues
 
-- **Known-gap candidates** (principle 1; not tasks). Each was checked against this branch's `evaluate`, and each is allowed:
+- **Known-gap candidates** (principle 1; not tasks), carried from round 1 and unchanged:
   - rsync's older alias of the source-removing option, for example `rsync --remove-sent-files docs/cleanroom.json build/`;
   - another archiver's extraction, which no rule names, for example `cd docs && pax -r -f a.tar`.
-
-  `rsync -d --delete-aft empty/ docs/` is allowed too. It is already covered by `KNOWN_LIMITS` entry 3 (abbreviations), so it is not a new candidate.
-- None against SPEC itself. The interpretation points PLAN raised under its own Spec issues were built as PLAN resolved them.
+- None against SPEC itself.
 
 ## Manual checks still owed
 
@@ -103,8 +88,10 @@ All are NOT VERIFIED by a human, copied from HANDOFF.md:
 
 ## Notes
 
-- **P0-01 reverts the owner's 418b291 agent defaults.** It does so because `no-fable-default` and 44 assertions required it (PLAN Decisions, Spec issues). If the owner meant to change the shipped defaults, that is a SPEC change, and the commit can be dropped.
-- **Inline gh error lines.** `test/state.mjs` writes the `api-fails` stderr (`HTTP 502: bad gateway`) inline, and the `view-title-fails` text in `test/review.mjs` is inline too. They are synthetic error lines, not recorded gh output, so principle 10 is read as satisfied. A later cleanup could move them under `test/fixtures/gh/`.
-- **`kukulu_run_start` signing values.** The **Returns** list in `docs/mcp-tools.md` still omits `off (commit signing failed: …)`. That omission predates this flight.
-- **`classifyChanges` and rename detection.** It reads `git diff --raw -z` in pairs. Under `diff.renames`, a rename record carries two paths and would shift the pairing. Worktree residue against HEAD makes a rename unlikely, and the fallback is `content`, so it is safe. Passing `--no-renames` would make it exact.
-- **`gitleaks` and `kukulu_verify`.** `pre-commit run --all-files` cannot see this class of failure, because the hook scans only staged changes. The fix task's verification therefore names the CI check and the local `gitleaks git` range scan.
+These are carried from round 1, are advisory, and need no task:
+
+- **P0-01 reverts the owner's 418b291 agent defaults.** It does so because `no-fable-default` and 44 assertions required it. If the owner meant to change the shipped defaults, that is a SPEC change, and the commit can be dropped.
+- **`classifyChanges` and rename detection.** It reads `git diff --raw -z` in pairs. A rename record under `diff.renames` would shift the pairing. The fallback is `content`, so it is safe; passing `--no-renames` would make it exact.
+- **Inline gh error lines.** The synthetic gh error lines in `test/state.mjs` (`api-fails`) and `test/review.mjs` (`view-title-fails`) are inline. They could move under `test/fixtures/gh/` in a later cleanup.
+- **`kukulu_run_start` signing values.** The **Returns** list in `docs/mcp-tools.md` still omits the `off (commit signing failed: …)` value. That omission predates this flight.
+- **Commit-scoped gitleaks allowlist.** It names the full sha of 79f3342, so it holds under the configured `mergeMethod: merge`. A rebase merge would rewrite that sha, but the review file at the branch tip no longer quotes the value, so only a scan of the rewritten history would notice.
