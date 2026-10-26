@@ -8,7 +8,7 @@ Started: 2026-10-26T14:17:50.269Z
 - [x] P0-01 The agent defaults pass the plugin's own checks again
 - [x] P0-02 rsync's deleting options are write targets
 - [x] P0-03 bsdtar and gtar get every decision tar gets
-- [ ] P0-04 The 0.7.1 review's advisory notes on the guard and the server
+- [x] P0-04 The 0.7.1 review's advisory notes on the guard and the server
 - [ ] P0-05 Phase 0 end: push and record the manual check
 - [ ] P1-01 A failed commit is classified as a signing failure by a probe
 - [ ] P1-02 The fallback's override is lifted at the next run start
@@ -42,3 +42,7 @@ rsyncParts now returns deletes/removesSources; evaluate checks them before A-04 
 ### P0-03 — 39e6520
 
 TAR_WORDS set used in evaluate write rule and recursiveOperands; reason uses word as written. 7 fixtures, 1 assertion; verify green (524 self-test cases). Interpretation: /usr/include fixture kept (plain() path shared with tar).
+
+### P0-04 — ded73e6
+
+Recursive containment now has its own branch naming the held protected path; landing-path hits unchanged. Fixture "rsync -a evil/ .kukulu/ (P0-05)" reason changed as specified. Comments moved/fixed in server.mjs and cleanroom.mjs. Verify green.
