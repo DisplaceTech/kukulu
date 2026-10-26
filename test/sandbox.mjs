@@ -5,10 +5,11 @@
 import fs from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
-import { finish, ok, eq, like, ROOT, cleanroomRepo, plannedRepo, setState, startServer, withServer } from "./harness.mjs";
+import { finish, ok, eq, like, ROOT, cleanroomRepo, plannedRepo, setState, startServer, withServer, mkFakeDocker, mkDir, writeFile } from "./harness.mjs";
 import net from "node:net";
-import { startControllerSocket, startLogSocket, startProxy, egressDecision, hostPortOf, main as sandboxMain } from "../scripts/sandbox.mjs";
+import { startControllerSocket, startLogSocket, startProxy, egressDecision, hostPortOf, planFor, containerArgs, projectIdFor, runtimeDirFor, main as sandboxMain } from "../scripts/sandbox.mjs";
 import { startBridge } from "../scripts/sandbox-entry.mjs";
+import { createHash } from "node:crypto";
 import { readEntries, verifyChain, loadPolicy, lockdownActive } from "../mcp/cleanroom.mjs";
 
 // A Unix socket path is limited to about 100 bytes on macOS, so sockets live under a short temp directory.
@@ -267,6 +268,108 @@ const exchange = (target, bytes, { until = null, then = null } = {}) => new Prom
   eq(egressDecision({ policy: p({ sandbox: { image: undefined, egress: ["pypi.org:443"] }, enforcement: "hook" }), endpoints: [], lockdown: false, host: "pypi.org", port: 443 }).reason, "sandbox.egress", "sandbox.egress hosts are allowed before lockdown");
   eq(egressDecision({ policy: p({ allow: { urls: ["https://www.rfc-editor.org/rfc/rfc1951.txt"] } }), endpoints: [], lockdown: false, host: "www.rfc-editor.org", port: 443 }).reason, "allow.urls", "an allow.urls entry's https port defaults to 443");
   eq(egressDecision({ policy: p({ allow: { urls: ["https://www.rfc-editor.org/rfc/rfc1951.txt"] } }), endpoints: [], lockdown: true, host: "www.rfc-editor.org", port: 443 }).reason, "lockdown is active", "...and lockdown denies it");
+}
+
+// ---------------------------------------------------------------- containerArgs, the plan, the Containerfile and doctor (P2-05)
+
+{
+  const digest = "sha256:" + "a".repeat(64);
+  const policyText = (extra = {}) => JSON.stringify({
+    version: 1,
+    enforcement: "container+proxy",
+    sandbox: { image: `kukulu-sandbox@${digest}`, mounts: [{ path: "tools/oracle", mode: "ro" }], egress: ["pypi.org:443"] },
+    ...extra,
+  });
+  const root = "/work/proj";
+  const base = (extra = {}) => ({ policy: loadPolicy(policyText(extra.policy)), root, pluginRoot: "/opt/kukulu", runtimeDir: "/run/user/1000/kukulu/abc", projectId: "abc", engine: "docker", env: { HOME: "/home/dev" }, ...extra.plan });
+
+  const fixed = ["KUKULU_CONTROLLER_SOCKET=/run/kukulu/controller.sock", "KUKULU_LOG_SOCKET=/run/kukulu/log.sock", "HTTPS_PROXY=http://127.0.0.1:3128", "HTTP_PROXY=http://127.0.0.1:3128", "NODE_USE_ENV_PROXY=1", "DISABLE_TELEMETRY=1", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1"];
+  const expected = (envs, { tty = false, extraRo = [], harness = [] } = {}) => [
+    "run", "--rm", "--init", "--name", "kukulu-abc", "--network", "none", "--read-only", "--tmpfs", "/tmp", "--user", "kukulu", "-w", root, "-i", ...(tty ? ["-t"] : []),
+    "-v", `${root}:${root}`,
+    ...[`${root}/docs/cleanroom.json`, `${root}/.kukulu`, `${root}/.claude`, `${root}/.git/config`, `${root}/.git/hooks`, `${root}/.git/info`, `${root}/docs/SPEC.md`, "/opt/kukulu", `${root}/tools/oracle`, ...extraRo].flatMap((p) => ["-v", `${p}:${p}:ro`]),
+    "-v", "/run/user/1000/kukulu/abc:/run/kukulu", "-v", "kukulu-abc-home:/home/kukulu",
+    ...envs.flatMap((e) => ["-e", e]),
+    digest, "/opt/kukulu/scripts/sandbox-entry.mjs", ...harness,
+  ];
+
+  const plan = planFor(base({ policy: { mode: "control-positive", control: { priorArt: ["vendor/zlib"] } } }));
+  eq(JSON.stringify(containerArgs(plan)), JSON.stringify(expected(fixed, { extraRo: [`${root}/vendor/zlib`] })), "containerArgs for a policy with mounts, prior art and egress is exactly the expected list");
+  eq(plan.name + "|" + plan.home + "|" + plan.image + "|" + plan.imageName, `kukulu-abc|kukulu-abc-home|${digest}|kukulu-sandbox`, "the plan names the container, the home volume and the image");
+  eq(plan.readOnly.length + "|" + plan.mounts.join() + "|" + plan.priorArt.join(), `8|${root}/tools/oracle|${root}/vendor/zlib`, "...and its read-only, mount and prior-art lists");
+
+  const creds = planFor(base({ plan: { env: { HOME: "/home/dev", ANTHROPIC_AUTH_TOKEN: "t", ANTHROPIC_API_KEY: "k", UNRELATED: "x" } } }));
+  eq(containerArgs(creds).filter((a) => /^(ANTHROPIC|UNRELATED)/.test(a)).join(","), "ANTHROPIC_API_KEY=k,ANTHROPIC_AUTH_TOKEN=t", "containerArgs passes only the credential variables that are set, in order");
+  eq(containerArgs(planFor(base())).filter((a) => a === "-t").length, 0, "containerArgs has no -t without a TTY");
+  const tty = containerArgs(planFor(base({ plan: { tty: true, harnessArgs: ["--model", "x"] } })));
+  eq(JSON.stringify(tty), JSON.stringify(expected(fixed, { tty: true, harness: ["--model", "x"] })), "containerArgs adds -t only for a TTY plan, and appends the harness arguments");
+  ok(!tty.some((a) => /--privileged|--cap-add|--pid|--security-opt|\.sock:/.test(a)), "...and never an escape flag");
+
+  const real = fs.mkdtempSync(path.join(fs.realpathSync(process.env.TMPDIR || "/tmp"), "kid-"));
+  const link = real + "-link";
+  fs.symlinkSync(real, link);
+  const id = projectIdFor(link);
+  eq(id, createHash("sha256").update(fs.realpathSync(real)).digest("hex").slice(0, 16), "projectIdFor is 16 hex characters of the real path's SHA-256");
+  ok(/^[0-9a-f]{16}$/.test(id), "...as hex");
+  eq(runtimeDirFor("abc", { XDG_RUNTIME_DIR: "/run/user/7" }), "/run/user/7/kukulu/abc", "runtimeDirFor uses XDG_RUNTIME_DIR");
+  eq(runtimeDirFor("abc", { HOME: "/home/dev" }), "/home/dev/.cache/kukulu/run/abc", "...else ~/.cache/kukulu/run");
+
+  const containerfile = fs.readFileSync(path.join(ROOT, "templates", "sandbox", "Containerfile"), "utf8");
+  ok(/^ARG NODE_IMAGE=node:22-bookworm-slim$/m.test(containerfile) && /^FROM \$\{NODE_IMAGE\}$/m.test(containerfile) && /^ARG CLAUDE_CODE_VERSION=latest$/m.test(containerfile), "the Containerfile has the two build args");
+  ok(/git ca-certificates/.test(containerfile) && /--no-install-recommends/.test(containerfile) && /rm -rf \/var\/lib\/apt\/lists/.test(containerfile), "...installs git and ca-certificates without recommends and clears the lists");
+  ok(/npm install -g @anthropic-ai\/claude-code@\$\{CLAUDE_CODE_VERSION\}/.test(containerfile) && /useradd .*kukulu/.test(containerfile), "...installs claude-code and adds the kukulu user");
+  ok(/^USER kukulu$/m.test(containerfile) && /^WORKDIR \/home\/kukulu$/m.test(containerfile) && /^ENTRYPOINT \["node"\]$/m.test(containerfile), "...runs as kukulu with a node entrypoint");
+  ok(!/COPY|ADD /.test(containerfile), "...and copies nothing of the plugin in");
+
+  // doctor, against the fake docker
+  const doctorRepo = (extra = {}) => {
+    const repo = cleanroomRepo({ policy: policyText(extra) });
+    return repo;
+  };
+  const runDoctor = (repo, dockerDir, argv = ["doctor"], envExtra = {}) => {
+    const out = [];
+    const err = [];
+    const code = sandboxMain(argv, {
+      platform: "linux",
+      cwd: repo,
+      env: { PATH: `${dockerDir}:${process.env.PATH}`, HOME: process.env.HOME, XDG_RUNTIME_DIR: "/run/user/1000", KUKULU_CONFIG: path.join(repo, ".kukulu-test-no-global.json"), KUKULU_PROFILE: "", ...envExtra },
+      stdout: { write: (t) => out.push(t) },
+      stderr: { write: (t) => err.push(t) },
+    });
+    return { code, out: out.join(""), err: err.join("") };
+  };
+  const dockerDir = mkFakeDocker();
+  writeFile(dockerDir, "image-missing", "");
+  const repo = doctorRepo();
+  const missing = runDoctor(repo, dockerDir);
+  eq(missing.code, 1, "doctor reports a missing image with exit 1");
+  like(missing.out, /^engine: docker \(Docker version 27\.0\.0, build test\)$/m, "...naming the engine");
+  like(missing.out, /^image: kukulu-sandbox missing \(sha256:a{64}\)$/m, "...and the missing image");
+  like(missing.out, /^build it with: docker build -t kukulu-sandbox --build-arg NODE_IMAGE=node:22-bookworm-slim --build-arg CLAUDE_CODE_VERSION=latest -f .*templates\/sandbox\/Containerfile .*templates\/sandbox$/m, "...with the build command");
+  like(missing.out, /^then paste into docs\/cleanroom\.json: "image": "kukulu-sandbox@/m, "...and the digest line");
+  like(missing.out, /^sandbox doctor: 1 problem\(s\)$/m, "...ending with the problem count");
+
+  fs.rmSync(path.join(dockerDir, "image-missing"));
+  const present = runDoctor(repo, dockerDir);
+  eq(present.code, 0, "doctor passes with the image present");
+  eq(present.out.trimEnd().split("\n").at(-1), "sandbox doctor: ok", "...ending with sandbox doctor: ok");
+  like(present.out, /^image: kukulu-sandbox present \(sha256:a{64}\)$/m, "...naming the image");
+  for (const role of ["planner", "implementer", "reviewer", "summarizer"]) like(present.out, new RegExp(`^  ${role}: \\S+ on anthropic \\(https://api\\.anthropic\\.com, remote\\)$`, "m"), `...listing the ${role} runner`);
+  like(present.out, new RegExp(`^  ${repo.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} \\(rw\\)$`, "m"), "...the project as the one read-write mount");
+  like(present.out, /^  pypi\.org:443$/m, "...the egress allowlist, with sandbox.egress");
+  like(present.out, /^  api\.anthropic\.com:443$/m, "...and the runner endpoints");
+  like(present.out, /^  .*\/\.kukulu \(ro\)$/m, "...and the read-only mounts");
+  const calls = fs.readFileSync(path.join(dockerDir, "calls.log"), "utf8");
+  ok(/image inspect --format \{\{\.Id\}\} sha256:a{64}/.test(calls), "doctor asks the engine for the image by digest");
+  ok(!/^(run|rm|stop) /m.test(calls), "...and never starts, stops or removes anything");
+
+  const hookPolicy = cleanroomRepo();
+  const refused = runDoctor(hookPolicy, dockerDir);
+  eq(refused.code, 1, "doctor reports a hook-level policy as a problem");
+  like(refused.out, /^problem: policy enforcement is "hook"/m, "...saying so");
+  const noEngine = runDoctor(repo, mkDir("kukulu-noengine-"), ["doctor"], { PATH: "/nonexistent" });
+  like(noEngine.out, /^problem: no container engine: install docker or podman$/m, "doctor reports no container engine");
+  eq(runDoctor(repo, dockerDir, ["doctor", "--engine", "lxc"]).code, 2, "an unknown --engine is a usage error");
 }
 
 finish();

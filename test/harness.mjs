@@ -225,6 +225,57 @@ printf -- '-----BEGIN PGP SIGNATURE-----\\n\\nZmFrZQ==\\n-----END PGP SIGNATURE-
   return gpg;
 }
 
+/**
+ * A fake container engine for the sandbox tests: a directory holding an executable `docker` script to
+ * put first on PATH. It appends every invocation to `<dir>/calls.log` and answers from files in the
+ * directory: `version.txt`, `image-inspect.txt`, `image-missing`, `inspect.json`, `run-exit` and
+ * `exec-output`; `exec` otherwise runs the trailing `sh -c <command>` locally in the `-w` directory.
+ * Recorded output lives in `test/fixtures/docker/`; tests copy what they need in. Returns the directory.
+ */
+export function mkFakeDocker() {
+  const dir = mkDir("kukulu-docker-");
+  const docker = path.join(dir, "docker");
+  fs.writeFileSync(
+    docker,
+    `#!/bin/sh
+# Fake docker for tests: records its arguments and answers from files next to it.
+D=$(dirname "$0")
+echo "$*" >> "$D/calls.log"
+case "$1" in
+  --version)
+    if [ -f "$D/version.txt" ]; then cat "$D/version.txt"; else echo "Docker version 27.0.0, build test"; fi
+    exit 0 ;;
+  image)
+    if [ -f "$D/image-missing" ]; then exit 1; fi
+    if [ -f "$D/image-inspect.txt" ]; then cat "$D/image-inspect.txt"; else echo "sha256:0000000000000000000000000000000000000000000000000000000000000000"; fi
+    exit 0 ;;
+  inspect)
+    if [ -f "$D/inspect.json" ]; then cat "$D/inspect.json"; exit 0; fi
+    exit 1 ;;
+  run)
+    if [ -f "$D/run-exit" ]; then exit "$(cat "$D/run-exit")"; fi
+    exit 0 ;;
+  exec)
+    if [ -f "$D/exec-output" ]; then cat "$D/exec-output"; exit 0; fi
+    shift
+    wd=.
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        -w) wd="$2"; shift 2 ;;
+        sh) if [ "$2" = "-c" ]; then cd "$wd" && exec sh -c "$3"; fi; shift ;;
+        *) shift ;;
+      esac
+    done
+    exit 1 ;;
+  stop|rm|volume) exit 0 ;;
+esac
+exit 1
+`,
+  );
+  fs.chmodSync(docker, 0o755);
+  return dir;
+}
+
 /** Point `repo`'s local git config at a fake gpg so every commit is signed. */
 export function useFakeSigner(repo, gpgPath) {
   gitIn(repo, ["config", "--local", "gpg.format", "openpgp"]);

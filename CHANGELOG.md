@@ -20,6 +20,7 @@ All notable changes to this plugin. Format follows
 - `mcp/relay.mjs` and the controller socket: a server started with `KUKULU_CONTROLLER_SOCKET` relays its stdio to `scripts/sandbox.mjs`, which runs the real server per connection; `kukulu_status` reports `sandbox` (G-06, C-02).
 - The log socket: with `KUKULU_LOG_SOCKET` set, the clean-room hooks send every entry to `scripts/sandbox.mjs`, which appends it with `data.source: "box"`, and fail closed when the socket is unreachable; `docs/sandbox.md` describes the sockets (G-06, C-02).
 - The egress proxy: a `CONNECT`-only proxy on `proxy.sock` that allows the roles' runner endpoints, `sandbox.egress` and `allow.urls` hosts (the last two until lockdown), logs every decision as an `egress` entry, and a loopback bridge in `scripts/sandbox-entry.mjs` (G-06, C-03).
+- `scripts/sandbox.mjs doctor`, the exact container argument list (`containerArgs`), the plan it is built from, and `templates/sandbox/Containerfile` (G-06, C-01).
 
 ## [0.7.2] — 2026-10-26
 

@@ -26,3 +26,69 @@ A request is allowed when its `host:port` is one of:
 A literal IP address is denied (`literal IP addresses are not allowed`) unless one of those lists names that literal, so a name cannot be dodged by resolving it elsewhere. Everything else is denied with `not allowed by this flight's policy`. The proxy resolves names itself; the container has no resolver.
 
 A denied request gets `HTTP/1.1 403 Forbidden`, `Content-Type: text/plain`, `Connection: close` and the body `kukulu egress: <host:port> is not allowed by this flight's policy`. Every decision becomes an `egress` entry in the chain (see [cleanroom.md](./cleanroom.md#the-log)): a denial at once, an allowed connection when it closes, with `data.bytesUp`, `data.bytesDown` and `data.ms`.
+
+## Building the image
+
+The sandbox runs a prebuilt image that the owner builds once and pins by digest in the policy (`sandbox.image`, as `<name>@sha256:<digest>`). The template is `templates/sandbox/Containerfile`: a Node base, `git` and `ca-certificates`, Claude Code, and a `kukulu` user. Nothing of the plugin is copied in; the plugin is mounted read-only at run time.
+
+```text
+docker build -t kukulu-sandbox --build-arg NODE_IMAGE=node:22-bookworm-slim --build-arg CLAUDE_CODE_VERSION=latest -f templates/sandbox/Containerfile templates/sandbox
+docker image inspect --format '{{.Id}}' kukulu-sandbox
+```
+
+Paste the second command's output into the policy as `"image": "kukulu-sandbox@<that id>"`. The all-zero digest in `templates/cleanroom.local-only.example.json` is a placeholder; `node scripts/sandbox.mjs doctor` prints the build command and the line to paste when the image is missing. An image that needs a model router derives from this one in two lines:
+
+```text
+FROM kukulu-sandbox
+RUN npm install -g @musistudio/claude-code-router
+```
+
+(Use `USER root` before the install and `USER kukulu` after it if the installer needs it, then pin the new image the same way.)
+
+## doctor
+
+`node scripts/sandbox.mjs doctor [--engine docker|podman]` checks the setup and writes nothing. It picks the engine (the first of `docker`, `podman` whose `--version` works, or the one you name), loads the policy, asks the engine whether the pinned image exists, and reads each role's runner from the server. The output below was produced against the test fixtures (a fake `docker`), not a real engine:
+
+```text
+engine: docker (Docker version 27.0.0, build test)
+image: kukulu-sandbox present (sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa)
+mounts:
+  /work/proj/docs/cleanroom.json (ro)
+  /work/proj/.kukulu (ro)
+  /work/proj/.claude (ro)
+  /work/proj/.git/config (ro)
+  /work/proj/.git/hooks (ro)
+  /work/proj/.git/info (ro)
+  /work/proj/docs/SPEC.md (ro)
+  /opt/kukulu (ro)
+  /work/proj/tools/oracle (ro)
+  /work/proj (rw)
+egress:
+  pypi.org:443
+  api.anthropic.com:443
+runners:
+  planner: opus on anthropic (https://api.anthropic.com, remote)
+  implementer: sonnet on anthropic (https://api.anthropic.com, remote)
+  reviewer: opus on anthropic (https://api.anthropic.com, remote)
+  summarizer: opus on anthropic (https://api.anthropic.com, remote)
+sandbox doctor: ok
+```
+
+It ends with `sandbox doctor: ok` (exit 0), or one `problem: <text>` line per problem and `sandbox doctor: <n> problem(s)` (exit 1).
+
+## The mount list
+
+The project is the only read-write mount. Everything else the container sees of the host is read-only, in this order:
+
+| Path | Why it is read-only |
+|---|---|
+| the policy file | the rules cannot be edited from inside |
+| `<root>/.kukulu` | the state and the chain's directory; the log is appended outside, over the log socket |
+| `<root>/.claude` | the harness's own settings and hooks wiring |
+| `<root>/.git/config`, `.git/hooks`, `.git/info` | a git config or hook is code that runs outside the boundary |
+| `<root>/docs/SPEC.md` | the spec is the owner's |
+| the plugin root | the hooks and the server cannot be edited from inside |
+| each `sandbox.mounts` path | extra tools, such as a prebuilt oracle binary |
+| each `control.priorArt` path | the prior art a control flight is given |
+
+Two more mounts are not the project's: the runtime directory, which holds the three sockets and is mounted at `/run/kukulu`, and a named volume for the container's home, `kukulu-<id>-home`, so the harness's login and caches survive a restart without touching the host.

@@ -1,0 +1,11 @@
+ARG NODE_IMAGE=node:22-bookworm-slim
+FROM ${NODE_IMAGE}
+ARG CLAUDE_CODE_VERSION=latest
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} \
+    && useradd --create-home --home-dir /home/kukulu --shell /bin/sh kukulu
+USER kukulu
+WORKDIR /home/kukulu
+ENTRYPOINT ["node"]

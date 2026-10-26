@@ -1,0 +1,120 @@
+[
+  {
+    "Name": "/kukulu-0123456789abcdef",
+    "State": {
+      "Running": true,
+      "Status": "running"
+    },
+    "Image": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "Config": {
+      "Image": "kukulu-sandbox@sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "User": "kukulu",
+      "WorkingDir": "__ROOT__"
+    },
+    "HostConfig": {
+      "NetworkMode": "none",
+      "ReadonlyRootfs": true,
+      "Privileged": false
+    },
+    "Mounts": [
+      {
+        "Type": "bind",
+        "Source": "__ROOT__",
+        "Destination": "__ROOT__",
+        "Mode": "",
+        "RW": true,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "__ROOT__/docs/cleanroom.json",
+        "Destination": "__ROOT__/docs/cleanroom.json",
+        "Mode": "ro",
+        "RW": false,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "__ROOT__/.kukulu",
+        "Destination": "__ROOT__/.kukulu",
+        "Mode": "ro",
+        "RW": false,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "__ROOT__/.claude",
+        "Destination": "__ROOT__/.claude",
+        "Mode": "ro",
+        "RW": false,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "__ROOT__/.git/config",
+        "Destination": "__ROOT__/.git/config",
+        "Mode": "ro",
+        "RW": false,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "__ROOT__/.git/hooks",
+        "Destination": "__ROOT__/.git/hooks",
+        "Mode": "ro",
+        "RW": false,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "__ROOT__/.git/info",
+        "Destination": "__ROOT__/.git/info",
+        "Mode": "ro",
+        "RW": false,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "__ROOT__/docs/SPEC.md",
+        "Destination": "__ROOT__/docs/SPEC.md",
+        "Mode": "ro",
+        "RW": false,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "/opt/kukulu",
+        "Destination": "/opt/kukulu",
+        "Mode": "ro",
+        "RW": false,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "__ROOT__/tools/oracle",
+        "Destination": "__ROOT__/tools/oracle",
+        "Mode": "ro",
+        "RW": false,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "/run/user/1000/kukulu/0123456789abcdef",
+        "Destination": "/run/kukulu",
+        "Mode": "",
+        "RW": true,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "volume",
+        "Name": "kukulu-0123456789abcdef-home",
+        "Source": "/var/lib/docker/volumes/kukulu-0123456789abcdef-home/_data",
+        "Destination": "/home/kukulu",
+        "Driver": "local",
+        "Mode": "z",
+        "RW": true,
+        "Propagation": ""
+      }
+    ]
+  }
+]
