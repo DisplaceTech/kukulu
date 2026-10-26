@@ -33,6 +33,8 @@ A project without the policy file pays nothing: both hooks exit at once, before 
 | `runners.allow` | no, any runner | Non-empty array of runner names. A role resolving to a runner not in the list fails gate check 8 |
 | `runners.locality` | no, `"any"` | `"local"` or `"any"`. `"local"` fails gate check 8 for any role whose runner is not `local` |
 | `roles.distinct` | no, `"none"` | `"none"`, `"model"` or `"family"`: how far apart the implementer's and reviewer's models must be. `family` compares `familyOf` of the normalized model strings |
+| `mode` | no, `"clean-room"` | `"clean-room"` or `"control-positive"`. A control flight is given the prior art on purpose; its bundle can never pass as a clean-room one (see [Control mode](#control-mode)) |
+| `control.priorArt` | with `mode` `"control-positive"` only | Non-empty array of prefixes, resolved like `deny.paths`. Refused in clean-room mode, required in control mode |
 | `protected` | no, `[]` | Extra prefixes that no write tool or write-family Bash command may touch, in addition to the always-protected set |
 
 ### What the guard decides
@@ -68,6 +70,15 @@ Any other unmodelled spelling is a review note, not a task. The reviewer lists i
 ### Testing a policy
 
 `node scripts/cleanroom-guard.mjs --self-test docs/cleanroom.json` loads the policy, runs the plugin's fixture cases (every rule, allow and deny, including calls recorded from a real clean-room build) and one case per fixture line of the policy's own patterns, then prints `guard self-test: ok (<n> cases)` or one line per failure. It never writes the project's log.
+
+## Control mode
+
+A positive-control flight (`"mode": "control-positive"`) is the same flight with the prior art handed over, so its score is the high end of the scale a real clean-room score is read against. In the guard:
+
+- **What stays the same.** The protected set, every write rule, `deny.tools`, the network rules and `commandPatterns` apply exactly as in a clean-room flight, and a write to a prior-art path is still denied by `deny.paths`.
+- **What differs.** A read-family tool or a path-like Bash read operand that equals or lies under a `control.priorArt` path is exempt from `deny.paths`, `deny.pathPatterns` and `deny.words`. In clean-room mode the list is empty and nothing changes.
+
+The genesis, gate, manifest and verifier parts of control mode are described where those are (the verifier exits 3 and prints `CONTROL (positive)`).
 
 ## The log
 

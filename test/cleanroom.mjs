@@ -19,7 +19,7 @@ import {
   splitSegments, shellWords, commandWord, isPathLike, tokenPath, canonicalPaths,
   evaluate, lockdownActive, NETWORK_COMMANDS, READ_FAMILY, WRITE_FAMILY, protectedPaths,
   coverageGaps, KNOWN_LIMITS,
-  normalizeModel, familyOf,
+  normalizeModel, familyOf, controlPaths,
   generateKey, loadKey, keyFingerprint, CHECKPOINT_KEYS, signCheckpoint, verifyCheckpoint,
 } from "../mcp/cleanroom.mjs";
 
@@ -72,6 +72,27 @@ const pattern = (extra = {}) => ({ id: "p", pattern: "/build/", shouldMatch: ["/
   eq(normalizeModel("OpenRouter/deepseek/deepseek-v4-pro"), "deepseek-v4-pro", "normalizeModel strips every provider prefix");
   eq(normalizeModel("Prov,Mixed/Model-X"), "model-x", "...whether the separator is a slash or a comma");
   ok(familyOf("alpha-1") !== familyOf("beta-1"), "two unknown strings are their own families");
+}
+
+// ---------------------------------------------------------------- control mode (P1-01)
+
+{
+  const control = (extra = {}) => base({ mode: "control-positive", control: { priorArt: ["prior/"] }, deny: { network: false, paths: ["prior/"], words: ["zlib"] }, ...extra });
+  eq(refusal(base({ mode: "control-positive" })), 'policy control.priorArt is required when mode is "control-positive": list the prior art the control flight is given', "control.priorArt is required under control-positive");
+  eq(refusal(base({ control: { priorArt: ["prior/"] } })), 'policy control.priorArt is only legal when mode is "control-positive" (mode is "clean-room")', "control.priorArt is refused under clean-room");
+  eq(refusal(base({ mode: "control" })), 'policy mode must be "clean-room" or "control-positive" (got "control")', "a bad mode refuses");
+  like(refusal(base({ mode: "control-positive", control: { priorArt: [] } })), /control\.priorArt must be a non-empty array/, "an empty priorArt refuses");
+  like(refusal(base({ mode: "control-positive", control: { priorArt: ["x"], other: 1 } })), /policy control has an unknown key 'other'/, "an unknown control key refuses");
+  const loaded = loadPolicy(JSON.stringify(control()));
+  eq(loaded.mode + "|" + loaded.control.priorArt.join(","), "control-positive|prior/", "a control policy loads with its mode and priorArt");
+  eq(loadPolicy('{"version":1}').mode + "|" + loadPolicy('{"version":1}').control.priorArt.length, "clean-room|0", "mode defaults to clean-room with no priorArt");
+  eq(controlPaths(loaded, { root: "/p", home: "/h" })[0], "/p/prior", "controlPaths resolves entries against the root");
+  const env = { root: "/p", home: "/h" };
+  const read = (policy, file) => evaluate(policy, { tool_name: "Read", tool_input: { file_path: file }, cwd: "/p" }, env).decision;
+  eq(read(loaded, "/p/prior/zlib.c"), "allowed", "a control.priorArt read is allowed in control mode");
+  const plain = loadPolicy(JSON.stringify(base({ deny: { network: false, paths: ["prior/"], words: ["zlib"] } })));
+  eq(read(plain, "/p/prior/zlib.c"), "denied", "...and denied in clean-room mode");
+  eq(evaluate(loaded, { tool_name: "Write", tool_input: { file_path: "/p/prior/zlib.c", content: "x" }, cwd: "/p" }, env).decision, "denied", "a write to prior art is still denied in control mode");
 }
 
 {

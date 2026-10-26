@@ -16,7 +16,8 @@ export class CleanroomError extends Error {
 }
 
 const TASK_ID = /^[PR]\d+-\d+$/;
-const POLICY_KEYS = ["version", "deny", "allow", "lockdown", "protected", "runners", "roles"];
+const POLICY_KEYS = ["version", "deny", "allow", "lockdown", "protected", "runners", "roles", "mode", "control"];
+const CONTROL_KEYS = ["priorArt"];
 const RUNNERS_KEYS = ["allow", "locality"];
 const ROLES_KEYS = ["distinct"];
 const RUNNER_NAME = /^[a-z0-9][a-z0-9-]{0,39}$/;
@@ -131,8 +132,28 @@ export function loadPolicy(text) {
     throw new CleanroomError(`policy roles.distinct must be "none", "model" or "family" (got ${JSON.stringify(roles.distinct)})`);
   }
 
+  if (raw.mode !== undefined && raw.mode !== "clean-room" && raw.mode !== "control-positive") {
+    throw new CleanroomError(`policy mode must be "clean-room" or "control-positive" (got ${JSON.stringify(raw.mode)})`);
+  }
+  const mode = raw.mode ?? "clean-room";
+  const control = raw.control === undefined ? {} : raw.control;
+  if (!isObject(control)) throw new CleanroomError("policy control must be an object");
+  onlyKeys(control, CONTROL_KEYS, "control");
+  if (control.priorArt !== undefined && (!Array.isArray(control.priorArt) || !control.priorArt.length
+    || control.priorArt.some((e) => typeof e !== "string" || !e))) {
+    throw new CleanroomError("policy control.priorArt must be a non-empty array of non-empty strings");
+  }
+  if (mode === "control-positive" && control.priorArt === undefined) {
+    throw new CleanroomError('policy control.priorArt is required when mode is "control-positive": list the prior art the control flight is given');
+  }
+  if (mode === "clean-room" && control.priorArt !== undefined) {
+    throw new CleanroomError('policy control.priorArt is only legal when mode is "control-positive" (mode is "clean-room")');
+  }
+
   return {
     version: 1,
+    mode,
+    control: { priorArt: control.priorArt ? control.priorArt.slice() : [] },
     deny: {
       tools: stringArray(deny.tools, "deny.tools"),
       network: deny.network ?? true,
@@ -769,6 +790,11 @@ const underPrefix = (p, prefix) => {
 /** A policy path entry made absolute: `~` is home, a relative entry is repo-relative. */
 const resolvePrefix = (entry, root, home) => canonicalPaths(entry, { cwd: root, home })[0];
 
+/** The control flight's prior art, resolved like deny.paths entries; empty in clean-room mode (SPEC B-01). */
+export function controlPaths(policy, env) {
+  return (policy.control?.priorArt ?? []).map((e) => resolvePrefix(e, env.root, env.home));
+}
+
 /**
  * The paths no write tool or write-family command may touch (SPEC D-10): the
  * rules, the evidence, the configuration that selects them, the hooks that
@@ -819,6 +845,9 @@ export function evaluate(policy, hookInput, env) {
   const forms = (p) => canonicalPaths(p, { cwd: shellCwd, home });
   const inRepo = (p) => forms(p).some((f) => underPrefix(f, root));
   const exempt = (p) => forms(p).some((f) => allowPaths.some((a) => underPrefix(f, a)));
+  // Prior art a control flight is given is readable: it is exempt from deny.paths, pathPatterns and deny.words, for reads only (SPEC B-01).
+  const controlList = controlPaths(policy, env);
+  const isControl = (p) => controlList.length > 0 && forms(p).every((f) => controlList.some((c) => underPrefix(f, c)));
   const wordIn = (text) => {
     const lower = String(text).toLowerCase();
     return policy.deny.words.some((w) => lower.includes(w.toLowerCase()));
@@ -870,6 +899,7 @@ export function evaluate(policy, hookInput, env) {
       if (v) return denied(`protected path: ${v}`);
     }
     // 5. deny.paths, pathPatterns and forbidden words
+    if (!WRITE_TOOLS.has(tool) && typeof base === "string" && base && isControl(base)) return NO_ISSUES;
     if (typeof base === "string" && base) {
       const v = pathVerdict(base);
       if (v) return v;
@@ -951,7 +981,8 @@ export function evaluate(policy, hookInput, env) {
       // An rsync operand that names a host (`host:path`, `user@host:path`, `rsync://...`) reaches the network.
       if (policy.deny.network && word === "rsync" && rsyncParts(rest).operands.some((t) => /^rsync:\/\//i.test(t) || /^[^/]*:/.test(t))) return denied("network command rsync is denied");
       // 6b. any token under deny.paths or matching a pathPattern
-      const pathTokens = rest.filter(isPathLike);
+      const controlRead = (t) => READ_FAMILY.has(word) && isControl(tokenPath(t));
+      const pathTokens = rest.filter((t) => isPathLike(t) && !controlRead(t));
       for (const t of pathTokens) {
         const v = pathVerdict(tokenPath(t));
         if (v) return v;
@@ -964,7 +995,7 @@ export function evaluate(policy, hookInput, env) {
         // A bare operand (`cat zlib.txt`) is the same file as `./zlib.txt`, so it gets the same decision.
         const operands = rest.filter((t, i) => !patterns.has(i) && (isPathLike(t) || !t.startsWith("-")));
         for (const t of operands) {
-          if (wordIn(t) && !exempt(tokenPath(t))) return denied(`forbidden word in path argument: ${t}`);
+          if (wordIn(t) && !exempt(tokenPath(t)) && !controlRead(t)) return denied(`forbidden word in path argument: ${t}`);
         }
         const outside = realPaths.length ? realPaths.some((t) => !inRepo(tokenPath(t))) : !inRepo(".");
         if (outside) {
@@ -981,7 +1012,7 @@ export function evaluate(policy, hookInput, env) {
         const textOperands = patternOperands(word, rest);
         const bare = word === "cd" || word === "pushd" || READ_FAMILY.has(word);
         for (let i = 0; bare && i < rest.length; i++) {
-          if (isPathLike(rest[i]) || textOperands.has(i) || rest[i].startsWith("-")) continue;
+          if (isPathLike(rest[i]) || textOperands.has(i) || rest[i].startsWith("-") || controlRead(rest[i])) continue;
           const v = pathVerdict(rest[i]);
           if (v) return v;
         }
@@ -992,12 +1023,13 @@ export function evaluate(policy, hookInput, env) {
       const bareWord = word === "cd" || word === "pushd" || READ_FAMILY.has(word);
       for (let i = 0; i < rest.length; i++) {
         const reaching = isPathLike(rest[i]) || (bareWord && !rest[i].startsWith("-"));
-        if (reaching && !textual.has(i) && (/[*?[{]/.test(tokenPath(rest[i])) || (bareWord && /[*?[{]/.test(shellCwd)))) {
+        if (reaching && !textual.has(i) && !controlRead(rest[i]) && (/[*?[{]/.test(tokenPath(rest[i])) || (bareWord && /[*?[{]/.test(shellCwd)))) {
           const v = reachVerdict(rest[i], shellCwd, false);
           if (v) return v;
         }
       }
       for (const t of recursiveOperands(word, rest) ?? []) {
+        if (controlRead(t)) continue;
         const v = reachVerdict(t, shellCwd, true);
         if (v) return v;
       }

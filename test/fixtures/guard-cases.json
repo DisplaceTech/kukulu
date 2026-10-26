@@ -6834,5 +6834,225 @@
    "cwd": "__ROOT__"
   },
   "expect": "allowed"
+ },
+ {
+  "name": "Read of control priorArt is allowed in control mode (P1-01)",
+  "policy": {
+   "version": 1,
+   "mode": "control-positive",
+   "control": {
+    "priorArt": [
+     "prior/"
+    ]
+   },
+   "deny": {
+    "network": false,
+    "paths": [
+     "prior/"
+    ],
+    "words": [
+     "zlib"
+    ]
+   }
+  },
+  "input": {
+   "tool_name": "Read",
+   "tool_input": {
+    "file_path": "__ROOT__/prior/zlib.c"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "cat of control priorArt is allowed in control mode (P1-01)",
+  "policy": {
+   "version": 1,
+   "mode": "control-positive",
+   "control": {
+    "priorArt": [
+     "prior/"
+    ]
+   },
+   "deny": {
+    "network": false,
+    "paths": [
+     "prior/"
+    ],
+    "words": [
+     "zlib"
+    ]
+   }
+  },
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat prior/zlib.c"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "Read of prior/zlib.c in clean-room mode (P1-01)",
+  "policy": {
+   "version": 1,
+   "deny": {
+    "network": false,
+    "paths": [
+     "prior/"
+    ],
+    "words": [
+     "zlib"
+    ]
+   }
+  },
+  "input": {
+   "tool_name": "Read",
+   "tool_input": {
+    "file_path": "__ROOT__/prior/zlib.c"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "deny\\.paths"
+ },
+ {
+  "name": "cat prior/zlib.c in clean-room mode (P1-01)",
+  "policy": {
+   "version": 1,
+   "deny": {
+    "network": false,
+    "paths": [
+     "prior/"
+    ],
+    "words": [
+     "zlib"
+    ]
+   }
+  },
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat prior/zlib.c"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "deny\\.paths"
+ },
+ {
+  "name": "Write to docs/cleanroom.json in control mode (P1-01)",
+  "policy": {
+   "version": 1,
+   "mode": "control-positive",
+   "control": {
+    "priorArt": [
+     "prior/"
+    ]
+   },
+   "deny": {
+    "network": false,
+    "paths": [
+     "prior/"
+    ],
+    "words": [
+     "zlib"
+    ]
+   }
+  },
+  "input": {
+   "tool_name": "Write",
+   "tool_input": {
+    "file_path": "__ROOT__/docs/cleanroom.json",
+    "content": "{}"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected"
+ },
+ {
+  "name": "Write to control priorArt is still denied by deny.paths (P1-01)",
+  "policy": {
+   "version": 1,
+   "mode": "control-positive",
+   "control": {
+    "priorArt": [
+     "prior/"
+    ]
+   },
+   "deny": {
+    "network": false,
+    "paths": [
+     "prior/"
+    ]
+   }
+  },
+  "input": {
+   "tool_name": "Write",
+   "tool_input": {
+    "file_path": "__ROOT__/prior/zlib.c",
+    "content": "x"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "deny\\.paths"
+ },
+ {
+  "name": "rm of control priorArt is still denied by deny.paths (P1-01)",
+  "policy": {
+   "version": 1,
+   "mode": "control-positive",
+   "control": {
+    "priorArt": [
+     "prior/"
+    ]
+   },
+   "deny": {
+    "network": false,
+    "paths": [
+     "prior/"
+    ]
+   }
+  },
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "rm prior/zlib.c"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "deny\\.paths"
+ },
+ {
+  "name": "Read outside control priorArt is still denied in control mode (P1-01)",
+  "policy": {
+   "version": 1,
+   "mode": "control-positive",
+   "control": {
+    "priorArt": [
+     "prior/"
+    ]
+   },
+   "deny": {
+    "network": false,
+    "paths": [
+     "prior/",
+     "other/"
+    ]
+   }
+  },
+  "input": {
+   "tool_name": "Read",
+   "tool_input": {
+    "file_path": "__ROOT__/other/x.c"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "deny\\.paths"
  }
 ]
