@@ -7,6 +7,7 @@ import net from "node:net";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { appendEntry } from "../mcp/cleanroom.mjs";
 
 const PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const USAGE = "usage: node scripts/sandbox.mjs doctor\n       node scripts/sandbox.mjs run [-- <harness arguments>]\n       node scripts/sandbox.mjs stop\n";
@@ -51,6 +52,48 @@ export function startControllerSocket({ socketPath, root, pluginRoot = PLUGIN_RO
       for (const child of children) child.kill();
       return new Promise((resolve) => server.close(() => resolve()));
     },
+  };
+}
+
+/**
+ * The log socket (SPEC C-02): the hooks inside the container send each entry here, and it is appended to the
+ * chain outside, with data.source "box" so a reader can tell which entries were reported from inside. Each
+ * line in is one entry's fields; each line out is `{ seq, hash }` or `{ error }`.
+ */
+export function startLogSocket({ socketPath, logPath }) {
+  const server = net.createServer({ allowHalfOpen: true }, (conn) => {
+    let buffered = "";
+    conn.setEncoding("utf8");
+    conn.on("data", (chunk) => {
+      buffered += chunk;
+      let nl;
+      while ((nl = buffered.indexOf("\n")) >= 0) {
+        const line = buffered.slice(0, nl);
+        buffered = buffered.slice(nl + 1);
+        if (!line.trim()) continue;
+        let reply;
+        try {
+          const fields = JSON.parse(line);
+          fields.data = { ...(fields.data ?? {}), source: "box" };
+          const entry = appendEntry(logPath, fields);
+          reply = { seq: entry.seq, hash: entry.hash };
+        } catch (e) {
+          reply = { error: e instanceof Error ? e.message : String(e) };
+        }
+        conn.write(`${JSON.stringify(reply)}\n`);
+      }
+    });
+    conn.on("end", () => conn.end());
+    conn.on("error", () => {});
+  });
+  if (fs.existsSync(socketPath)) fs.rmSync(socketPath, { force: true });
+  server.listen(socketPath);
+  return {
+    listening: new Promise((resolve, reject) => {
+      server.once("listening", resolve);
+      server.once("error", reject);
+    }),
+    close: () => new Promise((resolve) => server.close(() => resolve())),
   };
 }
 

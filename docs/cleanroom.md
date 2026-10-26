@@ -105,6 +105,8 @@ A positive-control flight (`"mode": "control-positive"`) is the same flight with
 | `data` | present only on entries that carry a body |
 | `hash` | SHA-256 of `prev`, a newline, and the entry without `hash` as compact JSON with the keys in this order |
 
+An entry reported from inside the sandbox's boundary, through the log socket, carries `data.source: "box"`; entries appended by the hooks directly carry no `source`.
+
 Every writer takes a directory lock on the log, so parallel streams, the hooks and the server cannot fork the chain. The log lives in the repository and is committed by the checkpoint of each bookkeeping tool; the hooks append between commits, so an uncommitted log is normal and never makes the tree dirty.
 
 ### Checkpoints and the key

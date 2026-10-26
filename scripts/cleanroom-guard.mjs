@@ -147,11 +147,39 @@ if (!fs.existsSync(policyFile(root))) process.exit(0);
 
 let cr = null;
 let fields = {};
+let conn = null;
+
+const UNREACHABLE = "the log socket is unreachable, so this call cannot be logged; restart the session with node scripts/sandbox.mjs run";
+
+// Inside the boundary the log lives outside it: the guard talks to the log socket (SPEC C-02). The client is
+// inlined here, never shared with the logger, because gate check 3 pins each script by hash.
+const openSocket = (net, socketPath, timeoutMs) => new Promise((resolve) => {
+  const c = net.createConnection(socketPath);
+  const timer = setTimeout(() => { c.destroy(); resolve(null); }, timeoutMs);
+  c.once("connect", () => { clearTimeout(timer); resolve(c); });
+  c.once("error", () => { clearTimeout(timer); resolve(null); });
+});
+const sendEntry = (c, entry, timeoutMs) => new Promise((resolve) => {
+  let buf = "";
+  const timer = setTimeout(() => { c.destroy(); resolve(null); }, timeoutMs);
+  c.on("data", (d) => {
+    buf += d;
+    if (!buf.includes("\n")) return;
+    clearTimeout(timer);
+    c.end();
+    try { resolve(JSON.parse(buf.split("\n")[0])); } catch { resolve(null); }
+  });
+  c.once("error", () => { clearTimeout(timer); resolve(null); });
+  c.once("close", () => { clearTimeout(timer); resolve(null); });
+  c.write(`${JSON.stringify(entry)}\n`);
+});
 
 /** Log the denial where the log can be written, tell the model why on stderr, and stop the call. Never returns. */
-function deny(reason) {
+async function deny(reason) {
   try {
-    if (cr) {
+    if (cr && process.env.KUKULU_LOG_SOCKET) {
+      if (conn) await sendEntry(conn, { kind: "denied", ...fields, decision: "denied", reason }, cr.LOG_SOCKET_TIMEOUT_MS);
+    } else if (cr) {
       const logPath = cr.logPathFor(root, process.env);
       if (cr.loggingActive(cr.projectContext(root), logPath)) cr.appendEntry(logPath, { kind: "denied", ...fields, decision: "denied", reason });
     }
@@ -165,6 +193,10 @@ function deny(reason) {
 try {
   cr = await import("../mcp/cleanroom.mjs");
   if (!input) throw new Error("the hook input is empty or not a JSON object");
+  if (process.env.KUKULU_LOG_SOCKET) {
+    conn = await openSocket(await import("node:net"), process.env.KUKULU_LOG_SOCKET, cr.LOG_SOCKET_TIMEOUT_MS);
+    if (!conn) await deny(UNREACHABLE);
+  }
   const ctx = cr.projectContext(root);
   fields = cr.entryFields(input, ctx);
   const policy = cr.loadPolicy(fs.readFileSync(policyFile(root), "utf8"));
@@ -178,8 +210,11 @@ try {
     keyPath: keyPathFor(root, home),
     planExists: fs.existsSync(path.join(root, "docs", "PLAN.md")),
   });
-  if (verdict.decision === "allowed") process.exit(0);
-  deny(verdict.reason);
+  if (verdict.decision === "allowed") {
+    if (conn) conn.destroy();
+    process.exit(0);
+  }
+  await deny(verdict.reason);
 } catch (e) {
-  deny(`guard internal error: ${e instanceof Error ? e.message : String(e)}`);
+  await deny(`guard internal error: ${e instanceof Error ? e.message : String(e)}`);
 }

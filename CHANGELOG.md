@@ -18,6 +18,7 @@ All notable changes to this plugin. Format follows
 - `scripts/publish-bundle.mjs`, which writes a publishable copy of a verified bundle with `SHA256SUMS` and `VERIFY.txt` and re-checks one, and `docs/publishing.md` (G-05, B-03).
 - Clean-room policy keys `enforcement`, `sandbox.image`, `sandbox.mounts`, `sandbox.egress` and `deny.packages`, the log kinds `egress`, `stage` and `usage`, and `templates/cleanroom.local-only.example.json` (G-06, G-08).
 - `mcp/relay.mjs` and the controller socket: a server started with `KUKULU_CONTROLLER_SOCKET` relays its stdio to `scripts/sandbox.mjs`, which runs the real server per connection; `kukulu_status` reports `sandbox` (G-06, C-02).
+- The log socket: with `KUKULU_LOG_SOCKET` set, the clean-room hooks send every entry to `scripts/sandbox.mjs`, which appends it with `data.source: "box"`, and fail closed when the socket is unreachable; `docs/sandbox.md` describes the sockets (G-06, C-02).
 
 ## [0.7.2] — 2026-10-26
 
