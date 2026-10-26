@@ -17,7 +17,7 @@ Started: 2026-10-26T21:19:36.125Z
 - [x] P1-03 The control bundle is the positive pair
 - [x] P1-04 scripts/publish-bundle.mjs and docs/publishing.md
 - [x] P1-05 Phase 1 end: push and record the manual check
-- [ ] P2-01 The policy's enforcement, sandbox and package keys, and the local-only template
+- [x] P2-01 The policy's enforcement, sandbox and package keys, and the local-only template
 - [ ] P2-02 mcp/relay.mjs, the controller socket and the sandbox suite
 - [ ] P2-03 The log socket, and its round-trip budget
 - [ ] P2-04 The egress proxy, the bridge, and its overhead
@@ -106,3 +106,8 @@ Lesson: the plugin suite's link check reads git ls-files, so a new doc must be c
 
 Push: pushed build branch to origin. Empty phase-end commit.
 Manual check: NOT VERIFIED (human): a small control flight's bundle verifies as CONTROL (positive) with exit 3; publish-bundle.mjs output copied to a static host verifies with --check from a second machine.
+
+### P2-01 — 1c01978
+
+loadPolicy: enforcement, sandbox.{image,mounts,egress}, deny.packages with all refusals; policy carries enforcement, sandbox {image,mounts,egress}, deny.packages. KINDS += egress, stage, usage; LOG_SOCKET_TIMEOUT_MS exported (2000 only on that line). templates/cleanroom.local-only.example.json (SPEC example); both guard self-tests pass (532 / 528 cases). Tests in test/cleanroom.mjs (1211); KINDS count test now twelve. Verify green.
+Interpretation: empty deny.packages ecosystem list refused; mounts entries accept only path/mode.
