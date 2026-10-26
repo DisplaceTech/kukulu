@@ -10,14 +10,21 @@
     "signing": "auto",
     "push": true,
     "pr": "draft",
-    "feedback": true
+    "feedback": true,
+    "archive": true,
+    "finalize": "ready",
+    "mergeMethod": "merge",
+    "syncBase": true
   },
-  "signing": null,
+  "signing": "on",
   "rounds": [],
   "archived": {
     "slug": "v0-7-2",
     "dir": "docs/flights/v0-7-2",
     "at": "2026-10-26T20:04:43.339Z"
   },
-  "breaking": true
+  "breaking": true,
+  "cleanroom": {
+    "mode": "general"
+  }
 }
