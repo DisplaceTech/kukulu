@@ -437,7 +437,7 @@ const stateOf = (repo) => (hasFile(repo, ".kukulu/state.json") ? JSON.parse(read
     const log = logOf(repo);
     eq(log.length + "|" + log[0].kind + "|" + log[0].stage + "|" + log[1].kind, "2|genesis|controller|gate", "the first kukulu_next with a policy appends a genesis entry, then the gate's");
     const d = log[0].data;
-    eq(Object.keys(d).join(","), "mode,policyHash,guardHash,loggerHash,hooksHash,cleanroomHash,pluginVersion,keyFingerprint,baseBranch,head", "...whose data names mode, the five hashes, pluginVersion, keyFingerprint, baseBranch and head");
+    eq(Object.keys(d).join(","), "mode,policyHash,guardHash,loggerHash,hooksHash,cleanroomHash,pluginVersion,keyFingerprint,baseBranch,head,roles,distinct", "...whose data names mode, the five hashes, pluginVersion, keyFingerprint, baseBranch, head, roles and distinct");
     eq(d.mode + "|" + d.baseBranch, "clean-room|main", "...in clean-room mode on main");
     like(d.head, /^[0-9a-f]{40}$/, "...at the commit it was written on");
     eq(d.policyHash, policyHash(fs.readFileSync(path.join(repo, "docs", "cleanroom.json"))), "...the policy hash is the SHA-256 of the file");
@@ -1002,9 +1002,9 @@ const gateCheck = (reason) => (reason.match(/^clean-room gate failed: ([\w-]+):/
   const repo = cleanroomRepo();
   await live(repo, async ({ call }) => {
     const n = await call("kukulu_next");
-    eq(JSON.stringify(n.gate), JSON.stringify({ ok: true, checked: ["mode", "policy", "guard", "self-test", "lockdown", "chain", "liveness"] }), "the gate passes on an intact clean-room project and kukulu_next reports it");
+    eq(JSON.stringify(n.gate), JSON.stringify({ ok: true, checked: ["mode", "policy", "guard", "self-test", "lockdown", "chain", "liveness", "routing"] }), "the gate passes on an intact clean-room project and kukulu_next reports it");
     const g = gateEntries(repo);
-    eq(g.length + "|" + JSON.stringify(g[0].data), '1|{"checks":7,"ok":true}', "a passing gate appends a gate entry recording seven checks");
+    eq(g.length + "|" + JSON.stringify(g[0].data), '1|{"checks":8,"ok":true}', "a passing gate appends a gate entry recording eight checks");
     eq(verifyChain(linesOf(LOG(repo))).ok, true, "...in a chain that verifies");
   });
   const general = plannedRepo();
@@ -1141,13 +1141,115 @@ const gateCheck = (reason) => (reason.match(/^clean-room gate failed: ([\w-]+):/
   });
 }
 
+// ---------------------------------------------------------------- gate check 8 and genesis roles (P0-03)
+
+{
+  const D = (c) => `sha256:${c.repeat(64)}`;
+  const runnersBlock = {
+    spark: { endpoint: "http://spark.test:8000", locality: "local", match: ["spark/"], identities: { "spark/nemotron-3.5-super-nvfp4": { weights: D("a"), image: D("b") } } },
+    mac: { endpoint: "http://mac.test:11434", locality: "local", match: ["mac/"] },
+  };
+  const localRoles = {
+    planner: { model: "mac/qwen3.8-27b" },
+    implementer: { model: "spark/nemotron-3.5-super-nvfp4" },
+    reviewer: { model: "mac/qwen3.8-27b" },
+    summarizer: { model: "mac/qwen3.8-27b" },
+  };
+  const policyWith = (extra) => JSON.stringify({ ...JSON.parse(EXAMPLE), ...extra });
+  const cfgFile = (obj) => writeFile(mkDir("kukulu-cfg-"), "global.json", JSON.stringify(obj));
+  const envFor = (obj) => ({ env: { KUKULU_CONFIG: cfgFile(obj) } });
+  const gen = async (policyExtra, globalObj, fn) => {
+    const repo = cleanroomRepo({ policy: policyWith(policyExtra) });
+    await live(repo, (s) => fn(repo, s), envFor(globalObj));
+  };
+  const genesisOf = (repo) => logOf(repo).find((e) => e.kind === "genesis");
+
+  await gen({ runners: { locality: "local" } }, { runners: runnersBlock, roles: localRoles }, async (repo, { call }) => {
+    const n = await call("kukulu_next");
+    eq(n.stage, "plan", "a local-only policy with every role on local runners passes genesis");
+    eq(n.gate.checked.at(-1), "routing", "...and the gate ends with routing");
+    eq(genesisOf(repo).data.roles.implementer.runner, "spark", "...genesis records the implementer's runner");
+    eq(genesisOf(repo).data.distinct, "none", "...and the policy's distinct value");
+    ok((await call("kukulu_next")).gate.ok, "...and the next gate passes");
+  });
+
+  await gen({}, { runners: runnersBlock, roles: { ...localRoles, summarizer: { model: "nothing/x" } } }, async (repo, { call }) => {
+    await call("kukulu_next");
+    const r = genesisOf(repo).data.roles;
+    eq(JSON.stringify(r.implementer.identity), JSON.stringify({ source: "operator-measured", weights: D("a"), image: D("b") }), "genesis records operator-measured identity with the digests copied");
+    eq(JSON.stringify(r.reviewer.identity), '{"source":"none"}', "...none for a model on a runner without an identity");
+    eq(r.summarizer.runner, null, "...an unmatched string has no runner");
+    eq(JSON.stringify(r.summarizer.identity), '{"source":"none"}', "...and identity none");
+    eq(r.implementer.family + "|" + r.reviewer.family, "nemotron|qwen", "...with each role's family");
+  });
+  await gen({}, {}, async (repo, { call }) => {
+    await call("kukulu_next");
+    const r = genesisOf(repo).data.roles;
+    eq(JSON.stringify(r.planner.identity) + "|" + r.planner.family, '{"source":"vendor-asserted"}|claude', "genesis records vendor-asserted identity for opus");
+  });
+
+  {
+    const repo = cleanroomRepo({ policy: policyWith({ runners: { locality: "local" } }) });
+    const head = git(repo, ["rev-parse", "HEAD"]);
+    await live(repo, async ({ call }) => {
+      isError(await call("kukulu_next"), /clean-room genesis refused: routing: planner resolves to opus on runner anthropic \(locality remote\)/, "the default routing fails a local-only policy at genesis");
+    }, envFor({ runners: runnersBlock }));
+    ok(!hasFile(repo, ".kukulu/cleanroom/log.jsonl"), "...with no log written");
+    ok(!hasFile(repo, ".kukulu/state.json") || !JSON.parse(readFile(repo, ".kukulu/state.json")).cleanroom, "...no state.cleanroom");
+    eq(git(repo, ["rev-parse", "HEAD"]), head, "...and HEAD unmoved");
+  }
+
+  {
+    const repo = cleanroomRepo({ policy: policyWith({ runners: { allow: ["mac"] } }) });
+    await live(repo, async ({ call }) => {
+      isError(await call("kukulu_next"), /clean-room genesis refused: routing: implementer resolves to runner spark, which policy runners.allow does not name \(mac\)/, "a runner outside runners.allow fails part 2 at genesis");
+    }, envFor({ runners: runnersBlock, roles: localRoles }));
+  }
+
+  {
+    const repo = cleanroomRepo({ policy: policyWith({ roles: { distinct: "model" } }) });
+    await live(repo, async ({ call }) => {
+      isError(await call("kukulu_next"), /clean-room genesis refused: routing: the implementer and the reviewer both resolve to qwen3.8-27b; policy roles.distinct "model" needs two different models/, "roles.distinct model refuses two roles on one model at genesis");
+    }, envFor({ runners: runnersBlock, roles: { implementer: { model: "mac/qwen3.8-27b" }, reviewer: { model: "Other/qwen3.8-27b" } } }));
+  }
+  {
+    const roles = { implementer: { model: "opus" }, reviewer: { model: "sonnet" } };
+    const m = cleanroomRepo({ policy: policyWith({ roles: { distinct: "model" } }) });
+    await live(m, async ({ call }) => eq((await call("kukulu_next")).stage, "plan", "opus and sonnet pass model"), envFor({ roles }));
+    const f = cleanroomRepo({ policy: policyWith({ roles: { distinct: "family" } }) });
+    await live(f, async ({ call }) => isError(await call("kukulu_next"), /the implementer \(opus\) and the reviewer \(sonnet\) are both family claude; policy roles.distinct "family" needs two families/, "...and fail family"), envFor({ roles }));
+  }
+  for (const [roles, label] of [
+    [{ implementer: { model: "mac/qwen3.8-27b" }, reviewer: { model: "spark/nemotron-3.5-super-nvfp4" } }, "a Qwen model and a Nemotron model pass family"],
+    [{ implementer: { model: "mac/alpha-1" }, reviewer: { model: "mac/beta-1" } }, "two different unknown strings pass family"],
+  ]) {
+    const repo = cleanroomRepo({ policy: policyWith({ roles: { distinct: "family" } }) });
+    await live(repo, async ({ call }) => eq((await call("kukulu_next")).stage, "plan", label), envFor({ runners: runnersBlock, roles }));
+  }
+
+  {
+    const repo = cleanroomRepo({ policy: policyWith({}) });
+    await live(repo, async ({ call }) => {
+      eq((await call("kukulu_next")).stage, "plan", "genesis passes before the routing changes");
+      const cfgPath = path.join(repo, "docs", "kukulu.json");
+      const base = fs.existsSync(cfgPath) ? JSON.parse(fs.readFileSync(cfgPath, "utf8")) : {};
+      fs.writeFileSync(cfgPath, JSON.stringify({ ...base, roles: { reviewer: { model: "haiku" } } }));
+      const h = await call("kukulu_next");
+      eq(h.stage, "halt", "changing a role's model after genesis halts the next kukulu_next");
+      like(h.reason, /^clean-room gate failed: routing: routing changed since genesis: reviewer now resolves to haiku on anthropic \(genesis: opus on anthropic\); restore the routing/, "...with the routing reason");
+      const last = logOf(repo).filter((e) => e.kind === "gate").at(-1);
+      eq(last.data.failed, "routing", "...and the failing gate entry is in the chain");
+    }, envFor({}));
+  }
+}
+
 // ---------------------------------------------------------------- gate liveness
 
 {
   const repo = cleanroomRepo();
   await withServer(repo, async ({ call }) => {
     const first = await call("kukulu_next");
-    eq(first.gate.ok + "|" + first.gate.checked.length, "true|7", "the first gate needs no allowed entry, and a passing gate records seven checks");
+    eq(first.gate.ok + "|" + first.gate.checked.length, "true|8", "the first gate needs no allowed entry, and a passing gate records eight checks");
     const second = await call("kukulu_next");
     eq(second.stage + "|" + gateCheck(second.reason), "halt|liveness", "two gates with no allowed entry between them halt with the liveness message");
     eq(second.reason, "clean-room gate failed: liveness: no tool call has been logged since the last gate; the clean-room hooks are not running in this session. Start a new session.", "...in exactly these words");
@@ -1156,7 +1258,7 @@ const gateCheck = (reason) => (reason.match(/^clean-room gate failed: ([\w-]+):/
     logCall(repo);
     const third = await call("kukulu_next");
     eq(third.gate.ok, true, "an allowed entry between gates passes");
-    eq(gateEntries(repo).at(-1).data.checks, 7, "...and is recorded as seven checks");
+    eq(gateEntries(repo).at(-1).data.checks, 8, "...and is recorded as eight checks");
     isError(await call("kukulu_review_submit", { verdict: "APPROVED" }), /clean-room gate failed: liveness: no tool call has been logged/, "a tool's gate has the same liveness rule");
   });
 }

@@ -17,7 +17,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import {
-  CleanroomError, loadPolicy, policyHash, appendEntry, readEntries, logPathFor, generateKey, loadKey, signCheckpoint, verifyCheckpoint, verifyChain, evaluate, lockdownActive, ZERO_HASH, scorePair, position, verdictOf, LIMITS, coverageGaps, KNOWN_LIMITS, summarizeEntries, signBytes,
+  CleanroomError, loadPolicy, policyHash, appendEntry, readEntries, logPathFor, generateKey, loadKey, signCheckpoint, verifyCheckpoint, verifyChain, evaluate, lockdownActive, normalizeModel, familyOf, ZERO_HASH, scorePair, position, verdictOf, LIMITS, coverageGaps, KNOWN_LIMITS, summarizeEntries, signBytes,
 } from "./cleanroom.mjs";
 
 /**
@@ -121,13 +121,66 @@ function cleanroomModeBreak(st, policyPresent, planPresent) {
 }
 const modeBreakText = (why) => `clean-room coverage is broken: the mode changed after genesis (${why}); archive this flight with kukulu_flight_archive and start another`;
 
+/** Each role's resolved model, runner, locality, identity and family, as genesis records them (SPEC A-03). */
+function rolesRecord(routing) {
+  const record = {};
+  for (const role of ROLES) {
+    const e = routing.roles[role];
+    const measured = e.runner && e.runner !== "anthropic" ? routing.runners?.[e.runner]?.identities?.[e.model] : undefined;
+    const identity = measured
+      ? { source: "operator-measured", weights: measured.weights, ...(measured.image ? { image: measured.image } : {}) }
+      : e.runner === "anthropic" ? { source: "vendor-asserted" } : { source: "none" };
+    record[role] = { model: e.model, runner: e.runner, endpoint: e.endpoint, locality: e.locality, identity, family: familyOf(e.model) };
+  }
+  return record;
+}
+
+/** Why the resolved roles break the policy or differ from genesis, or null; the first failing part wins (SPEC A-02, A-04). */
+function routingCheck(policy, roles, genesisRoles) {
+  const name = (r) => r ?? "none";
+  if (genesisRoles) {
+    for (const role of ROLES) {
+      const was = genesisRoles[role];
+      if (was && (was.model !== roles[role].model || (was.runner ?? null) !== (roles[role].runner ?? null))) {
+        return `routing changed since genesis: ${role} now resolves to ${roles[role].model} on ${name(roles[role].runner)} (genesis: ${was.model} on ${name(was.runner)}); restore the routing, or archive this flight and start another`;
+      }
+    }
+  }
+  if (policy.runners.allow) {
+    for (const role of ROLES) {
+      if (!policy.runners.allow.includes(roles[role].runner)) {
+        return `${role} resolves to runner ${name(roles[role].runner)}, which policy runners.allow does not name (${policy.runners.allow.join(", ")})`;
+      }
+    }
+  }
+  if (policy.runners.locality === "local") {
+    for (const role of ROLES) {
+      if (roles[role].locality !== "local") {
+        return `${role} resolves to ${roles[role].model} on runner ${name(roles[role].runner)} (locality ${roles[role].locality}); a local-only flight needs every role on a local runner. Route it to one in ~/.config/kukulu/config.json, or set runners.locality to "any"`;
+      }
+    }
+  }
+  const imp = roles.implementer.model;
+  const rev = roles.reviewer.model;
+  if (policy.roles.distinct === "model" && normalizeModel(imp) === normalizeModel(rev)) {
+    return `the implementer and the reviewer both resolve to ${normalizeModel(imp)}; policy roles.distinct "model" needs two different models. Route one of them elsewhere`;
+  }
+  if (policy.roles.distinct === "family" && familyOf(imp) === familyOf(rev)) {
+    return `the implementer (${imp}) and the reviewer (${rev}) are both family ${familyOf(imp)}; policy roles.distinct "family" needs two families`;
+  }
+  return null;
+}
+
 /**
  * Append the genesis entry and record the hashes the gate will compare against,
  * in one commit with the log. A policy that does not load is a refusal.
  */
 function cleanroomGenesis(cc, st) {
   const policyBytes = fs.readFileSync(cleanroomPolicyPath(cc));
-  loadPolicy(policyBytes.toString("utf8"));
+  const policy = loadPolicy(policyBytes.toString("utf8"));
+  const roles = rolesRecord(resolveRouting());
+  const routingReason = routingCheck(policy, roles, null);
+  if (routingReason) throw new ToolError(`clean-room genesis refused: routing: ${routingReason}`);
   const key = ensureKey(cc);
   const hashes = pluginHashes();
   const logPath = cleanroomLogPath();
@@ -139,7 +192,7 @@ function cleanroomGenesis(cc, st) {
       kind: "genesis",
       stage: "controller",
       role: "session",
-      data: { mode: "clean-room", policyHash: policyHash(policyBytes), ...hashes, pluginVersion: VERSION, keyFingerprint: key.fingerprint, baseBranch: cc.baseBranch, head },
+      data: { mode: "clean-room", policyHash: policyHash(policyBytes), ...hashes, pluginVersion: VERSION, keyFingerprint: key.fingerprint, baseBranch: cc.baseBranch, head, roles, distinct: policy.roles.distinct },
     });
     st.cleanroom = { genesis: entry.hash, policyHash: policyHash(policyBytes), ...hashes };
     saveState(st);
@@ -237,6 +290,12 @@ function runGate(stage, st = loadState()) {
   if (lastGate >= 0 && !chain.entries.slice(lastGate + 1).some((e) => e.kind === "allowed")) {
     return failed("liveness", "no tool call has been logged since the last gate; the clean-room hooks are not running in this session. Start a new session.");
   }
+
+  // 8. routing: the roles still resolve as genesis recorded, and still satisfy the policy
+  checked.push("routing");
+  const genesisRoles = chain.entries[0]?.data?.roles;
+  const routingReason = routingCheck(policy, rolesRecord(resolveRouting()), genesisRoles);
+  if (routingReason) return failed("routing", routingReason);
 
   appendEntry(logPath, { kind: "gate", stage, role: "session", data: { checks: checked.length, ok: true, ...(unpinned.length ? { unpinned } : {}) } });
   return { ok: true, checked };
