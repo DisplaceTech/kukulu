@@ -144,11 +144,14 @@ if [ "$1 $2" = "pr view" ]; then
 fi
 if [ "$1 $2" = "pr create" ]; then
   base=main
+  title=
   while [ $# -gt 0 ]; do
     if [ "$1" = "--base" ]; then base=$2; fi
+    if [ "$1" = "--title" ]; then title=$2; fi
     shift
   done
-  printf '{"url":"https://github.invalid/pull/1","state":"OPEN","isDraft":true,"baseRefName":"%s"}\\n' "$base" > "$dir/pr.json"
+  esc=$(printf '%s' "$title" | sed 's/\\\\/\\\\\\\\/g; s/"/\\\\"/g')
+  printf '{"number":1,"url":"https://github.invalid/pull/1","state":"OPEN","isDraft":true,"baseRefName":"%s","title":"%s"}\\n' "$base" "$esc" > "$dir/pr.json"
   echo https://github.invalid/pull/1
   exit 0
 fi

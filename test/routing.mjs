@@ -23,6 +23,26 @@ const pluginAgent = (role) => splitFrontmatter(readFile(ROOT, `agents/${role}.md
 /** A fresh directory to hold a global-config fixture, separate from any project repo. */
 const cfgDir = () => mkDir("kukulu-cfg-");
 
+// ---------------------------------------------------------------- prTitle validation (C-01)
+
+for (const [value, got, label] of [
+  [42, "42", "a number"],
+  ["", '""', "an empty string"],
+  ["x".repeat(121), "121 characters", "121 characters"],
+  ["a\nb", "a newline", "a newline"],
+]) {
+  const repo = plannedRepo({ config: { prTitle: value } });
+  await withServer(repo, async ({ call }) => {
+    isError(await call("kukulu_status"), new RegExp(`docs/kukulu\\.json prTitle must be 1 to 120 characters on one line; got ${got}$`), `prTitle: ${label} is refused`);
+  });
+}
+{
+  const repo = plannedRepo({ config: { prTitle: "x".repeat(120) } });
+  await withServer(repo, async ({ call }) => {
+    ok(!(await call("kukulu_status")).error, "a 120-character prTitle is accepted");
+  });
+}
+
 // ---------------------------------------------------------------- defaults, no global file
 
 {

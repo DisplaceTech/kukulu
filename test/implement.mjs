@@ -851,6 +851,46 @@ for (const [bad, re] of [
   });
 }
 
+// ---------------------------------------------------------------- the draft PR's title (C-01)
+
+/** Runs one flight to run_finish with the fake gh and returns the finish result and the title gh was given. */
+async function prTitleFor({ spec = "# Widget 1.0 \u2014 Specification\n", config = {}, round = 0 } = {}) {
+  const repo = plannedRepo({ config });
+  writeFile(repo, "docs/SPEC.md", spec);
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-qm", "spec heading"]);
+  git(repo, ["remote", "add", "origin", mkBareRemote()]);
+  const ghDir = mkFakeGhBin();
+  let out;
+  await withServer(repo, async ({ call }) => {
+    if (round) setState(repo, { round });
+    await call("kukulu_run_start");
+    await call("kukulu_task_next");
+    commitTask(repo, "P0-01", "Create hello", { "hello.txt": "hi\n" });
+    await call("kukulu_task_done", { id: "P0-01", log: "x" });
+    await call("kukulu_task_block", { id: "P0-02", reason: "x / y / z" });
+    await call("kukulu_task_next");
+    writeFile(repo, "docs/HANDOFF.md", "# handoff\n");
+    const r = await call("kukulu_run_finish");
+    const m = /--title (.*) --body-file/.exec(readFile(ghDir, "calls.log"));
+    out = { r, title: m ? m[1] : null };
+  }, { env: { PATH: `${ghDir}:${process.env.PATH}` } });
+  return out;
+}
+
+{
+  const { title } = await prTitleFor({ config: { prTitle: "Custom title", flight: "w-1" } });
+  eq(title, "Custom title", "prTitle wins");
+}
+{
+  const { r, title } = await prTitleFor({ config: { flight: "w-1" } });
+  eq(title, "w-1: Widget 1.0", "the derived title strips the Specification suffix");
+  eq(r.prTitle, "w-1: Widget 1.0", "run_finish returns prTitle when it opened a PR");
+}
+eq((await prTitleFor()).title, "Widget 1.0", "...and is the spec title alone without a flight");
+eq((await prTitleFor({ spec: "no heading here\n" })).title.startsWith("Build: build/"), true, "without a spec heading the title is Build: <branch>");
+eq((await prTitleFor({ config: { flight: "w-1" }, round: 2 })).title, "w-1: Widget 1.0", "the title has no round suffix at round 2");
+
 // The draft PR targets baseBranch, not the repository's default branch, and
 // the summary reports the PR it finds (2026-09-30 cleanflate F-24, F-25).
 {

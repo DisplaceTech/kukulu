@@ -312,11 +312,11 @@ End an implementation run and hand off to review.
 
 1. Commits `docs/HANDOFF.md` as `chore: handoff for review`.
 2. Records the round as implemented in `.kukulu/state.json` and commits it as `chore: round N implemented`.
-3. Pushes to `origin` if `policies.push` is true and there is one, and, if `policies.pr` is not `"none"` and `gh` is on `PATH`, opens a draft PR against `baseBranch` (`--base`, always) with `HANDOFF.md` as the body, or reports the existing one.
+3. Pushes to `origin` if `policies.push` is true and there is one, and, if `policies.pr` is not `"none"` and `gh` is on `PATH`, opens a draft PR against `baseBranch` (`--base`, always) with `HANDOFF.md` as the body, or reports the existing one. The new PR is titled `prTitle` from `docs/kukulu.json`, else `<flight>: <spec title>` (the first top-level heading of `docs/SPEC.md` without a trailing "Specification"; the heading alone when there is no `flight`), else `Build: <branch>`, cut to 120 characters, with no round suffix; an existing PR is never retitled.
 4. Deletes the lock, standing the guard hook down.
 5. Runs every constraint over the whole tree, as `kukulu_verify` does, and reports the result without refusing on it.
 
-**Returns:** `{ branch, base, head, handoffCommit, stateCommit, push, pr, counts, round, constraints, readyLine }`. `constraints` is `{ ok, failing: [<rule ids>] }`, and a rule whose `from` task has not started is inactive there too; when any rule fails, the ready line ends with `; constraints failing: <ids>`. `push` is `"pushed"`, `"skipped: no origin remote"`, `"skipped: policy"`, or `"failed: <git's message>"`. A failed push does not fail the handoff, because the branch can still be reviewed locally. `pr` is `null` when there was nothing to try, `"skipped: policy"` when `policies.pr` is `"none"`, a URL, or a `gh` failure message.
+**Returns:** `{ branch, base, head, handoffCommit, stateCommit, push, pr, prTitle?, counts, round, constraints, readyLine }`. `constraints` is `{ ok, failing: [<rule ids>] }`, and a rule whose `from` task has not started is inactive there too; when any rule fails, the ready line ends with `; constraints failing: <ids>`. `push` is `"pushed"`, `"skipped: no origin remote"`, `"skipped: policy"`, or `"failed: <git's message>"`. A failed push does not fail the handoff, because the branch can still be reviewed locally. `pr` is `null` when there was nothing to try, `"skipped: policy"` when `policies.pr` is `"none"`, a URL, or a `gh` failure message.
 
 **Refuses when:** any task is still open; `HANDOFF.md` does not exist; or the tree is not clean after the handoff commit, again ignoring anything recorded as `preexistingUntracked`.
 

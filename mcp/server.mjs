@@ -901,6 +901,16 @@ function cfgFrom(c, planIds) {
   if (c.flight !== undefined && (typeof c.flight !== "string" || !FLIGHT_SLUG.test(c.flight))) {
     throw new ToolError(`docs/kukulu.json flight must be a slug matching ${FLIGHT_SLUG} (lowercase letters, digits and -, at most 40 characters)`);
   }
+  if (c.prTitle !== undefined) {
+    const t = c.prTitle;
+    const bad =
+      typeof t !== "string" ? JSON.stringify(t)
+      : t === "" ? '""'
+      : /[\n\r]/.test(t) ? "a newline"
+      : [...t].length > 120 ? `${[...t].length} characters`
+      : null;
+    if (bad !== null) throw new ToolError(`docs/kukulu.json prTitle must be 1 to 120 characters on one line; got ${bad}`);
+  }
   validateConstraints(c.constraints, planIds);
   validateParallel(c.parallel);
   validateMutation(c.mutation);
@@ -930,6 +940,7 @@ function cfgFrom(c, planIds) {
     guardCap: Number.isInteger(c.guardCap) ? c.guardCap : 60,
     constraints: c.constraints || [],
     flight: c.flight ?? null,
+    prTitle: c.prTitle ?? null,
     mutation: { targeted },
     // ⚠️ ASSUMPTION: the number of fix rounds that a surviving mutant alone may open, before it is only a note.
     review: { mutationFixRounds: c.review?.mutationFixRounds ?? 2 },
@@ -3190,6 +3201,7 @@ function runFinish() {
 
   const push = pushBranch(g.branch, st.policies.push);
   let pr_url = null;
+  let title = null;
   if (push === "pushed") {
     if (st.policies.pr === "none") {
       pr_url = "skipped: policy";
@@ -3197,7 +3209,7 @@ function runFinish() {
       const existing = spawnSync("gh", ["pr", "view", "--json", "url", "-q", ".url"], { cwd: ROOT, encoding: "utf8" });
       if (existing.status === 0 && existing.stdout.trim()) pr_url = existing.stdout.trim();
       else {
-        const title = st.round === 0 ? `Build: ${g.branch}` : `Build: ${g.branch} (review round ${st.round})`;
+        title = prTitleFor(c, g.branch);
         // --base, always: without it gh targets the repository's default
         // branch, not the one this flight branched from (F-24 of the
         // 2026-09-30 cleanflate feedback).
@@ -3214,10 +3226,23 @@ function runFinish() {
   const scan = checkConstraints(c.constraints, ROOT, st.preexistingUntracked);
   const failing = scan.results.filter((r) => !r.ok).map((r) => r.id);
   return {
-    branch: g.branch, base: g.base, head, handoffCommit, stateCommit, push, pr: pr_url, counts: cnt, round: st.round,
+    branch: g.branch, base: g.base, head, handoffCommit, stateCommit, push, pr: pr_url, ...(title !== null && pr_url?.startsWith("pr create failed") !== true ? { prTitle: title } : {}), counts: cnt, round: st.round,
     constraints: { ok: scan.ok, failing },
     readyLine: `READY FOR REVIEW — branch ${g.branch}, head ${head}, ${cnt.done} done / ${cnt.blocked} blocked / ${cnt.skipped} skipped of ${cnt.total}${failing.length ? `; constraints failing: ${failing.join(", ")}` : ""}`,
   };
+}
+
+/**
+ * The draft PR's title (SPEC C-01): `prTitle` as written, else the SPEC's
+ * first heading without its "Specification" suffix, prefixed with the flight
+ * slug when there is one, else `Build: <branch>`. At most 120 code points.
+ */
+function prTitleFor(c, branch) {
+  if (c.prTitle) return c.prTitle;
+  const heading = exists(P.spec) ? /^# (.+)$/m.exec(read(P.spec))?.[1] : undefined;
+  const topic = heading?.replace(/\s*[—–:-]\s*Spec(ification)?\s*$/i, "").trim();
+  const title = topic ? (c.flight ? `${c.flight}: ${topic}` : topic) : `Build: ${branch}`;
+  return [...title].slice(0, 120).join("");
 }
 
 const FLIGHT_OPTION_KEYS = ["maxRounds", "maxRoundsHard"];
