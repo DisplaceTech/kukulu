@@ -27,7 +27,7 @@ Started: 2026-10-26T21:19:36.125Z
 - [x] P2-08 Commands run inside the boundary
 - [x] P2-09 The enforcement level: known limits per level, the manifest and verifier check 11
 - [x] P2-10 Signing under the boundary
-- [ ] P2-11 Lockfile parsers, gate check 10 and the manifest's packages
+- [x] P2-11 Lockfile parsers, gate check 10 and the manifest's packages
 - [ ] P2-12 The guard denies adding a denied package
 - [ ] P2-13 The 0.7.2 known-gap candidates: --remove-sent-files and pax
 - [ ] P2-14 The real-container integration step
@@ -156,3 +156,8 @@ Interpretation: a manifest without an enforcement field is not compared against 
 
 server: startRun refuses required inside the sandbox before any write; probeSigning returns the "off (sandbox: ...)" record under auto (no probe, gpgsign untouched); signaturesExpected false for it; signingNoteFor has the sandbox note; finalize reports "not required: commits made inside the sandbox are unsigned; ...". coverageGaps takes level (both copies); attest manifest coverage.unsignedTrailed under container+proxy; verifier recounts and prints one note. Tests: sandbox 177, attest 285, cleanroom 1215, review 445; verify green.
 Interpretation: the finalize acceptance test is in test/review.mjs (finalizeRepo helper is local to it).
+
+### P2-11 — 11cbd67
+
+cleanroom.mjs: LOCKFILES, lockfileEcosystem, lockfilePackages (TOML blocks, package-lock, requirements), normalizePackageName, deniedPackage. server: trackedLockfiles, packagesCheck, gate check 10 (packages, after boundary) incl. cargo cache listing via engine exec; attest manifest.packages after enforcement. Fixtures test/fixtures/lockfiles. cleanroom 1238, attest 287, sandbox 184; verify green.
+Interpretation: sub-table headers end a [[package]] block's own keys; a lockfile of an ecosystem deny.packages does not name is not parsed; a non-"No such file" find failure fails the check with the engine's first stderr line.
