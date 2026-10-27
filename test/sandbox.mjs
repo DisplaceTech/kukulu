@@ -120,6 +120,7 @@ const runHookAsync = (script, payload, env) => new Promise((resolve) => {
     ok(verifyChain(fs.readFileSync(logPath, "utf8").split("\n").filter(Boolean)).ok, "...in a chain that verifies");
     ok(!fs.existsSync(projectLog), "...and the project's own log is untouched");
 
+
     const allowed = await runHookAsync(GUARD, { hook_event_name: "PreToolUse", tool_name: "Read", tool_input: { file_path: path.join(repo, "docs", "SPEC.md") }, cwd: repo }, env);
     eq(allowed.status, 0, "an allowed call exits 0 over the log socket");
     eq(readEntries(logPath).length, 1, "...and the guard sends nothing for it");
@@ -268,9 +269,32 @@ const exchange = (target, bytes, { until = null, then = null } = {}) => new Prom
   eq(egressDecision({ policy: p({ sandbox: { image: undefined, egress: ["pypi.org:443"] }, enforcement: "hook" }), endpoints: [], lockdown: false, host: "pypi.org", port: 443 }).reason, "sandbox.egress", "sandbox.egress hosts are allowed before lockdown");
   eq(egressDecision({ policy: p({ allow: { urls: ["https://www.rfc-editor.org/rfc/rfc1951.txt"] } }), endpoints: [], lockdown: false, host: "www.rfc-editor.org", port: 443 }).reason, "allow.urls", "an allow.urls entry's https port defaults to 443");
   eq(egressDecision({ policy: p({ allow: { urls: ["https://www.rfc-editor.org/rfc/rfc1951.txt"] } }), endpoints: [], lockdown: true, host: "www.rfc-editor.org", port: 443 }).reason, "lockdown is active", "...and lockdown denies it");
+  const afterLockdown = egressDecision({ policy: p({ sandbox: { image: undefined, egress: ["pypi.org:443"] }, enforcement: "hook" }), endpoints: [], lockdown: true, host: "pypi.org", port: 443 });
+  eq(afterLockdown.allowed + "|" + afterLockdown.reason, "false|lockdown is active", "sandbox.egress hosts are denied after lockdown");
 }
 
 // ---------------------------------------------------------------- containerArgs, the plan, the Containerfile and doctor (P2-05)
+
+// a box that names another source still gets "box" (SPEC C-02)
+{
+  const dir = shortDir();
+  const logPath = path.join(dir, "forged-log.jsonl");
+  const socketPath = path.join(dir, "f.sock");
+  const logSocket = startLogSocket({ socketPath, logPath });
+  await logSocket.listening;
+  try {
+    const reply = await new Promise((resolve, reject) => {
+      const c = net.connect(socketPath, () => c.write(JSON.stringify({ kind: "allowed", stage: "implement", role: "session", data: { source: "controller", target: "/x" } }) + "\n"));
+      c.setEncoding("utf8");
+      c.on("data", (t) => { c.end(); resolve(t); });
+      c.on("error", reject);
+    });
+    ok(!JSON.parse(reply).error, "(a forged entry is accepted as an entry)");
+    eq(readEntries(logPath).at(-1).data.source, "box", "the log socket marks a box entry source box even when the box sends another source");
+  } finally {
+    await logSocket.close();
+  }
+}
 
 {
   const digest = "sha256:" + "a".repeat(64);
@@ -456,6 +480,30 @@ const exchange = (target, bytes, { until = null, then = null } = {}) => new Prom
   const stopTwice = await sandboxRun(repo, dockerWith({}), ["stop"]);
   eq(stopTwice.code, 0, "stop of a container that is not running is not an error");
   eq((await sandboxRun(repo, dockerWith(), ["stop", "extra"])).code, 2, "stop with an argument is a usage error");
+
+  // stop signals the pid in run.json (PLAN P2-06)
+  {
+    const sleeper = spawn("sleep", ["60"], { stdio: "ignore" });
+    const exited = new Promise((resolve) => sleeper.on("exit", (code, signal) => resolve(signal)));
+    fs.mkdirSync(runtime, { recursive: true });
+    const runFile = path.join(runtime, "run.json");
+    fs.writeFileSync(runFile, JSON.stringify({ pid: sleeper.pid }));
+    const stopSignal = await sandboxRun(repo, dockerWith(), ["stop"]);
+    eq(stopSignal.code, 0, "stop with a run.json succeeds");
+    eq(await Promise.race([exited, new Promise((resolve) => setTimeout(() => resolve("still running"), 5000))]), "SIGTERM", "stop signals the pid in run.json: the child exited on SIGTERM");
+    ok(!fs.existsSync(runFile), "...and run.json is gone");
+    sleeper.kill("SIGKILL");
+  }
+
+  // a tag-only image never reaches the engine
+  {
+    const tagged = cleanroomRepo({ policy: policyText({ sandbox: { image: "kukulu-sandbox:latest" } }) });
+    const tagDocker = dockerWith();
+    const refused = await sandboxRun(tagged, tagDocker, ["run"]);
+    eq(refused.code, 1, "run refuses a tag-only image");
+    like(refused.err, /sandbox\.image/, "...with the policy loader's message on stderr");
+    ok(!started(tagDocker), "...and nothing started");
+  }
 }
 
 // ---------------------------------------------------------------- gate check 9 and the boundary in genesis (P2-07)
