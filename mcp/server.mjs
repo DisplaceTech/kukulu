@@ -2366,6 +2366,30 @@ function requiredSigningPolicy(st) {
   }
 }
 
+/**
+ * Base health (SPEC E-02): after an archived flight, with no plan config yet, the constraints that flight carried are
+ * scanned over the tracked tree (self-test and scan, no command), and the sentence for the planner names those the
+ * base fails. `null` when there is nothing to say or the archive cannot be read.
+ */
+function baseHealth(st) {
+  if (!st.archived || exists(P.config)) return null;
+  const file = ["kukulu.json", "foun" + "dry.json"].map((n) => path.join(ROOT, st.archived.dir, n)).find(exists);
+  if (!file) return null;
+  try {
+    const archived = cfgFrom(JSON.parse(read(file)), null);
+    if (!archived.constraints.length) return null;
+    const failing = checkConstraints(archived.constraints, ROOT, []).results.filter((r) => !r.ok);
+    if (!failing.length) return null;
+    const named = failing.map((r) => (r.hits[0] ? `${r.id} (${r.hits[0].file}:${r.hits[0].line})` : `${r.id} (its fixture fails)`)).join(", ");
+    return {
+      failing: failing.length,
+      sentence: `The base fails ${failing.length} constraint(s) carried from flight ${st.archived.slug}: ${named}; decide in the plan whether a task restores them or the spec changed them.`,
+    };
+  } catch {
+    return null;
+  }
+}
+
 function nextDecision() {
   const routing = resolveRouting();
   const s = status();
@@ -2491,6 +2515,11 @@ function nextDecision() {
       if (!probe.signedOk) {
         return stage("plan", `policies.signing is 'required' and the signing probe failed: ${probe.line}. Fix the signing agent before planning, or set policies.signing to 'auto' or 'off'.`);
       }
+    }
+    const health = baseHealth(st);
+    if (health) {
+      const planned = stage("plan", `${planReason}; base health: ${health.failing} failing`);
+      return { ...planned, prompt: `${planned.prompt} ${health.sentence}` };
     }
     return stage("plan", planReason);
   }

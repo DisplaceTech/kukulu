@@ -33,6 +33,7 @@ All notable changes to this plugin. Format follows
 - The manifest's `roles` carry `reported` models and `usage` sums, and the verifier's check 12 (`roles`) recounts them from the `usage` entries and notes a reported model that routing did not declare (G-02, G-10).
 - `scripts/compare-bundles.mjs`, which compares two attestation bundles side by side and, with `--trees`, scores their result trees against each other (G-09, D-03).
 - `kukulu_release`, which tags the newest archived flight's merged pull request, pushes the tag and creates a GitHub release from the CHANGELOG entry, as a draft unless asked to publish (E-01, the 2026-10-20 notes' open question 2).
+- Base health before planning: after an archived flight, `kukulu_next` scans the tracked tree with the archived constraints and tells the planner which ones the base fails (E-02).
 
 ### Changed
 

@@ -1099,4 +1099,69 @@ const OLD_LAYOUT = /pre-0\.6\.0 Foundry layout, which 0\.7\.0 no longer reads/;
   });
 }
 
+// -------------------------------------------------------------- base health before planning (E-02)
+
+{
+  const RULE = { id: "no-todo", description: "no TODO in src/", paths: ["src/"], pattern: "\\bTODO\\b", shouldMatch: ["// TODO fix"], shouldNotMatch: ["// done"] };
+  const archivedRepo = (rule, file, verify = ["true"]) => {
+    const repo = specRepo("# Spec 2\n");
+    writeFile(repo, "docs/flights/x/SPEC.md", "# Spec 1\n");
+    writeFile(repo, "docs/flights/x/kukulu.json", JSON.stringify({ verify, constraints: rule ? [rule] : [] }) + "\n");
+    if (file) writeFile(repo, file.path, file.text);
+    setState(repo, { archived: { slug: "x", dir: "docs/flights/x", at: "2026-01-01T00:00:00Z" } });
+    git(repo, ["add", "-A"]);
+    git(repo, ["commit", "-qm", "chore: archived"]);
+    return repo;
+  };
+  const SENTENCE = /The base fails 1 constraint\(s\) carried from flight x: no-todo \(src\/a\.js:2\); decide in the plan whether a task restores them or the spec changed them\.$/;
+  {
+    const repo = archivedRepo(RULE, { path: "src/a.js", text: "const a = 1;\n// TODO later\n" });
+    await withServer(repo, async ({ call }) => {
+      const n = await call("kukulu_next");
+      eq(n.stage, "plan", "an archived flight with a constraint the base breaks still gives the plan stage");
+      like(n.prompt, SENTENCE, "...the prompt ends with the base-health sentence");
+      like(n.prompt, /^Run the K\u016bkulu plan stage/, "...after the usual prompt");
+      like(n.reason, /^no plan on disk \(.*\); base health: 1 failing$/, "...and the reason names the count");
+    });
+  }
+  {
+    const repo = archivedRepo(RULE, { path: "src/a.js", text: "const a = 1;\n" });
+    await withServer(repo, async ({ call }) => {
+      const n = await call("kukulu_next");
+      like(n.reason, /^no plan on disk \([^;]*\)$/, "a clean base gives today's reason");
+      ok(!/base fails/.test(n.prompt), "...and today's prompt");
+    });
+  }
+  await withServer(specRepo(), async ({ call }) => {
+    const n = await call("kukulu_next");
+    ok(!/base fails|base health/.test(n.prompt + n.reason), "no archive gives today's prompt");
+  });
+  {
+    // a scan runs no command: the archived verify would fail if it ran, and the call still returns plan
+    const marker = path.join(mkDir("kukulu-bh-"), "ran");
+    const repo = archivedRepo(RULE, { path: "src/a.js", text: "const a = 1;\n// TODO later\n" }, [`touch ${marker}; false`]);
+    await withServer(repo, async ({ call }) => {
+      const n = await call("kukulu_next");
+      eq(n.stage, "plan", "a base-health scan runs no command: the archived verify is [false] and the call returns plan");
+      ok(!fs.existsSync(marker), "...and the verify command never ran");
+    });
+  }
+  {
+    const repo = archivedRepo({ ...RULE, shouldMatch: ["nothing matches this"] }, null);
+    await withServer(repo, async ({ call }) => {
+      const n = await call("kukulu_next");
+      like(n.prompt, /no-todo \(its fixture fails\)/, "a rule whose own fixture fails is named as such");
+    });
+  }
+  {
+    const repo = archivedRepo(RULE, { path: "src/a.js", text: "// TODO\n" });
+    writeFile(repo, "docs/flights/x/kukulu.json", "{not json");
+    git(repo, ["add", "-A"]);
+    git(repo, ["commit", "-qm", "break the archive"]);
+    await withServer(repo, async ({ call }) => {
+      ok(!/base fails/.test((await call("kukulu_next")).prompt), "an unreadable archived config gives today's prompt");
+    });
+  }
+}
+
 finish();
