@@ -90,6 +90,42 @@ const tree = (dir) => fs.readdirSync(dir, { recursive: true }).sort().join("\n")
   eq(bad.status, 1, "a changed byte in the published copy fails --check");
   eq(bad.stderr, "publish-bundle: SUMMARY.md: the SHA-256 differs from SHA256SUMS\n", "...naming the file");
 
+  // the other integrity checks, each on a fresh published copy
+  const fresh = () => {
+    const o = mkDir("kukulu-pub-out-");
+    publishRun(b.dir, "--key", b.fingerprint, "--out", o);
+    return path.join(o, "bundle-test");
+  };
+  {
+    const d = fresh();
+    fs.writeFileSync(path.join(d, "stray.txt"), "x");
+    const r = publishRun("--check", d, "--key", b.fingerprint);
+    eq(r.status + "|" + r.stderr, "1|publish-bundle: stray.txt: present but not listed in SHA256SUMS\n", "--check fails on a file not listed in SHA256SUMS, naming it");
+  }
+  {
+    const d = fresh();
+    fs.unlinkSync(path.join(d, "REVIEW.md"));
+    const r = publishRun("--check", d, "--key", b.fingerprint);
+    eq(r.status + "|" + r.stderr, "1|publish-bundle: REVIEW.md: listed in SHA256SUMS but missing\n", "--check fails on a listed file that is missing");
+  }
+  {
+    const d = fresh();
+    fs.appendFileSync(path.join(d, "SHA256SUMS"), "not a checksum line\n");
+    const r = publishRun("--check", d, "--key", b.fingerprint);
+    eq(r.status + "|" + r.stderr, '1|publish-bundle: SHA256SUMS has a line that is not "<sha256>  <path>": not a checksum line\n', "--check fails on a malformed SHA256SUMS line");
+  }
+  {
+    const d = fresh();
+    fs.unlinkSync(path.join(d, "SHA256SUMS"));
+    const r = publishRun("--check", d, "--key", b.fingerprint);
+    eq(r.status + "|" + r.stderr, `1|publish-bundle: ${d}: SHA256SUMS is missing\n`, "--check fails cleanly when SHA256SUMS is missing");
+    ok(!/\n\s+at /.test(r.stderr), "...with no stack trace");
+  }
+  for (const script of ["publish-bundle.mjs", "compare-bundles.mjs"]) {
+    const text = fs.readFileSync(path.join(ROOT, "scripts", script), "utf8");
+    ok(!text.includes("\u016b") && !text.includes("\u2014"), `${script} holds no literal macron letter or em dash`);
+  }
+
   const before = tree(out);
   const again = publishRun(b.dir, "--key", b.fingerprint, "--out", out);
   eq(again.status, 1, "an existing output directory refuses");

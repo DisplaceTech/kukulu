@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import { scorePair } from "../mcp/cleanroom.mjs";
 
 const USAGE = "usage: node scripts/compare-bundles.mjs <bundle-a> <bundle-b> [--key-a sha256:<fp>] [--key-b sha256:<fp>] [--trees <dir-a> <dir-b>] [--json]\n";
-const DASH = "—";
+const DASH = "\u2014";
 const FINGERPRINT = /^sha256:[0-9a-f]{64}$/;
 const SKIP_DIRS = new Set([".git", "node_modules"]);
 const PARAMETERS = ["ngram", "minIdentLen", "commentNgram", "languages"];

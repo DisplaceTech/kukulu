@@ -63,7 +63,7 @@ export function publish(bundle, key, out, io) {
   fs.writeFileSync(path.join(target, "SHA256SUMS"), files.map((f) => `${sha256(fs.readFileSync(path.join(target, f)))}  ${f}\n`).join(""));
   const control = manifest.mode === "control-positive";
   fs.writeFileSync(path.join(target, "VERIFY.txt"), [
-    "Kūkulu attestation bundle",
+    "K\u016bkulu attestation bundle",
     `flight: ${flight}`,
     `mode: ${manifest.mode}`,
     `enforcement: ${manifest.enforcement?.level ?? "hook"}`,
