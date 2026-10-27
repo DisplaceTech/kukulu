@@ -46,7 +46,7 @@ Started: 2026-10-26T21:19:36.125Z
 - [x] R1-01 Mount the runtime directory read-only and hold gate check 9 to the exact mount list
 - [x] R1-02 The constraint scan never reads through a symlink that leaves the project
 - [x] R1-03 Behind the sandbox, run the plugin's verifier, never one from the project tree
-- [~] R1-04 --expect control-positive still prints CONTROL (positive)
+- [x] R1-04 --expect control-positive still prints CONTROL (positive)
 - [ ] R1-05 Test the sandbox mechanics SPEC names: box source, lockdown on sandbox.egress, stop, tag-only image
 - [ ] R1-06 Test the git -c options and the runner part of routing, fix the cache crate name, correct kukulu_next's docs
 - [ ] R1-07 Test the control-path symlink rule and the lockfile sub-table rule
@@ -254,3 +254,7 @@ checkConstraints lstat/realpath-checks each listed path; symlinks resolving outs
 ### R1-03 — c6f500a
 
 verifyControlBundle and attest self-check use PLUGIN_ROOT/scripts/verify-attestation.mjs when KUKULU_SANDBOX is set. Tests: sandbox.mjs (planted verify.mjs, marker absent, refusal reason) and attest.mjs (temp plugin verifier records import.meta.url, both modes). Interpretation: attest test placed in test/attest.mjs. Docs: mcp-tools.md, sandbox.md, CHANGELOG.
+
+### R1-04 — 0bb7148
+
+Verifier prints CONTROL (positive) whenever the bundle's mode is control-positive and it passes; exit codes and --json unchanged. attest.mjs assertions updated; docs/cleanroom.md and CHANGELOG updated.
