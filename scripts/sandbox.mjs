@@ -308,7 +308,7 @@ export function containerArgs(plan) {
   if (plan.tty) args.push("-t");
   args.push("-v", `${plan.root}:${plan.root}`);
   for (const p of [...plan.readOnly, ...plan.mounts, ...plan.priorArt]) args.push("-v", `${p}:${p}:ro`);
-  args.push("-v", `${plan.runtimeDir}:/run/kukulu`, "-v", `${plan.home}:/home/kukulu`);
+  args.push("-v", `${plan.runtimeDir}:/run/kukulu:ro`, "-v", `${plan.home}:/home/kukulu`);
   for (const [k, v] of Object.entries(plan.env)) args.push("-e", `${k}=${v}`);
   args.push(plan.image, path.join(plan.pluginRoot, "scripts", "sandbox-entry.mjs"), ...plan.harnessArgs);
   return args;

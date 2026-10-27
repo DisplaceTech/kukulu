@@ -288,7 +288,7 @@ const exchange = (target, bytes, { until = null, then = null } = {}) => new Prom
     "run", "--rm", "--init", "--name", "kukulu-abc", "--network", "none", "--read-only", "--tmpfs", "/tmp", "--user", "kukulu", "-w", root, "-i", ...(tty ? ["-t"] : []),
     "-v", `${root}:${root}`,
     ...[`${root}/docs/cleanroom.json`, `${root}/.kukulu`, `${root}/.claude`, `${root}/.git/config`, `${root}/.git/hooks`, `${root}/.git/info`, `${root}/docs/SPEC.md`, "/opt/kukulu", `${root}/tools/oracle`, ...extraRo].flatMap((p) => ["-v", `${p}:${p}:ro`]),
-    "-v", "/run/user/1000/kukulu/abc:/run/kukulu", "-v", "kukulu-abc-home:/home/kukulu",
+    "-v", "/run/user/1000/kukulu/abc:/run/kukulu:ro", "-v", "kukulu-abc-home:/home/kukulu",
     ...envs.flatMap((e) => ["-e", e]),
     digest, "/opt/kukulu/scripts/sandbox-entry.mjs", ...harness,
   ];
@@ -464,13 +464,14 @@ const exchange = (target, bytes, { until = null, then = null } = {}) => new Prom
   const zero = "sha256:" + "0".repeat(64);
   const policy = JSON.stringify({ version: 1, enforcement: "container+proxy", sandbox: { image: `kukulu-sandbox@${zero}`, mounts: [{ path: "tools/oracle", mode: "ro" }], egress: ["pypi.org:443"] } });
   const name = "kukulu-0123456789abcdef";
+  const HOOKS = "/run/user/1000/kukulu/0123456789abcdef/hooks-empty";
   const boundaryRepo = () => {
     const repo = cleanroomRepo({ policy });
     const dockerDir = mkFakeDocker();
     const inspect = JSON.parse(readFile(ROOT, "test/fixtures/docker/inspect.json").replaceAll("__ROOT__", repo).replaceAll("/opt/kukulu", ROOT));
     return { repo, dockerDir, inspect, put: (obj) => writeFile(dockerDir, "inspect.json", JSON.stringify(obj)) };
   };
-  const envFor = (dockerDir, extra = {}) => ({ env: { PATH: `${dockerDir}:${process.env.PATH}`, KUKULU_SANDBOX: name, KUKULU_SANDBOX_ENGINE: "docker", ...extra } });
+  const envFor = (dockerDir, extra = {}) => ({ env: { PATH: `${dockerDir}:${process.env.PATH}`, KUKULU_SANDBOX: name, KUKULU_SANDBOX_ENGINE: "docker", KUKULU_SANDBOX_HOOKS_PATH: HOOKS, ...extra } });
   const logOf = (repo) => readEntries(path.join(repo, ".kukulu", "cleanroom", "log.jsonl"));
   const live = async (repo, opts, fn) => withServer(repo, async (s) => fn({ ...s, call: async (n, a) => { logCall(repo); return s.call(n, a); } }), opts);
 
@@ -494,11 +495,16 @@ const exchange = (target, bytes, { until = null, then = null } = {}) => new Prom
   // each way the container can differ, after genesis (the gate) and, for the first, at genesis too
   for (const [label, mutate, want] of [
     ["network mode bridge", (i) => { i[0].HostConfig.NetworkMode = "bridge"; }, /boundary: network is bridge, but the policy requires none/],
-    ["an extra read-write mount", (i) => { i[0].Mounts.push({ Type: "bind", Source: "/etc", Destination: "/etc-rw", RW: true }); }, /boundary: read-write mounts are \/etc-rw, .*; only the project, the home volume and the socket directory may be writable/],
+    ["an extra read-write mount", (i) => { i[0].Mounts.push({ Type: "bind", Source: "/etc", Destination: "/etc-rw", RW: true }); }, /boundary: read-write mounts are \/etc-rw, .*; only the project and the home volume may be writable/],
     ["a different image digest", (i) => { i[0].Image = "sha256:" + "b".repeat(64); }, new RegExp(`boundary: image is sha256:b{64}, but the policy pins ${zero}`)],
     ["a container that is not running", (i) => { i[0].State.Running = false; }, new RegExp(`boundary: container ${name} is not running`)],
     ["a missing read-only mount", (i) => { i[0].Mounts = i[0].Mounts.filter((m) => !m.Destination.endsWith("/docs/SPEC.md")); }, /boundary: mount .*\/docs\/SPEC\.md is missing/],
     ["a read-write policy file", (i) => { i[0].Mounts.find((m) => m.Destination.endsWith("/docs/cleanroom.json")).RW = true; }, /boundary: read-write mounts are/],
+    ["a writable /run/kukulu", (i) => { const m = i[0].Mounts.find((x) => x.Destination === "/run/kukulu"); m.RW = true; }, /boundary: read-write mounts are [^;]*; only the project and the home volume may be writable/],
+    ["an extra read-only mount", (i) => { i[0].Mounts.push({ Type: "bind", Source: "/etc", Destination: "/etc-ro", RW: false }); }, /boundary: mount \/etc-ro is not one the policy and the sandbox define/],
+    ["a bind-mounted home", (i) => { const m = i[0].Mounts.find((x) => x.Destination === "/home/kukulu"); m.Type = "bind"; delete m.Name; m.Source = "/home/victim"; }, /boundary: mount \/home\/kukulu is a bind mount of \/home\/victim, but it must be the volume kukulu-0123456789abcdef-home/],
+    ["a same-path mount with another source", (i) => { i[0].Mounts.find((m) => m.Destination.endsWith("/docs/SPEC.md")).Source = "/tmp/other-spec.md"; }, /boundary: mount .*\/docs\/SPEC\.md has source \/tmp\/other-spec\.md/],
+    ["a runtime directory from elsewhere", (i) => { i[0].Mounts.find((m) => m.Destination === "/run/kukulu").Source = "/tmp/elsewhere"; }, /boundary: mount \/run\/kukulu has source \/tmp\/elsewhere/],
   ]) {
     const b = boundaryRepo();
     mutate(b.inspect);
@@ -514,6 +520,10 @@ const exchange = (target, bytes, { until = null, then = null } = {}) => new Prom
     ["an extra read-write mount", (i) => { i[0].Mounts.push({ Type: "bind", Source: "/etc", Destination: "/etc-rw", RW: true }); }, /boundary: read-write mounts are/],
     ["a different image digest", (i) => { i[0].Image = "sha256:" + "b".repeat(64); }, /boundary: image is sha256:b{64}/],
     ["a changed mount source", (i) => { i[0].Mounts.find((m) => m.Destination === "/home/kukulu").Source = "/elsewhere"; }, /boundary: mounts are .*, but genesis recorded/],
+    ["a writable /run/kukulu", (i) => { i[0].Mounts.find((m) => m.Destination === "/run/kukulu").RW = true; }, /boundary: read-write mounts are [^;]*; only the project and the home volume/],
+    ["an extra read-only mount", (i) => { i[0].Mounts.push({ Type: "bind", Source: "/etc", Destination: "/etc-ro", RW: false }); }, /boundary: mount \/etc-ro is not one/],
+    ["a bind-mounted home", (i) => { const m = i[0].Mounts.find((x) => x.Destination === "/home/kukulu"); m.Type = "bind"; delete m.Name; }, /boundary: mount \/home\/kukulu is a bind mount/],
+    ["a same-path mount with another source", (i) => { i[0].Mounts.find((m) => m.Destination.endsWith("/docs/SPEC.md")).Source = "/tmp/other-spec.md"; }, /boundary: mount .*\/docs\/SPEC\.md has source/],
   ]) {
     const b = boundaryRepo();
     b.put(b.inspect);
@@ -700,7 +710,7 @@ const exchange = (target, bytes, { until = null, then = null } = {}) => new Prom
       logCall(repo);
       out = await s.call("kukulu_next");
       out.calls = fs.readFileSync(path.join(dockerDir, "calls.log"), "utf8");
-    }, { env: { PATH: `${dockerDir}:${process.env.PATH}`, KUKULU_SANDBOX: name, KUKULU_SANDBOX_ENGINE: "docker" } });
+    }, { env: { PATH: `${dockerDir}:${process.env.PATH}`, KUKULU_SANDBOX: name, KUKULU_SANDBOX_ENGINE: "docker", KUKULU_SANDBOX_HOOKS_PATH: "/run/user/1000/kukulu/0123456789abcdef/hooks-empty" } });
     return out;
   };
   const cache = "/home/kukulu/.cargo/registry/src/index.crates.io-6f17d22bba15001f";
@@ -735,6 +745,8 @@ if (process.env.KUKULU_SANDBOX_IT === "1" && dockerVersion.status === 0) {
         "curl -sS --max-time 10 https://example.com >/dev/null 2>&1 || echo NET_FAIL >> it-markers.txt",
         "(echo x > .kukulu/x) 2>/dev/null || echo KUKULU_WRITE_FAIL >> it-markers.txt",
         "echo hi > it-file.txt && echo PROJECT_OK >> it-markers.txt",
+        "(touch /run/kukulu/x) 2>/dev/null || echo RUNTIME_WRITE_FAIL >> it-markers.txt",
+        "node -e \"require('net').connect('/run/kukulu/log.sock').on('connect',()=>{console.log('SOCKET_OK');process.exit(0)}).on('error',()=>process.exit(1))\" >/dev/null 2>&1 && echo SOCKET_OK >> it-markers.txt",
       ].join("; ");
       const err = [];
       const code = await sandboxMain(["run", "--", "--exec", "sh", "-c", script], {
@@ -746,7 +758,7 @@ if (process.env.KUKULU_SANDBOX_IT === "1" && dockerVersion.status === 0) {
       });
       eq(code, 0, "the sandboxed command exits 0" + (code === 0 ? "" : `: ${err.join("")}`));
       const markers = fs.existsSync(path.join(repo, "it-markers.txt")) ? fs.readFileSync(path.join(repo, "it-markers.txt"), "utf8") : "";
-      ok(/^NET_FAIL$/m.test(markers) && /^KUKULU_WRITE_FAIL$/m.test(markers) && /^PROJECT_OK$/m.test(markers), "inside the container the network, .kukulu writes and project writes behave as the boundary says (" + markers.trim().split("\n").join(",") + ")");
+      ok(/^NET_FAIL$/m.test(markers) && /^KUKULU_WRITE_FAIL$/m.test(markers) && /^PROJECT_OK$/m.test(markers) && /^RUNTIME_WRITE_FAIL$/m.test(markers) && /^SOCKET_OK$/m.test(markers), "inside the container the network, .kukulu writes and project writes behave as the boundary says (" + markers.trim().split("\n").join(",") + ")");
       eq(fs.readFileSync(path.join(repo, "it-file.txt"), "utf8"), "hi\n", "...and the project write is visible outside");
       ok(!fs.existsSync(path.join(repo, ".kukulu", "x")), "...while .kukulu stayed untouched");
     } finally {

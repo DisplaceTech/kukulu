@@ -201,7 +201,7 @@ function inspectContainer(engine, name) {
       running: Boolean(c.State?.Running),
       image: c.Image,
       network: c.HostConfig?.NetworkMode,
-      mounts: (c.Mounts ?? []).map((m) => ({ source: m.Source, destination: m.Destination, rw: Boolean(m.RW) })).sort((a, b) => (a.destination < b.destination ? -1 : a.destination > b.destination ? 1 : 0)),
+      mounts: (c.Mounts ?? []).map((m) => ({ source: m.Source, destination: m.Destination, rw: Boolean(m.RW), type: m.Type, name: m.Name })).sort((a, b) => (a.destination < b.destination ? -1 : a.destination > b.destination ? 1 : 0)),
     };
   } catch (e) {
     return { error: `could not inspect container ${name}: the engine's output is not the JSON it should be (${e.message})` };
@@ -225,10 +225,9 @@ function boundaryCheck(cc, policy, recorded) {
   if (c.image !== digest) return { reason: `image is ${c.image}, but the policy pins ${digest}` };
   if (c.network !== "none") return { reason: `network is ${c.network}, but the policy requires none` };
   const writable = c.mounts.filter((m) => m.rw).map((m) => m.destination).sort();
-  // /run/kukulu is the runtime directory that holds the sockets; connecting to a socket needs it writable.
-  const allowed = [...new Set([ROOT, "/home/kukulu", "/run/kukulu"])].sort();
+  const allowed = [...new Set([ROOT, "/home/kukulu"])].sort();
   if (writable.join("\n") !== allowed.join("\n")) {
-    return { reason: `read-write mounts are ${writable.join(", ")}; only the project, the home volume and the socket directory may be writable` };
+    return { reason: `read-write mounts are ${writable.join(", ")}; only the project and the home volume may be writable` };
   }
   const home = os.homedir();
   const expand = (e) => (e === "~" || e.startsWith("~/") ? path.join(home, e.slice(1)) : path.resolve(ROOT, e));
@@ -239,15 +238,33 @@ function boundaryCheck(cc, policy, recorded) {
   for (const p of required) {
     if (!c.mounts.some((m) => m.destination === p && !m.rw)) return { reason: `mount ${p} is missing` };
   }
-  if (!c.mounts.some((m) => m.destination === "/run/kukulu")) return { reason: "mount /run/kukulu is missing" };
-  const boundary = { engine, image: c.image, network: c.network, mounts: c.mounts };
+  // The runtime directory holds hooks-empty/, run.json and the sockets; the box must not be able to write it (SPEC C-01, C-04).
+  const runtime = c.mounts.find((m) => m.destination === "/run/kukulu");
+  if (!runtime) return { reason: "mount /run/kukulu is missing" };
+  if (runtime.rw) return { reason: "mount /run/kukulu is writable; the runtime directory must be mounted read-only" };
+  const hooksPath = envVar("SANDBOX_HOOKS_PATH");
+  if (!hooksPath || runtime.source !== path.dirname(hooksPath)) {
+    return { reason: `mount /run/kukulu has source ${runtime.source}, but the directory holding KUKULU_SANDBOX_HOOKS_PATH is ${hooksPath ? path.dirname(hooksPath) : "not set"}; start the session with node scripts/sandbox.mjs run` };
+  }
+  const homeMount = c.mounts.find((m) => m.destination === "/home/kukulu");
+  if (homeMount.type !== "volume" || homeMount.name !== `${name}-home`) {
+    return { reason: `mount /home/kukulu is ${homeMount.type === "volume" ? `the volume ${homeMount.name}` : `a ${homeMount.type ?? "unknown"} mount of ${homeMount.source}`}, but it must be the volume ${name}-home` };
+  }
+  const expected = new Set([ROOT, "/home/kukulu", "/run/kukulu", ...required]);
+  for (const m of c.mounts) {
+    if (!expected.has(m.destination)) return { reason: `mount ${m.destination} is not one the policy and the sandbox define; remove it from the container` };
+    if (m.destination !== "/run/kukulu" && m.destination !== "/home/kukulu" && m.source !== m.destination) {
+      return { reason: `mount ${m.destination} has source ${m.source}; a project or policy mount must have the same path on the host as in the container` };
+    }
+  }
+  const boundary = { engine, image: c.image, network: c.network, mounts: c.mounts.map((m) => ({ source: m.source, destination: m.destination, rw: m.rw })) };
   if (recorded) {
     for (const field of ["engine", "image", "network"]) {
       if (recorded[field] !== boundary[field]) return { reason: `${field} is ${boundary[field]}, but genesis recorded ${recorded[field]}` };
     }
-    const now = c.mounts.map(mountKey).sort().join("\n");
+    const now = boundary.mounts.map(mountKey).sort().join("\n");
     const then = (recorded.mounts ?? []).map(mountKey).sort().join("\n");
-    if (now !== then) return { reason: `mounts are ${c.mounts.map((m) => `${m.destination}${m.rw ? " (rw)" : ""}`).join(", ")}, but genesis recorded ${(recorded.mounts ?? []).map((m) => `${m.destination}${m.rw ? " (rw)" : ""}`).join(", ")}` };
+    if (now !== then) return { reason: `mounts are ${boundary.mounts.map((m) => `${m.destination}${m.rw ? " (rw)" : ""}`).join(", ")}, but genesis recorded ${(recorded.mounts ?? []).map((m) => `${m.destination}${m.rw ? " (rw)" : ""}`).join(", ")}` };
   }
   return { id: c.id, boundary };
 }

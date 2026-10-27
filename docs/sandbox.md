@@ -93,7 +93,7 @@ The project is the only read-write mount. Everything else the container sees of 
 | each `sandbox.mounts` path | extra tools, such as a prebuilt oracle binary |
 | each `control.priorArt` path | the prior art a control flight is given |
 
-Two more mounts are not the project's: the runtime directory, which holds the three sockets and is mounted at `/run/kukulu`, and a named volume for the container's home, `kukulu-<id>-home`, so the harness's login and caches survive a restart without touching the host.
+Two more mounts are not the project's: the runtime directory, which holds `hooks-empty/`, `run.json` and the three sockets and is mounted read-only at `/run/kukulu` (a socket connects through a read-only bind mount, so nothing in the box can plant a hook the host's git would run), and a named volume for the container's home, `kukulu-<id>-home`, so the harness's login and caches survive a restart without touching the host.
 
 ## Running a flight
 

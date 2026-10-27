@@ -280,7 +280,7 @@ case "$1" in
   run)
     # Record what the runtime directory (mounted at /run/kukulu) holds while the container "runs".
     for a in "$@"; do
-      case "$a" in *:/run/kukulu) ls "\${a%%:/run/kukulu}" > "$D/runtime-listing.txt" 2>&1 ;; esac
+      case "$a" in *:/run/kukulu|*:/run/kukulu:ro) a="\${a%%:ro}"; ls "\${a%%:/run/kukulu}" > "$D/runtime-listing.txt" 2>&1 ;; esac
     done
     if [ -f "$D/run-exit" ]; then exit "$(cat "$D/run-exit")"; fi
     exit 0 ;;

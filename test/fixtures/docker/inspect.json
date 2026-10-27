@@ -102,8 +102,8 @@
         "Type": "bind",
         "Source": "/run/user/1000/kukulu/0123456789abcdef",
         "Destination": "/run/kukulu",
-        "Mode": "",
-        "RW": true,
+        "Mode": "ro",
+        "RW": false,
         "Propagation": "rprivate"
       },
       {
