@@ -3392,7 +3392,8 @@ function recoverMutation() {
 }
 
 /** Tracked paths that differ from HEAD (modified, deleted or staged), sorted. */
-const trackedChanges = () => git(["diff", "--name-only", "HEAD"]).out.split("\n").filter(Boolean).sort();
+// --no-renames: a rename is a deleted path and an added one, and both must be named to be put back.
+const trackedChanges = () => git(["diff", "--name-only", "--no-renames", "HEAD"]).out.split("\n").filter(Boolean).sort();
 
 /**
  * What differs between HEAD and the working tree for each path: `deleted`, `mode`
@@ -3400,7 +3401,7 @@ const trackedChanges = () => git(["diff", "--name-only", "HEAD"]).out.split("\n"
  * included). Read before the paths are restored (SPEC D-03).
  */
 function classifyChanges(paths) {
-  const raw = spawnSync("git", gitArgv(["diff", "--raw", "-z", "--abbrev=40", "HEAD", "--", ...paths]), { cwd: ROOT, encoding: "utf8" }).stdout || "";
+  const raw = spawnSync("git", gitArgv(["diff", "--raw", "--no-renames", "-z", "--abbrev=40", "HEAD", "--", ...paths]), { cwd: ROOT, encoding: "utf8" }).stdout || "";
   const parts = raw.split("\0");
   const byPath = new Map();
   for (let i = 0; i + 1 < parts.length; i += 2) {
@@ -3433,7 +3434,16 @@ function undoMutationResidue(before) {
   const untrackedBefore = new Set(before.untracked);
   const restored = trackedChanges().filter((p) => !dirtyBefore.has(p));
   const restoredChanges = restored.length ? classifyChanges(restored) : [];
-  if (restored.length) git(["checkout", "-q", "HEAD", "--", ...restored]);
+  if (restored.length) {
+    // A path the command staged that HEAD does not have (the new side of a `git mv`) cannot be checked out: it is unstaged and removed.
+    const inHead = new Set(git(["ls-tree", "-r", "--name-only", "HEAD", "--", ...restored]).out.split("\n").filter(Boolean));
+    const gone = restored.filter((p) => !inHead.has(p));
+    if (gone.length) {
+      git(["rm", "-q", "-f", "--cached", "--", ...gone]);
+      for (const p of gone) fs.rmSync(path.join(ROOT, p), { force: true });
+    }
+    if (inHead.size) git(["checkout", "-q", "HEAD", "--", ...inHead]);
+  }
   const removed = untrackedPaths().filter((p) => !untrackedBefore.has(p));
   for (const p of removed) fs.rmSync(path.join(ROOT, p), { force: true });
   return { restored, removed, restoredChanges };

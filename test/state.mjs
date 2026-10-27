@@ -684,7 +684,7 @@ for (const [config, re, label] of [
     eq(pending.state, "pending", "...reports pending");
     eq((await checks(withOrigin(), ghEnv(apiGh([], [])))).state, "none", "...reports none");
     const broken = apiGh(runsAll.check_runs, statusAll.statuses);
-    writeFile(broken, "api-fails", "HTTP 502: bad gateway\nsecond line\n");
+    writeFile(broken, "api-fails", fx("api-bad-gateway.txt"));
     eq(await checks(withOrigin(), ghEnv(broken)), "unknown: HTTP 502: bad gateway", "a failing gh api call is unknown");
   }
 

@@ -7,7 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import {
-  finish, ok, eq, like, isError,
+  finish, ok, eq, like, isError, ROOT,
   mkDir, plannedRepo, withServer, readFile, writeFile, subject, hasFile,
   markTasks, setState, git, mkBareRemote, mkFakeGhBin, mkFakeGpg, useFakeSigner,
   headingSpacingProblems, planDoc, progressDoc, DEFAULT_TASKS,
@@ -657,6 +657,22 @@ for (const [cmd, want, label] of [
   });
 }
 
+// A rename is two paths, not one record: with rename detection on, the residue is still classified per path (0.7.2 REVIEW note).
+{
+  const repo = mutationRepo({ config: { verify: ["git mv tests/old-seeds.txt tests/new-seeds.txt; node test/add.test.mjs"] } });
+  writeFile(repo, "tests/old-seeds.txt", "# seeds\nmore seeds so the rename is above the similarity threshold\n");
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-qm", "seeds file"]);
+  git(repo, ["config", "--local", "diff.renames", "true"]);
+  await withServer(repo, async ({ call }) => {
+    const r = await call("kukulu_mutate", { file: "src/add.mjs", find: "a + b", replace: "a - b" });
+    ok(!r.error, "a mutation whose command renames a tracked file runs" + (r.error ? `: ${r.error}` : ""));
+    eq(JSON.stringify(r.restoredChanges), JSON.stringify([{ path: "tests/new-seeds.txt", change: "content" }, { path: "tests/old-seeds.txt", change: "deleted" }]), "a renamed residue is classified as content under rename detection: both paths, deleted and content");
+    eq(readFile(repo, "tests/old-seeds.txt"), "# seeds\nmore seeds so the rename is above the similarity threshold\n", "...and the original is back");
+    eq(git(repo, ["status", "--porcelain"]), "", "...with a clean tree");
+  });
+}
+
 // A per-call timeout only ever shortens the configured one (cleanflate F-06).
 {
   const repo = mutationRepo({ config: { verify: [{ cmd: "sleep 30", timeoutMs: 600000 }] } });
@@ -1022,7 +1038,9 @@ for (const [archive, want] of [[undefined, true], [true, true], [false, false]])
 
 // ---------------------------------------------------------------- pr_finalize (S-14)
 
-const DRAFT_PR = '{"number":1,"url":"https://github.invalid/pull/1","state":"OPEN","isDraft":true,"baseRefName":"main","title":"Widget thing"}\n';
+// Recorded gh output lives in test/fixtures/gh/, never inline.
+const ghFixture = (name) => fs.readFileSync(path.join(ROOT, "test", "fixtures", "gh", name), "utf8");
+const DRAFT_PR = ghFixture("pr-draft.json");
 
 /** A summarized build branch with a bare origin and a fake gh holding a draft PR. `signed` signs every commit on it. */
 function finalizeRepo({ signed = false, policies = {}, summarized = true } = {}) {
@@ -1090,7 +1108,7 @@ for (const [label, args, policies, expect, mergeFails] of [
   ["breaking", { breaking: true }, {}, { calls: ["pr ready"], merge: "skipped: breaking", ready: true }],
   ["finalize ready", { breaking: false }, { finalize: "ready" }, { calls: ["pr ready"], merge: "skipped: policy", ready: true }],
   ["finalize draft", { breaking: false }, { finalize: "draft" }, { calls: [], merge: "skipped: policy", ready: false }],
-  ["merge unavailable", { breaking: false }, {}, { calls: ["pr ready", "pr merge --auto --merge --subject Widget thing (#1)"], merge: 'unavailable: auto-merge is not allowed; set policies.finalize to "ready" to stop asking', ready: true }, "auto-merge is not allowed\nsecond line\n"],
+  ["merge unavailable", { breaking: false }, {}, { calls: ["pr ready", "pr merge --auto --merge --subject Widget thing (#1)"], merge: 'unavailable: auto-merge is not allowed; set policies.finalize to "ready" to stop asking', ready: true }, ghFixture("merge-not-allowed.txt")],
 ]) {
   const { repo, ghDir, opts } = finalizeRepo({ signed: true, policies });
   if (mergeFails) writeFile(ghDir, "merge-fails", mergeFails);
@@ -1211,7 +1229,7 @@ for (const [label, policies, stateExtra, wantSignatures, wantAwait] of [
   eq((await calls({})).merges.join("|"), "pr merge --auto --merge --subject Widget thing (#1)", "finalize passes the PR title as the merge subject");
   eq((await calls({ mergeMethod: "squash" })).merges.join("|"), "pr merge --auto --squash --subject Widget thing (#1)", "...for squash too");
   eq((await calls({ mergeMethod: "rebase" })).merges.join("|"), "pr merge --auto --rebase", "...and no subject for rebase");
-  const failed = await calls({}, (ghDir) => writeFile(ghDir, "view-title-fails", "title lookup refused\nsecond line\n"));
+  const failed = await calls({}, (ghDir) => writeFile(ghDir, "view-title-fails", ghFixture("view-title-refused.txt")));
   eq(failed.r.merge, "enabled (default subject: title lookup refused)", "a failed title lookup merges with the default subject: merge says so");
   eq(failed.merges.join("|"), "pr merge --auto --merge", "...and passes no --subject");
 }
@@ -1544,7 +1562,7 @@ const remoteTag = (remote, tag) => spawnSync("git", ["-C", remote, "rev-parse", 
 
 {
   const { repo, remote, merge, ghDir, opts } = releaseRepo();
-  writeFile(ghDir, "release-fails", "HTTP 422: validation failed\nmore detail\n");
+  writeFile(ghDir, "release-fails", ghFixture("release-validation-failed.txt"));
   await withServer(repo, async ({ call }) => {
     isError(await call("kukulu_release"), /^the tag v1\.2\.3 was pushed; create the release by hand with gh release create v1\.2\.3 --verify-tag, or call kukulu_release again: HTTP 422: validation failed$/, "a failing gh release create leaves the pushed tag and says so");
     eq(remoteTag(remote, "v1.2.3"), merge, "...the tag stays on origin");

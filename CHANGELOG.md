@@ -40,6 +40,10 @@ All notable changes to this plugin. Format follows
 - A clean-room flight started on 0.7.x cannot continue on 0.8.0: `hooks/hooks.json` and the hook scripts changed, and gate check 3 pins them (SPEC section 1).
 - `rsync --remove-sent-files` and `pax` get the rules of their siblings, `--remove-source-files` and `tar` (the 0.7.2 known-gap candidates, C-08).
 
+### Fixed
+
+- `classifyChanges` reads the diff without rename detection, so a rename never pairs records wrongly; `kukulu_mutate` names both sides of a renamed residue and puts a staged new side back by unstaging and removing it (0.7.2 REVIEW note).
+
 ## [0.7.2] — 2026-10-26
 
 ### Changed
