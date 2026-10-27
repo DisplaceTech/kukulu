@@ -126,6 +126,13 @@ eq(hooks.hooks.SubagentStop[0].matcher, "^(kukulu:implementer|kukulu-implementer
   }
   ok(spawnSync("git", ["ls-files", "-s", "scripts/cleanroom-guard.mjs", "scripts/cleanroom-log.mjs"], { cwd: ROOT, encoding: "utf8" }).stdout.split("\n").filter(Boolean).every((l) => l.startsWith("100755")), "both clean-room hook scripts are mode 755 in git");
 }
+{
+  const sub = hooks.hooks.SubagentStop;
+  eq(sub.length, 2, "SubagentStop has two entries");
+  eq(sub[1].hooks.map((h) => h.command).join(), `"${"$"}{CLAUDE_PLUGIN_ROOT}"/scripts/cleanroom-log.mjs`, "hooks.json runs the clean-room logger on SubagentStop after the implement guard");
+  ok(!sub[1].matcher, "...for every subagent, with no matcher");
+  eq(sub[0].hooks.map((h) => h.command).join(), `"${"$"}{CLAUDE_PLUGIN_ROOT}"/scripts/implement-guard.mjs`, "...and the implement guard stays first");
+}
 ok(!hooks.hooks.Stop[0].matcher, "Stop carries no matcher — a Stop event has no agent to match against");
 
 // ---------------------------------------------------------------- agents and skills

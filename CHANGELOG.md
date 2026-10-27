@@ -29,9 +29,11 @@ All notable changes to this plugin. Format follows
 - Lockfile parsers for `Cargo.lock`, `package-lock.json`, `npm-shrinkwrap.json`, `uv.lock`, `poetry.lock` and `requirements*.txt`, gate check 10 (`packages`) against `deny.packages`, and the manifest's `packages` list (G-08, C-07).
 - The clean-room guard denies `cargo add`, `npm install|i|add`, `pip install` and `uv add` of a package named in `deny.packages` (G-08, C-07).
 - Stage timing: `kukulu_next` records when each stage starts and ends in `state.timeline` (every mode) and as `stage` entries in the chain (clean-room mode), committed as `chore: stage <stage>`, and `kukulu_status` reports `timeline` and `stageSeconds` (G-10, D-01).
+- Token use per role: on `SubagentStop` in clean-room mode the logger reads the subagent's transcript and appends a `usage` entry with per-model token sums, first and last timestamps and cost (G-10, D-02).
 
 ### Changed
 
+- A clean-room flight started on 0.7.x cannot continue on 0.8.0: `hooks/hooks.json` and the hook scripts changed, and gate check 3 pins them (SPEC section 1).
 - `rsync --remove-sent-files` and `pax` get the rules of their siblings, `--remove-source-files` and `tar` (the 0.7.2 known-gap candidates, C-08).
 
 ## [0.7.2] — 2026-10-26

@@ -1135,6 +1135,12 @@ const gateCheck = (reason) => (reason.match(/^clean-room gate failed: ([\w-]+):/
     delete j.hooks.PreToolUse;
     fs.writeFileSync(file, JSON.stringify(j, null, 2));
   }, { before: true });
+  await edited("the gate requires the logger on SubagentStop", "guard", (p) => {
+    const file = path.join(p, "hooks", "hooks.json");
+    const j = JSON.parse(fs.readFileSync(file, "utf8"));
+    j.hooks.SubagentStop = j.hooks.SubagentStop.filter((e) => !e.hooks.some((h) => h.command.includes("cleanroom-log.mjs")));
+    fs.writeFileSync(file, JSON.stringify(j, null, 2));
+  }, { before: true, reason: /hooks\/hooks\.json no longer registers cleanroom-log\.mjs on SubagentStop/ });
   await edited("a failing self-test halts naming self-test", "self-test", (p) => {
     const file = path.join(p, "test", "fixtures", "guard-cases.json");
     const cases = JSON.parse(fs.readFileSync(file, "utf8"));
@@ -1397,6 +1403,56 @@ const gateCheck = (reason) => (reason.match(/^clean-room gate failed: ([\w-]+):/
   eq(bash("npm install @scope/ok").decision, "denied", "(the network rule still denies an npm install that adds nothing denied)");
   eq(bash("npm install @scope/ok").reason.startsWith("network command"), true, "...with its own reason");
   eq(bash("cargo search flate2").decision, "allowed", "a subcommand that adds nothing is not an add");
+}
+
+// ---------------------------------------------------------------- token use per subagent (P3-02)
+
+{
+  const TRANSCRIPT = path.join(ROOT, "test", "fixtures", "transcripts", "subagent.jsonl");
+  const stop = (repo, extra = {}, env = {}) => runHook(LOGGER, { hook_event_name: "SubagentStop", agent_type: "kukulu-implementer", agent_transcript_path: TRANSCRIPT, session_id: "s-7", model: "claude-sonnet-x", cwd: repo, ...extra }, { CLAUDE_PROJECT_DIR: repo, CLAUDE_PLUGIN_ROOT: ROOT, HOME: mkDir("kukulu-home-"), ...env });
+  const usageOf = (repo) => logOf(repo).filter((e) => e.kind === "usage");
+  const repo = cleanroomRepo();
+  setState(repo, { cleanroom: { genesis: "a".repeat(64) } });
+  const r = stop(repo);
+  eq(r.status, 0, "the logger exits 0 on SubagentStop");
+  const u = usageOf(repo);
+  eq(u.length, 1, "it appends one usage entry");
+  eq(JSON.stringify(u[0].data.models), JSON.stringify({
+    "claude-sonnet-x": { requests: 2, input: 300, output: 50, cacheRead: 1000, cacheWrite: 50 },
+    "claude-haiku-x": { requests: 2, input: 17, output: 8, cacheRead: 5, cacheWrite: 0 },
+  }), "the logger sums a subagent transcript's usage with the duplicate requestId counted once");
+  eq(u[0].data.first + "|" + u[0].data.last + "|" + u[0].data.cost, "2026-10-26T09:59:59.000Z|2026-10-26T10:00:05.000Z|0.043", "...with the first and last timestamps and the cost");
+  eq(u[0].role + "|" + u[0].tool + "|" + u[0].decision + "|" + u[0].session + "|" + u[0].stage, "kukulu-implementer|null|null|s-7|implement", "...as the agent's entry: role, no tool or decision, session and stage");
+  const noCost = path.join(mkDir("kukulu-tr-"), "t.jsonl");
+  fs.writeFileSync(noCost, fs.readFileSync(TRANSCRIPT, "utf8").replace(/"costUSD": 0\.03/, '"x": 1').replace(/,"costUSD":0\.03/, ""));
+  stop(repo, { agent_transcript_path: noCost });
+  eq(usageOf(repo).at(-1).data.cost, null, "a counted line without a cost makes the total null");
+  stop(repo, { agent_transcript_path: undefined, transcript_path: TRANSCRIPT });
+  eq(usageOf(repo).at(-1).data.models["claude-haiku-x"].requests, 2, "the session transcript is read when there is no agent transcript");
+  stop(repo, { agent_transcript_path: path.join(repo, "nope.jsonl") });
+  like(usageOf(repo).at(-1).data.error, /ENOENT/, "an unreadable transcript gives a usage entry with error");
+  const empty = path.join(mkDir("kukulu-tr-"), "e.jsonl");
+  fs.writeFileSync(empty, '{"type":"user"}\n');
+  stop(repo, { agent_transcript_path: empty });
+  like(usageOf(repo).at(-1).data.error, /no assistant line with usage/, "a transcript with nothing to count gives a usage entry with error");
+  ok(verifyChain(fs.readFileSync(path.join(repo, ".kukulu", "cleanroom", "log.jsonl"), "utf8").split("\n").filter(Boolean)).ok, "the chain still verifies");
+
+  const general = plannedRepo();
+  stop(general);
+  ok(!hasFile(general, ".kukulu/cleanroom/log.jsonl"), "general mode writes nothing on SubagentStop");
+
+  // the budget: the median hook run minus the median bare Node start, over ten runs each, as the fast-path budget is asserted
+  const median = (xs) => xs.slice().sort((a, b) => a - b)[Math.floor(xs.length / 2)];
+  const time = (fn) => median(Array.from({ length: 10 }, () => {
+    const t0 = process.hrtime.bigint();
+    fn();
+    return Number(process.hrtime.bigint() - t0) / 1e6;
+  }));
+  const bare = time(() => spawnSync(process.execPath, ["-e", "0"]));
+  const fast = time(() => stop(general));
+  ok(fast - bare < 50, `the SubagentStop hook's fast path costs under 50 ms beyond Node's own startup (${(fast - bare).toFixed(1)} ms)`);
+  const full = time(() => stop(repo));
+  ok(full - bare < 50, `...and so does the SubagentStop hook with a policy and the fixture transcript (${(full - bare).toFixed(1)} ms)`);
 }
 
 // ---------------------------------------------------------------- gate liveness

@@ -399,7 +399,7 @@ function runGate(stage, st = loadState()) {
     return failed("guard", `hooks/hooks.json cannot be read: ${e.message}`);
   }
   const registers = (event, script) => (hooks[event] || []).some((entry) => (entry.hooks || []).some((h) => String(h.command || "").includes(script)));
-  for (const [event, script] of [["PreToolUse", "cleanroom-guard.mjs"], ["PostToolUse", "cleanroom-log.mjs"], ["UserPromptSubmit", "cleanroom-log.mjs"]]) {
+  for (const [event, script] of [["PreToolUse", "cleanroom-guard.mjs"], ["PostToolUse", "cleanroom-log.mjs"], ["UserPromptSubmit", "cleanroom-log.mjs"], ["SubagentStop", "cleanroom-log.mjs"]]) {
     if (!registers(event, script)) return failed("guard", `hooks/hooks.json no longer registers ${script} on ${event}`);
   }
 
