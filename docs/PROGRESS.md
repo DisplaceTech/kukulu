@@ -37,7 +37,7 @@ Started: 2026-10-26T21:19:36.125Z
 - [x] P3-03 The manifest's reported models and usage, and verifier check 12
 - [x] P3-04 scripts/compare-bundles.mjs
 - [x] P3-05 Phase 3 end: push and record the manual check
-- [ ] P4-01 kukulu_release
+- [x] P4-01 kukulu_release
 - [ ] P4-02 Base health before planning
 - [ ] P4-03 The 0.7.2 review's notes
 - [ ] P4-04 The documentation sweep
@@ -206,3 +206,8 @@ Interpretation: one prefixed line per role; metric lines indented under the verd
 
 Push: pushed build branch to origin. Empty phase-end commit.
 Manual check: NOT VERIFIED (human): compare-bundles.mjs on the Phase 2 bundle and a hook bundle from a real flight prints wall time and tokens per role for both.
+
+### P4-01 — 8b65053
+
+New tool kukulu_release (26 tools; after kukulu_pr_finalize): validates, fetches origin, reads CHANGELOG at the merge commit, tags (-s or -a), pushes, gh release create --verify-tag (draft unless publish); repeat calls create only what is missing. mkFakeGhBin extended (pr view <branch>, release view/create). go-flight: allowed-tools both spellings + "release it" / "release and publish"; docs/mcp-tools.md section + count; README count + row. review 475, plugin 588; verify green (4505).
+Interpretation: git fetch origin before reading CHANGELOG at the merge commit; newest entry must be the first "## [" heading and numbered; existing tag at the merge commit with no release skips creation; See-line URL derived from origin (ssh/scp to https, .git stripped, local path as written).
