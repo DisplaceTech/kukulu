@@ -35,7 +35,7 @@ Started: 2026-10-26T21:19:36.125Z
 - [x] P3-01 Stage timing in the log and in state
 - [x] P3-02 Token use per role from the subagent transcript
 - [x] P3-03 The manifest's reported models and usage, and verifier check 12
-- [ ] P3-04 scripts/compare-bundles.mjs
+- [x] P3-04 scripts/compare-bundles.mjs
 - [ ] P3-05 Phase 3 end: push and record the manual check
 - [ ] P4-01 kukulu_release
 - [ ] P4-02 Base health before planning
@@ -196,3 +196,8 @@ Interpretation: cost rounded to 6 decimals; a line without a model counts under 
 
 rolesUsage(entries) in mcp/cleanroom.mjs (server and harness import it) duplicated in the verifier; attest roles[role] gain reported + usage; verifier check 12 roles recounts and fails with the recount JSON, notes a role whose reported models differ from the routed one (names all reported models); manifest without roles passes with no note. buildBundle opts.roles; --json checks list twelve. attest 301; verify green (4433).
 Interpretation: note lists every reported model; cost sums rounded to six decimals in both copies.
+
+### P3-04 — d5f1ffd
+
+scripts/compare-bundles.mjs (verifies each bundle first; nine items A/B; --json; --trees cross score with A's parameters, refusals for mismatch and no similarity.json; writes nothing). buildComparePair in test/harness.mjs; recorded test/fixtures/compare/expected.txt (identical across two runs). bundles suite 77; verify green (4463). CONTRIBUTING row, cleanroom.md ## Comparing two bundles.
+Interpretation: one prefixed line per role; metric lines indented under the verdict; blank line between sections; B's parameters used when only B has similarity.json.
