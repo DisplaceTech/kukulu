@@ -47,6 +47,7 @@ All notable changes to this plugin. Format follows
 - The sandbox mounts its runtime directory read-only, and gate check 9 and genesis accept only the exact mount list: the project and the home volume writable, `/run/kukulu` read-only with the hooks directory's parent as its source, no extra mount, no bind-mounted home, no same-path mount with a different source (REVIEW F-01, C-01).
 - The constraint scan of `kukulu_verify` never reads through a symlink that leaves the project: the path is listed under the rule's `skipped` instead (REVIEW F-02, C-04).
 - Behind the sandbox, `kukulu_similarity` and `kukulu_attest` check a bundle with the plugin's own `scripts/verify-attestation.mjs`, never a `verify.mjs` from the project tree (REVIEW F-03, C-04).
+- The offline verifier prints `CONTROL (positive)` for a passing control bundle with or without `--expect control-positive`; only the exit status differs (REVIEW F-08, B-01).
 
 ## [0.7.2] — 2026-10-26
 

@@ -274,7 +274,9 @@ const logLines = (dir) => fs.readFileSync(path.join(dir, "log.jsonl"), "utf8").s
   eq(r.stdout.trimEnd().split("\n").at(-1), "verify-attestation: CONTROL (positive)", "...with CONTROL (positive) as the last line");
   const expected = run(c.dir, "--expect", "control-positive");
   eq(expected.status, 0, "...and 0 with --expect control-positive");
-  eq(expected.stdout.trimEnd().split("\n").at(-1), "verify-attestation: PASS", "...printing PASS");
+  eq(expected.stdout.trimEnd().split("\n").at(-1), "verify-attestation: CONTROL (positive)", "...and 0 with --expect control-positive, still printing CONTROL (positive) as the last line");
+  const cleanExpected = run(fresh().dir, "--expect", "clean-room");
+  eq(cleanExpected.status + "|" + cleanExpected.stdout.trimEnd().split("\n").at(-1), "0|verify-attestation: PASS", "a clean-room bundle with --expect clean-room prints PASS");
   const wrong = run(c.dir, "--expect", "clean-room");
   eq(wrong.status, 1, "a control bundle expected to be clean-room fails");
   like(wrong.stdout, /mode: the bundle is control-positive, expected clean-room/, "...naming both modes");

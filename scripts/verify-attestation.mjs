@@ -609,7 +609,7 @@ function main(argv) {
   }
   for (const r of result.reasons) process.stdout.write("verify-attestation: " + r.check + ": " + r.reason + "\n");
   for (const n of result.notes) process.stdout.write("verify-attestation: note: " + n + "\n");
-  process.stdout.write(!result.ok ? "verify-attestation: FAIL (" + result.reasons.length + " reason" + (result.reasons.length === 1 ? "" : "s") + ")\n" : passCode === 3 ? "verify-attestation: CONTROL (positive)\n" : "verify-attestation: PASS\n");
+  process.stdout.write(!result.ok ? "verify-attestation: FAIL (" + result.reasons.length + " reason" + (result.reasons.length === 1 ? "" : "s") + ")\n" : result.mode === "control-positive" ? "verify-attestation: CONTROL (positive)\n" : "verify-attestation: PASS\n");
   return result.ok ? passCode : 1;
 }
 
