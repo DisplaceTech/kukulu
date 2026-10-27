@@ -33,7 +33,7 @@ Started: 2026-10-26T21:19:36.125Z
 - [x] P2-14 The real-container integration step
 - [x] P2-15 Phase 2 end: push and record the manual checks
 - [x] P3-01 Stage timing in the log and in state
-- [ ] P3-02 Token use per role from the subagent transcript
+- [x] P3-02 Token use per role from the subagent transcript
 - [ ] P3-03 The manifest's reported models and usage, and verifier check 12
 - [ ] P3-04 scripts/compare-bundles.mjs
 - [ ] P3-05 Phase 3 end: push and record the manual check
@@ -186,3 +186,8 @@ Manual check: NOT VERIFIED (human): on Linux, doctor passes; KUKULU_SANDBOX_IT=1
 
 server: next() now wraps nextDecision() with recordTimeline (state.timeline in every mode, stage entries in the chain, commit chore: stage <stage> / chore: stage end; skipped outside a git repo); kukulu_status gains timeline and stageSeconds. commitStaged gained noSigningFallback so bookkeeping never flips the run's signing off; a failed timeline commit rolls back and returns the decision with a timelineNote. Verifier unchanged (kinds unchecked; summarizeEntries counts allowed/denied only). Tests: state 297; cleanroom/streams/drive assertions that counted next()'s entries or commits updated. Verify green (4400).
 Codebase note (for REVIEW): kukulu_next is no longer read-only; every stage change commits state.json (and the log) on whatever branch the server is on, including the base branch before run_start, and a flight's final done leaves one local unpushed chore: stage end commit.
+
+### P3-02 — d3c9262
+
+hooks.json: second SubagentStop entry (no matcher) running cleanroom-log.mjs after the implement guard; gate check 3 requires it; logger usageOf() appends a usage entry (per-model requests/input/output/cacheRead/cacheWrite, each requestId once, first/last, cost or null, or {error}); general mode writes nothing; goes through the log socket via record(). Fixture test/fixtures/transcripts/subagent.jsonl (6 lines, no content). cleanroom 1286, plugin 576; verify green (4419). Budget: SubagentStop fast path under 50 ms; full path with policy and fixture measured 26.7 ms beyond bare Node. CHANGELOG notes that a 0.7.x clean-room flight cannot continue on 0.8.0.
+Interpretation: cost rounded to 6 decimals; a line without a model counts under "unknown".
