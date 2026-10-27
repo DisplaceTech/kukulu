@@ -369,6 +369,34 @@ const logLines = (dir) => fs.readFileSync(path.join(dir, "log.jsonl"), "utf8").s
   eq(run(legacy, "--require-enforcement", "container+proxy").status, 1, "...and a 0.7.2 bundle fails a container+proxy requirement");
 }
 
+// ---------------------------------------------------------------- unsigned commits under container+proxy (P2-10)
+
+{
+  const line = (sha, sig, subject, stage, task) => [sha.repeat(40).slice(0, 40), sig, subject, stage, task].join("\x1f");
+  const commits = `${[line("a", "N", "P0-01: inside", "implement", "P0-01"), line("b", "N", "P0-02: inside", "implement", "P0-02"), line("c", "G", "chore: outside", "controller", "-")].join("\n")}\n`;
+  const boxed = fresh({ enforcement: "container+proxy", commits, gaps: [] });
+  const r = run(boxed.dir);
+  eq(r.status, 0, "a container+proxy bundle with trailed unsigned commits passes");
+  like(r.stdout, /verify-attestation: note: unsigned commits: 2 \(expected under container\+proxy: commits made inside the boundary are unsigned, and the checkpoints sign their heads\)\n/, "...reporting them as one note");
+  ok(!/unsigned-commit/.test(r.stdout), "...with no unsigned-commit gap for each");
+  eq(boxed.manifest.coverage.unsignedTrailed, 2, "...and the manifest counts them in coverage.unsignedTrailed");
+  rewriteManifest(boxed.dir, boxed.key, (m) => { m.coverage.unsignedTrailed = 1; });
+  like(run(boxed.dir).stdout, /coverage: the manifest says 1 unsigned commits carry a stage trailer, but commits.txt shows 2/, "a miscounted unsignedTrailed fails check 9");
+
+  const untrailed = `${line("d", "N", "wip", "", "")}\n`;
+  const gapped = fresh({ enforcement: "container+proxy", commits: untrailed, gaps: [{ kind: "untrailed-commit", sha: "d".repeat(40), subject: "wip" }, { kind: "unsigned-commit", sha: "d".repeat(40) }] });
+  eq(run(gapped.dir).status, 0, "an untrailed unsigned commit is still a gap under container+proxy");
+  const missed = fresh({ enforcement: "container+proxy", commits: untrailed, gaps: [{ kind: "untrailed-commit", sha: "d".repeat(40), subject: "wip" }] });
+  like(run(missed.dir).stdout, /coverage: the log shows a gap the manifest omits: .*unsigned-commit/, "...and a manifest that omits it fails");
+
+  const hook = fresh({ commits, gaps: [{ kind: "unsigned-commit", sha: "a".repeat(40) }, { kind: "unsigned-commit", sha: "b".repeat(40) }] });
+  const h = run(hook.dir);
+  eq(h.status, 0, "under hook each unsigned commit is a gap");
+  ok(!/unsigned commits:/.test(h.stdout), "...and there is no aggregated note");
+  const unlisted = fresh({ commits, gaps: [] });
+  like(run(unlisted.dir).stdout, /coverage: the log shows a gap the manifest omits: .*unsigned-commit/, "...and a hook manifest that lists none fails");
+}
+
 // ---------------------------------------------------------------- check 8: the denials
 
 {

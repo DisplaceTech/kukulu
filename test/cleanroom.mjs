@@ -1903,6 +1903,9 @@ eq(LANGUAGES.join(","), "rust,c,cpp,go,python,javascript,typescript,java,php", "
   eq(JSON.stringify(coverageGaps([e(1, "allowed", "implement", 0), e(2, "allowed", "implement", 1)], [], { idleGapHours: 0.5 })), JSON.stringify([{ kind: "idle", from: 1, to: 2, hours: 1 }]), "coverageGaps takes the limit it is given");
   eq(JSON.stringify(coverageGaps([], [line("c3", "N", "s", "implement", "P0-01"), line("d4", "B", "s", "implement", "P0-01"), line("e5", "G", "s", "implement", "P0-01"), line("f6", "U", "s", "implement", "P0-01"), line("g7", "E", "s", "implement", "P0-01")], hours)), JSON.stringify([{ kind: "unsigned-commit", sha: "c3" }, { kind: "unsigned-commit", sha: "d4" }]), "coverageGaps lists unsigned commits (N and B, and no other code)");
   eq(JSON.stringify(coverageGaps([e(1, "gate", "c", 0), e(2, "gate", "c", 5), e(3, "human", "c", 5, { kind: "intervention" })], [line("h8", "N", "no trailer", "", "")], hours).map((g) => g.kind)), JSON.stringify(["silent-gates", "untrailed-commit", "intervention", "idle", "unsigned-commit"]), "coverageGaps orders the kinds as the manifest lists them");
+  const trailed = [line("t1", "N", "P0-01: inside", "implement", "P0-01"), line("t2", "N", "wip", "", "")];
+  eq(coverageGaps([], trailed, hours).map((g) => g.kind + ":" + (g.sha ?? "")).join(), "untrailed-commit:t2,unsigned-commit:t1,unsigned-commit:t2", "under hook every unsigned commit is a gap");
+  eq(coverageGaps([], trailed, { ...hours, level: "container+proxy" }).map((g) => g.kind + ":" + (g.sha ?? "")).join(), "untrailed-commit:t2,unsigned-commit:t2", "under container+proxy a trailed unsigned commit is not a gap, and an untrailed one still is");
   let refused = null;
   try { coverageGaps([], [], { idleGapHours: 0 }); } catch (x) { refused = x; }
   ok(refused instanceof CleanroomError && /idleGapHours, a positive number/.test(refused.message), "coverageGaps refuses a limit that is not a positive number");

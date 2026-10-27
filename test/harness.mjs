@@ -551,7 +551,7 @@ export function buildBundle(dir, opts = {}) {
     calls: { total: 3, byTool: { Read: 2, Bash: 1 }, byStage: { implement: 3 }, readCapable: 3 },
     human: { instructions: 1, interventions: 0, verdicts: 0 },
     selfTest: { ok: true, cases: 164, at: "2026-01-01T00:00:00.000Z" },
-    coverage: { gaps: opts.gaps ?? [], knownLimits: CR.knownLimitsFor(level), idleGapHours: opts.idleGapHours ?? 4 },
+    coverage: { gaps: opts.gaps ?? [], knownLimits: CR.knownLimitsFor(level), idleGapHours: opts.idleGapHours ?? 4, ...(level === "container+proxy" ? { unsignedTrailed: sources["commits.txt"].split("\n").filter(Boolean).filter((l) => { const f = l.split("\x1f"); return (f[1] === "N" || f[1] === "B") && (f[3] ?? "") !== ""; }).length } : {}) },
     similarity: opts.similarity === undefined ? null : { sha256: sha256Of(opts.similarity) },
     files: listed.map((name) => {
       const bytes = fs.readFileSync(path.join(dir, name));

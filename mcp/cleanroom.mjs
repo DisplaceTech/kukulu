@@ -1902,7 +1902,7 @@ export function knownLimitsFor(level) {
  * kinds, shapes and order are the ones scripts/verify-attestation.mjs recomputes,
  * which has its own copy of these definitions so a bundle can be checked alone.
  */
-export function coverageGaps(entries, commitLines, { idleGapHours }) {
+export function coverageGaps(entries, commitLines, { idleGapHours, level = "hook" }) {
   if (typeof idleGapHours !== "number" || !(idleGapHours > 0)) throw new CleanroomError("coverageGaps needs idleGapHours, a positive number of hours");
   const commits = commitLines.filter(Boolean).map((line) => {
     const [sha, signature, subject, stage] = line.split("\x1f");
@@ -1921,7 +1921,11 @@ export function coverageGaps(entries, commitLines, { idleGapHours }) {
     const hours = (Date.parse(b.at) - Date.parse(a.at)) / 3600000;
     if (hours > idleGapHours) gaps.push({ kind: "idle", from: a.seq, to: b.seq, hours: Math.round(hours * 100) / 100 });
   }
-  for (const c of commits) if (c.signature === "N" || c.signature === "B") gaps.push({ kind: "unsigned-commit", sha: c.sha });
+  // Under container+proxy a commit made inside the boundary is unsigned on purpose and its head is vouched for by a
+  // checkpoint; only an unsigned commit with no stage trailer is still a gap.
+  for (const c of commits) {
+    if ((c.signature === "N" || c.signature === "B") && !(level === "container+proxy" && c.stage !== "")) gaps.push({ kind: "unsigned-commit", sha: c.sha });
+  }
   return gaps;
 }
 

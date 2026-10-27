@@ -252,6 +252,14 @@ function boundaryCheck(cc, policy, recorded) {
   return { id: c.id, boundary };
 }
 
+/** Commits that carry a stage trailer but no signature, from the lines of commits.txt. */
+function unsignedTrailedCount(commitLines) {
+  return commitLines.filter(Boolean).filter((line) => {
+    const [, signature, , stage] = line.split("\x1f");
+    return (signature === "N" || signature === "B") && (stage ?? "") !== "";
+  }).length;
+}
+
 /** Every allowed `egress` entry after genesis must name a host the policy allows, lockdown ignored; returns a reason or null. */
 function egressAudit(policy, entries) {
   const named = new Set(policy.sandbox.egress.map((e) => e.toLowerCase()));
@@ -2481,7 +2489,15 @@ const PROMPTS = {
  * configured), or `"off (probe failed: <reason>)"` for `auto` falling back.
  * Throws under `required` when signing is not configured or the probe fails.
  */
+const SANDBOX_SIGNING_REFUSAL = "policies.signing is 'required', but commits made inside the sandbox cannot be signed: the signing agent stays outside the boundary. Set policies.signing to 'auto' or 'off'; the signed checkpoints vouch for every commit's head";
+const SANDBOX_SIGNING = "off (sandbox: commits inside the boundary are unsigned; the signed checkpoints vouch for them)";
+
 function probeSigning(signingPolicy, st) {
+  // No signing socket crosses the boundary, so the probe would only fail. The server's own commits keep the operator's setting.
+  if (envVar("SANDBOX") && signingPolicy !== "off") {
+    if (signingPolicy === "required") throw new ToolError(SANDBOX_SIGNING_REFUSAL);
+    return SANDBOX_SIGNING;
+  }
   if (signingPolicy === "off") {
     git(["config", "--local", "commit.gpgsign", "false"]);
     return "off";
@@ -2588,6 +2604,7 @@ function startRun({ sync = false } = {}) {
     if (!exists(p)) throw new ToolError(`${rel(p)} is missing (${k}); run the plan stage first`);
   }
   const c = cfg();
+  if (envVar("SANDBOX") && c.policies.signing === "required") throw new ToolError(SANDBOX_SIGNING_REFUSAL);
   const g = gitFacts();
   if (!g.inRepo) throw new ToolError("not a git repository");
   // A branch this call cuts from the base is already up to date; only an existing build branch can lag behind it.
@@ -3916,7 +3933,7 @@ function attest({ evidence } = {}) {
     calls: counts.calls,
     human: counts.human,
     selfTest: { ok: true, cases: Number(/\((\d+) cases\)/.exec(selfTest.stdoutTail || "")?.[1] ?? 0), at: new Date().toISOString() },
-    coverage: { gaps: coverageGaps(entries, gl.stdout.split("\n"), { idleGapHours }), knownLimits: knownLimitsFor(level), idleGapHours },
+    coverage: { gaps: coverageGaps(entries, gl.stdout.split("\n"), { idleGapHours, level }), knownLimits: knownLimitsFor(level), idleGapHours, ...(level === "container+proxy" ? { unsignedTrailed: unsignedTrailedCount(gl.stdout.split("\n")) } : {}) },
     similarity: files.has("similarity.json") ? { sha256: sha256Hex(files.get("similarity.json")) } : null,
     files: [...files].map(([name, bytes]) => ({ path: name, sha256: sha256Hex(bytes), bytes: bytes.length })),
     signer: { fingerprint: key.fingerprint, publicKey: "publisher.pub" },
@@ -4382,6 +4399,7 @@ function nextSteps(mergeBase) {
 
 /** Whether finalize holds the PR for signatures: always under `required`, and under `auto` unless signing was never configured (SPEC B-03). */
 function signaturesExpected(policy, signing) {
+  if (typeof signing === "string" && signing.startsWith("off (sandbox:")) return false;
   return policy === "required" || (policy === "auto" && signing !== "none");
 }
 
@@ -4389,6 +4407,9 @@ function signaturesExpected(policy, signing) {
 function signingNoteFor(signing) {
   if (typeof signing !== "string" || signing === "on") return null;
   if (signing === "off" || signing === "none") return "Commits in this run are unsigned and kukulu_pr_finalize will not wait for signatures.";
+  if (signing.startsWith("off (sandbox:")) {
+    return "Commits made inside the sandbox are unsigned: commit with git -c commit.gpgsign=false commit -F <file>; the signed checkpoints vouch for every commit's head, and kukulu_pr_finalize will not wait for signatures.";
+  }
   if (signing.startsWith("off (")) {
     return "Commits from here on are unsigned; kukulu_pr_finalize will wait for signatures, so unlock the signing agent and call kukulu_run_start again to resume signing, or re-sign at the end.";
   }
@@ -4481,7 +4502,8 @@ function prFinalize({ breaking, resign } = {}) {
   }
   // A re-sign is the operator asking for signatures, whatever the policy says.
   const expected = resign === true || signaturesExpected(cc.policies.signing, recordedSigning);
-  const signatures = expected ? "required" : cc.policies.signing === "off" ? "not required: policies.signing is off" : "not required: signing is not configured";
+  const sandboxed = typeof recordedSigning === "string" && recordedSigning.startsWith("off (sandbox:");
+  const signatures = expected ? "required" : cc.policies.signing === "off" ? "not required: policies.signing is off" : sandboxed ? "not required: commits made inside the sandbox are unsigned; the signed checkpoints vouch for them" : "not required: signing is not configured";
   const mb = git(["merge-base", cc.baseBranch, "HEAD"], { allowFail: true }).out;
   if (!mb) throw new ToolError(`cannot find a merge base with baseBranch '${cc.baseBranch}'; check out the build branch, or fix baseBranch in docs/kukulu.json`);
 

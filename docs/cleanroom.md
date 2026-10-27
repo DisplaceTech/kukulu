@@ -191,7 +191,7 @@ The manifest's fields, in the order it writes them:
 - `untrailed-commit`: a commit without a `Kukulu-Stage` trailer, which is work done outside the pipeline. The commits a base-branch sync merges in (`policies.syncBase`) carry no trailer either, so they are listed here; that is the honest record of work that came from outside the flight.
 - `intervention`: a `human` entry you recorded as something done by hand.
 - `idle`: two consecutive entries of one stage more than `cleanroom.idleGapHours` apart.
-- `unsigned-commit`: a commit whose signature code is `N` (none) or `B` (bad).
+- `unsigned-commit`: a commit whose signature code is `N` (none) or `B` (bad). Under `container+proxy` a commit with a stage trailer is not listed: commits made inside the boundary are unsigned on purpose, and the checkpoints sign their heads. The manifest counts them in `coverage.unsignedTrailed`, and the verifier prints them as one note, `unsigned commits: <n> (expected under container+proxy: commits made inside the boundary are unsigned, and the checkpoints sign their heads)`. An unsigned commit without the trailer is still an `untrailed-commit` gap and an `unsigned-commit` gap.
 
 `coverage.knownLimits` is the list under [Known gaps](#known-gaps) for the bundle's enforcement level: what no log of tool calls can show.
 

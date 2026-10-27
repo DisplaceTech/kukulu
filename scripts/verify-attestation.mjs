@@ -287,6 +287,9 @@ export function verifyBundle(dir, { key = null, expect = null, requireEnforcemen
     if (sorted(m.verdicts) !== sorted(verdicts)) fail("denials", `the manifest's denials.verdicts differs from the log's: ${sorted(verdicts)}`);
   }
 
+  // The level, for the gaps below; an unknown name is check 11's business, and reads as hook here.
+  const bundleLevel = ENFORCEMENT_LEVELS.includes(manifest?.enforcement?.level) ? manifest.enforcement.level : "hook";
+
   // 9. the coverage gaps, recomputed from the log and commits.txt
   if (notChecked("coverage")) {
     const idleGapHours = manifest.coverage?.idleGapHours;
@@ -311,7 +314,14 @@ export function verifyBundle(dir, { key = null, expect = null, requireEnforcemen
         const hours = (Date.parse(b.at) - Date.parse(a.at)) / 3600000;
         if (hours > idleGapHours) gaps.push({ kind: "idle", from: a.seq, to: b.seq, hours: Math.round(hours * 100) / 100 });
       }
-      for (const c of commits) if (c.sig === "N" || c.sig === "B") gaps.push({ kind: "unsigned-commit", sha: c.sha });
+      for (const c of commits) {
+        if ((c.sig === "N" || c.sig === "B") && !(bundleLevel === "container+proxy" && c.stage !== "")) gaps.push({ kind: "unsigned-commit", sha: c.sha });
+      }
+      if (bundleLevel === "container+proxy") {
+        const trailed = commits.filter((c) => (c.sig === "N" || c.sig === "B") && c.stage !== "").length;
+        if (manifest.coverage?.unsignedTrailed !== trailed) fail("coverage", `the manifest says ${manifest.coverage?.unsignedTrailed} unsigned commits carry a stage trailer, but commits.txt shows ${trailed}`);
+        if (trailed > 0) notes.push(`unsigned commits: ${trailed} (expected under container+proxy: commits made inside the boundary are unsigned, and the checkpoints sign their heads)`);
+      }
       const want = gaps.map((g) => JSON.stringify(g));
       const have = (manifest.coverage?.gaps ?? []).map((g) => JSON.stringify(g));
       for (const g of want) if (!have.includes(g)) fail("coverage", `the log shows a gap the manifest omits: ${g}`);

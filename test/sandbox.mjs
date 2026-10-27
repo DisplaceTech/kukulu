@@ -640,4 +640,47 @@ const exchange = (target, bytes, { until = null, then = null } = {}) => new Prom
   }
 }
 
+// ---------------------------------------------------------------- signing under the boundary (P2-10)
+
+{
+  const insideEnv = (dockerDir) => ({ env: { PATH: `${dockerDir}:${process.env.PATH}`, KUKULU_SANDBOX: "kukulu-x", KUKULU_SANDBOX_ENGINE: "docker", KUKULU_SANDBOX_HOOKS_PATH: mkDir("kukulu-hooks-empty-") } });
+  const dockerDir = mkFakeDocker();
+  const SANDBOX_RECORD = "off (sandbox: commits inside the boundary are unsigned; the signed checkpoints vouch for them)";
+
+  {
+    const repo = plannedRepo({ config: { policies: { signing: "required" } } });
+    const head = git(repo, ["rev-parse", "HEAD"]);
+    const branch = git(repo, ["rev-parse", "--abbrev-ref", "HEAD"]);
+    await withServer(repo, async ({ call }) => {
+      isError(await call("kukulu_run_start"), /^policies\.signing is 'required', but commits made inside the sandbox cannot be signed: the signing agent stays outside the boundary\. Set policies\.signing to 'auto' or 'off'; the signed checkpoints vouch for every commit's head$/, "run_start refuses policies.signing required inside the sandbox");
+    }, insideEnv(dockerDir));
+    eq(git(repo, ["rev-parse", "HEAD"]) + "|" + git(repo, ["rev-parse", "--abbrev-ref", "HEAD"]), `${head}|${branch}`, "...HEAD and the branch unmoved");
+    ok(!fs.existsSync(path.join(repo, ".kukulu", "implement.lock")), "...and no lock written");
+    await withServer(repo, async ({ call }) => {
+      isError(await call("kukulu_run_start"), /^policies\.signing is 'required' but commit\.gpgsign is not set/, "without the sandbox, required takes its usual path");
+    });
+  }
+
+  {
+    const repo = plannedRepo({ config: { policies: { signing: "auto" } } });
+    git(repo, ["config", "--local", "commit.gpgsign", "true"]);
+    git(repo, ["config", "--local", "gpg.program", "/nonexistent-signing-agent"]);
+    await withServer(repo, async ({ call }) => {
+      const r = await call("kukulu_run_start");
+      ok(!r.error, "run_start works under auto inside the sandbox" + (r.error ? ": " + r.error : ""));
+      eq(r.signing, SANDBOX_RECORD, "...recording the sandbox signing outcome");
+      eq(r.signingNote, "Commits made inside the sandbox are unsigned: commit with git -c commit.gpgsign=false commit -F <file>; the signed checkpoints vouch for every commit's head, and kukulu_pr_finalize will not wait for signatures.", "...with its note");
+      eq(git(repo, ["config", "--local", "--get", "commit.gpgsign"]), "true", "...leaving commit.gpgsign as the operator set it");
+    }, insideEnv(dockerDir));
+  }
+
+  {
+    const repo = plannedRepo({ config: { policies: { signing: "off" } } });
+    await withServer(repo, async ({ call }) => {
+      const r = await call("kukulu_run_start");
+      eq(r.signing, "off", "signing off is unchanged inside the sandbox");
+    }, insideEnv(dockerDir));
+  }
+}
+
 finish();

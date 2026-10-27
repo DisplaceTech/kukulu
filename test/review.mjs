@@ -1164,6 +1164,7 @@ eq((await finalizeWithChangelog(changelog("## [Unreleased]\n\n### Breaking chang
 for (const [label, policies, stateExtra, wantSignatures, wantAwait] of [
   ["finalize does not wait under signing off", { signing: "off" }, {}, "not required: policies.signing is off", false],
   ["finalize does not wait under auto with no signing configured", { signing: "auto" }, { signing: "none" }, "not required: signing is not configured", false],
+  ["finalize does not wait under the sandbox record", { signing: "auto" }, { signing: "off (sandbox: commits inside the boundary are unsigned; the signed checkpoints vouch for them)" }, "not required: commits made inside the sandbox are unsigned; the signed checkpoints vouch for them", false],
   ["finalize still waits under auto after a fallback", { signing: "auto" }, { signing: "off (commit signing failed: x)" }, "required", true],
   ["finalize still waits under required", { signing: "required" }, {}, "required", true],
 ]) {
