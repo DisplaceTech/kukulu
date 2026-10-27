@@ -34,7 +34,7 @@ Started: 2026-10-26T21:19:36.125Z
 - [x] P2-15 Phase 2 end: push and record the manual checks
 - [x] P3-01 Stage timing in the log and in state
 - [x] P3-02 Token use per role from the subagent transcript
-- [ ] P3-03 The manifest's reported models and usage, and verifier check 12
+- [x] P3-03 The manifest's reported models and usage, and verifier check 12
 - [ ] P3-04 scripts/compare-bundles.mjs
 - [ ] P3-05 Phase 3 end: push and record the manual check
 - [ ] P4-01 kukulu_release
@@ -191,3 +191,8 @@ Codebase note (for REVIEW): kukulu_next is no longer read-only; every stage chan
 
 hooks.json: second SubagentStop entry (no matcher) running cleanroom-log.mjs after the implement guard; gate check 3 requires it; logger usageOf() appends a usage entry (per-model requests/input/output/cacheRead/cacheWrite, each requestId once, first/last, cost or null, or {error}); general mode writes nothing; goes through the log socket via record(). Fixture test/fixtures/transcripts/subagent.jsonl (6 lines, no content). cleanroom 1286, plugin 576; verify green (4419). Budget: SubagentStop fast path under 50 ms; full path with policy and fixture measured 26.7 ms beyond bare Node. CHANGELOG notes that a 0.7.x clean-room flight cannot continue on 0.8.0.
 Interpretation: cost rounded to 6 decimals; a line without a model counts under "unknown".
+
+### P3-03 — a7c02eb
+
+rolesUsage(entries) in mcp/cleanroom.mjs (server and harness import it) duplicated in the verifier; attest roles[role] gain reported + usage; verifier check 12 roles recounts and fails with the recount JSON, notes a role whose reported models differ from the routed one (names all reported models); manifest without roles passes with no note. buildBundle opts.roles; --json checks list twelve. attest 301; verify green (4433).
+Interpretation: note lists every reported model; cost sums rounded to six decimals in both copies.
