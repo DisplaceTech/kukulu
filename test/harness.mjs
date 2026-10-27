@@ -122,7 +122,10 @@ export function mkFailingGhBin() {
 /**
  * A directory holding a `gh` stub that behaves like a GitHub with no pull
  * request until `gh pr create` makes one: `pr view` then reports it, with
- * the `--base` it was created against. Every invocation is appended to
+ * the `--base` it was created against. `pr view <branch> --json …` prints `pr-view.json`
+ * when that exists; `release view` succeeds when `release.json` exists; `release create`
+ * copies its `--notes-file` to `release-notes.txt`, fails with `release-fails` on stderr when
+ * that exists, else writes `release.json` and prints a URL. Every invocation is appended to
  * `<dir>/calls.log`. Prepend the directory to PATH.
  */
 export function mkFakeGhBin() {
@@ -134,6 +137,28 @@ export function mkFakeGhBin() {
 dir=$(dirname "$0")
 printf '%s\\n' "$*" >> "$dir/calls.log"
 case "$1" in --version) exit 0 ;; esac
+if [ "$1 $2" = "pr view" ] && [ -f "$dir/pr-view.json" ]; then
+  case "$3" in -*) ;; *) cat "$dir/pr-view.json"; exit 0 ;; esac
+fi
+if [ "$1 $2" = "release view" ]; then
+  if [ -f "$dir/release.json" ]; then cat "$dir/release.json"; exit 0; fi
+  echo "release not found" >&2
+  exit 1
+fi
+if [ "$1 $2" = "release create" ]; then
+  if [ -f "$dir/release-fails" ]; then cat "$dir/release-fails" >&2; exit 1; fi
+  notes=
+  tag=$3
+  prev=
+  for a in "$@"; do
+    if [ "$prev" = "--notes-file" ]; then notes=$a; fi
+    prev=$a
+  done
+  if [ -n "$notes" ]; then cp "$notes" "$dir/release-notes.txt"; fi
+  printf '{"tag":"%s"}\n' "$tag" > "$dir/release.json"
+  echo "https://github.invalid/releases/tag/$tag"
+  exit 0
+fi
 if [ "$1 $2" = "pr view" ]; then
   if [ ! -f "$dir/pr.json" ]; then echo "no pull requests found for branch" >&2; exit 1; fi
   case " $* " in

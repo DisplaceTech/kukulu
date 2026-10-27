@@ -5140,6 +5140,107 @@ function planCommit({ renumber } = {}) {
   };
 }
 
+// ---------------------------------------------------------------- kukulu_release (SPEC E-01)
+
+/** The repository's browsable URL from origin's: scp-like and ssh forms become https, `.git` and credentials go. */
+function repoUrlFromOrigin() {
+  const raw = git(["remote", "get-url", "origin"], { allowFail: true }).out;
+  if (!raw) throw new ToolError("origin has no URL; kukulu_release needs a GitHub remote named origin");
+  const scp = /^(?:[^@/]+@)?([^:/]+):(?!\/\/)(.+?)(?:\.git)?\/?$/.exec(raw);
+  if (scp && !raw.startsWith("/") && !/^[A-Za-z]:\\/.test(raw)) return `https://${scp[1]}/${scp[2]}`;
+  return raw.replace(/^ssh:\/\/(?:[^@/]+@)?/, "https://").replace(/^(https?:\/\/)[^@/]+@/, "$1").replace(/\.git\/?$/, "");
+}
+
+/**
+ * Tag the newest archived flight's merged pull request, push the tag, and create a GitHub release from the
+ * CHANGELOG entry (a draft unless `publish`). Every refusal comes before the first write; a repeated call
+ * does only what is still missing.
+ */
+function release({ publish } = {}) {
+  if (publish !== undefined && typeof publish !== "boolean") throw new ToolError("publish must be a boolean");
+  const st = loadState();
+  if (!st.archived) throw new ToolError("kukulu_release releases the newest archived flight, and none is archived; archive it first");
+  const archiveDir = path.join(ROOT, st.archived.dir);
+  const archivedProgress = path.join(archiveDir, "PROGRESS.md");
+  const branch = exists(archivedProgress) ? /^Branch:\s*(.+)$/m.exec(read(archivedProgress))?.[1]?.trim() : null;
+  if (!branch || branch.startsWith("(")) throw new ToolError(`the archived ${st.archived.dir}/PROGRESS.md names no Branch:; kukulu_release cannot find the flight's pull request`);
+  const c = cfg();
+  const ghRun = (args) => {
+    const r = spawnSync("gh", args, { cwd: ROOT, encoding: "utf8", timeout: CHECKS_TIMEOUT_MS });
+    if (r.error) throw new ToolError(`gh ${args.slice(0, 2).join(" ")} failed: ${r.error.code === "ETIMEDOUT" ? `timed out after ${CHECKS_TIMEOUT_MS} ms` : r.error.message}`);
+    return r;
+  };
+  const view = ghRun(["pr", "view", branch, "--json", "state,mergeCommit,number,url"]);
+  if (view.status !== 0) throw new ToolError(`gh pr view ${branch} failed: ${(view.stderr || view.stdout || "").trim().split("\n")[0] || `exit ${view.status}`}`);
+  let pr;
+  try {
+    pr = JSON.parse(view.stdout);
+  } catch {
+    throw new ToolError(`gh pr view ${branch} printed output that is not JSON`);
+  }
+  if (pr.state !== "MERGED" || !pr.mergeCommit?.oid) throw new ToolError(`the flight's PR (${pr.url}) is ${pr.state}; kukulu_release runs after a human merges it`);
+  const sha = pr.mergeCommit.oid;
+  // The merge was made on GitHub, so the commit may not be here yet.
+  const fetched = git(["fetch", "origin"], { allowFail: true });
+  const changelog = git(["show", `${sha}:CHANGELOG.md`], { allowFail: true });
+  if (!changelog.ok && !fetched.ok) throw new ToolError(`git fetch origin failed: ${fetched.err.split("\n")[0]}`);
+  const lines = changelog.ok ? changelog.out.split("\n") : [];
+  const start = lines.findIndex((l) => /^## \[\d+\.\d+\.\d+[^\]]*\]/.test(l));
+  const firstEntry = lines.findIndex((l) => l.startsWith("## ["));
+  const version = start >= 0 && start === firstEntry ? /^## \[(\d+\.\d+\.\d+[^\]]*)\]/.exec(lines[start])[1] : null;
+  if (!version) throw new ToolError(`CHANGELOG.md at ${sha.slice(0, 7)} has no numbered entry; add ## [x.y.z] before releasing`);
+  const tag = `v${version}`;
+  let end = lines.findIndex((l, i) => i > start && l.startsWith("## "));
+  if (end === -1) end = lines.length;
+  const body = lines.slice(start + 1, end).join("\n").trim();
+
+  const localTag = git(["rev-parse", "--verify", "--quiet", `refs/tags/${tag}^{commit}`], { allowFail: true });
+  const remoteTags = git(["ls-remote", "--tags", "origin", `refs/tags/${tag}`, `refs/tags/${tag}^{}`], { allowFail: true });
+  const remoteLines = remoteTags.out.split("\n").filter(Boolean).map((l) => l.split("\t"));
+  const remoteSha = (remoteLines.find(([, ref]) => ref.endsWith("^{}")) ?? remoteLines[0])?.[0] ?? null;
+  const existing = localTag.ok ? localTag.out : remoteSha;
+  let skipTag = false;
+  if (existing) {
+    const noRelease = ghRun(["release", "view", tag]).status !== 0;
+    if (existing === sha && noRelease) skipTag = true;
+    else throw new ToolError(`the tag ${tag} already exists (at ${existing.slice(0, 7)}); bump CHANGELOG.md's newest entry before releasing`);
+  }
+  if (gitFacts().branch !== c.baseBranch) throw new ToolError(`${c.baseBranch} is not checked out; check it out (clean) and call kukulu_release again`);
+  if (trackedDirtyLines().length) throw new ToolError(`the working tree is not clean; commit or stash before calling kukulu_release:\n${trackedDirtyLines().join("\n")}`);
+  const ff = git(["merge", "--ff-only", `origin/${c.baseBranch}`], { allowFail: true });
+  if (!git(["merge-base", "--is-ancestor", sha, "HEAD"], { allowFail: true }).ok) {
+    throw new ToolError(`${c.baseBranch} does not contain the merge commit ${sha.slice(0, 7)} after a fast-forward pull${ff.ok ? "" : ` (${ff.err.split("\n")[0]})`}; merge or rebase by hand, then call kukulu_release again`);
+  }
+
+  if (!skipTag) {
+    let signed = git(["config", "--get", "tag.gpgsign"], { allowFail: true }).out === "true";
+    if (!signed) {
+      try {
+        signed = JSON.parse(read(path.join(archiveDir, "state.json"))).signing === "on";
+      } catch {
+        signed = false;
+      }
+    }
+    const made = spawnSync("git", gitArgv(["tag", signed ? "-s" : "-a", tag, "-m", tag, sha]), { cwd: ROOT, encoding: "utf8", timeout: SIGNING_TIMEOUT_MS, env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } });
+    if (made.status !== 0 || made.error) throw new ToolError(`git tag ${tag} failed: ${((made.stderr || made.stdout || made.error?.message || "").trim().split("\n")[0]) || "unknown error"}`);
+  }
+  if (!remoteSha) {
+    const pushed = spawnSync("git", gitArgv(["push", "origin", `refs/tags/${tag}`]), { cwd: ROOT, encoding: "utf8", timeout: SIGNING_TIMEOUT_MS, env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } });
+    if (pushed.status !== 0 || pushed.error) {
+      if (!skipTag) git(["tag", "-d", tag], { allowFail: true });
+      throw new ToolError(`git push origin ${tag} failed: ${((pushed.stderr || pushed.stdout || pushed.error?.message || "").trim().split("\n")[0]) || "unknown error"}`);
+    }
+  }
+  const notes = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "kukulu-release-")), "notes.md");
+  fs.writeFileSync(notes, `${body}\n\nSee [CHANGELOG.md](${repoUrlFromOrigin()}/blob/${tag}/CHANGELOG.md) for the full list.\n`);
+  const created = ghRun(["release", "create", tag, "--verify-tag", "--title", tag, "--notes-file", notes, ...(publish === true ? [] : ["--draft"])]);
+  fs.rmSync(path.dirname(notes), { recursive: true, force: true });
+  if (created.status !== 0) {
+    throw new ToolError(`the tag ${tag} was pushed; create the release by hand with gh release create ${tag} --verify-tag, or call kukulu_release again: ${(created.stderr || created.stdout || "").trim().split("\n")[0] || `exit ${created.status}`}`);
+  }
+  return { tag, sha, release: (created.stdout || "").trim().split("\n").filter(Boolean).at(-1) ?? null, draft: publish !== true };
+}
+
 // ---------------------------------------------------------------- MCP plumbing
 
 // `required: []` is legal but trips stricter schema validators; omit it instead.
@@ -5261,6 +5362,12 @@ const TOOLS = [
   },
   { name: "kukulu_flight_archive", description: "Archive a summarized flight so the repository can run its next flight: move PLAN, PROGRESS, HANDOFF, REVIEW, SUMMARY, kukulu.json, .kukulu/state.json and .kukulu/feedback.jsonl into docs/flights/<slug>/ and docs/attestation/ into docs/flights/<slug>/attestation/ (copying SPEC.md, which stays), write a fresh state.json, commit 'chore: archive flight <slug>' and push per policy. slug defaults to the 'flight' key in docs/kukulu.json. Refused unless the flight is summarized, no run is armed, and the tree is clean. All-or-nothing. Returns { slug, dir, moved, copied, commit, push }.", inputSchema: S({ slug: { type: "string", description: "lowercase letters, digits and - (at most 40 characters); defaults to docs/kukulu.json's flight" } }), fn: flightArchive },
   { name: "kukulu_pr_finalize", description: "End a flight. Checks that every commit since the merge base with baseBranch is signed (judged from the commits, not from state): if so, or if the policy does not expect signatures (policies.signing off, or auto with signing never configured; the result says so in signatures), marks the draft PR ready and, unless breaking is true, enables auto-merge (gh pr merge --auto, never an immediate merge), per policies.finalize and policies.mergeMethod. If any commit is unsigned and signatures are expected the PR stays a draft, state.awaitingSigning is recorded, the steps are appended to SUMMARY.md, and kukulu_next reports done until it is resolved. breaking is required on the first call unless CHANGELOG.md decides it. Returns { signed, unsigned, ready, merge, signatures, breaking, breakingSource, awaitingSigning, resigned, push, pr, next? }; signatures is required or not required: <why>; merge is enabled, skipped: breaking, skipped: policy, skipped: no pull request, skipped: awaiting signing or unavailable: <why>.", inputSchema: S({ breaking: { type: "boolean", description: "whether this flight is a breaking change, so its PR must not auto-merge; optional when CHANGELOG.md decides (its newest entry has or lacks a Breaking changes section; a disagreeing value is refused), required on the first call otherwise, remembered after" }, resign: { type: "boolean", description: "HUMAN-INITIATED ONLY: never pass this on your own. Re-sign every commit of the branch (git rebase -f --rebase-merges --gpg-sign), force-push with lease, then finalize. For an operator who has unlocked the signing agent after an awaiting-signing result" } }), fn: prFinalize },
+  {
+    name: "kukulu_release",
+    description: "Release the newest archived flight after a human has merged its pull request: tag the merge commit v<x.y.z> from CHANGELOG.md's newest numbered entry (signed when tag.gpgsign is true or the flight's commits were signed), push the tag, and create a GitHub release from that entry (a draft unless publish is true). Fast-forwards the checked-out base branch to origin first. Refuses before any write when no flight is archived, the PR is not MERGED, the CHANGELOG has no numbered entry at the merge commit, or the tag already exists (unless it is at the merge commit and has no release yet, when only the release is created). A repeated call creates only what is missing. For the flight controller, on the operator's request only. Returns { tag, sha, release, draft }.",
+    inputSchema: S({ publish: { type: "boolean", description: "create the release as published instead of a draft; default false" } }),
+    fn: release,
+  },
   {
     name: "kukulu_agents_sync",
     description: "Generate .claude/agents/kukulu-<role>.md from the merged routing config (plugin defaults < global file < profile < docs/kukulu.json roles). Writes only files whose content changed, excludes them from git, and returns the resolved per-role table. `restartRequired` is true only when this is the directory's first population and a changed role's model cannot be named directly by the Agent tool. Also ensures the MCP allow rule in .claude/settings.local.json (`permissions` in the result), without which a subagent's first kukulu_status call is denied under any permission mode.",

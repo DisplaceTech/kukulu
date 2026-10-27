@@ -313,9 +313,9 @@ like(goFlight, /policies\.signing is 'required' and the signing probe failed/, "
 const fmGo = frontmatter(goFlight);
 const allowed = String(fmGo["allowed-tools"]).split(",").map((s) => s.trim());
 const toolNames = Array.from(serverSrc.matchAll(/name: "(kukulu_[a-z_]+)"/g), (m) => m[1]);
-eq(toolNames.length, 25, "the server defines twenty-five tools");
+eq(toolNames.length, 26, "the server defines twenty-six tools");
 
-const COUNT_WORDS = { 18: "Eighteen", 19: "Nineteen", 20: "Twenty", 21: "Twenty-one", 22: "Twenty-two", 23: "Twenty-three", 24: "Twenty-four", 25: "Twenty-five" };
+const COUNT_WORDS = { 18: "Eighteen", 19: "Nineteen", 20: "Twenty", 21: "Twenty-one", 22: "Twenty-two", 23: "Twenty-three", 24: "Twenty-four", 25: "Twenty-five", 26: "Twenty-six" };
 like(read("docs/mcp-tools.md").split("\n")[2], new RegExp(`^${COUNT_WORDS[toolNames.length]} tools,`), "docs/mcp-tools.md states the tool count in words");
 
 {
@@ -373,7 +373,7 @@ for (const t of allowed.filter((a) => a.startsWith("mcp__"))) {
 }
 ok(
   allowed.every((a) => a === "Agent" || MCP_PREFIXES.some((p) => a.startsWith(p))),
-  "the flight controller is allowed nothing beyond Agent, the read-only kukulu tools, agents_sync, run_halt, flight_options and pr_finalize",
+  "the flight controller is allowed nothing beyond Agent, the read-only kukulu tools, agents_sync, run_halt, flight_options, pr_finalize and release",
 );
 ok(
   // run_halt is a deliberate exception: it records a clean halt reason when
@@ -383,6 +383,10 @@ ok(
   !allowed.some((a) => /run_start|task_|run_finish|review_submit|summary_commit/.test(a)),
   "the flight controller cannot touch the tools that change project state",
 );
+like(goFlight, /"release it"[^\n]*kukulu_release\(\{\}\)/, "go-flight maps release it to kukulu_release");
+like(goFlight, /"release and publish"[^\n]*kukulu_release\(\{ publish: true \}\)/, "...and release and publish to kukulu_release({ publish: true })");
+for (const p of MCP_PREFIXES) ok(allowed.includes(`${p}kukulu_release`), `the flight controller may call ${p}kukulu_release`);
+for (const agent of agentNames) ok(!String(frontmatter(read(`agents/${agent}.md`)).tools).includes("kukulu_release"), `agents/${agent} cannot call kukulu_release`);
 like(goFlight, /resume: true/, "go-flight resumes a round-cap halt with kukulu_flight_options (project-c F-13, F-18)");
 like(goFlight, /kukulu_pr_finalize\(\{ resign: true \}\)/, "go-flight finishes a signing-blocked flight only with kukulu_pr_finalize({ resign: true })");
 like(goFlight, /`flight=<slug>`/, "go-flight passes flight=<slug> to the planner");

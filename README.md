@@ -200,7 +200,7 @@ Checkbox states in `PROGRESS.md`: `[ ]` todo · `[~]` in progress · `[x]` done 
 
 ## MCP tools
 
-The server exposes twenty-five tools.
+The server exposes twenty-six tools.
 
 | Tool | Does |
 |---|---|
@@ -227,6 +227,7 @@ The server exposes twenty-five tools.
 | `kukulu_attest` | Write the signed attestation bundle for a clean-room flight into `docs/attestation/`, run the bundle's own verifier on it, and commit it only when it passes; the summarizer calls it after the summary |
 | `kukulu_flight_archive` | Move a summarized flight's artifacts into `docs/flights/<slug>/` (the spec stays), write a fresh state, commit and push |
 | `kukulu_pr_finalize` | End a flight: if every commit is signed, mark the draft PR ready and, unless `breaking`, enable auto-merge; otherwise, when the policy expects signatures, keep it a draft and record `awaitingSigning`. `resign: true` is for a human |
+| `kukulu_release` | After a human merges the flight's pull request: tag the merge commit from CHANGELOG.md's newest numbered entry, push the tag and create a GitHub release (a draft unless `publish: true`). For the flight controller, on request only |
 | `kukulu_agents_sync` | Write `.claude/agents/kukulu-<role>.md` from the merged routing config; only changed files are written |
 | `kukulu_config_show` | The merged routing config with the source of every value. Read-only |
 
