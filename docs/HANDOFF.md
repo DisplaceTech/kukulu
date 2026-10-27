@@ -85,3 +85,9 @@ Review-fix round 1: tasks R1-01 to R1-08, all done (46 of 46 tasks done, 0 block
 - R1-07 (F-06): tests and the fixture `test/fixtures/lockfiles/subtable/Cargo.lock`; no defect.
 - R1-08 (F-07): the two scripts write U+016B and U+2014 as escapes; `--check` integrity tests added.
 - Manual check: NOT VERIFIED (human): the first-flight requirement above still stands.
+
+## Round 2
+
+Review-fix round 2: task R2-01, done (47 of 47 tasks done, 0 blocked). `kukulu_verify` green (15 suites).
+
+- R2-01 (F-01): the constraint scan resolves the real path of every listed file, not only symlinks, and reads the path it checked; a file reached through a symlinked directory that leaves the project is listed under `skipped` and never read. Interpretation: none. Other outside reads stay out of scope, as the task said.
