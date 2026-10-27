@@ -5,7 +5,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
-import { finish, ok, eq, like, isError, ROOT, cleanroomRepo, plannedRepo, setState, startServer, withServer, mkFakeDocker, mkDir, writeFile, readFile, logCall, git, buildBundle } from "./harness.mjs";
+import { finish, ok, eq, like, isError, ROOT, cleanroomRepo, plannedRepo, setState, startServer, withServer, mkFakeDocker, mkDir, writeFile, readFile, logCall, git, buildBundle, mkFakeGpg, useFakeSigner } from "./harness.mjs";
 import net from "node:net";
 import { startControllerSocket, startLogSocket, startProxy, egressDecision, hostPortOf, planFor, containerArgs, projectIdFor, runtimeDirFor, main as sandboxMain } from "../scripts/sandbox.mjs";
 import { startBridge } from "../scripts/sandbox-entry.mjs";
@@ -746,8 +746,9 @@ const exchange = (target, bytes, { until = null, then = null } = {}) => new Prom
 
   {
     const repo = plannedRepo({ config: { policies: { signing: "auto" } } });
-    git(repo, ["config", "--local", "commit.gpgsign", "true"]);
-    git(repo, ["config", "--local", "gpg.program", "/nonexistent-signing-agent"]);
+    // A working signer: a probe would record "on", so SANDBOX_RECORD shows it was skipped, and the server's own commits sign
+    // without the auto fallback writing commit.gpgsign false (a broken signer passed only where the global config signed).
+    useFakeSigner(repo, mkFakeGpg());
     await withServer(repo, async ({ call }) => {
       const r = await call("kukulu_run_start");
       ok(!r.error, "run_start works under auto inside the sandbox" + (r.error ? ": " + r.error : ""));

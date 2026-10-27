@@ -892,7 +892,9 @@ export function evaluate(policy, hookInput, env) {
   const inRepo = (p) => forms(p).some((f) => underPrefix(f, root));
   const exempt = (p) => forms(p).some((f) => allowPaths.some((a) => underPrefix(f, a)));
   // Prior art a control flight is given is readable: it is exempt from deny.paths, pathPatterns and deny.words, for reads only (SPEC B-01).
-  const controlList = controlPaths(policy, env);
+  // Each entry in both its literal and real form: isControl asks that every form of the read path lie under one, and on macOS a
+  // root under /var or /tmp resolves to /private/..., so a literal-only list would deny every prior-art read.
+  const controlList = (policy.control?.priorArt ?? []).flatMap((e) => canonicalPaths(e, { cwd: root, home }));
   const isControl = (p) => controlList.length > 0 && forms(p).every((f) => controlList.some((c) => underPrefix(f, c)));
   const wordIn = (text) => {
     const lower = String(text).toLowerCase();

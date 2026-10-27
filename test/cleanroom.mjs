@@ -138,6 +138,13 @@ const pattern = (extra = {}) => ({ id: "p", pattern: "/build/", shouldMatch: ["/
   const readIn = (file) => evaluate(linked, { tool_name: "Read", tool_input: { file_path: path.join(root, file) }, cwd: root }, { root, home: "/h" }).decision;
   eq(readIn("prior/inside.c"), "allowed", "a file under control.priorArt is readable");
   eq(readIn("prior/link"), "denied", "a symlink under control.priorArt that resolves to a deny.paths file outside it is still denied in control mode");
+
+  // the project root reached through a symlink, as /var and /tmp are on macOS: the read's real form must still match the prior art
+  const aliasRoot = path.join(fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "kukulu-control-alias-"))), "root");
+  fs.symlinkSync(root, aliasRoot);
+  const readVia = (file) => evaluate(linked, { tool_name: "Read", tool_input: { file_path: path.join(aliasRoot, file) }, cwd: aliasRoot }, { root: aliasRoot, home: "/h" }).decision;
+  fs.writeFileSync(path.join(root, "prior", "zlib.c"), "x\n");
+  eq(readVia("prior/zlib.c"), "allowed", "a control.priorArt read is allowed when the project root is reached through a symlink");
 }
 
 {
