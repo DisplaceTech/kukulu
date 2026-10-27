@@ -44,7 +44,7 @@ Started: 2026-10-26T21:19:36.125Z
 - [x] P4-05 CHANGELOG 0.8.0 and the version
 - [x] P4-06 Phase 4 end: push and record the manual check
 - [x] R1-01 Mount the runtime directory read-only and hold gate check 9 to the exact mount list
-- [ ] R1-02 The constraint scan never reads through a symlink that leaves the project
+- [~] R1-02 The constraint scan never reads through a symlink that leaves the project
 - [ ] R1-03 Behind the sandbox, run the plugin's verifier, never one from the project tree
 - [ ] R1-04 --expect control-positive still prints CONTROL (positive)
 - [ ] R1-05 Test the sandbox mechanics SPEC names: box source, lockdown on sandbox.egress, stop, tag-only image

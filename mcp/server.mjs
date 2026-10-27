@@ -3284,17 +3284,27 @@ function checkConstraints(constraints, cwd = ROOT, ignore = []) {
     const files = listed.ok ? [...new Set(listed.out.split("\n").filter(Boolean))].filter((f) => !skip.has(f)) : [];
     const excluded = c.exclude || [];
     const hits = [];
+    const skippedLinks = [];
+    const realRoot = fs.realpathSync(cwd);
     for (const file of files) {
       if (excluded.some((ex) => pathUnder(file, ex))) continue;
       const full = path.join(cwd, file);
       if (!exists(full)) continue; // e.g. a submodule gitlink git ls-files can list but fs cannot read
+      // This scan runs outside the sandbox: a symlink leaving the project would read the host's files (SPEC C-04).
+      if (fs.lstatSync(full).isSymbolicLink()) {
+        const real = fs.realpathSync(full);
+        if (real !== realRoot && !real.startsWith(realRoot + path.sep)) {
+          skippedLinks.push(file);
+          continue;
+        }
+      }
       read(full)
         .split("\n")
         .forEach((text, i) => {
           if (testLine(c, text)) hits.push({ file, line: i + 1, text });
         });
     }
-    return { id: c.id, ok: hits.length === 0, fixture: null, hits };
+    return { id: c.id, ok: hits.length === 0, fixture: null, hits, ...(skippedLinks.length ? { skipped: skippedLinks } : {}) };
   });
   return { ok: results.every((r) => r.ok), results };
 }

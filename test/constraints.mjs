@@ -102,6 +102,23 @@ for (const [bad, re, label] of [
 // ---------------------------------------------------------------- scanning real files
 
 {
+  const outside = fs.mkdtempSync(path.join(fs.realpathSync(process.env.TMPDIR || "/tmp"), "kukulu-outside-"));
+  fs.writeFileSync(path.join(outside, "secret.txt"), "console.log('top-secret');\n");
+  const repo = constraintRepo([RULE]);
+  fs.symlinkSync(path.join(outside, "secret.txt"), path.join(repo, "src", "link.js"));
+  fs.writeFileSync(path.join(repo, "src", "real.js"), "console.log('inside');\n");
+  fs.symlinkSync("real.js", path.join(repo, "src", "inner.js"));
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-qm", "links"]);
+  await withServer(repo, async ({ call }) => {
+    const r = (await call("kukulu_verify")).constraints.results[0];
+    ok(!JSON.stringify(r).includes("top-secret"), "a tracked symlink to a file outside the project is not scanned: its content is in no hit");
+    eq(JSON.stringify(r.skipped), JSON.stringify(["src/link.js"]), "...and the rule lists the symlink under skipped");
+    ok(r.hits.some((h) => h.file === "src/inner.js"), "a symlink inside the project is still scanned");
+  });
+}
+
+{
   const repo = constraintRepo([RULE]);
   writeFile(repo, "src/a.js", "const x = 1;\nconsole.log('debug', x);\n");
   git(repo, ["add", "-A"]);
