@@ -7054,5 +7054,420 @@
   },
   "expect": "denied",
   "reason": "deny\\.paths"
+ },
+ {
+  "name": "cargo add flate2 (P2-12)",
+  "policy": {
+   "version": 1,
+   "deny": {
+    "network": false,
+    "packages": {
+     "cargo": [
+      "flate2",
+      "miniz_oxide"
+     ],
+     "npm": [
+      "left-pad"
+     ],
+     "pypi": [
+      "zlib-ng"
+     ]
+    }
+   }
+  },
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cargo add flate2"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "denied package: .* deny\\.packages\\.cargo"
+ },
+ {
+  "name": "cargo add flate2@1 (P2-12)",
+  "policy": {
+   "version": 1,
+   "deny": {
+    "network": false,
+    "packages": {
+     "cargo": [
+      "flate2",
+      "miniz_oxide"
+     ],
+     "npm": [
+      "left-pad"
+     ],
+     "pypi": [
+      "zlib-ng"
+     ]
+    }
+   }
+  },
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cargo add flate2@1"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "denied package: .* deny\\.packages\\.cargo"
+ },
+ {
+  "name": "cargo add miniz-oxide (P2-12)",
+  "policy": {
+   "version": 1,
+   "deny": {
+    "network": false,
+    "packages": {
+     "cargo": [
+      "flate2",
+      "miniz_oxide"
+     ],
+     "npm": [
+      "left-pad"
+     ],
+     "pypi": [
+      "zlib-ng"
+     ]
+    }
+   }
+  },
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cargo add miniz-oxide"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "denied package: .* deny\\.packages\\.cargo"
+ },
+ {
+  "name": "npm install left-pad (P2-12)",
+  "policy": {
+   "version": 1,
+   "deny": {
+    "network": false,
+    "packages": {
+     "cargo": [
+      "flate2",
+      "miniz_oxide"
+     ],
+     "npm": [
+      "left-pad"
+     ],
+     "pypi": [
+      "zlib-ng"
+     ]
+    }
+   }
+  },
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "npm install left-pad"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "denied package: .* deny\\.packages\\.npm"
+ },
+ {
+  "name": "npm i left-pad@2 (P2-12)",
+  "policy": {
+   "version": 1,
+   "deny": {
+    "network": false,
+    "packages": {
+     "cargo": [
+      "flate2",
+      "miniz_oxide"
+     ],
+     "npm": [
+      "left-pad"
+     ],
+     "pypi": [
+      "zlib-ng"
+     ]
+    }
+   }
+  },
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "npm i left-pad@2"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "denied package: .* deny\\.packages\\.npm"
+ },
+ {
+  "name": "npm add left-pad (P2-12)",
+  "policy": {
+   "version": 1,
+   "deny": {
+    "network": false,
+    "packages": {
+     "cargo": [
+      "flate2",
+      "miniz_oxide"
+     ],
+     "npm": [
+      "left-pad"
+     ],
+     "pypi": [
+      "zlib-ng"
+     ]
+    }
+   }
+  },
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "npm add left-pad"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "denied package: .* deny\\.packages\\.npm"
+ },
+ {
+  "name": "pip install zlib-ng (P2-12)",
+  "policy": {
+   "version": 1,
+   "deny": {
+    "network": false,
+    "packages": {
+     "cargo": [
+      "flate2",
+      "miniz_oxide"
+     ],
+     "npm": [
+      "left-pad"
+     ],
+     "pypi": [
+      "zlib-ng"
+     ]
+    }
+   }
+  },
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "pip install zlib-ng"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "denied package: .* deny\\.packages\\.pypi"
+ },
+ {
+  "name": "pip install zlib_ng==1 (P2-12)",
+  "policy": {
+   "version": 1,
+   "deny": {
+    "network": false,
+    "packages": {
+     "cargo": [
+      "flate2",
+      "miniz_oxide"
+     ],
+     "npm": [
+      "left-pad"
+     ],
+     "pypi": [
+      "zlib-ng"
+     ]
+    }
+   }
+  },
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "pip install zlib_ng==1"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "denied package: .* deny\\.packages\\.pypi"
+ },
+ {
+  "name": "uv add zlib-ng (P2-12)",
+  "policy": {
+   "version": 1,
+   "deny": {
+    "network": false,
+    "packages": {
+     "cargo": [
+      "flate2",
+      "miniz_oxide"
+     ],
+     "npm": [
+      "left-pad"
+     ],
+     "pypi": [
+      "zlib-ng"
+     ]
+    }
+   }
+  },
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "uv add zlib-ng"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "denied package: .* deny\\.packages\\.pypi"
+ },
+ {
+  "name": "cargo add serde (P2-12)",
+  "policy": {
+   "version": 1,
+   "deny": {
+    "network": false,
+    "packages": {
+     "cargo": [
+      "flate2",
+      "miniz_oxide"
+     ],
+     "npm": [
+      "left-pad"
+     ],
+     "pypi": [
+      "zlib-ng"
+     ]
+    }
+   }
+  },
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cargo add serde"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "npm install react (P2-12)",
+  "policy": {
+   "version": 1,
+   "deny": {
+    "network": false,
+    "packages": {
+     "cargo": [
+      "flate2",
+      "miniz_oxide"
+     ],
+     "npm": [
+      "left-pad"
+     ],
+     "pypi": [
+      "zlib-ng"
+     ]
+    }
+   }
+  },
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "npm install react"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "pip install requests (P2-12)",
+  "policy": {
+   "version": 1,
+   "deny": {
+    "network": false,
+    "packages": {
+     "cargo": [
+      "flate2",
+      "miniz_oxide"
+     ],
+     "npm": [
+      "left-pad"
+     ],
+     "pypi": [
+      "zlib-ng"
+     ]
+    }
+   }
+  },
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "pip install requests"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "uv add httpx (P2-12)",
+  "policy": {
+   "version": 1,
+   "deny": {
+    "network": false,
+    "packages": {
+     "cargo": [
+      "flate2",
+      "miniz_oxide"
+     ],
+     "npm": [
+      "left-pad"
+     ],
+     "pypi": [
+      "zlib-ng"
+     ]
+    }
+   }
+  },
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "uv add httpx"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "cargo build (P2-12)",
+  "policy": {
+   "version": 1,
+   "deny": {
+    "network": false,
+    "packages": {
+     "cargo": [
+      "flate2",
+      "miniz_oxide"
+     ],
+     "npm": [
+      "left-pad"
+     ],
+     "pypi": [
+      "zlib-ng"
+     ]
+    }
+   }
+  },
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cargo build"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
  }
 ]

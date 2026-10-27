@@ -1377,6 +1377,21 @@ const gateCheck = (reason) => (reason.match(/^clean-room gate failed: ([\w-]+):/
   }
 }
 
+// ---------------------------------------------------------------- the guard and denied packages (P2-12)
+
+{
+  const policy = loadPolicy(JSON.stringify(base({ deny: { network: true, packages: { cargo: ["flate2"], npm: ["left-pad"] } } })));
+  const bash = (command) => evaluate(policy, { tool_name: "Bash", tool_input: { command }, cwd: "/p" }, { root: "/p", home: "/h" });
+  const v = bash("cargo add flate2@1");
+  eq(v.decision + "|" + v.reason, "denied|denied package: flate2 is in policy deny.packages.cargo", "a denied package add names the package and the ecosystem");
+  eq(bash("npm install --save-dev @scope/ok left-pad").reason, "denied package: left-pad is in policy deny.packages.npm", "...past options and other operands, even with the network rule on");
+  eq(bash("cd x && cargo add serde flate2").reason, "denied package: flate2 is in policy deny.packages.cargo", "...in the later segment of a command line");
+  eq(bash("cargo +nightly add Flate2").decision, "denied", "...whatever the case or a toolchain selector");
+  eq(bash("npm install @scope/ok").decision, "denied", "(the network rule still denies an npm install that adds nothing denied)");
+  eq(bash("npm install @scope/ok").reason.startsWith("network command"), true, "...with its own reason");
+  eq(bash("cargo search flate2").decision, "allowed", "a subcommand that adds nothing is not an add");
+}
+
 // ---------------------------------------------------------------- gate liveness
 
 {

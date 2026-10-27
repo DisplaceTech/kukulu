@@ -1013,6 +1013,21 @@ export function evaluate(policy, hookInput, env) {
         const v = bashVerdict(shellString, depth + 1);
         if (v.decision === "denied") return v;
       }
+      // 6.0 adding a package the policy denies: judged before the network rule of the same segment, so the reason names the package (SPEC C-07).
+      {
+        const adds = { cargo: ["cargo", ["add"]], npm: ["npm", ["install", "i", "add"]], pip: ["pypi", ["install"]], uv: ["pypi", ["add"]] }[word];
+        if (adds) {
+          const [ecosystem, subcommands] = adds;
+          const at = rest.findIndex((t) => !t.startsWith("-") && !t.startsWith("+"));
+          if (at >= 0 && subcommands.includes(rest[at])) {
+            const blocked = new Set((policy.deny.packages?.[ecosystem] ?? []).map((n) => normalizePackageName(ecosystem, n)));
+            for (const spec of rest.slice(at + 1).filter((t) => !t.startsWith("-"))) {
+              const name = /^@?[^@=<>~![]+/.exec(spec)?.[0];
+              if (name && blocked.has(normalizePackageName(ecosystem, name))) return denied(`denied package: ${name} is in policy deny.packages.${ecosystem}`);
+            }
+          }
+        }
+      }
       // The segment is judged with every rule below, so a `cd ~/.cargo/registry` operand is a token under 6b; the directory it names takes effect afterwards.
       // 6a. network commands
       if (policy.deny.network) {
