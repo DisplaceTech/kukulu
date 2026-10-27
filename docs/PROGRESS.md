@@ -26,7 +26,7 @@ Started: 2026-10-26T21:19:36.125Z
 - [x] P2-07 Gate check 9 and the boundary in genesis
 - [x] P2-08 Commands run inside the boundary
 - [x] P2-09 The enforcement level: known limits per level, the manifest and verifier check 11
-- [ ] P2-10 Signing under the boundary
+- [x] P2-10 Signing under the boundary
 - [ ] P2-11 Lockfile parsers, gate check 10 and the manifest's packages
 - [ ] P2-12 The guard denies adding a denied package
 - [ ] P2-13 The 0.7.2 known-gap candidates: --remove-sent-files and pax
@@ -151,3 +151,8 @@ server.mjs: gitArgv wraps every spawnSync("git") site (git(), signingProbe, comm
 
 cleanroom.mjs: ENFORCEMENT_LEVELS, KNOWN_LIMITS as 12 {id,text,levels}, knownLimitsFor (throws CleanroomError). Verifier duplicates table+function by hand; check 11 enforcement, --require-enforcement (usage error exit 2 on unknown), returns/--json enforcement, absent field reads as hook with a note. attest(): manifest.enforcement {level,[boundary,egress]}, coverage.knownLimits per level, roles assurance egress under container+proxy. Harness buildBundle opts.enforcement; fixture test/fixtures/bundles/v0-7-2 (public key + signatures only; fingerprint in test/fixtures/bundles/README.md). docs/cleanroom.md Known gaps is now a 12-row table. attest 275, cleanroom 1213 assertions.
 Interpretation: a manifest without an enforcement field is not compared against a known-limits list. .pre-commit-config.yaml now excludes test/fixtures/bundles/*/ from markdownlint (signed bytes cannot be reformatted).
+
+### P2-10 — 24e82d9
+
+server: startRun refuses required inside the sandbox before any write; probeSigning returns the "off (sandbox: ...)" record under auto (no probe, gpgsign untouched); signaturesExpected false for it; signingNoteFor has the sandbox note; finalize reports "not required: commits made inside the sandbox are unsigned; ...". coverageGaps takes level (both copies); attest manifest coverage.unsignedTrailed under container+proxy; verifier recounts and prints one note. Tests: sandbox 177, attest 285, cleanroom 1215, review 445; verify green.
+Interpretation: the finalize acceptance test is in test/review.mjs (finalizeRepo helper is local to it).
