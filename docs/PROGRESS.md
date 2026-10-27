@@ -42,7 +42,7 @@ Started: 2026-10-26T21:19:36.125Z
 - [x] P4-03 The 0.7.2 review's notes
 - [x] P4-04 The documentation sweep
 - [x] P4-05 CHANGELOG 0.8.0 and the version
-- [ ] P4-06 Phase 4 end: push and record the manual check
+- [x] P4-06 Phase 4 end: push and record the manual check
 
 ## Log
 
@@ -229,3 +229,8 @@ Walked SPEC 6 F bullet by bullet (list in the commit body). Fixed here: routing.
 ### P4-05 — 43532fc
 
 ## [Unreleased] renamed ## [0.8.0] — 2026-10-26; version 0.8.0 in package.json, plugin.json, VERSION and README badge; added a Changed line that kukulu_next now writes the stage timeline. Every SPEC section 6 requirement has a line citing its goal. Verify green (4520).
+
+### P4-06 — eb62467
+
+Push: pushed build branch to origin. Empty phase-end commit.
+Manual check: NOT VERIFIED (human): on a scratch repository with a merged PR, kukulu_release makes a draft release whose notes match the CHANGELOG entry; this release is the first one kukulu_release cuts, after the owner merges.
