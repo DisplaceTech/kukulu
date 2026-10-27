@@ -4,7 +4,9 @@
 
 ## Merge line
 
-`build/2026-10-26`, base `3aa6277` (main) → head `4a9a622`, 108 commits before this summary, 3 reviews, final verdict **APPROVED** (round 3). 47 of 47 tasks done (P0-01 to P4-06, R1-01 to R1-08, R2-01), none blocked or skipped. `kukulu_verify` green: 15 suites, 4,582 assertions. PR checks pass. `policies.finalize` is `ready`, so finalize marks the PR ready and never turns on auto-merge.
+`build/2026-10-26`, base `3aa6277` (main) → head `4a9a622`, 108 commits before this summary, 3 reviews, final verdict **APPROVED** (round 3). 47 of 47 tasks done (P0-01 to P4-06, R1-01 to R1-08, R2-01), none blocked or skipped. `kukulu_verify` green: 15 suites, 4,582 assertions. `policies.finalize` is `ready`, so finalize marks the PR ready and never turns on auto-merge.
+
+**No open PR for this flight.** The only PR whose head is `build/2026-10-26` is #4 (<https://github.com/DisplaceTech/kukulu/pull/4>). That is the 0.7.2 flight's PR: it was built on the same-named branch and merged on 2026-10-26 at 20:17 UTC, at head `ed62ddd`. The `prChecks: pass` that the reviews quote most likely refers to that PR. The 0.8.0 commits on this branch are pushed but are not in any open PR. To review and merge them, a human must open a new PR from `build/2026-10-26` (or from a renamed branch) into `main`, and should then confirm CI on it.
 
 ## What was built
 
@@ -143,6 +145,7 @@ All `NOT VERIFIED (human)`:
 - **Phase 3**: run `compare-bundles.mjs` on the Phase 2 bundle and on a hook bundle from a real flight. It should print wall time and tokens per role for both.
 - **Phase 4**: on a scratch repository with a merged PR, `kukulu_release` makes a draft release whose notes match the CHANGELOG entry.
 - **Merge gate**: the HANDOFF's first line stands. Do not merge until the sandboxed clean-room flight above has run from the working tree and its bundle verifies with `--require-enforcement container+proxy`.
+- **PR**: open a PR for this flight's commits. The branch's only PR, #4, is the merged 0.7.2 PR (see Merge line).
 
 ## Review history
 
@@ -164,6 +167,7 @@ All `NOT VERIFIED (human)`:
 ## Pipeline friction
 
 - review, verbose-output: `kukulu_mutate` returns the full constraints result list (32 rules, all ok) on every call, even with a targeted command; across ~25 sampled mutants that block is most of each result and buries the failure tail the reviewer needs. Returning only failing constraints (or a count) would cut the noise.
+- summarize, pr-lookup: The 0.8.0 flight reused branch name build/2026-10-26 from the same-day 0.7.2 flight, whose PR #4 was already merged; kukulu_summary_commit reported that merged PR as this branch's PR, so the 0.8.0 build has no open PR and finalize cannot ready one. Build branch names should be unique per flight (or the PR lookup should ignore merged PRs whose head is not the branch's current head).
 
 ## Suggested CLAUDE.md additions
 
