@@ -48,7 +48,7 @@ Started: 2026-10-26T21:19:36.125Z
 - [x] R1-03 Behind the sandbox, run the plugin's verifier, never one from the project tree
 - [x] R1-04 --expect control-positive still prints CONTROL (positive)
 - [x] R1-05 Test the sandbox mechanics SPEC names: box source, lockdown on sandbox.egress, stop, tag-only image
-- [ ] R1-06 Test the git -c options and the runner part of routing, fix the cache crate name, correct kukulu_next's docs
+- [~] R1-06 Test the git -c options and the runner part of routing, fix the cache crate name, correct kukulu_next's docs
 - [ ] R1-07 Test the control-path symlink rule and the lockfile sub-table rule
 - [ ] R1-08 Test publish-bundle --check's integrity checks and escape the literal characters
 

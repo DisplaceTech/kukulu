@@ -1308,6 +1308,20 @@ const gateCheck = (reason) => (reason.match(/^clean-room gate failed: ([\w-]+):/
       eq(last.data.failed, "routing", "...and the failing gate entry is in the chain");
     }, envFor({}));
   }
+
+  {
+    // the same model strings, but the runner prefixes move: "mac/" now belongs to the spark runner
+    const repo = cleanroomRepo({ policy: policyWith({}) });
+    const file = cfgFile({ runners: runnersBlock, roles: localRoles });
+    await live(repo, async ({ call }) => {
+      eq((await call("kukulu_next")).stage, "plan", "genesis passes before a role's runner changes");
+      fs.writeFileSync(file, JSON.stringify({ runners: { spark: { ...runnersBlock.spark, match: ["spark/", "mac/"] }, mac: { ...runnersBlock.mac, match: ["mac-old/"] } }, roles: localRoles }));
+      const h = await call("kukulu_next");
+      eq(h.stage, "halt", "changing a role's runner after genesis fails the gate's routing check");
+      like(h.reason, /^clean-room gate failed: routing: routing changed since genesis: planner now resolves to mac\/qwen3\.8-27b on spark \(genesis: mac\/qwen3\.8-27b on mac\)/, "...with the routing reason");
+      eq(logOf(repo).filter((e) => e.kind === "gate").at(-1).data.failed, "routing", "...and the failing gate entry is in the chain");
+    }, { env: { KUKULU_CONFIG: file } });
+  }
 }
 
 // ---------------------------------------------------------------- control mode in genesis (P1-02)

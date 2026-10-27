@@ -48,6 +48,7 @@ All notable changes to this plugin. Format follows
 - The constraint scan of `kukulu_verify` never reads through a symlink that leaves the project: the path is listed under the rule's `skipped` instead (REVIEW F-02, C-04).
 - Behind the sandbox, `kukulu_similarity` and `kukulu_attest` check a bundle with the plugin's own `scripts/verify-attestation.mjs`, never a `verify.mjs` from the project tree (REVIEW F-03, C-04).
 - The offline verifier prints `CONTROL (positive)` for a passing control bundle with or without `--expect control-positive`; only the exit status differs (REVIEW F-08, B-01).
+- Gate check 10 recognizes a pre-release crate directory in the sandbox's cargo cache (`flate2-1.0.0-rc.1` is `flate2`), and `docs/mcp-tools.md` no longer calls `kukulu_next` read-only (REVIEW F-05, C-07).
 
 ## [0.7.2] — 2026-10-26
 

@@ -679,6 +679,31 @@ const exchange = (target, bytes, { until = null, then = null } = {}) => new Prom
   }
 
   {
+    // a repository-local fsmonitor is a program git would run on the host (SPEC C-04)
+    const withMonitor = () => {
+      const repo = plannedRepo();
+      git(repo, ["reset", "-q", "HEAD~1"]);
+      const marker = path.join(mkDir("kukulu-fsmonitor-"), "ran");
+      const script = path.join(path.dirname(marker), "monitor.sh");
+      fs.writeFileSync(script, `#!/bin/sh\ntouch ${marker}\nexit 1\n`, { mode: 0o755 });
+      git(repo, ["config", "core.fsmonitor", script]);
+      return { repo, marker };
+    };
+    const dockerDir = mkFakeDocker();
+    const inner = withMonitor();
+    await withServer(inner.repo, async ({ call }) => {
+      const r = await call("kukulu_plan_commit");
+      ok(!r.error && r.commit, "a commit inside the sandbox turns the repository's fsmonitor off" + (r.error ? ": " + r.error : ""));
+    }, inside(dockerDir));
+    ok(!fs.existsSync(inner.marker), "...so the fsmonitor script never ran");
+    const outer = withMonitor();
+    await withServer(outer.repo, async ({ call }) => {
+      await call("kukulu_plan_commit");
+    });
+    ok(fs.existsSync(outer.marker), "...while without KUKULU_SANDBOX the same script runs");
+  }
+
+  {
     const repo = plannedRepo();
     const dockerDir = mkFakeDocker();
     await withServer(repo, async ({ call }) => {
@@ -809,6 +834,8 @@ const exchange = (target, bytes, { until = null, then = null } = {}) => new Prom
   eq(bad.stage, "halt", "gate check 10 fails on a denied crate directory in the sandbox cache");
   eq(bad.reason, `clean-room gate failed: packages: the sandbox's cargo cache holds ${cache}/flate2-1.0.30`, "...naming the directory");
   like(bad.calls, /^exec kukulu-0123456789abcdef find \/home\/kukulu\/\.cargo\/registry\/src -mindepth 2 -maxdepth 2 -type d$/m, "...by asking the container to list the registry sources");
+  const prerelease = await runCase(`${cache}/flate2-1.0.0-rc.1\n`);
+  eq(prerelease.reason, `clean-room gate failed: packages: the sandbox's cargo cache holds ${cache}/flate2-1.0.0-rc.1`, "gate check 10 fails on a denied crate at a pre-release version in the sandbox cache");
   const spelled = await runCase(`${cache}/libz-sys-1.1.8\n`);
   like(spelled.reason ?? "", /the sandbox's cargo cache holds .*libz-sys-1\.1\.8/, "cargo names compare with - and _ equal in the cache too");
   const clean = await runCase(`${cache}/serde-1.0.200\n${cache}/flate2x-1.0.0\n`);

@@ -298,7 +298,8 @@ function packagesCheck(policy) {
     }
     const denied = new Set(policy.deny.packages.cargo.map((n) => normalizePackageName("cargo", n)));
     for (const dir of (r.status === 0 ? r.stdout : "").split("\n").filter(Boolean)) {
-      const crate = /^(.*)-\d[^-]*$/.exec(path.basename(dir))?.[1];
+      // The crate is what precedes the first -<major>.<minor>.<patch> segment, so a pre-release such as flate2-1.0.0-rc.1 is flate2.
+      const crate = /^(.*?)-\d+\.\d+\.\d+(?:[-+].*)?$/.exec(path.basename(dir))?.[1];
       if (crate && denied.has(normalizePackageName("cargo", crate))) return `the sandbox's cargo cache holds ${dir}`;
     }
   }
