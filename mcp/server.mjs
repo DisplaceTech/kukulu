@@ -17,7 +17,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import {
-  CleanroomError, loadPolicy, policyHash, appendEntry, readEntries, logPathFor, generateKey, loadKey, signCheckpoint, verifyCheckpoint, verifyChain, evaluate, lockdownActive, normalizeModel, familyOf, controlPaths, lockfileEcosystem, lockfilePackages, deniedPackage, normalizePackageName, ZERO_HASH, scorePair, position, verdictOf, LIMITS, coverageGaps, knownLimitsFor, summarizeEntries, signBytes,
+  CleanroomError, loadPolicy, policyHash, appendEntry, readEntries, logPathFor, generateKey, loadKey, signCheckpoint, verifyCheckpoint, verifyChain, evaluate, lockdownActive, normalizeModel, familyOf, controlPaths, rolesUsage, lockfileEcosystem, lockfilePackages, deniedPackage, normalizePackageName, ZERO_HASH, scorePair, position, verdictOf, LIMITS, coverageGaps, knownLimitsFor, summarizeEntries, signBytes,
 } from "./cleanroom.mjs";
 
 /**
@@ -3963,6 +3963,7 @@ function attest({ evidence } = {}) {
     egress[e.target] ??= { allowed: 0, denied: 0 };
     egress[e.target][e.decision === "allowed" ? "allowed" : "denied"] += 1;
   }
+  const usageByRole = rolesUsage(entries);
   const manifest = {
     version: 1,
     flight: cc.flight ?? gitFacts().branch,
@@ -3983,7 +3984,7 @@ function attest({ evidence } = {}) {
     }),
     genesis,
     // A flight that began on 0.7.x has no roles in its genesis. "configuration" is the weakest assurance: the roles are what the routing said; "egress" means the proxy also saw the traffic to the runner.
-    roles: genesis.data?.roles ? Object.fromEntries(ROLES.map((role) => [role, { ...genesis.data.roles[role], assurance: level === "container+proxy" ? "egress" : "configuration" }])) : null,
+    roles: genesis.data?.roles ? Object.fromEntries(ROLES.map((role) => [role, { ...genesis.data.roles[role], ...usageByRole[role], assurance: level === "container+proxy" ? "egress" : "configuration" }])) : null,
     policy: { path: cc.cleanroom.policy, hashes: policyHashes, current: policyHash(policyBytes) },
     chain: { entries: entries.length, first: entries[0].hash, tip: entries[entries.length - 1].hash },
     checkpoints: checkpoints.map((e) => ({ seq: e.seq, event: e.data.event, git: e.data.git, signature: e.data.signature, ok: verifyCheckpoint(e, key.publicKey) })),

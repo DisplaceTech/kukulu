@@ -38,7 +38,7 @@ const logLines = (dir) => fs.readFileSync(path.join(dir, "log.jsonl"), "utf8").s
   const j = run(b.dir, "--json");
   const parsed = JSON.parse(j.stdout);
   eq(j.stdout.trim().split("\n").length + "|" + parsed.ok + "|" + Object.keys(parsed).sort().join(","), "1|true|checks,enforcement,mode,notes,ok,reasons", "--json prints one object");
-  eq(Object.keys(parsed.checks).join(","), "manifest,signature,chain,checkpoints,policy,guard,mode,denials,coverage,similarity,enforcement", "...with a result for each of the eleven checks");
+  eq(Object.keys(parsed.checks).join(","), "manifest,signature,chain,checkpoints,policy,guard,mode,denials,coverage,similarity,enforcement,roles", "...with a result for each of the twelve checks");
   eq(run(b.dir, "--json").status, 0, "...and exits 0 on a pass");
   const bad = JSON.parse(run(b.dir, "--json", "--key", "sha256:" + "1".repeat(64)).stdout);
   eq(bad.ok + "|" + bad.reasons[0].check, "false|signature", "--json carries the reasons too");
@@ -397,6 +397,49 @@ const logLines = (dir) => fs.readFileSync(path.join(dir, "log.jsonl"), "utf8").s
   like(run(unlisted.dir).stdout, /coverage: the log shows a gap the manifest omits: .*unsigned-commit/, "...and a hook manifest that lists none fails");
 }
 
+// ---------------------------------------------------------------- check 12: the roles (P3-03)
+
+{
+  const ROLES4 = ["planner", "implementer", "reviewer", "summarizer"];
+  const routed = Object.fromEntries(ROLES4.map((role) => [role, { model: role === "implementer" ? "spark/nemotron" : "opus", runner: role === "implementer" ? "spark" : "anthropic", endpoint: "http://spark.test:8000", locality: "local", identity: { source: "none" }, family: role === "implementer" ? "nemotron" : "claude" }]));
+  const usageEntry = (log, role, models, cost) => CR.appendEntry(log, { kind: "usage", stage: "implement", role, tool: null, decision: null, data: { models, first: "2026-01-01T00:00:00.000Z", last: "2026-01-01T00:01:00.000Z", cost } });
+  const m = (requests, input, output, cacheRead = 0, cacheWrite = 0) => ({ requests, input, output, cacheRead, cacheWrite });
+  const extra = (log) => {
+    usageEntry(log, "kukulu-implementer", { "spark/nemotron": m(3, 100, 40, 10, 5) }, 0.5);
+    usageEntry(log, "kukulu:implementer", { "spark/nemotron": m(1, 20, 10) }, 0.25);
+    usageEntry(log, "kukulu-reviewer", { opus: m(2, 7, 3) }, 0.1);
+    CR.appendEntry(log, { kind: "usage", stage: "review", role: "kukulu-reviewer", tool: null, decision: null, data: { error: "ENOENT: no such file" } });
+  };
+  const b = fresh({ roles: routed, extra });
+  const impl = b.manifest.roles.implementer;
+  eq(JSON.stringify(impl.reported) + "|" + JSON.stringify(impl.usage), '["spark/nemotron"]|{"requests":4,"input":120,"output":50,"cacheRead":10,"cacheWrite":5,"cost":0.75}', "the manifest's roles carry reported models and usage sums, across both agent spellings");
+  eq(JSON.stringify(b.manifest.roles.reviewer.usage), '{"requests":2,"input":7,"output":3,"cacheRead":0,"cacheWrite":0,"cost":0.1}', "...skipping an entry that holds an error");
+  eq(JSON.stringify(b.manifest.roles.planner.reported) + JSON.stringify(b.manifest.roles.planner.usage.requests), "[]0", "...and nothing for a role no subagent ran as");
+  const ok1 = run(b.dir);
+  eq(ok1.status, 0, "a bundle whose roles match the log passes check 12");
+  ok(!/the endpoint reported/.test(ok1.stdout), "...with no note when every reported model is the routed one");
+  eq(JSON.stringify(V.rolesUsage(b.entries)), JSON.stringify(CR.rolesUsage(b.entries)), "the verifier's recount and the module's agree");
+
+  const sum = fresh({ roles: routed, extra });
+  rewriteManifest(sum.dir, sum.key, (mf) => { mf.roles.implementer.usage.input += 1; });
+  const failed = run(sum.dir);
+  eq(failed.status, 1, "an edited usage sum fails roles");
+  like(failed.stdout, /^verify-attestation: roles: implementer\.usage differs from the log's: \{"requests":4,"input":120,"output":50,"cacheRead":10,"cacheWrite":5,"cost":0\.75\}$/m, "...naming the role, the field and the recount");
+  const rep = fresh({ roles: routed, extra });
+  rewriteManifest(rep.dir, rep.key, (mf) => { mf.roles.reviewer.reported = ["opus", "ghost"]; });
+  like(run(rep.dir).stdout, /roles: reviewer\.reported differs from the log's: \["opus"\]/, "an edited reported list fails roles");
+
+  const other = fresh({ roles: routed, extra: (log) => usageEntry(log, "kukulu-implementer", { "spark/nemotron": m(1, 1, 1), "mystery-model": m(1, 1, 1) }, 0.01) });
+  const noted = run(other.dir);
+  eq(noted.status, 0, "a reported model other than the routed one does not fail the bundle");
+  like(noted.stdout, /^verify-attestation: note: implementer: the endpoint reported mystery-model, spark\/nemotron; routing declared spark\/nemotron$/m, "...it prints the note, with the exact text");
+
+  const old = fresh();
+  const o = run(old.dir);
+  eq(o.status, 0, "a manifest without roles (0.7.x) passes check 12");
+  ok(!/the endpoint reported/.test(o.stdout) && JSON.parse(run(old.dir, "--json").stdout).checks.roles === true, "...with no note, and the check ran");
+}
+
 // ---------------------------------------------------------------- check 8: the denials
 
 {
@@ -710,7 +753,7 @@ async function summarizedFlight() {
       ok(manifest.coverage.gaps.length === count && manifest.coverage.gaps.every((g) => g.kind === "unsigned-commit"), "the gaps are the unsigned commits of this unsigned test repository, and nothing else (" + count + ")");
 
       ok(r.verify.ok === true && r.verify.reasons.length === 0, "the verifier's PASS is returned");
-      eq(Object.keys(r.verify.checks).join(","), "manifest,signature,chain,checkpoints,policy,guard,mode,denials,coverage,similarity,enforcement", "...with all eleven checks run");
+      eq(Object.keys(r.verify.checks).join(","), "manifest,signature,chain,checkpoints,policy,guard,mode,denials,coverage,similarity,enforcement,roles", "...with all twelve checks run");
       eq(r.fingerprint, manifest.signer.fingerprint, "the result carries the signer's fingerprint");
       const cli = spawnSync(process.execPath, [VERIFIER, dir, "--key", r.fingerprint], { encoding: "utf8" });
       eq(cli.status, 0, "the CLI passes the committed bundle with the right --key");
@@ -734,7 +777,8 @@ async function summarizedFlight() {
       eq(manifest.human.verdicts + "|" + (manifest.human.instructions >= 1), "1|true", "the human entries are counted, the prompt among them");
       ok(JSON.stringify(manifest.coverage.knownLimits) === JSON.stringify(CR.knownLimitsFor("hook")) && manifest.coverage.idleGapHours === 3, "the coverage section carries the known limits and the idle threshold");
       eq(JSON.stringify(Object.keys(manifest.roles)), JSON.stringify(["planner", "implementer", "reviewer", "summarizer"]), "the manifest's roles name every role");
-      eq(JSON.stringify(Object.values(manifest.roles).map(({ assurance, ...rest }) => rest)), JSON.stringify(Object.values(entriesOf(repo)[0].data.roles)), "the manifest's roles repeat genesis's roles");
+      eq(JSON.stringify(Object.values(manifest.roles).map(({ assurance, reported, usage, ...rest }) => rest)), JSON.stringify(Object.values(entriesOf(repo)[0].data.roles)), "the manifest's roles repeat genesis's roles");
+      ok(Object.values(manifest.roles).every((r) => Array.isArray(r.reported) && r.usage.requests === 0 && r.usage.cost === 0), "...with reported and usage (zero here: no subagent stopped)");
       ok(Object.values(manifest.roles).every((r) => r.assurance === "configuration" && r.identity.source === "vendor-asserted"), "...with assurance configuration and identity vendor-asserted for the default routing");
       eq(Object.keys(manifest).slice(5, 10).join(","), "enforcement,packages,genesis,roles,policy", "enforcement follows mode, packages follows enforcement, and roles follows genesis, in the manifest");
       eq(JSON.stringify(manifest.enforcement), '{"level":"hook"}', "a hook flight's manifest records enforcement level hook");

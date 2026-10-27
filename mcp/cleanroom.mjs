@@ -2064,6 +2064,31 @@ export function deniedPackage(policy, ecosystem, packages) {
   return packages.find((p) => denied.has(normalizePackageName(ecosystem, p.name))) ?? null;
 }
 
+/**
+ * Per role, the models the endpoint reported and the token sums of the `usage` entries of that role's agents
+ * (SPEC D-02): `{ reported: [sorted model names], usage: { requests, input, output, cacheRead, cacheWrite, cost } }`.
+ * `cost` is null when any counted entry's is; an entry that holds an `error` is skipped.
+ * scripts/verify-attestation.mjs duplicates this on purpose.
+ */
+export function rolesUsage(entries) {
+  const out = {};
+  for (const role of ["planner", "implementer", "reviewer", "summarizer"]) {
+    const agent = new RegExp(`^kukulu[-:]${role}$`);
+    const reported = new Set();
+    const usage = { requests: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 };
+    for (const e of entries) {
+      if (e.kind !== "usage" || !agent.test(e.role ?? "") || !e.data || e.data.error) continue;
+      for (const [model, m] of Object.entries(e.data.models ?? {})) {
+        reported.add(model);
+        for (const key of ["requests", "input", "output", "cacheRead", "cacheWrite"]) usage[key] += m[key] ?? 0;
+      }
+      usage.cost = usage.cost === null || typeof e.data.cost !== "number" ? null : Math.round((usage.cost + e.data.cost) * 1e6) / 1e6;
+    }
+    out[role] = { reported: [...reported].sort(), usage };
+  }
+  return out;
+}
+
 // ---------------------------------------------------------------- what an attestation counts
 
 /** The tools whose calls can read something, for the manifest's readCapable count. */

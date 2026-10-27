@@ -178,7 +178,7 @@ The manifest's fields, in the order it writes them:
 - `packages`: one entry per tracked lockfile, `{ path, sha256, ecosystem, packages, outsideClaim: true }`, where `packages` lists `name@version` (or the bare name when unpinned). Packages a lockfile names are outside the claim: the log cannot show what their source contained.
 - `enforcement`: `{ level }`, the level from the genesis (`hook` when a 0.7.x genesis records none); under `container+proxy` also `boundary`, the genesis's, and `egress`, an object keyed by `host:port` with `{ allowed, denied }` counts from the `egress` entries.
 - `genesis`: the first log entry, repeated.
-- `roles`: each role's `model`, `runner`, `endpoint`, `locality`, `identity` and `family` from the genesis entry, each with `assurance`: `"configuration"` (the roles are what the routing said, not what a runner reported or the proxy saw) or, under `container+proxy`, `"egress"` (the proxy also saw the traffic to the runner), or `null` for a flight that began on 0.7.x, whose genesis has no `roles`.
+- `roles`: each role's `model`, `runner`, `endpoint`, `locality`, `identity` and `family` from the genesis entry, plus `reported` (the sorted model names the role's subagents' transcripts showed, from the `usage` entries) and `usage` (`{ requests, input, output, cacheRead, cacheWrite, cost }` summed over them, `cost` null when any entry's is), each with `assurance`: `"configuration"` (the roles are what the routing said, not what a runner reported or the proxy saw) or, under `container+proxy`, `"egress"` (the proxy also saw the traffic to the runner), or `null` for a flight that began on 0.7.x, whose genesis has no `roles`.
 - `policy`: its `path`, every distinct `hashes` value seen in the checkpoints in order, and the `current` one.
 - `chain`: the number of `entries`, the `first` hash and the `tip`.
 - `checkpoints`: each one's `seq`, `event`, `git`, `signature` and whether it verifies (`ok`).
@@ -209,7 +209,7 @@ node docs/attestation/verify.mjs docs/attestation --key sha256:<fingerprint> [--
 
 `--key` is the signer's fingerprint, which you got from the publisher by some other route than the bundle (the bundle can carry any key it likes). Without it the bundle is only self-consistent, and the report says so with `verify-attestation: note: signer: self-consistent, fingerprint not checked against an out-of-band value`. `--json` prints the result as one object (`ok`, `mode`, `enforcement`, `reasons`, `notes`, `checks`) instead of text. `--expect` names the mode the bundle must have, and `--require-enforcement` the lowest enforcement level (`hook`, `container+proxy` or `container+proxy+audit`) it may have been built under. Exit status is 0 for a pass, 1 for a failure, 2 for a usage error and 3 for a passing control bundle (`CONTROL (positive)`, see [Control mode](#control-mode)) when `--expect control-positive` was not given. The verifier needs Node 22 or later, nothing else: no network, no git, no packages. The copy in the bundle and `scripts/verify-attestation.mjs` are the same file.
 
-It runs eleven checks in order and reports every failure, not only the first:
+It runs twelve checks in order and reports every failure, not only the first:
 
 1. `manifest`: `manifest.json` parses, its `version` is 1, and every listed file exists with the listed SHA-256 and size.
 2. `signature`: `manifest.sig` verifies over `manifest.json` with `publisher.pub`, and the key's fingerprint is the one you asked for.
@@ -222,6 +222,7 @@ It runs eleven checks in order and reports every failure, not only the first:
 9. `coverage`: the gaps, recomputed and printed.
 10. `similarity`: `similarity.json` hashes to the manifest's value, when there is one.
 11. `enforcement`: the manifest's level is `hook`, `container+proxy` or `container+proxy+audit`; under `container+proxy` the genesis has a `boundary` and the manifest's equals it, the `egress` summary equals a recount from the log's `egress` entries, and no gate failed the boundary check; and `coverage.knownLimits` is the list for the level. With `--require-enforcement <level>`, a bundle built below that level fails with `enforcement: the bundle was built under <level>, below the required <level>`. A manifest with no `enforcement` field, as every 0.7.x bundle, reads as `hook` with the note `enforcement absent (bundle from 0.7.x); read as hook`.
+12. `roles`: when the manifest has `roles`, each role's `reported` and `usage` equal a recount from the log's `usage` entries (`roles: <role>.<reported|usage> differs from the log's: <recount as JSON>`). A role whose subagents reported a model other than the one routing declared gets a note, `<role>: the endpoint reported <names>; routing declared <model>`: the routing is the operator's claim and the endpoint's answer is evidence, so a difference is shown, not failed. A manifest without `roles` (every 0.7.x bundle) passes with no note.
 
 A passing bundle prints its notes and then one line:
 

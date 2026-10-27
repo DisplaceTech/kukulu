@@ -455,7 +455,7 @@ const sha256Of = (bytes) => createHash("sha256").update(bytes).digest("hex");
  * `opts.checkpointKey` signs the second checkpoint instead (to build a bad one),
  * `opts.policyText` is the policy. `opts.clock()` replaces the time entries are stamped with,
  * `opts.extra(log)` appends more entries (after the first checkpoint), `opts.commits` is commits.txt,
- * `opts.gaps` and `opts.idleGapHours` are the manifest's coverage, `opts.cleanroomHash` (default none, the 0.7.0 shape) is pinned in the genesis entry and the manifest's plugin object, `opts.similarity` is a similarity.json's text, `opts.mode` (default `clean-room`) is the genesis's and the manifest's mode, `opts.head` the manifest's `repo.head`, `opts.enforcement` (`hook` by default, or `container+proxy`, which records a boundary built from `test/fixtures/docker/inspect.json` in the genesis and the manifest, and an egress summary counted from the entries) the enforcement level.
+ * `opts.gaps` and `opts.idleGapHours` are the manifest's coverage, `opts.cleanroomHash` (default none, the 0.7.0 shape) is pinned in the genesis entry and the manifest's plugin object, `opts.similarity` is a similarity.json's text, `opts.mode` (default `clean-room`) is the genesis's and the manifest's mode, `opts.head` the manifest's `repo.head`, `opts.roles` (a role to `{ model, runner, endpoint, locality, identity, family }` object, written into the genesis; the manifest gets each role with `reported` and `usage` recounted from the `usage` entries, which `opts.extra` can append), `opts.enforcement` (`hook` by default, or `container+proxy`, which records a boundary built from `test/fixtures/docker/inspect.json` in the genesis and the manifest, and an egress summary counted from the entries) the enforcement level.
  * The manifest's denials are counted from the entries here, independently of the verifier. Returns `{ dir, key, fingerprint, manifest, entries }`.
  */
 export function buildBundle(dir, opts = {}) {
@@ -491,7 +491,7 @@ export function buildBundle(dir, opts = {}) {
     const c = JSON.parse(fs.readFileSync(path.join(ROOT, "test", "fixtures", "docker", "inspect.json"), "utf8").replaceAll("__ROOT__", "/work/proj"))[0];
     boundary = { engine: "docker", image: c.Image, network: c.HostConfig.NetworkMode, mounts: c.Mounts.map((m) => ({ source: m.Source, destination: m.Destination, rw: m.RW })).sort((a, b) => (a.destination < b.destination ? -1 : 1)) };
   }
-  CR.appendEntry(log, { kind: "genesis", stage: "controller", ...base, data: { mode: opts.mode ?? "clean-room", enforcement: level, ...(boundary ? { boundary } : {}), policyHash, guardHash, loggerHash, hooksHash, ...(opts.cleanroomHash ? { cleanroomHash: opts.cleanroomHash } : {}), pluginVersion: "0.7.0", keyFingerprint: key.fingerprint, baseBranch: "main", head: "a".repeat(40) } });
+  CR.appendEntry(log, { kind: "genesis", stage: "controller", ...base, data: { mode: opts.mode ?? "clean-room", enforcement: level, ...(opts.roles ? { roles: opts.roles } : {}), ...(boundary ? { boundary } : {}), policyHash, guardHash, loggerHash, hooksHash, ...(opts.cleanroomHash ? { cleanroomHash: opts.cleanroomHash } : {}), pluginVersion: "0.7.0", keyFingerprint: key.fingerprint, baseBranch: "main", head: "a".repeat(40) } });
   CR.appendEntry(log, { kind: "gate", stage: "controller", ...base, data: { checks: 7, ok: true } });
   CR.appendEntry(log, { kind: "allowed", stage: "implement", task: "P0-01", ...base, tool: "Read", target: "/p/a.rs", decision: "allowed" });
   CR.appendEntry(log, { kind: "denied", stage: "implement", task: "P0-01", ...base, tool: "Read", target: "/usr/include/zlib.h", decision: "denied", reason: "denied path: /usr/include/zlib.h (deny.paths)" });
@@ -543,6 +543,7 @@ export function buildBundle(dir, opts = {}) {
     repo: { baseBranch: "main", base: "a".repeat(40), head: opts.head ?? "b".repeat(40), branch: "build/test" },
     mode: opts.mode ?? "clean-room",
     enforcement: { level, ...(boundary ? { boundary, egress } : {}) },
+    ...(opts.roles ? { roles: Object.fromEntries(Object.entries(opts.roles).map(([role, r]) => [role, { ...r, ...CR.rolesUsage(entries)[role], assurance: "configuration" }])) } : { roles: null }),
     genesis: entries[0],
     policy: { path: "docs/cleanroom.json", hashes: [policyHash], current: policyHash },
     chain: { entries: entries.length, first: entries[0].hash, tip: entries.at(-1).hash },

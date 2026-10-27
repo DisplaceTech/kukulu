@@ -39,6 +39,33 @@ export function knownLimitsFor(level) {
   return KNOWN_LIMITS.filter((l) => l.levels.includes(level)).map((l) => l.text);
 }
 
+// Duplicated from mcp/cleanroom.mjs on purpose (a bundle's verifier imports nothing); test/attest.mjs feeds both the same entries.
+/**
+ * Per role, the models the endpoint reported and the token sums of the `usage` entries of that role's agents
+ * (SPEC D-02): `{ reported: [sorted model names], usage: { requests, input, output, cacheRead, cacheWrite, cost } }`.
+ * `cost` is null when any counted entry's is; an entry that holds an `error` is skipped.
+ * scripts/verify-attestation.mjs duplicates this on purpose.
+ */
+export function rolesUsage(entries) {
+  const out = {};
+  for (const role of ["planner", "implementer", "reviewer", "summarizer"]) {
+    const agent = new RegExp(`^kukulu[-:]${role}$`);
+    const reported = new Set();
+    const usage = { requests: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 };
+    for (const e of entries) {
+      if (e.kind !== "usage" || !agent.test(e.role ?? "") || !e.data || e.data.error) continue;
+      for (const [model, m] of Object.entries(e.data.models ?? {})) {
+        reported.add(model);
+        for (const key of ["requests", "input", "output", "cacheRead", "cacheWrite"]) usage[key] += m[key] ?? 0;
+      }
+      usage.cost = usage.cost === null || typeof e.data.cost !== "number" ? null : Math.round((usage.cost + e.data.cost) * 1e6) / 1e6;
+    }
+    out[role] = { reported: [...reported].sort(), usage };
+  }
+  return out;
+}
+
+
 const ENTRY_KEYS = ["seq", "prev", "at", "kind", "stage", "task", "role", "model", "session", "tool", "target", "decision", "reason"];
 const CHECKPOINT_KEYS = ["chainTip", "git", "policyHash", "guardHash", "loggerHash", "hooksHash", "keyFingerprint", "event"];
 const ZERO_HASH = "0".repeat(64);
@@ -371,6 +398,19 @@ export function verifyBundle(dir, { key = null, expect = null, requireEnforcemen
       if (requireEnforcement && ENFORCEMENT_LEVELS.indexOf(level) < ENFORCEMENT_LEVELS.indexOf(requireEnforcement)) {
         fail("enforcement", `the bundle was built under ${level}, below the required ${requireEnforcement}`);
       }
+    }
+  }
+
+  // 12. the roles: the reported models and token sums recount from the usage entries, and a model nobody routed to is noted
+  if (notChecked("roles") && manifest.roles) {
+    const recount = rolesUsage(entries);
+    for (const [role, record] of Object.entries(manifest.roles)) {
+      if (!recount[role]) continue;
+      for (const field of ["reported", "usage"]) {
+        if (JSON.stringify(record[field]) !== JSON.stringify(recount[role][field])) fail("roles", `${role}.${field} differs from the log's: ${JSON.stringify(recount[role][field])}`);
+      }
+      const reported = recount[role].reported ?? [];
+      if (reported.some((m) => m !== record.model)) notes.push(`${role}: the endpoint reported ${reported.join(", ")}; routing declared ${record.model}`);
     }
   }
 
