@@ -201,6 +201,12 @@ The manifest's fields, in the order it writes them:
 
 `coverage.knownLimits` is the list under [Known gaps](#known-gaps) for the bundle's enforcement level: what no log of tool calls can show.
 
+## Comparing two bundles
+
+`node scripts/compare-bundles.mjs <bundle-a> <bundle-b> [--key-a <fingerprint>] [--key-b <fingerprint>] [--trees <dir-a> <dir-b>] [--json]` puts two bundles side by side. It first runs each bundle's own `verify.mjs` and refuses unless both pass (a control bundle's exit 3 counts as a pass). It then prints, for A and for B, the mode and enforcement level (with the egress summary), the gates run and failed, the human records, the denials by reason, the coverage gaps by kind, the similarity verdict with each metric's negative and positive control, each role's model, runner, identity source and family, the wall time per stage (from the `stage` entries) and the tokens per role and model (from the `usage` entries). An item a bundle does not have prints an em dash. `--json` prints the same items under `a` and `b`.
+
+With `--trees`, it also scores the two result trees against each other with bundle A's similarity parameters (`ngram`, `minIdentLen`, `commentNgram`, `languages`; B's when only B has a `similarity.json`), refusing when B's parameters differ from A's. The `cross score` section prints each metric's cross score beside each bundle's negative control: two independent clean-room builds should score at or near their negative controls. The script writes nothing.
+
 ## Verifying offline
 
 ```text

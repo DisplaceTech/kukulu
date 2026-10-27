@@ -5,7 +5,8 @@ import fs from "node:fs";
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { finish, ok, eq, like, ROOT, mkDir, buildBundle } from "./harness.mjs";
+import { finish, ok, eq, like, ROOT, mkDir, buildBundle, buildComparePair } from "./harness.mjs";
+import { scorePair } from "../mcp/cleanroom.mjs";
 
 const IDENTITY = path.join(ROOT, "scripts", "model-identity.mjs");
 const FIX = path.join(ROOT, "test", "fixtures", "identity");
@@ -121,6 +122,60 @@ const tree = (dir) => fs.readdirSync(dir, { recursive: true }).sort().join("\n")
   eq(publishRun(b.dir, "--key", "sha256:abc", "--out", "x").status, 2, "a malformed fingerprint is a usage error");
   eq(publishRun("--check", b.dir, "--key", fp, "--out", "x").status, 2, "both forms at once is a usage error");
   like(publishRun().stderr, /^usage: node scripts\/publish-bundle\.mjs/, "usage goes to stderr");
+}
+
+// ---------------------------------------------------------------- compare-bundles (P3-04)
+
+const COMPARE = path.join(ROOT, "scripts", "compare-bundles.mjs");
+const compareRun = (...args) => spawnSync(process.execPath, [COMPARE, ...args], { encoding: "utf8", cwd: ROOT });
+
+{
+  const dir = mkDir("kukulu-compare-");
+  const { a, b } = buildComparePair(dir);
+  const before = tree(dir);
+  const r = compareRun(a.dir, b.dir);
+  eq(r.status, 0, "compare-bundles exits 0 on two verifying bundles");
+  eq(r.stdout, fs.readFileSync(path.join(ROOT, "test", "fixtures", "compare", "expected.txt"), "utf8"), "the text output for a hook and a container+proxy bundle matches expected.txt");
+  ok(/^wall time per stage\n  A: implement 60 s, plan 60 s\n/m.test(r.stdout) && /A: implementer: opus 1200 in \/ 300 out/.test(r.stdout), "...with stage spans and tokens read from the log");
+
+  const j = JSON.parse(compareRun(a.dir, b.dir, "--json").stdout);
+  eq(Object.keys(j).join(), "a,b", "--json prints both bundles' items");
+  eq(j.a.modeAndEnforcement.level + "|" + j.b.modeAndEnforcement.level, "hook|container+proxy", "...their enforcement levels");
+  eq(j.b.tokensPerRoleAndModel.reviewer.opus.input, 90, "...and the token sums");
+  eq(Object.keys(j.a).join(), "modeAndEnforcement,gates,humanRecords,denialsByReason,coverageGapsByKind,similarity,roles,wallTimePerStage,tokensPerRoleAndModel", "...in the order the text prints them");
+
+  const key = compareRun(a.dir, b.dir, "--key-a", a.fingerprint, "--key-b", b.fingerprint);
+  eq(key.status, 0, "the right --key-a and --key-b pass");
+  const wrong = compareRun(a.dir, b.dir, "--key-a", `sha256:${"0".repeat(64)}`);
+  eq(wrong.status, 1, "a failing bundle refuses");
+  like(wrong.stderr, /^compare-bundles: .* does not verify: signature: /, "...naming the bundle and the first reason");
+  eq(wrong.stdout, "", "...with nothing on stdout");
+  eq(compareRun(a.dir).status, 2, "one bundle is a usage error");
+  eq(compareRun(a.dir, b.dir, "--key-a", "abc").status, 2, "a malformed --key-a is a usage error");
+  eq(compareRun(a.dir, b.dir, "--trees", "x").status, 2, "--trees with one directory is a usage error");
+  like(compareRun(a.dir, b.dir, "--nope").stderr, /unknown option --nope/, "an unknown option is a usage error");
+
+  const FIX = (d) => path.join(ROOT, "test", "fixtures", "similarity", d);
+  const cross = compareRun(a.dir, b.dir, "--trees", FIX("a"), FIX("b"));
+  eq(cross.status, 0, "--trees on two fixture trees exits 0");
+  const read = (d) => fs.readdirSync(FIX(d)).filter((f) => /\.(rs|c|h)$/.test(f)).sort().map((f) => ({ path: f, text: fs.readFileSync(path.join(FIX(d), f), "utf8"), language: f.endsWith(".rs") ? "rust" : "c" }));
+  const want = scorePair(read("a"), read("b"), { ngram: [5, 10], minIdentLen: 6, commentNgram: 5 });
+  for (const [metric, score] of Object.entries(want)) {
+    like(cross.stdout, new RegExp(`^  ${metric.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}: cross ${score.toFixed(4)}; A negative \\d\\.\\d{4}; B negative \\d\\.\\d{4}$`, "m"), `...gives the cross score for ${metric}`);
+  }
+  like(cross.stdout, /\ncross score\n/, "...under a cross score heading");
+  ok(cross.stdout.endsWith("Two independent clean-room builds should score at or near their negative controls.\n"), "...ending with the sentence");
+  const crossJson = JSON.parse(compareRun(a.dir, b.dir, "--trees", FIX("a"), FIX("b"), "--json").stdout);
+  eq(crossJson.cross["ident_jaccard"].cross, want.ident_jaccard, "--json carries the cross scores too");
+
+  const mismatch = buildComparePair(mkDir("kukulu-compare-"), { bSimilarityConfig: { ngram: [4], minIdentLen: 6, commentNgram: 5, languages: { ".rs": "rust" } } });
+  const m = compareRun(mismatch.a.dir, mismatch.b.dir, "--trees", FIX("a"), FIX("b"));
+  eq(m.status + "|" + m.stderr, "1|compare-bundles: bundle B's similarity parameters differ from A's (ngram)\n", "mismatched parameters refuse");
+  const none = buildComparePair(mkDir("kukulu-compare-"), { noSimilarity: true });
+  const n = compareRun(none.a.dir, none.b.dir, "--trees", FIX("a"), FIX("b"));
+  eq(n.status + "|" + n.stderr, "1|compare-bundles: neither bundle has a similarity.json, so --trees has no scoring parameters\n", "no similarity.json refuses --trees");
+  like(compareRun(none.a.dir, none.b.dir).stdout, /^similarity\n  A: \u2014\n  B: \u2014$/m, "...and a missing item prints an em dash without --trees");
+  eq(tree(dir), before, "the script writes nothing");
 }
 
 finish();

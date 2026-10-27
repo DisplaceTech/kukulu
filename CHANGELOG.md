@@ -31,6 +31,7 @@ All notable changes to this plugin. Format follows
 - Stage timing: `kukulu_next` records when each stage starts and ends in `state.timeline` (every mode) and as `stage` entries in the chain (clean-room mode), committed as `chore: stage <stage>`, and `kukulu_status` reports `timeline` and `stageSeconds` (G-10, D-01).
 - Token use per role: on `SubagentStop` in clean-room mode the logger reads the subagent's transcript and appends a `usage` entry with per-model token sums, first and last timestamps and cost (G-10, D-02).
 - The manifest's `roles` carry `reported` models and `usage` sums, and the verifier's check 12 (`roles`) recounts them from the `usage` entries and notes a reported model that routing did not declare (G-02, G-10).
+- `scripts/compare-bundles.mjs`, which compares two attestation bundles side by side and, with `--trees`, scores their result trees against each other (G-09, D-03).
 
 ### Changed
 

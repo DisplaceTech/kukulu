@@ -566,6 +566,53 @@ export function buildBundle(dir, opts = {}) {
   return { dir, key, fingerprint: key.fingerprint, manifest, entries };
 }
 
+/**
+ * Two bundles for the comparison script's tests, fully deterministic apart from the keys: `a` is a hook flight, `b` a
+ * container+proxy one with egress, stage and usage entries; both carry roles and a similarity.json whose parameters are
+ * the defaults. `opts.bSimilarityConfig` overrides B's parameters, `opts.noSimilarity` leaves both without one.
+ */
+export function buildComparePair(dir, opts = {}) {
+  const metrics = ["ngram_jaccard@5", "ngram_containment@5", "ngram_jaccard@10", "ngram_containment@10", "ident_jaccard", "ident_match_rate_left", "comment_jaccard"];
+  const config = { ngram: [5, 10], minIdentLen: 6, commentNgram: 5, languages: { ".rs": "rust", ".c": "c", ".h": "c" } };
+  const similarity = (verdict, config2, neg, pos) => JSON.stringify({
+    config: config2,
+    rows: metrics.flatMap((m, i) => [
+      { pair: "independent", role: "negative", metric: m, score: neg + i / 100, c: null, band: null },
+      { pair: "derived", role: "positive", metric: m, score: pos + i / 100, c: null, band: null },
+    ]),
+    verdict,
+  });
+  const routed = (model, runner, source, family) => ({ model, runner, endpoint: runner ? "http://spark.test:8000" : null, locality: runner ? "local" : "unknown", identity: { source }, family });
+  const roles = (implementer) => ({ planner: routed("opus", "anthropic", "vendor-asserted", "claude"), implementer, reviewer: routed("opus", "anthropic", "vendor-asserted", "claude"), summarizer: routed("opus", "anthropic", "vendor-asserted", "claude") });
+  const usage = (log, role, model, input, output, cost) => CR.appendEntry(log, { kind: "usage", stage: "implement", role, tool: null, decision: null, data: { models: { [model]: { requests: 1, input, output, cacheRead: 0, cacheWrite: 0 } }, first: "2026-01-01T00:00:00.000Z", last: "2026-01-01T00:01:00.000Z", cost } });
+  const stage = (log, event, name) => CR.appendEntry(log, { kind: "stage", stage: name, role: "controller", data: { event, stage: name, round: 0 } });
+  const clock = (start) => { let t = Date.parse(start); return () => (t += 30000); };
+  const a = buildBundle(path.join(dir, "a"), {
+    clock: clock("2026-02-01T00:00:00.000Z"),
+    roles: roles(routed("opus", "anthropic", "vendor-asserted", "claude")),
+    similarity: opts.noSimilarity ? undefined : similarity("shows no similarity beyond independent work", config, 0.1, 0.9),
+    extra: (log) => {
+      stage(log, "start", "plan"); stage(log, "end", "plan"); stage(log, "start", "implement"); stage(log, "end", "implement");
+      usage(log, "kukulu-implementer", "opus", 1200, 300, 0.5);
+      CR.appendEntry(log, { kind: "human", stage: "controller", role: "operator", target: "carry on with the plan", data: { kind: "instruction", via: "kukulu_cleanroom_record" } });
+    },
+  });
+  const b = buildBundle(path.join(dir, "b"), {
+    clock: clock("2026-02-02T00:00:00.000Z"),
+    enforcement: "container+proxy",
+    roles: roles(routed("spark/nemotron", "spark", "operator-measured", "nemotron")),
+    similarity: opts.noSimilarity ? undefined : similarity("is between the controls", opts.bSimilarityConfig ?? config, 0.2, 0.8),
+    extra: (log) => {
+      stage(log, "start", "plan"); stage(log, "end", "plan"); stage(log, "start", "implement"); stage(log, "end", "implement");
+      usage(log, "kukulu-implementer", "spark/nemotron", 5000, 800, null);
+      usage(log, "kukulu:reviewer", "opus", 90, 10, 0.01);
+      CR.appendEntry(log, { kind: "egress", stage: "controller", role: "session", tool: null, target: "spark.test:8000", decision: "allowed", reason: "runner endpoint spark", data: { bytesUp: 1, bytesDown: 2, ms: 3 } });
+      CR.appendEntry(log, { kind: "egress", stage: "controller", role: "session", tool: null, target: "example.com:443", decision: "denied", reason: "not allowed by this flight's policy" });
+    },
+  });
+  return { a, b };
+}
+
 /** Sign `dir/manifest.json` with `key`, writing `manifest.sig` (base64 Ed25519 over the manifest's bytes). */
 export function signBundleManifest(dir, key) {
   fs.writeFileSync(path.join(dir, "manifest.sig"), `${sign(null, fs.readFileSync(path.join(dir, "manifest.json")), key.privateKey).toString("base64")}\n`);
