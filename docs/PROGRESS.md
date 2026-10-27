@@ -31,7 +31,7 @@ Started: 2026-10-26T21:19:36.125Z
 - [x] P2-12 The guard denies adding a denied package
 - [x] P2-13 The 0.7.2 known-gap candidates: --remove-sent-files and pax
 - [x] P2-14 The real-container integration step
-- [ ] P2-15 Phase 2 end: push and record the manual checks
+- [x] P2-15 Phase 2 end: push and record the manual checks
 - [ ] P3-01 Stage timing in the log and in state
 - [ ] P3-02 Token use per role from the subagent transcript
 - [ ] P3-03 The manifest's reported models and usage, and verifier check 12
@@ -176,3 +176,8 @@ rsyncParts: --remove-sent-files sets removesSources (stores the option name; rea
 test/sandbox.mjs integration step: skip line + assertion without KUKULU_SANDBOX_IT/docker; with it, builds test/fixtures/docker/Containerfile.it and runs sandbox run --exec in a temp project. Ran once here (docker 29.9.2): image built, command exited 0, NET_FAIL, KUKULU_WRITE_FAIL and PROJECT_OK all appeared, it-file.txt visible outside, .kukulu untouched (189 assertions with the variable; 185 without).
 Codebase note: the project is bind-mounted, so the container user must have the host user's uid or it cannot write; added ARG KUKULU_UID (default 1000, replacing the base image node user) to both the IT Containerfile and templates/sandbox/Containerfile; docs/sandbox.md says to pass --build-arg KUKULU_UID=$(id -u) when not 1000.
 Interpretation: markers are appended to it-markers.txt in the project since the container's stdout is inherited.
+
+### P2-15 — f8425be
+
+Push: pushed build branch to origin. Empty phase-end commit.
+Manual check: NOT VERIFIED (human): on Linux, doctor passes; KUKULU_SANDBOX_IT=1 node test/sandbox.mjs passes (the implementer ran it once here with docker 29.9.2: it passed); a throwaway sandboxed clean-room flight runs to the end; inside it curl https://example.com fails and ls ~/.cargo/registry shows only the volume's own cache; its bundle verifies with --require-enforcement container+proxy and its egress summary lists only the runner endpoints. The same run inside a Linux VM on the owner's Mac is a second, separate check.
