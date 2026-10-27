@@ -36,7 +36,7 @@ Started: 2026-10-26T21:19:36.125Z
 - [x] P3-02 Token use per role from the subagent transcript
 - [x] P3-03 The manifest's reported models and usage, and verifier check 12
 - [x] P3-04 scripts/compare-bundles.mjs
-- [ ] P3-05 Phase 3 end: push and record the manual check
+- [x] P3-05 Phase 3 end: push and record the manual check
 - [ ] P4-01 kukulu_release
 - [ ] P4-02 Base health before planning
 - [ ] P4-03 The 0.7.2 review's notes
@@ -201,3 +201,8 @@ Interpretation: note lists every reported model; cost sums rounded to six decima
 
 scripts/compare-bundles.mjs (verifies each bundle first; nine items A/B; --json; --trees cross score with A's parameters, refusals for mismatch and no similarity.json; writes nothing). buildComparePair in test/harness.mjs; recorded test/fixtures/compare/expected.txt (identical across two runs). bundles suite 77; verify green (4463). CONTRIBUTING row, cleanroom.md ## Comparing two bundles.
 Interpretation: one prefixed line per role; metric lines indented under the verdict; blank line between sections; B's parameters used when only B has similarity.json.
+
+### P3-05 — 71a600d
+
+Push: pushed build branch to origin. Empty phase-end commit.
+Manual check: NOT VERIFIED (human): compare-bundles.mjs on the Phase 2 bundle and a hook bundle from a real flight prints wall time and tokens per role for both.
