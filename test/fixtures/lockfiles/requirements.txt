@@ -1,0 +1,7 @@
+# pinned and unpinned
+requests==2.32.3
+numpy
+flask>=3.0
+-r requirements-dev.txt
+--index-url https://example.invalid/simple
+Zlib_Ng[extra]==0.5.1  # a trailing comment

@@ -683,4 +683,38 @@ const exchange = (target, bytes, { until = null, then = null } = {}) => new Prom
   }
 }
 
+// ---------------------------------------------------------------- gate check 10 in the sandbox's cargo cache (P2-11)
+
+{
+  const zero = "sha256:" + "0".repeat(64);
+  const policy = JSON.stringify({ version: 1, enforcement: "container+proxy", sandbox: { image: `kukulu-sandbox@${zero}`, mounts: [{ path: "tools/oracle", mode: "ro" }] }, deny: { packages: { cargo: ["flate2", "libz_sys"] } } });
+  const name = "kukulu-0123456789abcdef";
+  const runCase = async (listing) => {
+    const repo = cleanroomRepo({ policy });
+    const dockerDir = mkFakeDocker();
+    const inspect = JSON.parse(readFile(ROOT, "test/fixtures/docker/inspect.json").replaceAll("__ROOT__", repo).replaceAll("/opt/kukulu", ROOT));
+    writeFile(dockerDir, "inspect.json", JSON.stringify(inspect));
+    if (listing !== null) writeFile(dockerDir, "exec-output", listing);
+    let out;
+    await withServer(repo, async (s) => {
+      logCall(repo);
+      out = await s.call("kukulu_next");
+      out.calls = fs.readFileSync(path.join(dockerDir, "calls.log"), "utf8");
+    }, { env: { PATH: `${dockerDir}:${process.env.PATH}`, KUKULU_SANDBOX: name, KUKULU_SANDBOX_ENGINE: "docker" } });
+    return out;
+  };
+  const cache = "/home/kukulu/.cargo/registry/src/index.crates.io-6f17d22bba15001f";
+  const bad = await runCase(`${cache}/serde-1.0.200\n${cache}/flate2-1.0.30\n`);
+  eq(bad.stage, "halt", "gate check 10 fails on a denied crate directory in the sandbox cache");
+  eq(bad.reason, `clean-room gate failed: packages: the sandbox's cargo cache holds ${cache}/flate2-1.0.30`, "...naming the directory");
+  like(bad.calls, /^exec kukulu-0123456789abcdef find \/home\/kukulu\/\.cargo\/registry\/src -mindepth 2 -maxdepth 2 -type d$/m, "...by asking the container to list the registry sources");
+  const spelled = await runCase(`${cache}/libz-sys-1.1.8\n`);
+  like(spelled.reason ?? "", /the sandbox's cargo cache holds .*libz-sys-1\.1\.8/, "cargo names compare with - and _ equal in the cache too");
+  const clean = await runCase(`${cache}/serde-1.0.200\n${cache}/flate2x-1.0.0\n`);
+  eq(clean.stage, "plan", "a cache without a denied crate passes");
+  eq(clean.gate.checked.slice(-2).join(","), "boundary,packages", "...and packages comes after boundary");
+  const empty = await runCase("");
+  eq(empty.stage, "plan", "an empty cache listing passes");
+}
+
 finish();

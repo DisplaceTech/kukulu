@@ -20,6 +20,7 @@ import {
   evaluate, lockdownActive, NETWORK_COMMANDS, READ_FAMILY, WRITE_FAMILY, protectedPaths,
   coverageGaps, KNOWN_LIMITS, knownLimitsFor,
   normalizeModel, familyOf, controlPaths, LOG_SOCKET_TIMEOUT_MS,
+  LOCKFILES, lockfileEcosystem, lockfilePackages, normalizePackageName, deniedPackage,
   generateKey, loadKey, keyFingerprint, CHECKPOINT_KEYS, signCheckpoint, verifyCheckpoint,
 } from "../mcp/cleanroom.mjs";
 
@@ -1315,6 +1316,65 @@ const gateCheck = (reason) => (reason.match(/^clean-room gate failed: ([\w-]+):/
     const g = logOf(plain).find((e) => e.kind === "genesis");
     eq(g.data.mode + "|" + ("control" in g.data), "clean-room|false", "a clean-room genesis records mode clean-room and no control");
   });
+}
+
+// ---------------------------------------------------------------- lockfiles and denied packages (P2-11)
+
+{
+  const lock = (name) => fs.readFileSync(path.join(ROOT, "test", "fixtures", "lockfiles", name), "utf8");
+  const flat = (list) => list.map((p) => `${p.name}@${p.version}`).join(",");
+  eq(flat(lockfilePackages("Cargo.lock", lock("Cargo.lock"))), "cleanflate@0.1.0,flate2@1.0.30,serde_json@1.0.117", "Cargo.lock yields every package name and version");
+  eq(flat(lockfilePackages("package-lock.json", lock("package-lock.json"))), "left-pad@1.3.0,pako@2.1.0,b@0.4.1", "package-lock.json yields top-level and nested packages");
+  eq(flat(lockfilePackages("npm-shrinkwrap.json", lock("npm-shrinkwrap.json"))), flat(lockfilePackages("package-lock.json", lock("package-lock.json"))), "npm-shrinkwrap.json parses like package-lock.json");
+  eq(flat(lockfilePackages("uv.lock", lock("uv.lock"))), "demo@0.1.0,zlib-ng@0.5.1", "uv.lock yields its packages, not the dependency entries");
+  eq(flat(lockfilePackages("poetry.lock", lock("poetry.lock"))), "requests@2.32.3,urllib3@2.2.2", "poetry.lock yields its packages, not the sub-table keys");
+  eq(flat(lockfilePackages("requirements.txt", lock("requirements.txt"))), "requests@2.32.3,numpy@null,flask@null,Zlib_Ng@0.5.1", "requirements.txt yields names and == pins only, skipping comments and options");
+  eq(flat(lockfilePackages("requirements-dev.txt", lock("requirements-dev.txt"))), "pytest@8.2.0", "requirements-dev.txt is read too");
+  eq(LOCKFILES.map(([n]) => lockfileEcosystem(n)).join() + "|" + lockfileEcosystem("requirements-prod.txt") + "|" + lockfileEcosystem("Cargo.toml") + "|" + lockfileEcosystem("notes.txt") + "|" + lockfileEcosystem("requirements.in"), "cargo,npm,npm,pypi,pypi|pypi|null|null|null", "lockfileEcosystem maps every form and nothing else");
+  let thrown = null;
+  try { lockfilePackages("package-lock.json", "{nope"); } catch (e) { thrown = e; }
+  ok(thrown instanceof CleanroomError && /package-lock\.json is not valid JSON/.test(thrown.message), "a lockfile that does not parse is a CleanroomError");
+  eq(normalizePackageName("cargo", "Libz_Sys"), "libz-sys", "cargo names compare with - and _ equal");
+  eq(normalizePackageName("pypi", "Zlib__Ng.Core"), "zlib-ng-core", "PyPI names follow PEP 503");
+  eq(normalizePackageName("npm", "Left_Pad") + "|" + (normalizePackageName("npm", "a-b") === normalizePackageName("npm", "a_b")), "Left_Pad|false", "npm names compare as written");
+  const policy = loadPolicy(JSON.stringify(base({ deny: { packages: { cargo: ["FLATE2", "libz_sys"], pypi: ["zlib.ng"] } } })));
+  eq(deniedPackage(policy, "cargo", lockfilePackages("Cargo.lock", lock("Cargo.lock")))?.name, "flate2", "deniedPackage finds a denied crate");
+  eq(deniedPackage(policy, "cargo", [{ name: "libz-sys", version: "1" }])?.name, "libz-sys", "...across - and _");
+  eq(deniedPackage(policy, "pypi", lockfilePackages("uv.lock", lock("uv.lock")))?.name, "zlib-ng", "...and across PEP 503 spellings");
+  eq(deniedPackage(policy, "npm", lockfilePackages("package-lock.json", lock("package-lock.json"))), null, "an ecosystem with no entry denies nothing");
+
+  const policyText = JSON.stringify({ ...JSON.parse(EXAMPLE), deny: { ...JSON.parse(EXAMPLE).deny, packages: { cargo: ["flate2"] } } });
+  const withLock = (name, text) => {
+    const repo = cleanroomRepo({ policy: policyText });
+    writeFile(repo, name, text);
+    git(repo, ["add", "-A"]);
+    git(repo, ["commit", "-qm", "add the lockfile"]);
+    return repo;
+  };
+  {
+    const repo = withLock("Cargo.lock", lock("Cargo.lock"));
+    await live(repo, async ({ call }) => {
+      const n = await call("kukulu_next");
+      eq(n.stage, "halt", "gate check 10 fails on a denied crate in Cargo.lock");
+      eq(n.reason, "clean-room gate failed: packages: Cargo.lock contains flate2 1.0.30, which policy deny.packages.cargo names; remove the dependency, and know that its source may already have been read", "...with the exact reason");
+      eq(gateEntries(repo).at(-1).data.failed, "packages", "...recorded in the chain");
+    });
+  }
+  {
+    const repo = withLock("Cargo.lock", lock("Cargo.lock").replace(/\[\[package\]\]\nname = "flate2"[\s\S]*?(?=\[\[package\]\]\nname = "serde_json")/, ""));
+    await live(repo, async ({ call }) => {
+      const n = await call("kukulu_next");
+      eq(n.stage, "plan", "gate check 10 passes a clean lockfile");
+      eq(n.gate.checked.at(-1), "packages", "...and the gate lists packages last");
+      eq(gateEntries(repo).at(-1).data.checks, 9, "...recording nine checks under hook with deny.packages");
+    });
+  }
+  {
+    const repo = withLock("sub/requirements.txt", "flate2==1\n");
+    await live(repo, async ({ call }) => {
+      eq((await call("kukulu_next")).stage, "plan", "a lockfile of an ecosystem the policy does not name is not read");
+    });
+  }
 }
 
 // ---------------------------------------------------------------- gate liveness

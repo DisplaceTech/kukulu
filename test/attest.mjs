@@ -679,6 +679,7 @@ async function summarizedFlight() {
   {
     const repo = copyOf(flight);
     writeFile(repo, "docs/conformance.txt", "all 41 vectors pass\n");
+    writeFile(repo, "Cargo.lock", fs.readFileSync(path.join(ROOT, "test", "fixtures", "lockfiles", "Cargo.lock"), "utf8"));
     git(repo, ["add", "-A"]);
     git(repo, ["commit", "-qm", "docs: conformance results\n\nKukulu-Stage: implement\nKukulu-Task: -"]);
     const head = git(repo, ["rev-parse", "HEAD"]);
@@ -735,9 +736,11 @@ async function summarizedFlight() {
       eq(JSON.stringify(Object.keys(manifest.roles)), JSON.stringify(["planner", "implementer", "reviewer", "summarizer"]), "the manifest's roles name every role");
       eq(JSON.stringify(Object.values(manifest.roles).map(({ assurance, ...rest }) => rest)), JSON.stringify(Object.values(entriesOf(repo)[0].data.roles)), "the manifest's roles repeat genesis's roles");
       ok(Object.values(manifest.roles).every((r) => r.assurance === "configuration" && r.identity.source === "vendor-asserted"), "...with assurance configuration and identity vendor-asserted for the default routing");
-      eq(Object.keys(manifest).slice(5, 9).join(","), "enforcement,genesis,roles,policy", "enforcement follows mode, and roles follows genesis, in the manifest");
+      eq(Object.keys(manifest).slice(5, 10).join(","), "enforcement,packages,genesis,roles,policy", "enforcement follows mode, packages follows enforcement, and roles follows genesis, in the manifest");
       eq(JSON.stringify(manifest.enforcement), '{"level":"hook"}', "a hook flight's manifest records enforcement level hook");
       ok(Object.values(manifest.roles).every((r) => r.assurance === "configuration"), "...and roles with assurance configuration");
+      eq(JSON.stringify(manifest.packages), JSON.stringify([{ path: "Cargo.lock", sha256: sha(fs.readFileSync(path.join(repo, "Cargo.lock"))), ecosystem: "cargo", packages: ["cleanflate@0.1.0", "flate2@1.0.30", "serde_json@1.0.117"], outsideClaim: true }]), "the manifest lists each lockfile's packages outside the claim");
+      eq(manifest.packages.length, 1, "...one entry per tracked lockfile");
       eq(manifest.plugin.cleanroomHash, CR.policyHash(fs.readFileSync(path.join(ROOT, "mcp", "cleanroom.mjs"))), "the manifest's plugin object carries cleanroomHash");
       eq(Object.keys(manifest.plugin).join(","), "version,guardHash,loggerHash,hooksHash,cleanroomHash,verifierHash", "...after hooksHash");
       eq(manifest.selfTest.ok + "|" + manifest.selfTest.cases, "true|" + manifest.selfTest.cases, "the self-test result is recorded");

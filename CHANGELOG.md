@@ -26,6 +26,7 @@ All notable changes to this plugin. Format follows
 - Commands inside the boundary: behind the sandbox every verify, extraVerify, build and mutate command runs through `<engine> exec` with an inner `timeout`, every git call the server makes ignores the repository's hooks, and a stream run start refuses (G-06, C-04).
 - The enforcement level in the attestation manifest, verifier check 11 (`enforcement`), `--require-enforcement <level>` and per-level known limits: twelve `{ id, text, levels }` entries, ten of them for `hook` and five for `container+proxy` (G-07, C-06 ⚠️ NEW MATTER).
 - Signing under the boundary: behind the sandbox `kukulu_run_start` refuses `policies.signing: "required"` and records `off (sandbox: …)` under `auto`, finalize does not wait for signatures, and the verifier reports trailed unsigned commits under `container+proxy` as one note (G-06, C-05).
+- Lockfile parsers for `Cargo.lock`, `package-lock.json`, `npm-shrinkwrap.json`, `uv.lock`, `poetry.lock` and `requirements*.txt`, gate check 10 (`packages`) against `deny.packages`, and the manifest's `packages` list (G-08, C-07).
 
 ## [0.7.2] — 2026-10-26
 

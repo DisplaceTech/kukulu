@@ -17,7 +17,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import {
-  CleanroomError, loadPolicy, policyHash, appendEntry, readEntries, logPathFor, generateKey, loadKey, signCheckpoint, verifyCheckpoint, verifyChain, evaluate, lockdownActive, normalizeModel, familyOf, controlPaths, ZERO_HASH, scorePair, position, verdictOf, LIMITS, coverageGaps, knownLimitsFor, summarizeEntries, signBytes,
+  CleanroomError, loadPolicy, policyHash, appendEntry, readEntries, logPathFor, generateKey, loadKey, signCheckpoint, verifyCheckpoint, verifyChain, evaluate, lockdownActive, normalizeModel, familyOf, controlPaths, lockfileEcosystem, lockfilePackages, deniedPackage, normalizePackageName, ZERO_HASH, scorePair, position, verdictOf, LIMITS, coverageGaps, knownLimitsFor, summarizeEntries, signBytes,
 } from "./cleanroom.mjs";
 
 /**
@@ -252,6 +252,42 @@ function boundaryCheck(cc, policy, recorded) {
   return { id: c.id, boundary };
 }
 
+/** The tracked lockfiles, in `git ls-files` order: `{ path, ecosystem }`. */
+function trackedLockfiles() {
+  return git(["ls-files"], { allowFail: true }).out.split("\n").filter(Boolean).map((p) => ({ path: p, ecosystem: lockfileEcosystem(path.basename(p)) })).filter((l) => l.ecosystem !== null);
+}
+
+/**
+ * Gate check 10 (SPEC C-07): no tracked lockfile names a package the policy denies, and under
+ * container+proxy the sandbox's cargo cache holds none. Returns a reason or null.
+ */
+function packagesCheck(policy) {
+  for (const file of trackedLockfiles()) {
+    if (!Object.keys(policy.deny.packages).includes(file.ecosystem)) continue;
+    let packages;
+    try {
+      packages = lockfilePackages(path.basename(file.path), read(path.join(ROOT, file.path)));
+    } catch (e) {
+      return `${file.path} cannot be read: ${e.message}`;
+    }
+    const hit = deniedPackage(policy, file.ecosystem, packages);
+    if (hit) return `${file.path} contains ${hit.name} ${hit.version ?? "unpinned"}, which policy deny.packages.${file.ecosystem} names; remove the dependency, and know that its source may already have been read`;
+  }
+  if (policy.enforcement === "container+proxy" && (policy.deny.packages.cargo ?? []).length) {
+    const engine = envVar("SANDBOX_ENGINE") || "docker";
+    const r = spawnSync(engine, ["exec", envVar("SANDBOX"), "find", "/home/kukulu/.cargo/registry/src", "-mindepth", "2", "-maxdepth", "2", "-type", "d"], { encoding: "utf8", timeout: 30000 });
+    if (r.status !== 0 && !/No such file or directory/.test(r.stderr || "")) {
+      return `could not list the sandbox's cargo cache: ${(r.stderr || r.error?.message || `exit ${r.status}`).trim().split("\n")[0]}`;
+    }
+    const denied = new Set(policy.deny.packages.cargo.map((n) => normalizePackageName("cargo", n)));
+    for (const dir of (r.status === 0 ? r.stdout : "").split("\n").filter(Boolean)) {
+      const crate = /^(.*)-\d[^-]*$/.exec(path.basename(dir))?.[1];
+      if (crate && denied.has(normalizePackageName("cargo", crate))) return `the sandbox's cargo cache holds ${dir}`;
+    }
+  }
+  return null;
+}
+
 /** Commits that carry a stage trailer but no signature, from the lines of commits.txt. */
 function unsignedTrailedCount(commitLines) {
   return commitLines.filter(Boolean).filter((line) => {
@@ -420,6 +456,13 @@ function runGate(stage, st = loadState()) {
     const leak = egressAudit(policy, chain.entries.slice(1));
     if (leak) return failed("boundary", leak);
     container = b.id;
+  }
+
+  // 10. packages: no tracked lockfile, and no sandbox cache, holds a package the policy denies
+  if (Object.keys(policy.deny.packages).length) {
+    checked.push("packages");
+    const reason = packagesCheck(policy);
+    if (reason) return failed("packages", reason);
   }
 
   appendEntry(logPath, { kind: "gate", stage, role: "session", data: { checks: checked.length, ok: true, ...(container ? { container } : {}), ...(unpinned.length ? { unpinned } : {}) } });
@@ -3923,6 +3966,17 @@ function attest({ evidence } = {}) {
     repo: { baseBranch: cc.baseBranch, base, head, branch: gitFacts().branch },
     mode: genesis.data?.mode ?? "clean-room",
     enforcement: { level, ...(level === "container+proxy" ? { boundary: genesis.data.boundary, egress } : {}) },
+    // Packages a lockfile names are outside the claim: the log cannot show what their source contained.
+    packages: trackedLockfiles().map((f) => {
+      const bytes = fs.readFileSync(path.join(ROOT, f.path));
+      let list = [];
+      try {
+        list = lockfilePackages(path.basename(f.path), bytes.toString("utf8"));
+      } catch {
+        list = [];
+      }
+      return { path: f.path, sha256: sha256Hex(bytes), ecosystem: f.ecosystem, packages: list.map((p) => (p.version ? `${p.name}@${p.version}` : p.name)), outsideClaim: true };
+    }),
     genesis,
     // A flight that began on 0.7.x has no roles in its genesis. "configuration" is the weakest assurance: the roles are what the routing said; "egress" means the proxy also saw the traffic to the runner.
     roles: genesis.data?.roles ? Object.fromEntries(ROLES.map((role) => [role, { ...genesis.data.roles[role], assurance: level === "container+proxy" ? "egress" : "configuration" }])) : null,

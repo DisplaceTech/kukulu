@@ -1929,6 +1929,85 @@ export function coverageGaps(entries, commitLines, { idleGapHours, level = "hook
   return gaps;
 }
 
+// ---------------------------------------------------------------- lockfiles and denied packages (SPEC C-07)
+
+/** The lockfile basenames the gate and the manifest read, with their ecosystem; `requirements*.txt` is pypi too. */
+export const LOCKFILES = [["Cargo.lock", "cargo"], ["package-lock.json", "npm"], ["npm-shrinkwrap.json", "npm"], ["uv.lock", "pypi"], ["poetry.lock", "pypi"]];
+
+/** The ecosystem a basename is the lockfile of, or null. */
+export function lockfileEcosystem(basename) {
+  const named = LOCKFILES.find(([name]) => name === basename);
+  if (named) return named[1];
+  return /^requirements.*\.txt$/.test(basename) ? "pypi" : null;
+}
+
+/** `[{ name, version }]` of a lockfile's text; `version` is null when unpinned. A file that does not parse is a CleanroomError. */
+export function lockfilePackages(basename, text) {
+  const ecosystem = lockfileEcosystem(basename);
+  if (ecosystem === null) throw new CleanroomError(`${basename} is not a lockfile this release reads`);
+  if (basename === "package-lock.json" || basename === "npm-shrinkwrap.json") {
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch (e) {
+      throw new CleanroomError(`${basename} is not valid JSON: ${e.message}`);
+    }
+    const out = [];
+    for (const [key, entry] of Object.entries(data?.packages ?? {})) {
+      const at = key.lastIndexOf("node_modules/");
+      if (at < 0) continue;
+      out.push({ name: key.slice(at + "node_modules/".length), version: typeof entry?.version === "string" ? entry.version : null });
+    }
+    return out;
+  }
+  if (ecosystem === "pypi" && basename.startsWith("requirements")) {
+    const out = [];
+    for (const raw of text.split("\n")) {
+      const line = raw.replace(/(^|\s)#.*$/, "").trim();
+      if (!line || line.startsWith("-")) continue;
+      const name = /^[A-Za-z0-9._-]+/.exec(line)?.[0];
+      if (!name) continue;
+      const pinned = /^(?:\[[^\]]*\])?\s*==\s*([^\s;,]+)/.exec(line.slice(name.length));
+      out.push({ name, version: pinned ? pinned[1] : null });
+    }
+    return out;
+  }
+  // Cargo.lock, uv.lock, poetry.lock: [[package]] blocks of `key = "value"` lines. A later table header ends the block's own keys.
+  const out = [];
+  let current = null;
+  let own = false;
+  for (const raw of text.split("\n")) {
+    const line = raw.trimEnd();
+    if (line === "[[package]]") {
+      current = { name: null, version: null };
+      out.push(current);
+      own = true;
+      continue;
+    }
+    if (/^\[/.test(line)) {
+      own = false;
+      continue;
+    }
+    if (!own || !current) continue;
+    const kv = /^(name|version)\s*=\s*"([^"]*)"\s*$/.exec(line);
+    if (kv) current[kv[1]] = kv[2];
+  }
+  return out.filter((p) => p.name !== null);
+}
+
+/** A package name as its ecosystem compares it: cargo folds case and `_` to `-`, PyPI follows PEP 503, npm is as written. */
+export function normalizePackageName(ecosystem, name) {
+  if (ecosystem === "cargo") return String(name).toLowerCase().replaceAll("_", "-");
+  if (ecosystem === "pypi") return String(name).toLowerCase().replace(/[-_.]+/g, "-");
+  return String(name);
+}
+
+/** The first package the policy's deny.packages names for this ecosystem, or null. */
+export function deniedPackage(policy, ecosystem, packages) {
+  const denied = new Set((policy.deny?.packages?.[ecosystem] ?? []).map((n) => normalizePackageName(ecosystem, n)));
+  return packages.find((p) => denied.has(normalizePackageName(ecosystem, p.name))) ?? null;
+}
+
 // ---------------------------------------------------------------- what an attestation counts
 
 /** The tools whose calls can read something, for the manifest's readCapable count. */

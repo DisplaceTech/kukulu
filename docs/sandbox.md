@@ -142,3 +142,9 @@ The server runs outside the container, with the key and the project's `.kukulu/`
 - **Outside, on the host:** git (every call the server makes, with the repository's hooks switched off by pointing `core.hooksPath` at the empty `hooks-empty/` directory and `core.fsmonitor` off, because a repository hook is project code and would run outside the boundary), the contamination scorer, the attestation bundle and the guard self-test.
 
 A parallel stream cannot run inside, so `kukulu_run_start` with `stream` refuses there; a sandboxed flight is serial.
+
+## Dependencies
+
+The container's home volume (`kukulu-<id>-home`) holds every package cache: cargo's registry, npm's cache, pip's. Nothing of the host's `~/.cargo`, `~/.npm` or `~/.cache/pip` is mounted, so a prior-art crate the owner once downloaded is not there to be read. The policy's `deny.packages` names the packages that must never be dependencies; the gate refuses a tracked lockfile that names one and, for cargo, a cache that holds one (see [cleanroom.md](./cleanroom.md)).
+
+An oracle that must link prior art, such as cleanflate's zlib oracle, is built outside the container and mounted read-only through `sandbox.mounts`; the agent calls the binary and never sees the library's source. The packages a lockfile names are outside the claim: the attestation lists them, but the log cannot show what their source contained.
