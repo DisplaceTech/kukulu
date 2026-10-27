@@ -44,7 +44,7 @@ Started: 2026-10-26T21:19:36.125Z
 - [x] P4-05 CHANGELOG 0.8.0 and the version
 - [x] P4-06 Phase 4 end: push and record the manual check
 - [x] R1-01 Mount the runtime directory read-only and hold gate check 9 to the exact mount list
-- [~] R1-02 The constraint scan never reads through a symlink that leaves the project
+- [x] R1-02 The constraint scan never reads through a symlink that leaves the project
 - [ ] R1-03 Behind the sandbox, run the plugin's verifier, never one from the project tree
 - [ ] R1-04 --expect control-positive still prints CONTROL (positive)
 - [ ] R1-05 Test the sandbox mechanics SPEC names: box source, lockdown on sandbox.egress, stop, tag-only image
@@ -246,3 +246,7 @@ Manual check: NOT VERIFIED (human): on a scratch repository with a merged PR, ku
 ### R1-01 — 05459f4
 
 containerArgs mounts runtimeDir :ro; boundaryCheck now: writable set = project+home only; /run/kukulu must be ro with source = dirname(KUKULU_SANDBOX_HOOKS_PATH); home must be volume <name>-home; any destination outside the expected set refused; same-path mounts need source==destination. inspectContainer keeps type/name; recorded boundary mounts keep 3 fields. Tests updated/added in test/sandbox.mjs (fake docker in harness accepts :ro). Docs and CHANGELOG updated. Interpretation: unset HOOKS_PATH fails the source check. Integration run with docker: 211/211 incl. RUNTIME_WRITE_FAIL and SOCKET_OK.
+
+### R1-02 — f9a234a
+
+checkConstraints lstat/realpath-checks each listed path; symlinks resolving outside the root are skipped and listed in the rule result's skipped (only when non-empty). Documented in mcp-tools.md, CHANGELOG. Tests in test/constraints.mjs (64 assertions).
