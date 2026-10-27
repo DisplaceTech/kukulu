@@ -10,7 +10,9 @@ import {
   ROOT, finish, ok, eq, like, isError,
   mkDir, mkFakeGpg, specRepo, plannedRepo, withServer, useLegacyLayout, mkBareRemote, mkFakeGhBin,
   writeFile, readFile, hasFile, setState, markTasks, git, subject, planDoc, progressDoc,
+  cleanroomRepo, addPlan, logCall,
 } from "./harness.mjs";
+import { readEntries } from "../mcp/cleanroom.mjs";
 
 const ALL_DONE = { "P0-01": "x", "P0-02": "x", "P0-03": "x" };
 
@@ -1027,6 +1029,73 @@ const OLD_LAYOUT = /pre-0\.6\.0 Foundry layout, which 0\.7\.0 no longer reads/;
   await withServer(repo, async ({ call }) => {
     isError(await call("kukulu_status"), /both the pre-0\.6\.0 layout .* and the current one .* exist/, "a project with both layouts is refused, since either would hide the other");
     isError(await call("kukulu_next"), /Keep the one you use and remove the other/, "...for every tool, with what to do");
+  });
+}
+
+// -------------------------------------------------------------- the stage timeline (D-01)
+
+{
+  // clean-room mode: start plan, end plan, start implement, in the chain and in state.timeline
+  const repo = cleanroomRepo();
+  const log = path.join(repo, ".kukulu", "cleanroom", "log.jsonl");
+  const stageEntries = () => readEntries(log).filter((e) => e.kind === "stage");
+  const timeline = () => JSON.parse(readFile(repo, ".kukulu/state.json")).timeline;
+  const events = (list) => list.map((r) => `${r.event ?? r.data.event} ${r.stage ?? r.data.stage}`).join(", ");
+  await withServer(repo, async ({ call }) => {
+    logCall(repo);
+    const first = await call("kukulu_next");
+    eq(first.stage, "plan", "the first kukulu_next of a clean-room flight is the plan stage");
+    eq(subject(repo), "chore: stage plan", "the timeline commit lands as chore: stage plan");
+    addPlan(repo);
+    logCall(repo);
+    const second = await call("kukulu_next");
+    eq(second.stage, "implement", "after the plan the stage is implement");
+    eq(subject(repo), "chore: stage implement", "...committed as chore: stage implement");
+    const head = git(repo, ["rev-parse", "HEAD"]);
+    logCall(repo);
+    await call("kukulu_next");
+    eq(git(repo, ["rev-parse", "HEAD"]), head, "a third call in the same stage writes nothing");
+    eq(events(timeline()), "start plan, end plan, start implement", "three kukulu_next calls give start, end and start in order in state.timeline");
+    eq(events(stageEntries()), "start plan, end plan, start implement", "...and in the chain");
+    const starts = stageEntries().filter((e) => e.data.event === "start");
+    ok(starts.every((e) => typeof e.data.agent === "string" && typeof e.data.model === "string"), "...with agent and model on each start");
+    ok(stageEntries().every((e) => e.role === "controller" && e.stage === e.data.stage && Number.isInteger(e.data.round)), "...the controller's, with the stage and round");
+    eq(git(repo, ["status", "--porcelain"]), "M .kukulu/cleanroom/log.jsonl", "the tree holds nothing after the timeline commits but the hooks' own appends to the log");
+    const status = await call("kukulu_status");
+    eq(JSON.stringify(status.timeline), JSON.stringify(timeline()), "kukulu_status reports the timeline");
+    ok(Number.isInteger(status.stageSeconds.plan) && Number.isInteger(status.stageSeconds.implement), "...and whole seconds for each stage");
+  });
+}
+
+{
+  // general mode: the timeline in state, nothing in a chain
+  const repo = plannedRepo();
+  await withServer(repo, async ({ call }) => {
+    const n = await call("kukulu_next");
+    eq(n.stage, "implement", "a planned general-mode flight is at implement");
+    const state = JSON.parse(readFile(repo, ".kukulu/state.json"));
+    eq(state.timeline.map((r) => `${r.event} ${r.stage}`).join(", "), "start implement", "general mode writes the timeline");
+    ok(!hasFile(repo, ".kukulu/cleanroom/log.jsonl"), "...and no chain");
+    eq(subject(repo), "chore: stage implement", "...committed the same way");
+  });
+}
+
+{
+  // a halt closes the open stage, once
+  const repo = plannedRepo();
+  await withServer(repo, async ({ call }) => {
+    await call("kukulu_next");
+    await call("kukulu_run_halt", { reason: "operator stop" });
+    const h = await call("kukulu_next");
+    eq(h.stage, "halt", "after kukulu_run_halt the stage is halt");
+    const timeline = JSON.parse(readFile(repo, ".kukulu/state.json")).timeline;
+    eq(timeline.map((r) => `${r.event} ${r.stage}`).join(", "), "start implement, end implement", "a halt closes the open stage with one end");
+    eq(subject(repo), "chore: stage end", "...committed as chore: stage end");
+    const head = git(repo, ["rev-parse", "HEAD"]);
+    await call("kukulu_next");
+    eq(git(repo, ["rev-parse", "HEAD"]), head, "a second halt result writes nothing more");
+    const status = await call("kukulu_status");
+    eq(Object.keys(status.stageSeconds).join(), "implement", "kukulu_status counts the closed span in whole seconds");
   });
 }
 

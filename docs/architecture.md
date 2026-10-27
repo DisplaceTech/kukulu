@@ -47,7 +47,7 @@ The flight controller is deliberately the weakest model in the system. Besides `
 
 ## The stage machine
 
-`kukulu_next` is a pure function of what is on disk. It never reads a subagent's report, and the flight controller is told not to interpret one.
+`kukulu_next` is a pure function of what is on disk. It never reads a subagent's report, and the flight controller is told not to interpret one. Besides its answer it records the stage timeline (when each stage started and ended) in `state.timeline`, and in the chain in clean-room mode; that is bookkeeping, never an input to the decision.
 
 ```mermaid
 stateDiagram-v2

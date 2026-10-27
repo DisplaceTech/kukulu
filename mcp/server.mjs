@@ -702,6 +702,8 @@ function commitStaged(rels, message, opts = {}) {
   if (policy === "required") {
     throw new ToolError(`policies.signing is 'required' and the commit could not be signed: ${line}. Nothing was committed; fix the signing agent or set policies.signing to 'off', then call this tool again.`);
   }
+  // Bookkeeping that can wait does not switch the run's signing off: the caller rolls back and tries again later.
+  if (opts.noSigningFallback) throw new ToolError(`git commit failed: the commit could not be signed: ${line}`);
   const snapFiles = [P.state, P.feedback].map((f) => [f, exists(f) ? fs.readFileSync(f) : null]);
   const prevSign = git(["config", "--local", "--get", "commit.gpgsign"], { allowFail: true }).out;
   const undoFallback = () => {
@@ -2314,6 +2316,8 @@ function status() {
   out.strayArtifacts = out.artifacts["PLAN.md"] === "absent" ? Object.keys(out.artifacts).filter((k) => out.artifacts[k] === "untracked") : [];
   out.lastReviewCommit = lastReviewCommit(g.inRepo);
   out.cleanroom = cleanroomStatus(st);
+  out.timeline = Array.isArray(st.timeline) ? st.timeline : [];
+  out.stageSeconds = stageSecondsOf(out.timeline);
   return out;
 }
 
@@ -2362,7 +2366,7 @@ function requiredSigningPolicy(st) {
   }
 }
 
-function next() {
+function nextDecision() {
   const routing = resolveRouting();
   const s = status();
   const c = cfg();
@@ -4447,6 +4451,75 @@ function summaryCommit({ content } = {}) {
 }
 
 /** The one line the operator needs when a flight's commits are not all signed. */
+/**
+ * The stage timeline (SPEC D-01): when each stage started and ended, as `{ event, stage, round, at }` in
+ * `state.timeline` in every mode and, in clean-room mode, as `stage` entries in the chain. The open span is
+ * the last record when it is a `start`. A new stage closes it and opens another; `done` and `halt` close it;
+ * the same stage and round again writes nothing.
+ */
+function recordTimeline(res) {
+  const st = loadState();
+  const timeline = Array.isArray(st.timeline) ? st.timeline : [];
+  const last = timeline.at(-1);
+  const open = last?.event === "start" ? last : null;
+  const at = new Date().toISOString();
+  const records = [];
+  if (res.stage === "done" || res.stage === "halt") {
+    if (open) records.push({ event: "end", stage: open.stage, round: open.round, at });
+  } else if (!open || open.stage !== res.stage || open.round !== res.round) {
+    if (open) records.push({ event: "end", stage: open.stage, round: open.round, at });
+    records.push({ event: "start", stage: res.stage, round: res.round, at });
+  }
+  if (!records.length) return res;
+  const crPaths = cleanroomPaths(st);
+  const paths = [P.state, ...crPaths];
+  // The timeline is bookkeeping: when it cannot be committed (a signer that is down, say) the files are put back and
+  // the decision is returned as it was, with a note; the next call records the same transition again.
+  try {
+    withRollback(paths, () => {
+    st.timeline = [...timeline, ...records];
+    saveState(st);
+    if (crPaths.length) {
+      for (const r of records) {
+        appendEntry(cleanroomLogPath(), {
+          kind: "stage",
+          stage: r.stage,
+          role: "controller",
+          ...(r.event === "start" ? { model: res.model ?? null } : {}),
+          data: { event: r.event, stage: r.stage, round: r.round, ...(r.event === "start" ? { agent: res.agent ?? null, model: res.model ?? null } : {}) },
+        });
+      }
+    }
+    if (gitFacts().inRepo) gitCommitIfChanged(paths, records.at(-1).event === "start" ? `chore: stage ${records.at(-1).stage}` : "chore: stage end", { stage: "controller", noSigningFallback: true });
+    });
+  } catch (e) {
+    return { ...res, timelineNote: `the stage timeline was not recorded this call: ${e instanceof Error ? e.message : String(e)}` };
+  }
+  return res;
+}
+
+function next() {
+  return recordTimeline(nextDecision());
+}
+
+/** Whole seconds each stage has run, from the timeline's spans; an open span counts up to now. */
+function stageSecondsOf(timeline) {
+  const out = {};
+  let open = null;
+  const add = (stage, from, to) => {
+    out[stage] = (out[stage] ?? 0) + Math.max(0, Math.round((Date.parse(to) - Date.parse(from)) / 1000));
+  };
+  for (const r of timeline ?? []) {
+    if (r.event === "start") open = r;
+    else if (r.event === "end" && open) {
+      add(open.stage, open.at, r.at);
+      open = null;
+    }
+  }
+  if (open) add(open.stage, open.at, new Date().toISOString());
+  return out;
+}
+
 function nextSteps(mergeBase) {
   return `Unlock the signing agent, then tell the flight controller to finalize with re-signing: kukulu_pr_finalize({ resign: true }). Or by hand: git rebase -f --rebase-merges --gpg-sign ${mergeBase}, then git push --force-with-lease, then kukulu_pr_finalize({}).`;
 }
@@ -5077,7 +5150,7 @@ const S = (props, required = []) => ({
 });
 const TOOLS = [
   { name: "kukulu_status", description: "Everything the pipeline knows from disk: which docs exist, task counts by state, branch/base/head, lock, round, review verdict, review.mutationFixRounds, and the pull request's CI checks as prChecks (every gh call bounded to 30 s). Read-only.", inputSchema: S({}), fn: () => ({ ...status(), prChecks: prChecks() }) },
-  { name: "kukulu_next", description: "Deterministic stage selection: returns { stage, agent, agentFallback, fallbackAgent, restartRequired, model, agentModel, agentModelExact, round, reason, prompt, streams? }. stage is plan | implement | review | summarize | done | halt. agentModel is the value to pass as the Agent tool's model when agentFallback is true (an alias, or null to pass none); agentModelExact is false when a full claude-* id was mapped to its family alias. restartRequired is true only when the routed model cannot be reached without relaunching the session. Read-only, except that when a parallel wave's partition is invalid it records once (state, one feedback entry, one commit, only on a build branch) that the wave runs serially. When streams is present, spawn one implementer per entry, all at once, and wait for all of them.", inputSchema: S({}), fn: next },
+  { name: "kukulu_next", description: "Deterministic stage selection: returns { stage, agent, agentFallback, fallbackAgent, restartRequired, model, agentModel, agentModelExact, round, reason, prompt, streams? }. stage is plan | implement | review | summarize | done | halt. agentModel is the value to pass as the Agent tool's model when agentFallback is true (an alias, or null to pass none); agentModelExact is false when a full claude-* id was mapped to its family alias. restartRequired is true only when the routed model cannot be reached without relaunching the session. Writes only the stage timeline (state.timeline, and in clean-room mode a stage entry in the chain, committed as chore: stage <stage>) and, when a parallel wave's partition is invalid, a record (state, one feedback entry, one commit, only on a build branch) that the wave runs serially. When streams is present, spawn one implementer per entry, all at once, and wait for all of them.", inputSchema: S({}), fn: next },
   { name: "kukulu_plan_commit", description: "Validate the plan as a whole and commit it: docs/PLAN.md, docs/PROGRESS.md, docs/kukulu.json and CLAUDE.md must exist and agree (task headings, numbering, dependencies, streams, config, from references). Every problem is listed at once, as numbered lines and as structuredContent.problems [{ check, id?, message }]; nothing is committed while any remain. With renumber: true (only before any run has started) it first renumbers split ids everywhere. On success it commits 'plan: derive build plan from SPEC' and returns { commit, tasks, phases, waves, renumbered }. For the planner, as its last step.", inputSchema: S({ renumber: { type: "boolean", description: "rewrite split or out-of-sequence task ids (such as P1-02a) to a clean P<n>-01.. sequence everywhere they appear, then validate and commit; refused once a run has started" } }), fn: planCommit },
   { name: "kukulu_run_start", description: "Begin (or resume) an implementation run: create/reuse the build branch, arm the implement guard lock, stamp Branch/Started in PROGRESS.md, commit. Idempotent. The result carries signingNote when commits are or will be unsigned and says whether kukulu_pr_finalize will wait for signatures. With stream, also create (or resume) that stream's git worktree for a parallel wave, run parallel.setup in it, and return its cwd: do all of that stream's work inside cwd.", inputSchema: S({ stream: { type: "string", description: "a stream of the current parallel wave, when kukulu_next handed you one" } }), fn: runStart },
   { name: "kukulu_task_next", description: "Select the next task (first [~], else first [ ]), auto-skip tasks whose dependencies are blocked, mark it [~], and return its PLAN.md text plus dependency log entries. Returns { done: true } when none remain.", inputSchema: S({ stream: { type: "string", description: "restrict to this stream's tasks (parallel waves only)" } }), fn: taskNext },

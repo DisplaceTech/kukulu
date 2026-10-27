@@ -28,6 +28,7 @@ All notable changes to this plugin. Format follows
 - Signing under the boundary: behind the sandbox `kukulu_run_start` refuses `policies.signing: "required"` and records `off (sandbox: …)` under `auto`, finalize does not wait for signatures, and the verifier reports trailed unsigned commits under `container+proxy` as one note (G-06, C-05).
 - Lockfile parsers for `Cargo.lock`, `package-lock.json`, `npm-shrinkwrap.json`, `uv.lock`, `poetry.lock` and `requirements*.txt`, gate check 10 (`packages`) against `deny.packages`, and the manifest's `packages` list (G-08, C-07).
 - The clean-room guard denies `cargo add`, `npm install|i|add`, `pip install` and `uv add` of a package named in `deny.packages` (G-08, C-07).
+- Stage timing: `kukulu_next` records when each stage starts and ends in `state.timeline` (every mode) and as `stage` entries in the chain (clean-room mode), committed as `chore: stage <stage>`, and `kukulu_status` reports `timeline` and `stageSeconds` (G-10, D-01).
 
 ### Changed
 

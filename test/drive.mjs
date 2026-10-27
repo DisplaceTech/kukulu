@@ -223,7 +223,9 @@ await withServer(repo, async ({ call }) => {
   // branch (pushed by run_start before the build branch was cut) and the
   // build branch (pushed after every review_submit and summary_commit).
   eq(git(repo, ["rev-parse", "origin/main"]), git(repo, ["rev-parse", "main"]), "the remote's base branch carries the plan commits");
-  eq(git(repo, ["rev-parse", `origin/${r.branch}`]), git(repo, ["rev-parse", "HEAD"]), "the remote build branch head matches the local head");
+  // The controller's last kukulu_next closes the final stage span with a local `chore: stage end` commit nobody pushes.
+  const lastPushed = git(repo, ["log", "--format=%H %s", "-10"]).split("\n").find((l) => !/^\w+ chore: stage /.test(l)).split(" ")[0];
+  eq(git(repo, ["rev-parse", `origin/${r.branch}`]), lastPushed, "the remote build branch head matches the local head (ignoring the timeline's own commits)");
 }, noGh);
 
 // A fresh server process trusts an agents directory that already existed

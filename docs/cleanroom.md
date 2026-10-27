@@ -105,6 +105,8 @@ A positive-control flight (`"mode": "control-positive"`) is the same flight with
 | `data` | present only on entries that carry a body |
 | `hash` | SHA-256 of `prev`, a newline, and the entry without `hash` as compact JSON with the keys in this order |
 
+A `stage` entry is written by `kukulu_next` when a stage starts or ends: `role` is `controller`, `stage` the stage's name, and `data` is `{ event: "start" | "end", stage, round }` (a `start` adds `agent` and `model`). The same records are in `state.timeline` in every mode, so the time each stage took can be read without the chain. The manifest's `calls` count only `allowed` and `denied` entries, so stage entries do not change them.
+
 An `egress` entry is written by the sandbox's proxy, not by a hook: `tool` is `null`, `target` is `host:port`, `decision` is `allowed` or `denied`, `reason` says why, and an allowed connection carries `data: { bytesUp, bytesDown, ms }` once it closes. See [sandbox.md](./sandbox.md#egress).
 
 An entry reported from inside the sandbox's boundary, through the log socket, carries `data.source: "box"`; entries appended by the hooks directly carry no `source`.

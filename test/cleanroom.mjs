@@ -489,7 +489,7 @@ const stateOf = (repo) => (hasFile(repo, ".kukulu/state.json") ? JSON.parse(read
     const n = await call("kukulu_next");
     eq(n.stage, "plan", "the first kukulu_next in a clean-room project goes on to the plan stage");
     const log = logOf(repo);
-    eq(log.length + "|" + log[0].kind + "|" + log[0].stage + "|" + log[1].kind, "2|genesis|controller|gate", "the first kukulu_next with a policy appends a genesis entry, then the gate's");
+    eq(log.length + "|" + log[0].kind + "|" + log[0].stage + "|" + log[1].kind + "|" + log[2].kind, "3|genesis|controller|gate|stage", "the first kukulu_next with a policy appends a genesis entry, then the gate's, then the stage timeline's");
     const d = log[0].data;
     eq(Object.keys(d).join(","), "mode,policyHash,guardHash,loggerHash,hooksHash,cleanroomHash,pluginVersion,keyFingerprint,baseBranch,head,roles,distinct,enforcement", "...whose data names mode, the five hashes, pluginVersion, keyFingerprint, baseBranch, head, roles and distinct");
     eq(d.mode + "|" + d.baseBranch, "clean-room|main", "...in clean-room mode on main");
@@ -499,13 +499,13 @@ const stateOf = (repo) => (hasFile(repo, ".kukulu/state.json") ? JSON.parse(read
     const st = stateOf(repo);
     eq(JSON.stringify(st.cleanroom), JSON.stringify({ genesis: log[0].hash, policyHash: d.policyHash, guardHash: d.guardHash, loggerHash: d.loggerHash, hooksHash: d.hooksHash, cleanroomHash: d.cleanroomHash }), "...and records state.cleanroom");
     eq(d.cleanroomHash, policyHash(fs.readFileSync(path.join(ROOT, "mcp", "cleanroom.mjs"))), "the genesis records the hash of mcp/cleanroom.mjs");
-    eq(subject(repo), "chore: clean-room genesis", "...commits chore: clean-room genesis");
-    eq(git(repo, ["show", "--name-only", "--format=", "HEAD"]).split("\n").sort().join(","), ".kukulu/cleanroom/log.jsonl,.kukulu/state.json", "...with the log and state");
+    eq(git(repo, ["log", "--format=%s", "-2"]).split("\n").join("|"), "chore: stage plan|chore: clean-room genesis", "...commits chore: clean-room genesis, then the stage timeline");
+    eq(git(repo, ["show", "--name-only", "--format=", "HEAD~1"]).split("\n").sort().join(","), ".kukulu/cleanroom/log.jsonl,.kukulu/state.json", "...with the log and state");
     ok(fs.existsSync(testKeyFor(repo)), "...generating the key at KUKULU_CLEANROOM_KEY");
     eq(d.keyFingerprint, loadKey(testKeyFor(repo)).fingerprint, "...and the genesis names its fingerprint");
     await call("kukulu_next");
     eq(logOf(repo).filter((e) => e.kind === "genesis").length, 1, "a second kukulu_next appends no second genesis");
-    eq(git(repo, ["status", "--porcelain"]), "M .kukulu/cleanroom/log.jsonl", "...and leaves only the log (the gate's entries) uncommitted");
+    eq(git(repo, ["status", "--porcelain"]), "", "...and the stage timeline's commit leaves nothing uncommitted (the gate's halt closes the open stage)");
   });
 }
 
@@ -564,13 +564,14 @@ const stateOf = (repo) => (hasFile(repo, ".kukulu/state.json") ? JSON.parse(read
   const repo = cleanroomRepo();
   await withServer(repo, async ({ call }) => {
     await call("kukulu_next");
+    const withPolicy = git(repo, ["rev-parse", "HEAD"]);
     git(repo, ["rm", "-q", "docs/cleanroom.json"]);
     git(repo, ["commit", "-qm", "drop the policy"]);
     const n = await call("kukulu_next");
     eq(n.stage, "halt", "a policy removed after genesis halts");
     like(n.reason, /the clean-room policy file was removed after genesis/, "...saying so");
     isError(await call("kukulu_run_resume", { reason: "restored it" }), /archive this flight with kukulu_flight_archive/, "kukulu_run_resume refuses it too");
-    git(repo, ["checkout", "HEAD~1", "--", "docs/cleanroom.json"]);
+    git(repo, ["checkout", withPolicy, "--", "docs/cleanroom.json"]);
     git(repo, ["commit", "-qm", "restore the policy"]);
     logCall(repo);
     ok((await call("kukulu_next")).stage !== "halt", "...and restoring the policy clears it, because the halt is computed each call");
@@ -738,7 +739,7 @@ async function genesisRepo(planOpts = {}) {
   await live(repo, async ({ call }) => {
     const n = await call("kukulu_next");
     ok(!n.error, "kukulu_next survives a failing signer under policies.signing auto");
-    eq(subject(repo), "chore: clean-room genesis", "...the genesis commit was made, unsigned");
+    eq(git(repo, ["log", "--format=%s", "-2"]).split("\n").reverse()[0], "chore: clean-room genesis", "...the genesis commit was made, unsigned");
     const body = git(repo, ["log", "-1", "--format=%B"]).trim().split("\n");
     eq(body.slice(-2).join("|"), "Kukulu-Stage: controller|Kukulu-Task: -", "the trailers survive the unsigned retry");
   });
@@ -1534,7 +1535,7 @@ const gateCheck = (reason) => (reason.match(/^clean-room gate failed: ([\w-]+):/
   await withServer(repo, async ({ call }) => {
     const first = (await call("kukulu_status")).cleanroom;
     eq([first.policy, first.mode, first.genesis === stateOf(repo).cleanroom.genesis, first.pinnedPolicyHash === first.policyHash, first.keyFingerprint === loadKey(testKeyFor(repo)).fingerprint, first.lockdown].join("|"), "docs/cleanroom.json|clean-room|true|true|true|false", "kukulu_status.cleanroom reports the policy, mode, genesis, pinned hash, key fingerprint and lockdown");
-    eq(first.chain.entries + "|" + first.chain.lastCheckpoint + "|" + first.denied, "2|null|0", "...and the chain (genesis and the first gate), no checkpoint, no denial");
+    eq(first.chain.entries + "|" + first.chain.lastCheckpoint + "|" + first.denied, "3|null|0", "...and the chain (genesis, the first gate and the stage timeline), no checkpoint, no denial");
     eq(first.chain.tip, readEntries(LOG(repo)).at(-1).hash, "...with the newest hash as its tip");
     eq(first.hooksLive, false, "hooksLive is false with no allowed entry since the last gate");
     logCall(repo);
