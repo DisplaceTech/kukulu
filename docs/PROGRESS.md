@@ -40,7 +40,7 @@ Started: 2026-10-26T21:19:36.125Z
 - [x] P4-01 kukulu_release
 - [x] P4-02 Base health before planning
 - [x] P4-03 The 0.7.2 review's notes
-- [ ] P4-04 The documentation sweep
+- [x] P4-04 The documentation sweep
 - [ ] P4-05 CHANGELOG 0.8.0 and the version
 - [ ] P4-06 Phase 4 end: push and record the manual check
 
@@ -221,3 +221,7 @@ Interpretation: a rule whose own fixture fails prints "(its fixture fails)"; not
 
 classifyChanges and trackedChanges use --no-renames; undoMutationResidue unstages and removes a restored path HEAD lacks (new side of git mv) instead of failing in git checkout. Recorded gh lines moved to test/fixtures/gh/ (merge-not-allowed.txt, view-title-refused.txt, api-bad-gateway.txt, release-validation-failed.txt, pr-draft.json). mcp-tools signing values complete. review 479, state 308; verify green (4520).
 Interpretation: the specified rename test needs trackedChanges --no-renames and the unstage-and-remove of an added residue (not named in the task text).
+
+### P4-04 — 4156ac0
+
+Walked SPEC 6 F bullet by bullet (list in the commit body). Fixed here: routing.md (vLLM prefix caching, Ollama prompt caching, prefill, runner-side context caps, local-runner starting point), operations.md (Running in the sandbox: egress), README (sandbox paragraph; verifier check list names enforcement and roles), CONTRIBUTING (sandbox-entry.mjs, templates, launcher row), architecture.md (gate up to ten checks, boundary). Everything else was already true. Verify green (4520).
