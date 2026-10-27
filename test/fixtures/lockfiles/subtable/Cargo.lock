@@ -1,0 +1,9 @@
+version = 3
+
+[[package]]
+name = "cleanflate"
+version = "0.1.0"
+
+[package.metadata]
+name = "other"
+version = "9.9.9"

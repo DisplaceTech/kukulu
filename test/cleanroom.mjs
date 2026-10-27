@@ -126,6 +126,18 @@ const pattern = (extra = {}) => ({ id: "p", pattern: "/build/", shouldMatch: ["/
   const plain = loadPolicy(JSON.stringify(base({ deny: { network: false, paths: ["prior/"], words: ["zlib"] } })));
   eq(read(plain, "/p/prior/zlib.c"), "denied", "...and denied in clean-room mode");
   eq(evaluate(loaded, { tool_name: "Write", tool_input: { file_path: "/p/prior/zlib.c", content: "x" }, cwd: "/p" }, env).decision, "denied", "a write to prior art is still denied in control mode");
+
+  // a symlink inside the prior art that leaves it is read through, so the target's own rules apply
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "kukulu-control-link-")));
+  fs.mkdirSync(path.join(root, "prior"));
+  fs.mkdirSync(path.join(root, "secret"));
+  fs.writeFileSync(path.join(root, "secret", "zlib.c"), "x\n");
+  fs.writeFileSync(path.join(root, "prior", "inside.c"), "x\n");
+  fs.symlinkSync("../secret/zlib.c", path.join(root, "prior", "link"));
+  const linked = loadPolicy(JSON.stringify(base({ mode: "control-positive", control: { priorArt: ["prior/"] }, deny: { network: false, paths: ["secret/"], words: ["zlib"] } })));
+  const readIn = (file) => evaluate(linked, { tool_name: "Read", tool_input: { file_path: path.join(root, file) }, cwd: root }, { root, home: "/h" }).decision;
+  eq(readIn("prior/inside.c"), "allowed", "a file under control.priorArt is readable");
+  eq(readIn("prior/link"), "denied", "a symlink under control.priorArt that resolves to a deny.paths file outside it is still denied in control mode");
 }
 
 {
@@ -1353,6 +1365,7 @@ const gateCheck = (reason) => (reason.match(/^clean-room gate failed: ([\w-]+):/
   eq(flat(lockfilePackages("Cargo.lock", lock("Cargo.lock"))), "cleanflate@0.1.0,flate2@1.0.30,serde_json@1.0.117", "Cargo.lock yields every package name and version");
   eq(flat(lockfilePackages("package-lock.json", lock("package-lock.json"))), "left-pad@1.3.0,pako@2.1.0,b@0.4.1", "package-lock.json yields top-level and nested packages");
   eq(flat(lockfilePackages("npm-shrinkwrap.json", lock("npm-shrinkwrap.json"))), flat(lockfilePackages("package-lock.json", lock("package-lock.json"))), "npm-shrinkwrap.json parses like package-lock.json");
+  eq(flat(lockfilePackages("Cargo.lock", lock("subtable/Cargo.lock"))), "cleanflate@0.1.0", "a sub-table after a [[package]] does not overwrite the package's name or version");
   eq(flat(lockfilePackages("uv.lock", lock("uv.lock"))), "demo@0.1.0,zlib-ng@0.5.1", "uv.lock yields its packages, not the dependency entries");
   eq(flat(lockfilePackages("poetry.lock", lock("poetry.lock"))), "requests@2.32.3,urllib3@2.2.2", "poetry.lock yields its packages, not the sub-table keys");
   eq(flat(lockfilePackages("requirements.txt", lock("requirements.txt"))), "requests@2.32.3,numpy@null,flask@null,Zlib_Ng@0.5.1", "requirements.txt yields names and == pins only, skipping comments and options");
