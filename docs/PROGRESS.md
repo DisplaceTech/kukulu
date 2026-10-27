@@ -32,7 +32,7 @@ Started: 2026-10-26T21:19:36.125Z
 - [x] P2-13 The 0.7.2 known-gap candidates: --remove-sent-files and pax
 - [x] P2-14 The real-container integration step
 - [x] P2-15 Phase 2 end: push and record the manual checks
-- [ ] P3-01 Stage timing in the log and in state
+- [x] P3-01 Stage timing in the log and in state
 - [ ] P3-02 Token use per role from the subagent transcript
 - [ ] P3-03 The manifest's reported models and usage, and verifier check 12
 - [ ] P3-04 scripts/compare-bundles.mjs
@@ -181,3 +181,8 @@ Interpretation: markers are appended to it-markers.txt in the project since the 
 
 Push: pushed build branch to origin. Empty phase-end commit.
 Manual check: NOT VERIFIED (human): on Linux, doctor passes; KUKULU_SANDBOX_IT=1 node test/sandbox.mjs passes (the implementer ran it once here with docker 29.9.2: it passed); a throwaway sandboxed clean-room flight runs to the end; inside it curl https://example.com fails and ls ~/.cargo/registry shows only the volume's own cache; its bundle verifies with --require-enforcement container+proxy and its egress summary lists only the runner endpoints. The same run inside a Linux VM on the owner's Mac is a second, separate check.
+
+### P3-01 — ddfd35d
+
+server: next() now wraps nextDecision() with recordTimeline (state.timeline in every mode, stage entries in the chain, commit chore: stage <stage> / chore: stage end; skipped outside a git repo); kukulu_status gains timeline and stageSeconds. commitStaged gained noSigningFallback so bookkeeping never flips the run's signing off; a failed timeline commit rolls back and returns the decision with a timelineNote. Verifier unchanged (kinds unchecked; summarizeEntries counts allowed/denied only). Tests: state 297; cleanroom/streams/drive assertions that counted next()'s entries or commits updated. Verify green (4400).
+Codebase note (for REVIEW): kukulu_next is no longer read-only; every stage change commits state.json (and the log) on whatever branch the server is on, including the base branch before run_start, and a flight's final done leaves one local unpushed chore: stage end commit.
