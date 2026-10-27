@@ -71,3 +71,17 @@ None.
 - Gate check 3 pins `hooks/hooks.json` and both hook scripts, which changed in P2-03 and P3-02: a clean-room flight started on 0.7.x cannot continue on 0.8.0 (CHANGELOG, Changed).
 - `scripts/verify-attestation.mjs` duplicates `ENFORCEMENT_LEVELS`, `KNOWN_LIMITS`, `knownLimitsFor`, `coverageGaps`' level rule and `rolesUsage` of `mcp/cleanroom.mjs` on purpose; `test/attest.mjs` feeds both the same inputs.
 - `docs/kukulu.json` was not edited.
+
+## Round 1
+
+Review-fix round 1: tasks R1-01 to R1-08, all done (46 of 46 tasks done, 0 blocked). `kukulu_verify` was green after every task (15 suites, 4,580 assertions at the end). `KUKULU_SANDBOX_IT=1 node test/sandbox.mjs` was run with docker after R1-01 and passed 211/211, including `RUNTIME_WRITE_FAIL` and `SOCKET_OK`.
+
+- R1-01 (F-01): `/run/kukulu` is mounted `:ro`; gate check 9 and genesis accept only the exact mount list (project and home volume writable; runtime directory read-only with the hooks directory's parent as its source; the home a volume named `<container>-home`; no mount outside the expected set; same-path mounts need equal source and destination). Interpretation: an unset `KUKULU_SANDBOX_HOOKS_PATH` fails the source check; recorded boundary mounts keep `source`, `destination`, `rw`. The fake `docker` in `test/harness.mjs` now accepts `:ro` on the runtime mount.
+- R1-02 (F-02): the constraint scan skips a symlink whose real path leaves the project and lists it under the rule's `skipped` (present only when non-empty).
+- R1-03 (F-03): behind the sandbox, `kukulu_similarity` and `kukulu_attest` run the plugin's own verifier. Interpretation: the attest test is in `test/attest.mjs`, which owns the flight fixture; the sandbox-side control test is in `test/sandbox.mjs`.
+- R1-04 (F-08): a passing control bundle prints `CONTROL (positive)` with or without `--expect control-positive`.
+- R1-05 (F-04): tests only; no defect found in `scripts/sandbox.mjs`.
+- R1-06 (F-05): the cargo-cache crate name is what precedes the first `-X.Y.Z` segment; `docs/mcp-tools.md` no longer calls `kukulu_next` read-only; fsmonitor and runner-change tests added.
+- R1-07 (F-06): tests and the fixture `test/fixtures/lockfiles/subtable/Cargo.lock`; no defect.
+- R1-08 (F-07): the two scripts write U+016B and U+2014 as escapes; `--check` integrity tests added.
+- Manual check: NOT VERIFIED (human): the first-flight requirement above still stands.
