@@ -28,7 +28,7 @@ Started: 2026-10-26T21:19:36.125Z
 - [x] P2-09 The enforcement level: known limits per level, the manifest and verifier check 11
 - [x] P2-10 Signing under the boundary
 - [x] P2-11 Lockfile parsers, gate check 10 and the manifest's packages
-- [ ] P2-12 The guard denies adding a denied package
+- [x] P2-12 The guard denies adding a denied package
 - [ ] P2-13 The 0.7.2 known-gap candidates: --remove-sent-files and pax
 - [ ] P2-14 The real-container integration step
 - [ ] P2-15 Phase 2 end: push and record the manual checks
@@ -161,3 +161,8 @@ Interpretation: the finalize acceptance test is in test/review.mjs (finalizeRepo
 
 cleanroom.mjs: LOCKFILES, lockfileEcosystem, lockfilePackages (TOML blocks, package-lock, requirements), normalizePackageName, deniedPackage. server: trackedLockfiles, packagesCheck, gate check 10 (packages, after boundary) incl. cargo cache listing via engine exec; attest manifest.packages after enforcement. Fixtures test/fixtures/lockfiles. cleanroom 1238, attest 287, sandbox 184; verify green.
 Interpretation: sub-table headers end a [[package]] block's own keys; a lockfile of an ecosystem deny.packages does not name is not parsed; a non-"No such file" find failure fails the check with the engine's first stderr line.
+
+### P2-12 — 38b667b
+
+evaluate rule 6 gains the package-add check (cargo add; npm install|i|add; pip install; uv add) before the network rule of a segment; reason "denied package: <name> is in policy deny.packages.<ecosystem>". 14 new fixtures (P2-12), none changed (guard self-test 546/542 cases). docs/cleanroom.md rule 6 sentence. Known-gap candidates (for REVIEW): pip3, pnpm, yarn, poetry add, cargo install, adds via requirements files.
+Interpretation: subcommand = first operand that is not an option or +toolchain; later non-option tokens are specs (option values over-deny only a name that is itself denied).
