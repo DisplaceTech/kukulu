@@ -43,7 +43,7 @@ Started: 2026-10-26T21:19:36.125Z
 - [x] P4-04 The documentation sweep
 - [x] P4-05 CHANGELOG 0.8.0 and the version
 - [x] P4-06 Phase 4 end: push and record the manual check
-- [~] R1-01 Mount the runtime directory read-only and hold gate check 9 to the exact mount list
+- [x] R1-01 Mount the runtime directory read-only and hold gate check 9 to the exact mount list
 - [ ] R1-02 The constraint scan never reads through a symlink that leaves the project
 - [ ] R1-03 Behind the sandbox, run the plugin's verifier, never one from the project tree
 - [ ] R1-04 --expect control-positive still prints CONTROL (positive)
@@ -242,3 +242,7 @@ Walked SPEC 6 F bullet by bullet (list in the commit body). Fixed here: routing.
 
 Push: pushed build branch to origin. Empty phase-end commit.
 Manual check: NOT VERIFIED (human): on a scratch repository with a merged PR, kukulu_release makes a draft release whose notes match the CHANGELOG entry; this release is the first one kukulu_release cuts, after the owner merges.
+
+### R1-01 — 05459f4
+
+containerArgs mounts runtimeDir :ro; boundaryCheck now: writable set = project+home only; /run/kukulu must be ro with source = dirname(KUKULU_SANDBOX_HOOKS_PATH); home must be volume <name>-home; any destination outside the expected set refused; same-path mounts need source==destination. inspectContainer keeps type/name; recorded boundary mounts keep 3 fields. Tests updated/added in test/sandbox.mjs (fake docker in harness accepts :ro). Docs and CHANGELOG updated. Interpretation: unset HOOKS_PATH fails the source check. Integration run with docker: 211/211 incl. RUNTIME_WRITE_FAIL and SOCKET_OK.
