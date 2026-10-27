@@ -38,7 +38,7 @@ Started: 2026-10-26T21:19:36.125Z
 - [x] P3-04 scripts/compare-bundles.mjs
 - [x] P3-05 Phase 3 end: push and record the manual check
 - [x] P4-01 kukulu_release
-- [ ] P4-02 Base health before planning
+- [x] P4-02 Base health before planning
 - [ ] P4-03 The 0.7.2 review's notes
 - [ ] P4-04 The documentation sweep
 - [ ] P4-05 CHANGELOG 0.8.0 and the version
@@ -211,3 +211,8 @@ Manual check: NOT VERIFIED (human): compare-bundles.mjs on the Phase 2 bundle an
 
 New tool kukulu_release (26 tools; after kukulu_pr_finalize): validates, fetches origin, reads CHANGELOG at the merge commit, tags (-s or -a), pushes, gh release create --verify-tag (draft unless publish); repeat calls create only what is missing. mkFakeGhBin extended (pr view <branch>, release view/create). go-flight: allowed-tools both spellings + "release it" / "release and publish"; docs/mcp-tools.md section + count; README count + row. review 475, plugin 588; verify green (4505).
 Interpretation: git fetch origin before reading CHANGELOG at the merge commit; newest entry must be the first "## [" heading and numbered; existing tag at the merge commit with no release skips creation; See-line URL derived from origin (ssh/scp to https, .git stripped, local path as written).
+
+### P4-02 — 764465b
+
+baseHealth(st) in server.mjs: with an archive and no docs/kukulu.json, normalizes the archived constraints with cfgFrom and runs checkConstraints (self-test and scan only, no command); next() plan prompt gains the specified sentence and the reason "; base health: <n> failing". Tests in test/state.mjs (308); docs/mcp-tools.md base-health paragraph; CHANGELOG. Verify green (4516).
+Interpretation: a rule whose own fixture fails prints "(its fixture fails)"; not added to the required-signing probe reason.
