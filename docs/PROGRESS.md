@@ -51,7 +51,7 @@ Started: 2026-10-26T21:19:36.125Z
 - [x] R1-06 Test the git -c options and the runner part of routing, fix the cache crate name, correct kukulu_next's docs
 - [x] R1-07 Test the control-path symlink rule and the lockfile sub-table rule
 - [x] R1-08 Test publish-bundle --check's integrity checks and escape the literal characters
-- [ ] R2-01 The constraint scan never reads a file reached through a symlinked directory that leaves the project
+- [x] R2-01 The constraint scan never reads a file reached through a symlinked directory that leaves the project
 
 ## Log
 
@@ -275,3 +275,7 @@ Added two tests in test/cleanroom.mjs and fixture test/fixtures/lockfiles/subtab
 ### R1-08 — 9f1277e
 
 publish-bundle.mjs and compare-bundles.mjs now write U+016B and U+2014 as escapes (output unchanged). Four --check tests plus a no-literal-characters test added to test/bundles.mjs (84 assertions).
+
+### R2-01 — d62cd70
+
+checkConstraints now realpaths every listed file (not just symlinks) and reads the resolved path it checked; files resolving outside the project go to skipped. Test added in test/constraints.mjs (symlinked directory case); existing symlink cases still pass. docs/mcp-tools.md and the R1-02 CHANGELOG line amended. kukulu_verify green.
