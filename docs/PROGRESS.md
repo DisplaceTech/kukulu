@@ -51,6 +51,7 @@ Started: 2026-10-26T21:19:36.125Z
 - [x] R1-06 Test the git -c options and the runner part of routing, fix the cache crate name, correct kukulu_next's docs
 - [x] R1-07 Test the control-path symlink rule and the lockfile sub-table rule
 - [x] R1-08 Test publish-bundle --check's integrity checks and escape the literal characters
+- [ ] R2-01 The constraint scan never reads a file reached through a symlinked directory that leaves the project
 
 ## Log
 

@@ -993,3 +993,15 @@ Derived from docs/SPEC.md v0.8.0 on 2026-10-26. SPEC.md wins over this file.
 **Out of scope:** Publishing behavior; the verifier.
 **Verification:** kukulu_verify.
 **Depends on:** none
+
+## Review fixes (round 2)
+
+### R2-01: The constraint scan never reads a file reached through a symlinked directory that leaves the project
+
+**Goal:** kukulu_verify's constraint scan resolves the real path of every listed file, not only of a path that is itself a symlink, so a tracked file under a directory that was swapped for a symlink to a host directory is never read and its content never appears in a hit (REVIEW round 2 F-01; completes R1-02).
+**Files touched:** mcp/server.mjs, test/constraints.mjs, docs/mcp-tools.md, CHANGELOG.md
+**Design constraints:** SPEC §3 principle 7, §6 C-04; REVIEW round 2 F-01. In checkConstraints (mcp/server.mjs, around line 3295) compute fs.realpathSync(full) for every listed file that exists; when it is neither the real root nor under it (realRoot + path.sep), push the file to skippedLinks and continue without reading. Read the resolved path you checked, not the original, so the check and the read agree. A file whose real path stays inside the project is scanned as before, so the existing inside-link case keeps passing. server-synchronous (no async/await). docs/mcp-tools.md kukulu_verify Returns: the sentence 'A listed path that is a symlink whose real path lies outside the project is never read' becomes one that covers a file reached through a symlinked directory too. CHANGELOG: amend the existing R1-02 line under ## [0.8.0] ### Fixed (do not add a new heading).
+**Acceptance tests:** test/constraints.mjs: "a tracked file reached through a symlinked directory that leaves the project is not scanned": commit src/keys/secret.js (a dummy line), then remove src/keys and replace it with a symlink to a temp directory outside the repo holding secret.js with console.log('top-secret');. kukulu_verify's constraint result contains no hit whose text includes top-secret, and its skipped list includes src/keys/secret.js. Against the current code this case fails (the server returns the hit, as REVIEW round 2 F-01 reproduced). The existing cases "a tracked symlink to a file outside the project is not scanned" and "a symlink inside the project is still scanned" still pass.
+**Out of scope:** Other outside reads (packagesCheck, kukulu_attest's documents and lockfiles, the similarity scorer); they are listed under Spec issues in REVIEW.md. The unreachable /run/kukulu writable message (a note).
+**Verification:** kukulu_verify
+**Depends on:** none
