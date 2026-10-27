@@ -5,7 +5,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
-import { finish, ok, eq, like, isError, ROOT, cleanroomRepo, plannedRepo, setState, startServer, withServer, mkFakeDocker, mkDir, writeFile, readFile, logCall, git } from "./harness.mjs";
+import { finish, ok, eq, like, isError, ROOT, cleanroomRepo, plannedRepo, setState, startServer, withServer, mkFakeDocker, mkDir, writeFile, readFile, logCall, git, buildBundle } from "./harness.mjs";
 import net from "node:net";
 import { startControllerSocket, startLogSocket, startProxy, egressDecision, hostPortOf, planFor, containerArgs, projectIdFor, runtimeDirFor, main as sandboxMain } from "../scripts/sandbox.mjs";
 import { startBridge } from "../scripts/sandbox-entry.mjs";
@@ -691,6 +691,49 @@ const exchange = (target, bytes, { until = null, then = null } = {}) => new Prom
       eq(r.signing, "off", "signing off is unchanged inside the sandbox");
     }, insideEnv(dockerDir));
   }
+}
+
+// ---------------------------------------------------------------- the control bundle's verifier behind the sandbox (R1-03)
+
+{
+  const FIX = (d) => path.join(ROOT, "test", "fixtures", "similarity", d);
+  const leftRepo = mkDir("kukulu-control-left-");
+  fs.cpSync(FIX("b"), leftRepo, { recursive: true });
+  git(leftRepo, ["init", "-q", "-b", "main"]);
+  git(leftRepo, ["config", "user.email", "t@example.com"]);
+  git(leftRepo, ["config", "user.name", "T"]);
+  git(leftRepo, ["add", "-A"]);
+  git(leftRepo, ["commit", "-qm", "control result"]);
+  const headSha = git(leftRepo, ["rev-parse", "HEAD"]);
+  const marker = path.join(mkDir("kukulu-marker-"), "ran.txt");
+  const bundle = buildBundle(path.join(mkDir("kukulu-control-bundle-"), "bundle"), { head: headSha });
+  // A clean-room bundle is no positive control, but its planted verifier says it is.
+  // The bundle's own verifier is planted to write a marker and claim a pass.
+  fs.writeFileSync(path.join(bundle.dir, "verify.mjs"), `import fs from "node:fs"; fs.writeFileSync(${JSON.stringify(marker)}, "ran"); console.log(JSON.stringify({ ok: true, reasons: [] }));\n`);
+  const similarity = {
+    subject: [FIX("a")],
+    pairs: [
+      { id: "independent", role: "negative", left: FIX("a"), right: FIX("b") },
+      { id: "derived", role: "positive", left: leftRepo, right: FIX("b-derived"), control: bundle.dir },
+      { id: "vs-c", role: "test", left: "subject", right: FIX("c") },
+    ],
+    languages: { ".rs": "rust", ".c": "c", ".h": "c" },
+  };
+  const mk = () => {
+    const repo = plannedRepo({ config: { flight: "w1", cleanroom: { similarity } } });
+    setState(repo, { implemented: true, reviewed: true, verdict: "APPROVED", summarized: true });
+    git(repo, ["add", "-A"]);
+    git(repo, ["commit", "-qm", "chore: approved"]);
+    return repo;
+  };
+  await withServer(mk(), async ({ call }) => {
+    isError(await call("kukulu_similarity"), /^the positive pair's control bundle .* does not verify as a positive control: mode: the bundle is clean-room, expected control-positive/, "behind the sandbox a control bundle's own verify.mjs never runs: the plugin's verifier rejects it");
+    ok(!fs.existsSync(marker), "...and the planted script left no marker");
+  }, { env: { KUKULU_SANDBOX: "kukulu-x", KUKULU_SANDBOX_ENGINE: "docker" } });
+  await withServer(mk(), async ({ call }) => {
+    const r = await call("kukulu_similarity");
+    ok(!r.error && fs.existsSync(marker), "without the sandbox the bundle's own script runs, as SPEC B-02 says");
+  });
 }
 
 // ---------------------------------------------------------------- gate check 10 in the sandbox's cargo cache (P2-11)

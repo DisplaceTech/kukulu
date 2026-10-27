@@ -10,7 +10,7 @@ import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   finish, ok, eq, like, isError, ROOT, mkDir, buildBundle, rewriteManifest, signBundleManifest,
-  cleanroomRepo, plannedRepo, addPlan, withServer, logCall, runHook, testKeyFor, setState, git, writeFile, readFile, hasFile,
+  cleanroomRepo, tempPlugin, plannedRepo, addPlan, withServer, logCall, runHook, testKeyFor, setState, git, writeFile, readFile, hasFile,
 } from "./harness.mjs";
 import * as CR from "../mcp/cleanroom.mjs";
 import * as V from "../scripts/verify-attestation.mjs";
@@ -795,6 +795,23 @@ async function summarizedFlight() {
       ok(!again.error && again.manifest !== r.manifest, "a second kukulu_attest replaces the bundle");
       ok(!fs.existsSync(path.join(dir, "evidence")), "...without the evidence it was not given");
     }, flight);
+  }
+
+  // behind the sandbox the self-check runs the plugin's verifier, not the bundle's copy (R1-03)
+  {
+    const plugin = tempPlugin();
+    const verifier = path.join(plugin, "scripts", "verify-attestation.mjs");
+    fs.writeFileSync(verifier, 'import __fs from "node:fs";\nif (process.env.MARKER_FILE) __fs.appendFileSync(process.env.MARKER_FILE, import.meta.url + "\\n");\n' + fs.readFileSync(verifier, "utf8"));
+    for (const [sandboxed, want] of [[false, (repo) => `file://${path.join(repo, "docs", "attestation", "verify.mjs")}`], [true, () => `file://${verifier}`]]) {
+      const repo = copyOf(flight);
+      const marker = path.join(mkDir("kukulu-marker-"), "ran.txt");
+      await withServer(repo, async (server) => {
+        logCall(repo);
+        const r = await server.call("kukulu_attest");
+        ok(!r.error && r.verify.ok === true, `kukulu_attest ${sandboxed ? "behind the sandbox " : ""}passes` + (r.error ? ": " + r.error : ""));
+        eq(fs.readFileSync(marker, "utf8").trim(), want(repo), sandboxed ? "behind the sandbox kukulu_attest checks the bundle with the plugin's verifier" : "without the sandbox the bundle's own verify.mjs checks it");
+      }, { server: path.join(plugin, "mcp", "server.mjs"), env: { KUKULU_CLEANROOM_KEY: testKeyFor(flight), MARKER_FILE: marker, ...(sandboxed ? { KUKULU_SANDBOX: "kukulu-x", KUKULU_SANDBOX_ENGINE: "docker" } : {}) } });
+    }
   }
 
   // a bundle the verifier rejects is never committed

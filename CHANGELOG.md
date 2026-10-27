@@ -46,6 +46,7 @@ All notable changes to this plugin. Format follows
 - `classifyChanges` reads the diff without rename detection, so a rename never pairs records wrongly; `kukulu_mutate` names both sides of a renamed residue and puts a staged new side back by unstaging and removing it (0.7.2 REVIEW note).
 - The sandbox mounts its runtime directory read-only, and gate check 9 and genesis accept only the exact mount list: the project and the home volume writable, `/run/kukulu` read-only with the hooks directory's parent as its source, no extra mount, no bind-mounted home, no same-path mount with a different source (REVIEW F-01, C-01).
 - The constraint scan of `kukulu_verify` never reads through a symlink that leaves the project: the path is listed under the rule's `skipped` instead (REVIEW F-02, C-04).
+- Behind the sandbox, `kukulu_similarity` and `kukulu_attest` check a bundle with the plugin's own `scripts/verify-attestation.mjs`, never a `verify.mjs` from the project tree (REVIEW F-03, C-04).
 
 ## [0.7.2] — 2026-10-26
 

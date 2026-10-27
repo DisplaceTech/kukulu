@@ -141,7 +141,7 @@ The policy is `templates/cleanroom.local-only.example.json` with the image diges
 The server runs outside the container, with the key and the project's `.kukulu/`. Behind the sandbox:
 
 - **Inside the container:** every `verify`, `extraVerify` and build command, and every `kukulu_mutate` run, through `<engine> exec -w <directory> <container> timeout -k 5 <seconds> sh -c <command>`. The `timeout` runs inside, because the supervisor outside can only kill the engine's client, not the process it started.
-- **Outside, on the host:** git (every call the server makes, with the repository's hooks switched off by pointing `core.hooksPath` at the empty `hooks-empty/` directory and `core.fsmonitor` off, because a repository hook is project code and would run outside the boundary), the contamination scorer, the attestation bundle and the guard self-test.
+- **Outside, on the host:** git (every call the server makes, with the repository's hooks switched off by pointing `core.hooksPath` at the empty `hooks-empty/` directory and `core.fsmonitor` off, because a repository hook is project code and would run outside the boundary), the contamination scorer, the attestation bundle and the guard self-test. The verifier that checks a bundle (the self-check of `kukulu_attest`, and a positive pair's control bundle in `kukulu_similarity`) is the plugin's own `scripts/verify-attestation.mjs` here, never a `verify.mjs` found in the project tree, because the box can write that and the host would run it.
 
 A parallel stream cannot run inside, so `kukulu_run_start` with `stream` refuses there; a sandboxed flight is serial.
 

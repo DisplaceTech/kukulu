@@ -3754,7 +3754,9 @@ function verifyControlBundle(sim) {
   const refuse = (why) => new ToolError(`the positive pair's control bundle ${dir} does not verify as a positive control: ${why}`);
   const verifier = path.join(dir, "verify.mjs");
   if (!exists(verifier)) throw refuse("verify.mjs is missing from it");
-  const run = spawnSync(process.execPath, [verifier, dir, "--expect", "control-positive", "--json"], { encoding: "utf8", timeout: GATE_SELF_TEST_MS });
+  // Behind the sandbox the bundle is a directory the box could have written, so its own verify.mjs would run on the host (SPEC C-04).
+  const script = envVar("SANDBOX") ? path.join(PLUGIN_ROOT, "scripts", "verify-attestation.mjs") : verifier;
+  const run = spawnSync(process.execPath, [script, dir, "--expect", "control-positive", "--json"], { encoding: "utf8", timeout: GATE_SELF_TEST_MS });
   let verdict = null;
   try {
     verdict = JSON.parse(run.stdout);
@@ -4083,7 +4085,7 @@ function attest({ evidence } = {}) {
         fs.writeFileSync(path.join(dir, name), bytes);
       }
       // The verifier that ships in the bundle checks the bundle before anything is committed.
-      const run = spawnSync(process.execPath, [path.join(dir, "verify.mjs"), dir, "--key", key.fingerprint, "--expect", genesis.data?.mode ?? "clean-room", "--json"], { encoding: "utf8", timeout: GATE_SELF_TEST_MS });
+      const run = spawnSync(process.execPath, [envVar("SANDBOX") ? path.join(PLUGIN_ROOT, "scripts", "verify-attestation.mjs") : path.join(dir, "verify.mjs"), dir, "--key", key.fingerprint, "--expect", genesis.data?.mode ?? "clean-room", "--json"], { encoding: "utf8", timeout: GATE_SELF_TEST_MS });
       let verdict;
       try {
         verdict = JSON.parse(run.stdout);
