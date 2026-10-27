@@ -4,7 +4,7 @@ All notable changes to this plugin. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.8.0] — 2026-10-26
 
 ### Added
 
@@ -37,6 +37,7 @@ All notable changes to this plugin. Format follows
 
 ### Changed
 
+- `kukulu_next` is no longer read-only: it records the stage timeline, committing `.kukulu/state.json` (and, in clean-room mode, the log) as `chore: stage <stage>` on whatever branch the server is on, and a flight's last call leaves one local `chore: stage end` commit (G-10, D-01).
 - A clean-room flight started on 0.7.x cannot continue on 0.8.0: `hooks/hooks.json` and the hook scripts changed, and gate check 3 pins them (SPEC section 1).
 - `rsync --remove-sent-files` and `pax` get the rules of their siblings, `--remove-source-files` and `tar` (the 0.7.2 known-gap candidates, C-08).
 
