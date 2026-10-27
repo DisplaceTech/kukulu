@@ -3292,14 +3292,13 @@ function checkConstraints(constraints, cwd = ROOT, ignore = []) {
       const full = path.join(cwd, file);
       if (!exists(full)) continue; // e.g. a submodule gitlink git ls-files can list but fs cannot read
       // This scan runs outside the sandbox: a symlink leaving the project would read the host's files (SPEC C-04).
-      if (fs.lstatSync(full).isSymbolicLink()) {
-        const real = fs.realpathSync(full);
-        if (real !== realRoot && !real.startsWith(realRoot + path.sep)) {
-          skippedLinks.push(file);
-          continue;
-        }
+      // Resolve every file, not only a symlink: a parent directory swapped for a link leaves the file itself a regular one.
+      const real = fs.realpathSync(full);
+      if (real !== realRoot && !real.startsWith(realRoot + path.sep)) {
+        skippedLinks.push(file);
+        continue;
       }
-      read(full)
+      read(real)
         .split("\n")
         .forEach((text, i) => {
           if (testLine(c, text)) hits.push({ file, line: i + 1, text });

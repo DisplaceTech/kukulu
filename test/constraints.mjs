@@ -119,6 +119,22 @@ for (const [bad, re, label] of [
 }
 
 {
+  const outside = fs.mkdtempSync(path.join(fs.realpathSync(process.env.TMPDIR || "/tmp"), "kukulu-outdir-"));
+  fs.writeFileSync(path.join(outside, "secret.js"), "console.log('top-secret');\n");
+  const repo = constraintRepo([RULE]);
+  writeFile(repo, "src/keys/secret.js", "const x = 1;\n");
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-qm", "keys"]);
+  fs.rmSync(path.join(repo, "src", "keys"), { recursive: true });
+  fs.symlinkSync(outside, path.join(repo, "src", "keys"));
+  await withServer(repo, async ({ call }) => {
+    const r = (await call("kukulu_verify")).constraints.results[0];
+    ok(!JSON.stringify(r.hits).includes("top-secret"), "a tracked file reached through a symlinked directory that leaves the project is not scanned: its content is in no hit");
+    ok((r.skipped || []).includes("src/keys/secret.js"), "...and the rule lists the file under skipped");
+  });
+}
+
+{
   const repo = constraintRepo([RULE]);
   writeFile(repo, "src/a.js", "const x = 1;\nconsole.log('debug', x);\n");
   git(repo, ["add", "-A"]);
