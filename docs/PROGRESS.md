@@ -30,7 +30,7 @@ Started: 2026-10-26T21:19:36.125Z
 - [x] P2-11 Lockfile parsers, gate check 10 and the manifest's packages
 - [x] P2-12 The guard denies adding a denied package
 - [x] P2-13 The 0.7.2 known-gap candidates: --remove-sent-files and pax
-- [ ] P2-14 The real-container integration step
+- [x] P2-14 The real-container integration step
 - [ ] P2-15 Phase 2 end: push and record the manual checks
 - [ ] P3-01 Stage timing in the log and in state
 - [ ] P3-02 Token use per role from the subagent transcript
@@ -170,3 +170,9 @@ Interpretation: subcommand = first operand that is not an option or +toolchain; 
 ### P2-13 — 81e47d1
 
 rsyncParts: --remove-sent-files sets removesSources (stores the option name; reasons name it as written, existing --remove-source-files text unchanged). New pax rule (paxParts): -r alone extracts into the cwd after a cd (reason "pax extracts into <abs dir>"), -w alone writes the -f archive like tar -cf. 6 new fixtures (P2-13), insertions only (guard self-test 552/548). Known-gap candidate for REVIEW: pax copy mode (-r with -w). KNOWN_LIMITS unchanged. CHANGELOG ### Changed.
+
+### P2-14 — 565c48a
+
+test/sandbox.mjs integration step: skip line + assertion without KUKULU_SANDBOX_IT/docker; with it, builds test/fixtures/docker/Containerfile.it and runs sandbox run --exec in a temp project. Ran once here (docker 29.9.2): image built, command exited 0, NET_FAIL, KUKULU_WRITE_FAIL and PROJECT_OK all appeared, it-file.txt visible outside, .kukulu untouched (189 assertions with the variable; 185 without).
+Codebase note: the project is bind-mounted, so the container user must have the host user's uid or it cannot write; added ARG KUKULU_UID (default 1000, replacing the base image node user) to both the IT Containerfile and templates/sandbox/Containerfile; docs/sandbox.md says to pass --build-arg KUKULU_UID=$(id -u) when not 1000.
+Interpretation: markers are appended to it-markers.txt in the project since the container's stdout is inherited.
