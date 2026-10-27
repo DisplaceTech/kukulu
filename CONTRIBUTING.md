@@ -63,6 +63,7 @@ npm run lint                    # node --check, bash -n, JSON parse, exec bits
 npm test                        # all fifteen suites
 npm test -- guard protocol      # named suites only
 node test/state.mjs             # one suite, directly
+KUKULU_SANDBOX_IT=1 node test/sandbox.mjs   # the real-container step (Linux, docker on PATH; never in verify)
 KEEP_REPO=1 npm test -- drive   # keep the temp repos for inspection
 
 # documentation diagrams, which need two packages the plugin does not ship

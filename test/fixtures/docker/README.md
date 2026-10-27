@@ -11,3 +11,7 @@ the files they need into the fake's directory; nothing here is run.
   `Mounts` matching the `containerArgs` list for the local-only template with
   the plugin root `/opt/kukulu`. The project root is written `__ROOT__`, which
   a test replaces with the real project path before copying the file in.
+- `Containerfile.it`: the minimal image the opt-in integration step of
+  `test/sandbox.mjs` builds (`KUKULU_SANDBOX_IT=1`, docker on `PATH`). It has
+  `git`, `ca-certificates`, `curl` and a `kukulu` user with the build-arg uid
+  (the host user's, so the bind-mounted project is writable), and no Claude Code.

@@ -4,7 +4,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { finish, ok, eq, like, isError, ROOT, cleanroomRepo, plannedRepo, setState, startServer, withServer, mkFakeDocker, mkDir, writeFile, readFile, logCall, git } from "./harness.mjs";
 import net from "node:net";
 import { startControllerSocket, startLogSocket, startProxy, egressDecision, hostPortOf, planFor, containerArgs, projectIdFor, runtimeDirFor, main as sandboxMain } from "../scripts/sandbox.mjs";
@@ -715,6 +715,47 @@ const exchange = (target, bytes, { until = null, then = null } = {}) => new Prom
   eq(clean.gate.checked.slice(-2).join(","), "boundary,packages", "...and packages comes after boundary");
   const empty = await runCase("");
   eq(empty.stage, "plan", "an empty cache listing passes");
+}
+
+// ---------------------------------------------------------------- the real-container integration step (P2-14)
+
+// Only with KUKULU_SANDBOX_IT=1 and docker on PATH: everything above runs with a fake engine.
+const SKIP_LINE = "sandbox integration: skipped (set KUKULU_SANDBOX_IT=1 with docker on PATH)";
+const dockerVersion = spawnSync("docker", ["--version"], { encoding: "utf8" });
+if (process.env.KUKULU_SANDBOX_IT === "1" && dockerVersion.status === 0) {
+  const context = mkDir("kukulu-it-context-");
+  fs.copyFileSync(path.join(ROOT, "test", "fixtures", "docker", "Containerfile.it"), path.join(context, "Containerfile"));
+  const build = spawnSync("docker", ["build", "-t", "kukulu-sandbox-it", "--build-arg", `KUKULU_UID=${process.getuid()}`, "-f", path.join(context, "Containerfile"), context], { encoding: "utf8" });
+  ok(build.status === 0, "the integration image builds" + (build.status === 0 ? "" : `: ${(build.stderr || "").trim().split("\n").slice(-3).join(" | ")}`));
+  if (build.status === 0) {
+    try {
+      const id = spawnSync("docker", ["image", "inspect", "--format", "{{.Id}}", "kukulu-sandbox-it"], { encoding: "utf8" }).stdout.trim();
+      const repo = cleanroomRepo({ policy: JSON.stringify({ version: 1, enforcement: "container+proxy", sandbox: { image: `kukulu-sandbox-it@${id}` } }) });
+      const script = [
+        "curl -sS --max-time 10 https://example.com >/dev/null 2>&1 || echo NET_FAIL >> it-markers.txt",
+        "(echo x > .kukulu/x) 2>/dev/null || echo KUKULU_WRITE_FAIL >> it-markers.txt",
+        "echo hi > it-file.txt && echo PROJECT_OK >> it-markers.txt",
+      ].join("; ");
+      const err = [];
+      const code = await sandboxMain(["run", "--", "--exec", "sh", "-c", script], {
+        platform: "linux",
+        cwd: repo,
+        env: { ...process.env, XDG_RUNTIME_DIR: shortDir(), KUKULU_CONFIG: path.join(repo, ".kukulu-test-no-global.json"), KUKULU_PROFILE: "" },
+        stdout: { write: () => {} },
+        stderr: { write: (t) => err.push(t) },
+      });
+      eq(code, 0, "the sandboxed command exits 0" + (code === 0 ? "" : `: ${err.join("")}`));
+      const markers = fs.existsSync(path.join(repo, "it-markers.txt")) ? fs.readFileSync(path.join(repo, "it-markers.txt"), "utf8") : "";
+      ok(/^NET_FAIL$/m.test(markers) && /^KUKULU_WRITE_FAIL$/m.test(markers) && /^PROJECT_OK$/m.test(markers), "inside the container the network, .kukulu writes and project writes behave as the boundary says (" + markers.trim().split("\n").join(",") + ")");
+      eq(fs.readFileSync(path.join(repo, "it-file.txt"), "utf8"), "hi\n", "...and the project write is visible outside");
+      ok(!fs.existsSync(path.join(repo, ".kukulu", "x")), "...while .kukulu stayed untouched");
+    } finally {
+      spawnSync("docker", ["rmi", "-f", "kukulu-sandbox-it"], { encoding: "utf8" });
+    }
+  }
+} else {
+  console.log(`# ${SKIP_LINE}`);
+  ok(true, "the integration step is skipped without KUKULU_SANDBOX_IT");
 }
 
 finish();

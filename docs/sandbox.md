@@ -36,6 +36,8 @@ docker build -t kukulu-sandbox --build-arg NODE_IMAGE=node:22-bookworm-slim --bu
 docker image inspect --format '{{.Id}}' kukulu-sandbox
 ```
 
+The `kukulu` user in the image has the uid of the build argument `KUKULU_UID` (default 1000, replacing the base image's `node` user), because the project is bind-mounted and the container can write it only as the user who owns it: pass `--build-arg KUKULU_UID=$(id -u)` when yours is not 1000.
+
 Paste the second command's output into the policy as `"image": "kukulu-sandbox@<that id>"`. The all-zero digest in `templates/cleanroom.local-only.example.json` is a placeholder; `node scripts/sandbox.mjs doctor` prints the build command and the line to paste when the image is missing. An image that needs a model router derives from this one in two lines:
 
 ```text
@@ -148,3 +150,7 @@ A parallel stream cannot run inside, so `kukulu_run_start` with `stream` refuses
 The container's home volume (`kukulu-<id>-home`) holds every package cache: cargo's registry, npm's cache, pip's. Nothing of the host's `~/.cargo`, `~/.npm` or `~/.cache/pip` is mounted, so a prior-art crate the owner once downloaded is not there to be read. The policy's `deny.packages` names the packages that must never be dependencies; the gate refuses a tracked lockfile that names one and, for cargo, a cache that holds one (see [cleanroom.md](./cleanroom.md)).
 
 An oracle that must link prior art, such as cleanflate's zlib oracle, is built outside the container and mounted read-only through `sandbox.mounts`; the agent calls the binary and never sees the library's source. The packages a lockfile names are outside the claim: the attestation lists them, but the log cannot show what their source contained.
+
+## The integration step
+
+Everything in `test/sandbox.mjs` runs against a fake container engine, so `npm test` needs no engine, GPU or second machine. One opt-in step uses a real one: `KUKULU_SANDBOX_IT=1 node test/sandbox.mjs` (Linux, docker on `PATH`, never part of `kukulu_verify`) builds `test/fixtures/docker/Containerfile.it`, runs `node scripts/sandbox.mjs run -- --exec sh -c '<script>'` in a temporary project, and checks the boundary from inside: a request to the internet fails, a write under `.kukulu/` fails, and a write to the project succeeds and is visible outside. Without the variable, or without `docker`, the suite prints `sandbox integration: skipped (set KUKULU_SANDBOX_IT=1 with docker on PATH)` and passes.
