@@ -41,7 +41,7 @@ Started: 2026-10-26T21:19:36.125Z
 - [x] P4-02 Base health before planning
 - [x] P4-03 The 0.7.2 review's notes
 - [x] P4-04 The documentation sweep
-- [ ] P4-05 CHANGELOG 0.8.0 and the version
+- [x] P4-05 CHANGELOG 0.8.0 and the version
 - [ ] P4-06 Phase 4 end: push and record the manual check
 
 ## Log
@@ -225,3 +225,7 @@ Interpretation: the specified rename test needs trackedChanges --no-renames and 
 ### P4-04 — 4156ac0
 
 Walked SPEC 6 F bullet by bullet (list in the commit body). Fixed here: routing.md (vLLM prefix caching, Ollama prompt caching, prefill, runner-side context caps, local-runner starting point), operations.md (Running in the sandbox: egress), README (sandbox paragraph; verifier check list names enforcement and roles), CONTRIBUTING (sandbox-entry.mjs, templates, launcher row), architecture.md (gate up to ten checks, boundary). Everything else was already true. Verify green (4520).
+
+### P4-05 — 43532fc
+
+## [Unreleased] renamed ## [0.8.0] — 2026-10-26; version 0.8.0 in package.json, plugin.json, VERSION and README badge; added a Changed line that kukulu_next now writes the stage timeline. Every SPEC section 6 requirement has a line citing its goal. Verify green (4520).
