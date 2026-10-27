@@ -1109,9 +1109,9 @@ export function evaluate(policy, hookInput, env) {
             for (const src of operands.slice(0, -1)) {
               const forms = writeForms(tokenPath(src));
               const q = protectedList.find((p) => forms.some((x) => underPrefix(p, x)));
-              if (q) return denied(`protected path: ${q.replace(/\/$/, "")} (rsync --remove-source-files removes it)`);
+              if (q) return denied(`protected path: ${q.replace(/\/$/, "")} (rsync ${removesSources} removes it)`);
               const f = forms.find((x) => protectedList.some((p) => underPrefix(x, p)));
-              if (f) return denied(`protected path: ${f} (rsync --remove-source-files removes it)`);
+              if (f) return denied(`protected path: ${f} (rsync ${removesSources} removes it)`);
             }
           }
           const landed = operands.slice(0, -1).map((src) => {
@@ -1143,6 +1143,22 @@ export function evaluate(policy, hookInput, env) {
           if (hit) return denied(`protected path: ${hit} (${word} extracts into ${dirs.length ? dirs[dirs.length - 1] : "."}; the archive's contents cannot be known)`);
         }
         if (writesArchive && file !== null && file !== "-") {
+          const forms = writeForms(tokenPath(file));
+          const f = forms.find((x) => protectedList.some((q) => underPrefix(x, q)));
+          if (f) return denied(`protected path: ${f}`);
+          const w = wildcardNames(forms, protectedList);
+          if (w) return denied(`protected path: ${w} (can be named by the wildcard ${file})`);
+        }
+      }
+      // pax reads and writes archives like tar: -r alone extracts into the current directory, -w alone writes the -f archive (SPEC C-08).
+      if (word === "pax") {
+        const { extract, writes, file } = paxParts(rest);
+        if (extract) {
+          const forms = [shellCwd, ...writeForms(shellCwd)];
+          const hit = protectedList.find((q) => forms.some((x) => underPrefix(q, x) || underPrefix(x, q)));
+          if (hit) return denied(`protected path: ${hit} (pax extracts into ${shellCwd}; the archive's contents cannot be known)`);
+        }
+        if (writes && file !== null && file !== "-") {
           const forms = writeForms(tokenPath(file));
           const f = forms.find((x) => protectedList.some((q) => underPrefix(x, q)));
           if (f) return denied(`protected path: ${f}`);
@@ -1454,7 +1470,7 @@ function rsyncParts(rest) {
   const operands = [];
   let recursive = false;
   let deletes = false;
-  let removesSources = false;
+  let removesSources = null;
   for (let i = 0; i < rest.length; i++) {
     const t = rest[i];
     if (t === "--") {
@@ -1469,7 +1485,7 @@ function rsyncParts(rest) {
     if (t.startsWith("--")) {
       const given = t.split("=")[0];
       if (RSYNC_DELETES.has(given)) deletes = true;
-      if (given === "--remove-source-files") removesSources = true;
+      if (given === "--remove-source-files" || given === "--remove-sent-files") removesSources = given;
       const hits = ["--recursive", "--archive"].filter((n) => n.startsWith(given));
       if (given.length > 2 && hits.length === 1) recursive = true;
     } else {
@@ -1480,6 +1496,31 @@ function rsyncParts(rest) {
     if (opt && opt.value === null) i++;
   }
   return { operands, recursive, deletes, removesSources };
+}
+
+// pax's short options that take a value; its options come before its operands (the file patterns).
+const PAX_VALUED = new Set("fsbxopTUG");
+
+/**
+ * What a pax command line does to the file system: `-r` without `-w` extracts, `-w` without `-r` writes
+ * the `-f` archive, both together (copy mode) is not modelled, neither lists. `file` is the -f value.
+ */
+function paxParts(rest) {
+  const modes = new Set();
+  let file = null;
+  for (let i = 0; i < rest.length; i++) {
+    const t = rest[i];
+    if (t === "--" || !t.startsWith("-") || t === "-") break;
+    for (let k = 1; k < t.length; k++) {
+      modes.add(t[k]);
+      if (PAX_VALUED.has(t[k])) {
+        const value = k + 1 < t.length ? t.slice(k + 1) : (rest[++i] ?? null);
+        if (t[k] === "f") file = value;
+        break;
+      }
+    }
+  }
+  return { extract: modes.has("r") && !modes.has("w"), writes: modes.has("w") && !modes.has("r"), file };
 }
 
 // BSD and GNU tar under their other names parse the same options.

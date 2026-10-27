@@ -1023,6 +1023,12 @@ async function genesisRepo(planOpts = {}) {
   eq(run("rsync evil/cleanroom.json docs/").reason, "protected path: /p/docs/cleanroom.json (rsync writes it into docs/)", "an rsync denial names its destination");
   eq(run("rsync -d --delete empty/ docs/").reason, "protected path: /p/docs/cleanroom.json (rsync --delete* can remove it from docs/)", "an rsync --delete denial names the protected path and the destination");
   eq(run("rsync --remove-source-files docs/cleanroom.json build/").reason, "protected path: /p/docs/cleanroom.json (rsync --remove-source-files removes it)", "an rsync --remove-source-files denial names the protected path");
+  eq(run("rsync --remove-sent-files docs/cleanroom.json build/").reason, "protected path: /p/docs/cleanroom.json (rsync --remove-sent-files removes it)", "an rsync --remove-sent-files denial names the option as written");
+  eq(run("cd docs && pax -r -f a.tar").reason, "protected path: /p/docs/cleanroom.json (pax extracts into /p/docs; the archive's contents cannot be known)", "a pax extraction denial names the directory");
+  eq(run("cd docs && pax -rf a.tar").decision + "|" + run("cd docs && pax -rvf a.tar").decision, "denied|denied", "...with bundled short options");
+  eq(run("pax -w -f docs/cleanroom.json src").reason, "protected path: /p/docs/cleanroom.json", "a pax -w -f denial names the archive path");
+  eq(run("pax -wfdocs/cleanroom.json src").decision, "denied", "...and with the file attached to -f");
+  eq(run("cd docs && pax -f a.tar").decision + "|" + run("cd docs && pax -r -w dest").decision + "|" + run("cd docs && pax").decision, "allowed|allowed|allowed", "listing, copy mode (not modelled) and no options write nothing the rule sees");
   eq(run("install -S evil/cleanroom.json docs").reason, "protected path: /p/docs/cleanroom.json (install writes it into docs)", "install's BSD-only denial names its directory");
   ok(!/null/.test(run("install -S evil/cleanroom.json docs").reason), "...and never says null");
   eq(run("install -S .bak evil/cleanroom.json docs").reason, "protected path: /p/docs/cleanroom.json (install writes it into docs)", "install's GNU-reading denial names its directory");

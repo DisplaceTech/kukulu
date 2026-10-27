@@ -29,6 +29,10 @@ All notable changes to this plugin. Format follows
 - Lockfile parsers for `Cargo.lock`, `package-lock.json`, `npm-shrinkwrap.json`, `uv.lock`, `poetry.lock` and `requirements*.txt`, gate check 10 (`packages`) against `deny.packages`, and the manifest's `packages` list (G-08, C-07).
 - The clean-room guard denies `cargo add`, `npm install|i|add`, `pip install` and `uv add` of a package named in `deny.packages` (G-08, C-07).
 
+### Changed
+
+- `rsync --remove-sent-files` and `pax` get the rules of their siblings, `--remove-source-files` and `tar` (the 0.7.2 known-gap candidates, C-08).
+
 ## [0.7.2] — 2026-10-26
 
 ### Changed

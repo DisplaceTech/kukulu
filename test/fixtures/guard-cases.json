@@ -7469,5 +7469,80 @@
    "cwd": "__ROOT__"
   },
   "expect": "allowed"
+ },
+ {
+  "name": "rsync --remove-sent-files docs/cleanroom.json build/ (P2-13)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "rsync --remove-sent-files docs/cleanroom.json build/"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "rsync --remove-sent-files removes it"
+ },
+ {
+  "name": "cd docs && pax -r -f a.tar (P2-13)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd docs && pax -r -f a.tar"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "pax extracts into"
+ },
+ {
+  "name": "pax -w -f docs/cleanroom.json src (P2-13)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "pax -w -f docs/cleanroom.json src"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "rsync --remove-sent-files build/a.o out/ (P2-13)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "rsync --remove-sent-files build/a.o out/"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "pax -f a.tar (P2-13)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "pax -f a.tar"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "cd build && pax -r -f a.tar (P2-13)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd build && pax -r -f a.tar"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
  }
 ]
