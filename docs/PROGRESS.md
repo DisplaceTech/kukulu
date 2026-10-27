@@ -48,7 +48,7 @@ Started: 2026-10-26T21:19:36.125Z
 - [x] R1-03 Behind the sandbox, run the plugin's verifier, never one from the project tree
 - [x] R1-04 --expect control-positive still prints CONTROL (positive)
 - [x] R1-05 Test the sandbox mechanics SPEC names: box source, lockdown on sandbox.egress, stop, tag-only image
-- [~] R1-06 Test the git -c options and the runner part of routing, fix the cache crate name, correct kukulu_next's docs
+- [x] R1-06 Test the git -c options and the runner part of routing, fix the cache crate name, correct kukulu_next's docs
 - [ ] R1-07 Test the control-path symlink rule and the lockfile sub-table rule
 - [ ] R1-08 Test publish-bundle --check's integrity checks and escape the literal characters
 
@@ -262,3 +262,7 @@ Verifier prints CONTROL (positive) whenever the bundle's mode is control-positiv
 ### R1-05 — 0dad250
 
 Four tests added to test/sandbox.mjs (forged data.source on a separate log socket, sandbox.egress after lockdown, stop SIGTERMs run.json pid and removes it, tag-only image refused with no run line). No defect found; scripts/sandbox.mjs unchanged.
+
+### R1-06 — bb423bd
+
+Crate regex now /^(.*?)-\d+\.\d+\.\d+(?:[-+].*)?$/ (first semver segment). Tests: fsmonitor marker absent in sandbox / present outside; flate2-1.0.0-rc.1 refused; runner prefix moved after genesis halts with routing changed (global config rewritten). mcp-tools.md line 5 corrected; CHANGELOG Fixed.
