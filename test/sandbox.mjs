@@ -15,7 +15,8 @@ import { readEntries, verifyChain, loadPolicy, lockdownActive, appendEntry } fro
 // A Unix socket path is limited to about 100 bytes on macOS, so sockets live under a short temp directory.
 /** The host:port a URL names, as the sandbox derives a runner endpoint. */
 const hostPortFor = (url) => { const { host, port } = hostPortOf(url); return `${host}:${port}`; };
-const shortDir = () => fs.mkdtempSync(path.join(fs.realpathSync(process.env.TMPDIR || "/tmp"), "ks-"));
+// Always /tmp, never TMPDIR: a Unix socket path is capped at 104 bytes on macOS, and its TMPDIR (/var/folders/...) leaves no room.
+const shortDir = () => fs.mkdtempSync(path.join(fs.realpathSync("/tmp"), "ks-"));
 
 const names = async (s) => (await s.rpc("tools/list", {})).result.tools.map((t) => t.name);
 
