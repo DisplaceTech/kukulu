@@ -39,7 +39,7 @@ Started: 2026-10-26T21:19:36.125Z
 - [x] P3-05 Phase 3 end: push and record the manual check
 - [x] P4-01 kukulu_release
 - [x] P4-02 Base health before planning
-- [ ] P4-03 The 0.7.2 review's notes
+- [x] P4-03 The 0.7.2 review's notes
 - [ ] P4-04 The documentation sweep
 - [ ] P4-05 CHANGELOG 0.8.0 and the version
 - [ ] P4-06 Phase 4 end: push and record the manual check
@@ -216,3 +216,8 @@ Interpretation: git fetch origin before reading CHANGELOG at the merge commit; n
 
 baseHealth(st) in server.mjs: with an archive and no docs/kukulu.json, normalizes the archived constraints with cfgFrom and runs checkConstraints (self-test and scan only, no command); next() plan prompt gains the specified sentence and the reason "; base health: <n> failing". Tests in test/state.mjs (308); docs/mcp-tools.md base-health paragraph; CHANGELOG. Verify green (4516).
 Interpretation: a rule whose own fixture fails prints "(its fixture fails)"; not added to the required-signing probe reason.
+
+### P4-03 — 207badf
+
+classifyChanges and trackedChanges use --no-renames; undoMutationResidue unstages and removes a restored path HEAD lacks (new side of git mv) instead of failing in git checkout. Recorded gh lines moved to test/fixtures/gh/ (merge-not-allowed.txt, view-title-refused.txt, api-bad-gateway.txt, release-validation-failed.txt, pr-draft.json). mcp-tools signing values complete. review 479, state 308; verify green (4520).
+Interpretation: the specified rename test needs trackedChanges --no-renames and the unstage-and-remove of an added residue (not named in the task text).
