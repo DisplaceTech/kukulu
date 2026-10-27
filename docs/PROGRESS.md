@@ -49,7 +49,7 @@ Started: 2026-10-26T21:19:36.125Z
 - [x] R1-04 --expect control-positive still prints CONTROL (positive)
 - [x] R1-05 Test the sandbox mechanics SPEC names: box source, lockdown on sandbox.egress, stop, tag-only image
 - [x] R1-06 Test the git -c options and the runner part of routing, fix the cache crate name, correct kukulu_next's docs
-- [ ] R1-07 Test the control-path symlink rule and the lockfile sub-table rule
+- [x] R1-07 Test the control-path symlink rule and the lockfile sub-table rule
 - [ ] R1-08 Test publish-bundle --check's integrity checks and escape the literal characters
 
 ## Log
@@ -266,3 +266,7 @@ Four tests added to test/sandbox.mjs (forged data.source on a separate log socke
 ### R1-06 — bb423bd
 
 Crate regex now /^(.*?)-\d+\.\d+\.\d+(?:[-+].*)?$/ (first semver segment). Tests: fsmonitor marker absent in sandbox / present outside; flate2-1.0.0-rc.1 refused; runner prefix moved after genesis halts with routing changed (global config rewritten). mcp-tools.md line 5 corrected; CHANGELOG Fixed.
+
+### R1-07 — b79a143
+
+Added two tests in test/cleanroom.mjs and fixture test/fixtures/lockfiles/subtable/Cargo.lock. No defect; mcp/cleanroom.mjs unchanged.
