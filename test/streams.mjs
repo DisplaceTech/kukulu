@@ -629,7 +629,7 @@ const feedbackOf = (repo) => (hasFile(repo, ".kukulu/feedback.jsonl") ? readFile
     const before = await call("kukulu_next");
     ok(!("streams" in before), "an invalid wave offers no streams");
     eq(feedbackOf(repo).length, 0, "before a run starts on a build branch, nothing is recorded on the base branch");
-    eq(git(repo, ["log", "--format=%s", "-1"]), "plan: derive build plan from SPEC", "no commit landed on the base branch");
+    eq(git(repo, ["log", "--format=%s", "-2"]).split("\n").join("|"), "chore: stage implement|plan: derive build plan from SPEC", "no commit but the stage timeline's landed on the base branch");
 
     await call("kukulu_run_start");
     for (let i = 0; i < 3; i++) {

@@ -1,0 +1,56 @@
+mode and enforcement
+  A: clean-room, hook
+  B: clean-room, container+proxy; egress: example.com:443 0/1, spark.test:8000 1/0
+
+gates
+  A: 1 run, 0 failed
+  B: 1 run, 0 failed
+
+human records
+  A: 1 instructions, 0 interventions, 0 verdicts
+  B: 1 instructions, 0 interventions, 0 verdicts
+
+denials by reason
+  A: denied path: /usr/include/zlib.h (deny.paths): 1
+  B: denied path: /usr/include/zlib.h (deny.paths): 1
+
+coverage gaps by kind
+  A: none
+  B: none
+
+similarity
+  A: shows no similarity beyond independent work
+    ngram_jaccard@5: negative 0.1000 positive 0.9000
+    ngram_containment@5: negative 0.1100 positive 0.9100
+    ngram_jaccard@10: negative 0.1200 positive 0.9200
+    ngram_containment@10: negative 0.1300 positive 0.9300
+    ident_jaccard: negative 0.1400 positive 0.9400
+    ident_match_rate_left: negative 0.1500 positive 0.9500
+    comment_jaccard: negative 0.1600 positive 0.9600
+  B: is between the controls
+    ngram_jaccard@5: negative 0.2000 positive 0.8000
+    ngram_containment@5: negative 0.2100 positive 0.8100
+    ngram_jaccard@10: negative 0.2200 positive 0.8200
+    ngram_containment@10: negative 0.2300 positive 0.8300
+    ident_jaccard: negative 0.2400 positive 0.8400
+    ident_match_rate_left: negative 0.2500 positive 0.8500
+    comment_jaccard: negative 0.2600 positive 0.8600
+
+roles
+  A: planner: opus on anthropic (vendor-asserted, claude)
+  A: implementer: opus on anthropic (vendor-asserted, claude)
+  A: reviewer: opus on anthropic (vendor-asserted, claude)
+  A: summarizer: opus on anthropic (vendor-asserted, claude)
+  B: planner: opus on anthropic (vendor-asserted, claude)
+  B: implementer: spark/nemotron on spark (operator-measured, nemotron)
+  B: reviewer: opus on anthropic (vendor-asserted, claude)
+  B: summarizer: opus on anthropic (vendor-asserted, claude)
+
+wall time per stage
+  A: implement 60 s, plan 60 s
+  B: implement 60 s, plan 60 s
+
+tokens per role and model
+  A: implementer: opus 1200 in / 300 out
+  B: implementer: spark/nemotron 5000 in / 800 out
+  B: reviewer: opus 90 in / 10 out

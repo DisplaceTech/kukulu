@@ -91,6 +91,7 @@ ok(exists(server.args[0].replace("${CLAUDE_PLUGIN_ROOT}/", "")), "the server fil
 eq(server.env.KUKULU_PROJECT_DIR, "${CLAUDE_PROJECT_DIR}", "the server is told which project it is operating on");
 eq(server.env.KUKULU_CONFIG, "${KUKULU_CONFIG:-}", "the global routing config path passes through, empty by default");
 eq(server.env.KUKULU_PROFILE, "${KUKULU_PROFILE:-}", "the routing profile passes through, empty by default");
+eq(server.env.KUKULU_CONTROLLER_SOCKET, "${KUKULU_CONTROLLER_SOCKET:-}", "the controller socket passes through, empty by default");
 eq(server.env.FOUNDRY_CONFIG, undefined, ".mcp.json no longer passes FOUNDRY_CONFIG");
 eq(server.env.FOUNDRY_PROFILE, undefined, "...or FOUNDRY_PROFILE");
 
@@ -124,6 +125,13 @@ eq(hooks.hooks.SubagentStop[0].matcher, "^(kukulu:implementer|kukulu-implementer
     ok(exists(script) && fs.statSync(path.join(ROOT, script)).mode & 0o111 && /^#!\/usr\/bin\/env node\n/.test(read(script)), `${script} is executable with a shebang`);
   }
   ok(spawnSync("git", ["ls-files", "-s", "scripts/cleanroom-guard.mjs", "scripts/cleanroom-log.mjs"], { cwd: ROOT, encoding: "utf8" }).stdout.split("\n").filter(Boolean).every((l) => l.startsWith("100755")), "both clean-room hook scripts are mode 755 in git");
+}
+{
+  const sub = hooks.hooks.SubagentStop;
+  eq(sub.length, 2, "SubagentStop has two entries");
+  eq(sub[1].hooks.map((h) => h.command).join(), `"${"$"}{CLAUDE_PLUGIN_ROOT}"/scripts/cleanroom-log.mjs`, "hooks.json runs the clean-room logger on SubagentStop after the implement guard");
+  ok(!sub[1].matcher, "...for every subagent, with no matcher");
+  eq(sub[0].hooks.map((h) => h.command).join(), `"${"$"}{CLAUDE_PLUGIN_ROOT}"/scripts/implement-guard.mjs`, "...and the implement guard stays first");
 }
 ok(!hooks.hooks.Stop[0].matcher, "Stop carries no matcher — a Stop event has no agent to match against");
 
@@ -201,7 +209,7 @@ for (const name of ["plan-build", "implement"]) {
   like(readme, /^## Upgrading to 0\.7\.0$/m, "README has a 0.7.0 migration paragraph");
   like(readme, /\.foundry\/state\.json[\s\S]*\.kukulu\/[\s\S]*`FOUNDRY_\*` environment variables are no longer read/, "...naming the manual move and the unread FOUNDRY_ variables");
   like(readme, /\*\*Clean-room mode\*\*, opt-in with a policy file/, "README's feature list names clean-room mode");
-  like(readme, /thirteen suites/, "README counts thirteen suites");
+  like(readme, /fifteen suites/, "README counts fifteen suites");
   const tools = read("docs/mcp-tools.md");
   ok(tools.includes("`prChecks`") && tools.includes("`gate`") && /"source": "review"/.test(tools) && tools.includes("`constraints`"), "mcp-tools documents prChecks, gate and source (and the mutate constraints)");
   ok(!tools.includes("kukulu_migrate"), "mcp-tools has no kukulu_migrate");
@@ -305,9 +313,9 @@ like(goFlight, /policies\.signing is 'required' and the signing probe failed/, "
 const fmGo = frontmatter(goFlight);
 const allowed = String(fmGo["allowed-tools"]).split(",").map((s) => s.trim());
 const toolNames = Array.from(serverSrc.matchAll(/name: "(kukulu_[a-z_]+)"/g), (m) => m[1]);
-eq(toolNames.length, 25, "the server defines twenty-five tools");
+eq(toolNames.length, 26, "the server defines twenty-six tools");
 
-const COUNT_WORDS = { 18: "Eighteen", 19: "Nineteen", 20: "Twenty", 21: "Twenty-one", 22: "Twenty-two", 23: "Twenty-three", 24: "Twenty-four", 25: "Twenty-five" };
+const COUNT_WORDS = { 18: "Eighteen", 19: "Nineteen", 20: "Twenty", 21: "Twenty-one", 22: "Twenty-two", 23: "Twenty-three", 24: "Twenty-four", 25: "Twenty-five", 26: "Twenty-six" };
 like(read("docs/mcp-tools.md").split("\n")[2], new RegExp(`^${COUNT_WORDS[toolNames.length]} tools,`), "docs/mcp-tools.md states the tool count in words");
 
 {
@@ -365,7 +373,7 @@ for (const t of allowed.filter((a) => a.startsWith("mcp__"))) {
 }
 ok(
   allowed.every((a) => a === "Agent" || MCP_PREFIXES.some((p) => a.startsWith(p))),
-  "the flight controller is allowed nothing beyond Agent, the read-only kukulu tools, agents_sync, run_halt, flight_options and pr_finalize",
+  "the flight controller is allowed nothing beyond Agent, the read-only kukulu tools, agents_sync, run_halt, flight_options, pr_finalize and release",
 );
 ok(
   // run_halt is a deliberate exception: it records a clean halt reason when
@@ -375,6 +383,10 @@ ok(
   !allowed.some((a) => /run_start|task_|run_finish|review_submit|summary_commit/.test(a)),
   "the flight controller cannot touch the tools that change project state",
 );
+like(goFlight, /"release it"[^\n]*kukulu_release\(\{\}\)/, "go-flight maps release it to kukulu_release");
+like(goFlight, /"release and publish"[^\n]*kukulu_release\(\{ publish: true \}\)/, "...and release and publish to kukulu_release({ publish: true })");
+for (const p of MCP_PREFIXES) ok(allowed.includes(`${p}kukulu_release`), `the flight controller may call ${p}kukulu_release`);
+for (const agent of agentNames) ok(!String(frontmatter(read(`agents/${agent}.md`)).tools).includes("kukulu_release"), `agents/${agent} cannot call kukulu_release`);
 like(goFlight, /resume: true/, "go-flight resumes a round-cap halt with kukulu_flight_options (project-c F-13, F-18)");
 like(goFlight, /kukulu_pr_finalize\(\{ resign: true \}\)/, "go-flight finishes a signing-blocked flight only with kukulu_pr_finalize({ resign: true })");
 like(goFlight, /`flight=<slug>`/, "go-flight passes flight=<slug> to the planner");

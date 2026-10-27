@@ -4,7 +4,7 @@
 // chain and signature code duplicates mcp/cleanroom.mjs on purpose: a bundle must
 // be checkable by someone who does not trust, or even have, the plugin.
 //
-//   node verify-attestation.mjs <bundle-dir> [--key sha256:<hex>] [--json]
+//   node verify-attestation.mjs <bundle-dir> [--key sha256:<hex>] [--expect clean-room|control-positive] [--require-enforcement hook|container+proxy|container+proxy+audit] [--json]
 //   node verify-attestation.mjs --legacy-log <file> --roots a,b --words a,b [--repo path] [--json]
 
 import { createHash, createPublicKey, verify } from "node:crypto";
@@ -12,6 +12,59 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+
+// ---------------------------------------------------------------- enforcement levels and known limits
+
+export const ENFORCEMENT_LEVELS = ["hook", "container+proxy", "container+proxy+audit"];
+
+// Duplicated from mcp/cleanroom.mjs on purpose (a bundle's verifier imports nothing); test/attest.mjs feeds both the same levels.
+export const KNOWN_LIMITS = [
+  { id: "interpreter", text: "Interpreter escapes (python3 -c, node -e) are not parsed, so a path or word inside the quoted program is not seen.", levels: ["hook"] },
+  { id: "expansion", text: "Shell expansion beyond ~ and $HOME is not evaluated: other variables, and strings assembled at run time (a base64 decode, a variable holding a command), so a path or command built that way is not seen.", levels: ["hook"] },
+  { id: "spellings", text: "Option and wrapper spellings the tables do not model are not recognized: the guard judges a command by its text, its wrapper and option parsing follows GNU coreutils, findutils and sudo (and BSD/macOS forms where their manual pages differ), and no table can be proved complete across tool versions.", levels: ["hook"] },
+  { id: "indirect", text: "Commands that run a command from their arguments (find -exec, watch, parallel, busybox) and programs outside the fixed network and write lists (unlink, shred, perl -i, cargo fetch) are not recognized.", levels: ["hook"] },
+  { id: "patterns", text: "pathPatterns regexes are matched on the paths a call names, not on the files a recursive read or a glob reaches below a directory.", levels: ["hook"] },
+  { id: "make", text: "Subprocesses of a make target are not individual tool calls, so what they read is not logged.", levels: ["hook"] },
+  { id: "mcp", text: "MCP server internals are not tool calls, so what a server reads on its own is not logged.", levels: ["hook"] },
+  { id: "session", text: "Hooks load at session start, so a session that writes the policy is not covered until the next one; the gate's liveness check catches a session with no hooks at all.", levels: ["hook", "container+proxy"] },
+  { id: "training", text: "What a model learned in training is outside every boundary; the similarity score, not the log, measures it.", levels: ["hook", "container+proxy"] },
+  { id: "packages", text: "Packages named in a lockfile are outside the claim; deny.packages and the gate keep named prior-art packages out of the lockfiles and the cache, and the manifest lists what the lockfiles name.", levels: ["hook", "container+proxy"] },
+  { id: "config-writable", text: "Inside the boundary docs/kukulu.json stays writable, because the planner writes it; only the guard protects it after the plan exists.", levels: ["container+proxy"] },
+  { id: "tls", text: "The proxy sees host and port, not paths or content inside TLS; whatever an allowed host serves is reachable.", levels: ["container+proxy"] },
+];
+
+/** The known-limit texts that apply at an enforcement level, in order. */
+export function knownLimitsFor(level) {
+  if (!ENFORCEMENT_LEVELS.includes(level)) throw new Error(`enforcement level must be one of ${ENFORCEMENT_LEVELS.join(", ")} (got ${JSON.stringify(level)})`);
+  return KNOWN_LIMITS.filter((l) => l.levels.includes(level)).map((l) => l.text);
+}
+
+// Duplicated from mcp/cleanroom.mjs on purpose (a bundle's verifier imports nothing); test/attest.mjs feeds both the same entries.
+/**
+ * Per role, the models the endpoint reported and the token sums of the `usage` entries of that role's agents
+ * (SPEC D-02): `{ reported: [sorted model names], usage: { requests, input, output, cacheRead, cacheWrite, cost } }`.
+ * `cost` is null when any counted entry's is; an entry that holds an `error` is skipped.
+ * scripts/verify-attestation.mjs duplicates this on purpose.
+ */
+export function rolesUsage(entries) {
+  const out = {};
+  for (const role of ["planner", "implementer", "reviewer", "summarizer"]) {
+    const agent = new RegExp(`^kukulu[-:]${role}$`);
+    const reported = new Set();
+    const usage = { requests: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 };
+    for (const e of entries) {
+      if (e.kind !== "usage" || !agent.test(e.role ?? "") || !e.data || e.data.error) continue;
+      for (const [model, m] of Object.entries(e.data.models ?? {})) {
+        reported.add(model);
+        for (const key of ["requests", "input", "output", "cacheRead", "cacheWrite"]) usage[key] += m[key] ?? 0;
+      }
+      usage.cost = usage.cost === null || typeof e.data.cost !== "number" ? null : Math.round((usage.cost + e.data.cost) * 1e6) / 1e6;
+    }
+    out[role] = { reported: [...reported].sort(), usage };
+  }
+  return out;
+}
+
 
 const ENTRY_KEYS = ["seq", "prev", "at", "kind", "stage", "task", "role", "model", "session", "tool", "target", "decision", "reason"];
 const CHECKPOINT_KEYS = ["chainTip", "git", "policyHash", "guardHash", "loggerHash", "hooksHash", "keyFingerprint", "event"];
@@ -71,11 +124,11 @@ const fingerprintOf = (publicKey) => `sha256:${sha256(publicKey.export({ type: "
 const readIfExists = (file) => (fs.existsSync(file) ? fs.readFileSync(file) : null);
 
 /**
- * Verify the bundle in `dir`. Returns `{ ok, reasons, notes, checks }`: every
+ * Verify the bundle in `dir`. Returns `{ ok, mode, enforcement, reasons, notes, checks }` (`mode` is the genesis's, `enforcement` the bundle's level): every
  * failure is a reason `{ check, reason }`, not only the first, and `checks` maps
  * each check that ran to whether it passed.
  */
-export function verifyBundle(dir, { key = null } = {}) {
+export function verifyBundle(dir, { key = null, expect = null, requireEnforcement = null } = {}) {
   const reasons = [];
   const notes = [];
   const checks = {};
@@ -229,7 +282,12 @@ export function verifyBundle(dir, { key = null } = {}) {
   // 7. the mode: clean-room from the genesis on, and no gate ever failed on it
   if (notChecked("mode")) {
     const genesis = entries.find((e) => e.kind === "genesis");
-    if (genesis?.data?.mode !== "clean-room") fail("mode", `the genesis records mode ${JSON.stringify(genesis?.data?.mode ?? null)}, not "clean-room"`);
+    const gm = genesis?.data?.mode;
+    if (gm !== "clean-room" && gm !== "control-positive") fail("mode", `the genesis records mode ${JSON.stringify(gm ?? null)}, which is neither "clean-room" nor "control-positive"`);
+    else {
+      if (manifest?.mode !== gm) fail("mode", `the manifest says ${manifest?.mode}, but the genesis records ${gm}`);
+      if (expect && gm !== expect) fail("mode", `the bundle is ${gm}, expected ${expect}`);
+    }
     for (const e of entries) {
       if (e.kind === "gate" && e.data?.failed === "mode") fail("mode", `entry ${e.seq}: a gate failed the mode check${e.data.reason ? `: ${e.data.reason}` : ""}`);
     }
@@ -256,6 +314,9 @@ export function verifyBundle(dir, { key = null } = {}) {
     if (sorted(m.verdicts) !== sorted(verdicts)) fail("denials", `the manifest's denials.verdicts differs from the log's: ${sorted(verdicts)}`);
   }
 
+  // The level, for the gaps below; an unknown name is check 11's business, and reads as hook here.
+  const bundleLevel = ENFORCEMENT_LEVELS.includes(manifest?.enforcement?.level) ? manifest.enforcement.level : "hook";
+
   // 9. the coverage gaps, recomputed from the log and commits.txt
   if (notChecked("coverage")) {
     const idleGapHours = manifest.coverage?.idleGapHours;
@@ -280,7 +341,14 @@ export function verifyBundle(dir, { key = null } = {}) {
         const hours = (Date.parse(b.at) - Date.parse(a.at)) / 3600000;
         if (hours > idleGapHours) gaps.push({ kind: "idle", from: a.seq, to: b.seq, hours: Math.round(hours * 100) / 100 });
       }
-      for (const c of commits) if (c.sig === "N" || c.sig === "B") gaps.push({ kind: "unsigned-commit", sha: c.sha });
+      for (const c of commits) {
+        if ((c.sig === "N" || c.sig === "B") && !(bundleLevel === "container+proxy" && c.stage !== "")) gaps.push({ kind: "unsigned-commit", sha: c.sha });
+      }
+      if (bundleLevel === "container+proxy") {
+        const trailed = commits.filter((c) => (c.sig === "N" || c.sig === "B") && c.stage !== "").length;
+        if (manifest.coverage?.unsignedTrailed !== trailed) fail("coverage", `the manifest says ${manifest.coverage?.unsignedTrailed} unsigned commits carry a stage trailer, but commits.txt shows ${trailed}`);
+        if (trailed > 0) notes.push(`unsigned commits: ${trailed} (expected under container+proxy: commits made inside the boundary are unsigned, and the checkpoints sign their heads)`);
+      }
       const want = gaps.map((g) => JSON.stringify(g));
       const have = (manifest.coverage?.gaps ?? []).map((g) => JSON.stringify(g));
       for (const g of want) if (!have.includes(g)) fail("coverage", `the log shows a gap the manifest omits: ${g}`);
@@ -298,7 +366,56 @@ export function verifyBundle(dir, { key = null } = {}) {
     else if (sha256(bytes) !== manifest.similarity.sha256) fail("similarity", "similarity.json does not hash to the manifest's similarity.sha256");
   }
 
-  return { ok: reasons.length === 0, reasons, notes, checks };
+  // 11. the enforcement level: a known name, the boundary genesis recorded, the egress summary recounted, and the known limits that level has
+  let level = "hook";
+  if (notChecked("enforcement")) {
+    const given = manifest.enforcement;
+    if (given === undefined) notes.push("enforcement absent (bundle from 0.7.x); read as hook");
+    else level = given?.level;
+    if (!ENFORCEMENT_LEVELS.includes(level)) {
+      fail("enforcement", `the manifest's level ${JSON.stringify(level)} is not one of ${ENFORCEMENT_LEVELS.join(", ")}`);
+    } else {
+      const genesis = entries.find((e) => e.kind === "genesis");
+      if (level === "container+proxy") {
+        if (!genesis?.data?.boundary) fail("enforcement", "the bundle says container+proxy, but the genesis records no boundary");
+        else if (JSON.stringify(given.boundary) !== JSON.stringify(genesis.data.boundary)) fail("enforcement", "the manifest's boundary differs from the genesis entry's");
+        const recount = {};
+        for (const e of entries) {
+          if (e.kind !== "egress") continue;
+          recount[e.target] ??= { allowed: 0, denied: 0 };
+          recount[e.target][e.decision === "allowed" ? "allowed" : "denied"] += 1;
+        }
+        const sorted = (o) => JSON.stringify(Object.fromEntries(Object.entries(o ?? {}).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))));
+        if (sorted(given.egress) !== sorted(recount)) fail("enforcement", `the egress summary differs from the log's: ${sorted(recount)}`);
+        for (const e of entries) {
+          if (e.kind === "gate" && e.data?.failed === "boundary") fail("enforcement", `entry ${e.seq}: a gate failed the boundary check${e.data.reason ? `: ${e.data.reason}` : ""}`);
+        }
+      }
+      // A 0.7.x manifest has no enforcement field and carries the eight limits it was written with; it is not compared.
+      if (given !== undefined && JSON.stringify(manifest.coverage?.knownLimits) !== JSON.stringify(knownLimitsFor(level))) {
+        fail("enforcement", `coverage.knownLimits is not the known-limit list for level ${level}`);
+      }
+      if (requireEnforcement && ENFORCEMENT_LEVELS.indexOf(level) < ENFORCEMENT_LEVELS.indexOf(requireEnforcement)) {
+        fail("enforcement", `the bundle was built under ${level}, below the required ${requireEnforcement}`);
+      }
+    }
+  }
+
+  // 12. the roles: the reported models and token sums recount from the usage entries, and a model nobody routed to is noted
+  if (notChecked("roles") && manifest.roles) {
+    const recount = rolesUsage(entries);
+    for (const [role, record] of Object.entries(manifest.roles)) {
+      if (!recount[role]) continue;
+      for (const field of ["reported", "usage"]) {
+        if (JSON.stringify(record[field]) !== JSON.stringify(recount[role][field])) fail("roles", `${role}.${field} differs from the log's: ${JSON.stringify(recount[role][field])}`);
+      }
+      const reported = recount[role].reported ?? [];
+      if (reported.some((m) => m !== record.model)) notes.push(`${role}: the endpoint reported ${reported.join(", ")}; routing declared ${record.model}`);
+    }
+  }
+
+  const genesisMode = entries.find((e) => e.kind === "genesis")?.data?.mode;
+  return { ok: reasons.length === 0, mode: typeof genesisMode === "string" ? genesisMode : null, enforcement: ENFORCEMENT_LEVELS.includes(level) ? level : null, reasons, notes, checks };
 }
 
 // ---------------------------------------------------------------- pre-0.6.0 tool logs
@@ -415,13 +532,13 @@ function printLegacy(file, r) {
 
 function main(argv) {
   const args = argv.slice(2);
-  const usage = "usage: node verify-attestation.mjs <bundle-dir> [--key sha256:<hex>] [--json]\n       node verify-attestation.mjs --legacy-log <file> --roots <a,b> --words <a,b> [--repo <path>] [--json]\n";
+  const usage = "usage: node verify-attestation.mjs <bundle-dir> [--key sha256:<hex>] [--expect clean-room|control-positive] [--require-enforcement hook|container+proxy|container+proxy+audit] [--json]\n       node verify-attestation.mjs --legacy-log <file> --roots <a,b> --words <a,b> [--repo <path>] [--json]\n";
   let json = false;
   let key = null;
   let legacy = null;
   const legacyOpts = {};
   const positional = [];
-  const wants = { "--key": "key", "--legacy-log": "legacy", "--roots": "roots", "--words": "words", "--repo": "repo" };
+  const wants = { "--key": "key", "--expect": "expect", "--require-enforcement": "requireEnforcement", "--legacy-log": "legacy", "--roots": "roots", "--words": "words", "--repo": "repo" };
   const given = {};
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--json") json = true;
@@ -467,6 +584,14 @@ function main(argv) {
     else printLegacy(legacy, result);
     return result.failed.length ? 1 : 0;
   }
+  if (given.expect !== undefined && given.expect !== "clean-room" && given.expect !== "control-positive") {
+    process.stderr.write("verify-attestation: --expect takes clean-room or control-positive\n" + usage);
+    return 2;
+  }
+  if (given.requireEnforcement !== undefined && !ENFORCEMENT_LEVELS.includes(given.requireEnforcement)) {
+    process.stderr.write("verify-attestation: --require-enforcement takes " + ENFORCEMENT_LEVELS.join(", ") + "\n" + usage);
+    return 2;
+  }
   if (given.roots || given.words || given.repo) {
     process.stderr.write("verify-attestation: --roots, --words and --repo belong to --legacy-log\n" + usage);
     return 2;
@@ -475,15 +600,17 @@ function main(argv) {
     process.stderr.write(usage);
     return 2;
   }
-  const result = verifyBundle(path.resolve(positional[0]), { key });
+  const result = verifyBundle(path.resolve(positional[0]), { key, expect: given.expect ?? null, requireEnforcement: given.requireEnforcement ?? null });
+  // A control bundle that passes is not a clean-room pass: it exits 3 unless the caller said it expected a control bundle.
+  const passCode = result.ok && result.mode === "control-positive" && given.expect !== "control-positive" ? 3 : 0;
   if (json) {
     process.stdout.write(JSON.stringify(result) + "\n");
-    return result.ok ? 0 : 1;
+    return result.ok ? passCode : 1;
   }
   for (const r of result.reasons) process.stdout.write("verify-attestation: " + r.check + ": " + r.reason + "\n");
   for (const n of result.notes) process.stdout.write("verify-attestation: note: " + n + "\n");
-  process.stdout.write(result.ok ? "verify-attestation: PASS\n" : "verify-attestation: FAIL (" + result.reasons.length + " reason" + (result.reasons.length === 1 ? "" : "s") + ")\n");
-  return result.ok ? 0 : 1;
+  process.stdout.write(!result.ok ? "verify-attestation: FAIL (" + result.reasons.length + " reason" + (result.reasons.length === 1 ? "" : "s") + ")\n" : result.mode === "control-positive" ? "verify-attestation: CONTROL (positive)\n" : "verify-attestation: PASS\n");
+  return result.ok ? passCode : 1;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) process.exit(main(process.argv));

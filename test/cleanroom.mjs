@@ -8,7 +8,7 @@ import os from "node:os";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import {
-  finish, ok, eq, like, isError, ROOT, plannedRepo, cleanroomRepo, withServer, runHook, mkDir, writeFile, readFile, hasFile, git, subject, testKeyFor, addPlan, commitTask, setState, tempPlugin, markTasks, startServer, logCall,
+  finish, ok, eq, like, isError, ROOT, plannedRepo, cleanroomRepo, withServer, runHook, mkDir, writeFile, readFile, hasFile, git, subject, testKeyFor, addPlan, commitTask, setState, tempPlugin, markTasks, startServer, logCall, buildBundle,
 } from "./harness.mjs";
 import { spawn, spawnSync } from "node:child_process";
 import { createHash as sha, generateKeyPairSync } from "node:crypto";
@@ -18,7 +18,9 @@ import {
   tokenize, LANGUAGES, scorePair, position, verdictOf, LIMITS, BANDS,
   splitSegments, shellWords, commandWord, isPathLike, tokenPath, canonicalPaths,
   evaluate, lockdownActive, NETWORK_COMMANDS, READ_FAMILY, WRITE_FAMILY, protectedPaths,
-  coverageGaps, KNOWN_LIMITS,
+  coverageGaps, KNOWN_LIMITS, knownLimitsFor,
+  normalizeModel, familyOf, controlPaths, LOG_SOCKET_TIMEOUT_MS,
+  LOCKFILES, lockfileEcosystem, lockfilePackages, normalizePackageName, deniedPackage,
   generateKey, loadKey, keyFingerprint, CHECKPOINT_KEYS, signCheckpoint, verifyCheckpoint,
 } from "../mcp/cleanroom.mjs";
 
@@ -51,6 +53,106 @@ const pattern = (extra = {}) => ({ id: "p", pattern: "/build/", shouldMatch: ["/
   eq(JSON.stringify([empty.deny.tools, empty.deny.paths, empty.deny.words, empty.allow.paths, empty.allow.urls, empty.protected]), "[[],[],[],[],[],[]]", "every list defaults to empty");
   eq(empty.lockdown.after, null, "...and lockdown.after to null");
   eq(loadPolicy('{"version":1,"deny":{"network":false}}').deny.network, false, "deny.network false is kept");
+}
+
+{
+  const d = loadPolicy('{"version":1}');
+  eq(d.runners.allow, null, "defaults fill runners: allow is null");
+  eq(d.runners.locality, "any", "...locality is any");
+  eq(d.roles.distinct, "none", "...and roles.distinct is none");
+  eq(loadPolicy(JSON.stringify(base({ runners: { allow: ["spark", "mac-1"], locality: "local" }, roles: { distinct: "family" } }))).runners.allow.join(","), "spark,mac-1", "runners.allow accepts a list of names");
+  eq(refusal(base({ runners: { allow: [] } })), "policy runners.allow must be a non-empty array of runner names (lowercase letters, digits and -)", "an empty runners.allow refuses");
+  eq(refusal(base({ runners: { allow: ["Bad"] } })), "policy runners.allow must be a non-empty array of runner names (lowercase letters, digits and -)", "a badly named runners.allow entry refuses");
+  eq(refusal(base({ runners: { locality: "near" } })), 'policy runners.locality must be "local" or "any" (got "near")', "a bad runners.locality refuses");
+  eq(refusal(base({ roles: { distinct: "x" } })), 'policy roles.distinct must be "none", "model" or "family" (got "x")', "a bad roles.distinct refuses");
+  like(refusal(base({ runners: { deny: [] } })), /policy runners has an unknown key 'deny'; the legal keys are allow, locality/, "an unknown runners key refuses");
+  like(refusal(base({ roles: { other: 1 } })), /policy roles has an unknown key 'other'/, "an unknown roles key refuses");
+  const families = JSON.parse(readFile(ROOT, "test/fixtures/families.json"));
+  ok(families.length >= 16, "the family fixture has at least sixteen entries");
+  for (const { model, family } of families) eq(familyOf(model), family, `familyOf classifies ${model}`);
+  eq(normalizeModel("OpenRouter/deepseek/deepseek-v4-pro"), "deepseek-v4-pro", "normalizeModel strips every provider prefix");
+  eq(normalizeModel("Prov,Mixed/Model-X"), "model-x", "...whether the separator is a slash or a comma");
+  ok(familyOf("alpha-1") !== familyOf("beta-1"), "two unknown strings are their own families");
+}
+
+// ---------------------------------------------------------------- enforcement, sandbox and packages (P2-01)
+
+{
+  const digest = "sha256:" + "a".repeat(64);
+  const boxed = (extra = {}) => base({ enforcement: "container+proxy", sandbox: { image: `kukulu-sandbox@${digest}` }, ...extra });
+  const d = loadPolicy('{"version":1}');
+  eq(d.enforcement + "|" + JSON.stringify(d.sandbox) + "|" + JSON.stringify(d.deny.packages), 'hook|{"image":null,"mounts":[],"egress":[]}|{}', "defaults fill enforcement, sandbox and deny.packages");
+  eq(refusal(base({ enforcement: "container+proxy+audit" })), 'policy enforcement "container+proxy+audit" is 0.9.0\'s level; this release cannot run it', "container+proxy+audit is refused as 0.9.0's level");
+  eq(refusal(base({ enforcement: "vm" })), 'policy enforcement must be "hook" or "container+proxy" (got "vm")', "a bad enforcement refuses");
+  eq(refusal(base({ enforcement: "container+proxy" })), 'policy sandbox.image is required when enforcement is "container+proxy": the image as <name>@sha256:<digest>', "sandbox.image is required under container+proxy");
+  eq(refusal(base({ sandbox: { image: `x@${digest}` } })), 'policy sandbox.image is only legal when enforcement is "container+proxy"', "sandbox.image is refused under hook");
+  eq(refusal(boxed({ sandbox: { image: "kukulu-sandbox:latest" } })), 'policy sandbox.image must be <name>@sha256:<64 hex>; a tag alone (got "kukulu-sandbox:latest") does not pin the image', "a tag-only image refuses");
+  eq(refusal(boxed({ sandbox: { image: `kukulu-sandbox@${digest}`, mounts: [{ path: "tools/o", mode: "rw" }] } })), 'policy sandbox.mounts[0].mode must be "ro"; the project is the only read-write mount', "a read-write mount refuses");
+  eq(refusal(boxed({ sandbox: { image: `kukulu-sandbox@${digest}`, egress: ["example.com"] } })), "policy sandbox.egress[0] must be host:port", "a bad egress entry refuses");
+  like(refusal(boxed({ sandbox: { image: `kukulu-sandbox@${digest}`, other: 1 } })), /policy sandbox has an unknown key 'other'/, "an unknown sandbox key refuses");
+  like(refusal(base({ deny: { packages: { gem: ["x"] } } })), /policy deny\.packages has an unknown key 'gem'; the legal keys are cargo, npm, pypi/, "an unknown package ecosystem refuses");
+  like(refusal(base({ deny: { packages: { cargo: [] } } })), /policy deny\.packages\.cargo must be a non-empty array/, "an empty package list refuses");
+  const ok1 = loadPolicy(JSON.stringify(boxed({ sandbox: { image: `kukulu-sandbox@${digest}`, mounts: [{ path: "tools/o", mode: "ro" }], egress: ["example.com:443"] }, deny: { packages: { cargo: ["flate2"] } } })));
+  eq(ok1.sandbox.mounts[0].path + "|" + ok1.sandbox.egress[0] + "|" + ok1.deny.packages.cargo[0], "tools/o|example.com:443|flate2", "a full container policy loads");
+  const log = path.join(mkDir("kukulu-kinds-"), "log.jsonl");
+  for (const kind of ["egress", "stage", "usage"]) {
+    appendEntry(log, { kind, stage: "implement", role: "session", data: { x: 1 } });
+  }
+  eq(readEntries(log).map((e) => e.kind).join(","), "egress,stage,usage", "appendEntry accepts egress, stage and usage");
+  eq(KINDS.slice(-3).join(","), "egress,stage,usage", "KINDS gains them after resume");
+  eq(LOG_SOCKET_TIMEOUT_MS, 2000, "LOG_SOCKET_TIMEOUT_MS is exported");
+  const local = loadPolicy(fs.readFileSync(path.join(ROOT, "templates", "cleanroom.local-only.example.json"), "utf8"));
+  eq(local.enforcement + "|" + local.runners.locality + "|" + local.roles.distinct + "|" + local.sandbox.image.endsWith("0".repeat(64)), "container+proxy|local|family|true", "the local-only template loads");
+  const st = spawnSync(process.execPath, [path.join(ROOT, "scripts", "cleanroom-guard.mjs"), "--self-test", path.join(ROOT, "templates", "cleanroom.local-only.example.json")], { encoding: "utf8" });
+  eq(st.status, 0, "the local-only template passes the guard self-test");
+}
+
+// ---------------------------------------------------------------- control mode (P1-01)
+
+{
+  const control = (extra = {}) => base({ mode: "control-positive", control: { priorArt: ["prior/"] }, deny: { network: false, paths: ["prior/"], words: ["zlib"] }, ...extra });
+  eq(refusal(base({ mode: "control-positive" })), 'policy control.priorArt is required when mode is "control-positive": list the prior art the control flight is given', "control.priorArt is required under control-positive");
+  eq(refusal(base({ control: { priorArt: ["prior/"] } })), 'policy control.priorArt is only legal when mode is "control-positive" (mode is "clean-room")', "control.priorArt is refused under clean-room");
+  eq(refusal(base({ mode: "control" })), 'policy mode must be "clean-room" or "control-positive" (got "control")', "a bad mode refuses");
+  like(refusal(base({ mode: "control-positive", control: { priorArt: [] } })), /control\.priorArt must be a non-empty array/, "an empty priorArt refuses");
+  like(refusal(base({ mode: "control-positive", control: { priorArt: ["x"], other: 1 } })), /policy control has an unknown key 'other'/, "an unknown control key refuses");
+  const loaded = loadPolicy(JSON.stringify(control()));
+  eq(loaded.mode + "|" + loaded.control.priorArt.join(","), "control-positive|prior/", "a control policy loads with its mode and priorArt");
+  eq(loadPolicy('{"version":1}').mode + "|" + loadPolicy('{"version":1}').control.priorArt.length, "clean-room|0", "mode defaults to clean-room with no priorArt");
+  eq(controlPaths(loaded, { root: "/p", home: "/h" })[0], "/p/prior", "controlPaths resolves entries against the root");
+  const env = { root: "/p", home: "/h" };
+  const read = (policy, file) => evaluate(policy, { tool_name: "Read", tool_input: { file_path: file }, cwd: "/p" }, env).decision;
+  eq(read(loaded, "/p/prior/zlib.c"), "allowed", "a control.priorArt read is allowed in control mode");
+  const plain = loadPolicy(JSON.stringify(base({ deny: { network: false, paths: ["prior/"], words: ["zlib"] } })));
+  eq(read(plain, "/p/prior/zlib.c"), "denied", "...and denied in clean-room mode");
+  eq(evaluate(loaded, { tool_name: "Write", tool_input: { file_path: "/p/prior/zlib.c", content: "x" }, cwd: "/p" }, env).decision, "denied", "a write to prior art is still denied in control mode");
+
+  // a symlink inside the prior art that leaves it is read through, so the target's own rules apply
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "kukulu-control-link-")));
+  fs.mkdirSync(path.join(root, "prior"));
+  fs.mkdirSync(path.join(root, "secret"));
+  fs.writeFileSync(path.join(root, "secret", "zlib.c"), "x\n");
+  fs.writeFileSync(path.join(root, "prior", "inside.c"), "x\n");
+  fs.symlinkSync("../secret/zlib.c", path.join(root, "prior", "link"));
+  const linked = loadPolicy(JSON.stringify(base({ mode: "control-positive", control: { priorArt: ["prior/"] }, deny: { network: false, paths: ["secret/"], words: ["zlib"] } })));
+  const readIn = (file) => evaluate(linked, { tool_name: "Read", tool_input: { file_path: path.join(root, file) }, cwd: root }, { root, home: "/h" }).decision;
+  eq(readIn("prior/inside.c"), "allowed", "a file under control.priorArt is readable");
+  eq(readIn("prior/link"), "denied", "a symlink under control.priorArt that resolves to a deny.paths file outside it is still denied in control mode");
+
+  // the project root reached through a symlink, as /var and /tmp are on macOS: the read's real form must still match the prior art
+  const aliasRoot = path.join(fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "kukulu-control-alias-"))), "root");
+  fs.symlinkSync(root, aliasRoot);
+  const readVia = (file) => evaluate(linked, { tool_name: "Read", tool_input: { file_path: path.join(aliasRoot, file) }, cwd: aliasRoot }, { root: aliasRoot, home: "/h" }).decision;
+  fs.writeFileSync(path.join(root, "prior", "zlib.c"), "x\n");
+  eq(readVia("prior/zlib.c"), "allowed", "a control.priorArt read is allowed when the project root is reached through a symlink");
+  eq(readVia("prior/link"), "denied", "...and a symlink out of the prior art to a deny.paths file is still denied there");
+  const catVia = (file) => evaluate(linked, { tool_name: "Bash", tool_input: { command: `cat ${file}` }, cwd: aliasRoot }, { root: aliasRoot, home: "/h" }).decision;
+  eq(catVia("prior/link"), "denied", "...through cat as well");
+  fs.mkdirSync(path.join(root, ".kukulu"), { recursive: true });
+  fs.writeFileSync(path.join(root, ".kukulu", "state.json"), "{}\n");
+  fs.symlinkSync(".kukulu/state.json", path.join(root, "state-link"));
+  const writeVia = evaluate(linked, { tool_name: "Write", tool_input: { file_path: path.join(aliasRoot, "state-link"), content: "x" }, cwd: aliasRoot }, { root: aliasRoot, home: "/h" });
+  eq(writeVia.decision, "denied", "a write through a symlink to a protected file is denied when the project root is reached through a symlink");
 }
 
 {
@@ -203,7 +305,7 @@ const sample = (n) => ({ kind: "allowed", stage: "implement", task: "P0-01", rol
   eq(entryHash(second.prev, (({ hash, ...r }) => r)(second)), second.hash, "the hash is SHA-256 of prev, a newline and the canonical entry");
   eq(readEntries(log).length, 2, "readEntries returns both");
   eq(readEntries(path.join(path.dirname(log), "absent.jsonl")).length, 0, "...and none for an absent file");
-  eq(KINDS.length, 9, "there are nine entry kinds");
+  eq(KINDS.length, 12, "there are twelve entry kinds");
   eq(logPathFor("/p", {}), path.join("/p", ".kukulu", "cleanroom", "log.jsonl"), "the log lives under .kukulu/cleanroom/");
   eq(logPathFor("/p", { KUKULU_CLEANROOM_LOG: "/tmp/x.jsonl" }), "/tmp/x.jsonl", "...unless KUKULU_CLEANROOM_LOG says otherwise");
   let refused = null;
@@ -414,9 +516,9 @@ const stateOf = (repo) => (hasFile(repo, ".kukulu/state.json") ? JSON.parse(read
     const n = await call("kukulu_next");
     eq(n.stage, "plan", "the first kukulu_next in a clean-room project goes on to the plan stage");
     const log = logOf(repo);
-    eq(log.length + "|" + log[0].kind + "|" + log[0].stage + "|" + log[1].kind, "2|genesis|controller|gate", "the first kukulu_next with a policy appends a genesis entry, then the gate's");
+    eq(log.length + "|" + log[0].kind + "|" + log[0].stage + "|" + log[1].kind + "|" + log[2].kind, "3|genesis|controller|gate|stage", "the first kukulu_next with a policy appends a genesis entry, then the gate's, then the stage timeline's");
     const d = log[0].data;
-    eq(Object.keys(d).join(","), "mode,policyHash,guardHash,loggerHash,hooksHash,cleanroomHash,pluginVersion,keyFingerprint,baseBranch,head", "...whose data names mode, the five hashes, pluginVersion, keyFingerprint, baseBranch and head");
+    eq(Object.keys(d).join(","), "mode,policyHash,guardHash,loggerHash,hooksHash,cleanroomHash,pluginVersion,keyFingerprint,baseBranch,head,roles,distinct,enforcement", "...whose data names mode, the five hashes, pluginVersion, keyFingerprint, baseBranch, head, roles and distinct");
     eq(d.mode + "|" + d.baseBranch, "clean-room|main", "...in clean-room mode on main");
     like(d.head, /^[0-9a-f]{40}$/, "...at the commit it was written on");
     eq(d.policyHash, policyHash(fs.readFileSync(path.join(repo, "docs", "cleanroom.json"))), "...the policy hash is the SHA-256 of the file");
@@ -424,13 +526,13 @@ const stateOf = (repo) => (hasFile(repo, ".kukulu/state.json") ? JSON.parse(read
     const st = stateOf(repo);
     eq(JSON.stringify(st.cleanroom), JSON.stringify({ genesis: log[0].hash, policyHash: d.policyHash, guardHash: d.guardHash, loggerHash: d.loggerHash, hooksHash: d.hooksHash, cleanroomHash: d.cleanroomHash }), "...and records state.cleanroom");
     eq(d.cleanroomHash, policyHash(fs.readFileSync(path.join(ROOT, "mcp", "cleanroom.mjs"))), "the genesis records the hash of mcp/cleanroom.mjs");
-    eq(subject(repo), "chore: clean-room genesis", "...commits chore: clean-room genesis");
-    eq(git(repo, ["show", "--name-only", "--format=", "HEAD"]).split("\n").sort().join(","), ".kukulu/cleanroom/log.jsonl,.kukulu/state.json", "...with the log and state");
+    eq(git(repo, ["log", "--format=%s", "-2"]).split("\n").join("|"), "chore: stage plan|chore: clean-room genesis", "...commits chore: clean-room genesis, then the stage timeline");
+    eq(git(repo, ["show", "--name-only", "--format=", "HEAD~1"]).split("\n").sort().join(","), ".kukulu/cleanroom/log.jsonl,.kukulu/state.json", "...with the log and state");
     ok(fs.existsSync(testKeyFor(repo)), "...generating the key at KUKULU_CLEANROOM_KEY");
     eq(d.keyFingerprint, loadKey(testKeyFor(repo)).fingerprint, "...and the genesis names its fingerprint");
     await call("kukulu_next");
     eq(logOf(repo).filter((e) => e.kind === "genesis").length, 1, "a second kukulu_next appends no second genesis");
-    eq(git(repo, ["status", "--porcelain"]), "M .kukulu/cleanroom/log.jsonl", "...and leaves only the log (the gate's entries) uncommitted");
+    eq(git(repo, ["status", "--porcelain"]), "", "...and the stage timeline's commit leaves nothing uncommitted (the gate's halt closes the open stage)");
   });
 }
 
@@ -489,13 +591,14 @@ const stateOf = (repo) => (hasFile(repo, ".kukulu/state.json") ? JSON.parse(read
   const repo = cleanroomRepo();
   await withServer(repo, async ({ call }) => {
     await call("kukulu_next");
+    const withPolicy = git(repo, ["rev-parse", "HEAD"]);
     git(repo, ["rm", "-q", "docs/cleanroom.json"]);
     git(repo, ["commit", "-qm", "drop the policy"]);
     const n = await call("kukulu_next");
     eq(n.stage, "halt", "a policy removed after genesis halts");
     like(n.reason, /the clean-room policy file was removed after genesis/, "...saying so");
     isError(await call("kukulu_run_resume", { reason: "restored it" }), /archive this flight with kukulu_flight_archive/, "kukulu_run_resume refuses it too");
-    git(repo, ["checkout", "HEAD~1", "--", "docs/cleanroom.json"]);
+    git(repo, ["checkout", withPolicy, "--", "docs/cleanroom.json"]);
     git(repo, ["commit", "-qm", "restore the policy"]);
     logCall(repo);
     ok((await call("kukulu_next")).stage !== "halt", "...and restoring the policy clears it, because the halt is computed each call");
@@ -663,7 +766,7 @@ async function genesisRepo(planOpts = {}) {
   await live(repo, async ({ call }) => {
     const n = await call("kukulu_next");
     ok(!n.error, "kukulu_next survives a failing signer under policies.signing auto");
-    eq(subject(repo), "chore: clean-room genesis", "...the genesis commit was made, unsigned");
+    eq(git(repo, ["log", "--format=%s", "-2"]).split("\n").reverse()[0], "chore: clean-room genesis", "...the genesis commit was made, unsigned");
     const body = git(repo, ["log", "-1", "--format=%B"]).trim().split("\n");
     eq(body.slice(-2).join("|"), "Kukulu-Stage: controller|Kukulu-Task: -", "the trailers survive the unsigned retry");
   });
@@ -948,6 +1051,12 @@ async function genesisRepo(planOpts = {}) {
   eq(run("rsync evil/cleanroom.json docs/").reason, "protected path: /p/docs/cleanroom.json (rsync writes it into docs/)", "an rsync denial names its destination");
   eq(run("rsync -d --delete empty/ docs/").reason, "protected path: /p/docs/cleanroom.json (rsync --delete* can remove it from docs/)", "an rsync --delete denial names the protected path and the destination");
   eq(run("rsync --remove-source-files docs/cleanroom.json build/").reason, "protected path: /p/docs/cleanroom.json (rsync --remove-source-files removes it)", "an rsync --remove-source-files denial names the protected path");
+  eq(run("rsync --remove-sent-files docs/cleanroom.json build/").reason, "protected path: /p/docs/cleanroom.json (rsync --remove-sent-files removes it)", "an rsync --remove-sent-files denial names the option as written");
+  eq(run("cd docs && pax -r -f a.tar").reason, "protected path: /p/docs/cleanroom.json (pax extracts into /p/docs; the archive's contents cannot be known)", "a pax extraction denial names the directory");
+  eq(run("cd docs && pax -rf a.tar").decision + "|" + run("cd docs && pax -rvf a.tar").decision, "denied|denied", "...with bundled short options");
+  eq(run("pax -w -f docs/cleanroom.json src").reason, "protected path: /p/docs/cleanroom.json", "a pax -w -f denial names the archive path");
+  eq(run("pax -wfdocs/cleanroom.json src").decision, "denied", "...and with the file attached to -f");
+  eq(run("cd docs && pax -f a.tar").decision + "|" + run("cd docs && pax -r -w dest").decision + "|" + run("cd docs && pax").decision, "allowed|allowed|allowed", "listing, copy mode (not modelled) and no options write nothing the rule sees");
   eq(run("install -S evil/cleanroom.json docs").reason, "protected path: /p/docs/cleanroom.json (install writes it into docs)", "install's BSD-only denial names its directory");
   ok(!/null/.test(run("install -S evil/cleanroom.json docs").reason), "...and never says null");
   eq(run("install -S .bak evil/cleanroom.json docs").reason, "protected path: /p/docs/cleanroom.json (install writes it into docs)", "install's GNU-reading denial names its directory");
@@ -981,9 +1090,9 @@ const gateCheck = (reason) => (reason.match(/^clean-room gate failed: ([\w-]+):/
   const repo = cleanroomRepo();
   await live(repo, async ({ call }) => {
     const n = await call("kukulu_next");
-    eq(JSON.stringify(n.gate), JSON.stringify({ ok: true, checked: ["mode", "policy", "guard", "self-test", "lockdown", "chain", "liveness"] }), "the gate passes on an intact clean-room project and kukulu_next reports it");
+    eq(JSON.stringify(n.gate), JSON.stringify({ ok: true, checked: ["mode", "policy", "guard", "self-test", "lockdown", "chain", "liveness", "routing"] }), "the gate passes on an intact clean-room project and kukulu_next reports it");
     const g = gateEntries(repo);
-    eq(g.length + "|" + JSON.stringify(g[0].data), '1|{"checks":7,"ok":true}', "a passing gate appends a gate entry recording seven checks");
+    eq(g.length + "|" + JSON.stringify(g[0].data), '1|{"checks":8,"ok":true}', "a passing gate appends a gate entry recording eight checks");
     eq(verifyChain(linesOf(LOG(repo))).ok, true, "...in a chain that verifies");
   });
   const general = plannedRepo();
@@ -1053,6 +1162,12 @@ const gateCheck = (reason) => (reason.match(/^clean-room gate failed: ([\w-]+):/
     delete j.hooks.PreToolUse;
     fs.writeFileSync(file, JSON.stringify(j, null, 2));
   }, { before: true });
+  await edited("the gate requires the logger on SubagentStop", "guard", (p) => {
+    const file = path.join(p, "hooks", "hooks.json");
+    const j = JSON.parse(fs.readFileSync(file, "utf8"));
+    j.hooks.SubagentStop = j.hooks.SubagentStop.filter((e) => !e.hooks.some((h) => h.command.includes("cleanroom-log.mjs")));
+    fs.writeFileSync(file, JSON.stringify(j, null, 2));
+  }, { before: true, reason: /hooks\/hooks\.json no longer registers cleanroom-log\.mjs on SubagentStop/ });
   await edited("a failing self-test halts naming self-test", "self-test", (p) => {
     const file = path.join(p, "test", "fixtures", "guard-cases.json");
     const cases = JSON.parse(fs.readFileSync(file, "utf8"));
@@ -1120,13 +1235,275 @@ const gateCheck = (reason) => (reason.match(/^clean-room gate failed: ([\w-]+):/
   });
 }
 
+// ---------------------------------------------------------------- gate check 8 and genesis roles (P0-03)
+
+{
+  const D = (c) => `sha256:${c.repeat(64)}`;
+  const runnersBlock = {
+    spark: { endpoint: "http://spark.test:8000", locality: "local", match: ["spark/"], identities: { "spark/nemotron-3.5-super-nvfp4": { weights: D("a"), image: D("b") } } },
+    mac: { endpoint: "http://mac.test:11434", locality: "local", match: ["mac/"] },
+  };
+  const localRoles = {
+    planner: { model: "mac/qwen3.8-27b" },
+    implementer: { model: "spark/nemotron-3.5-super-nvfp4" },
+    reviewer: { model: "mac/qwen3.8-27b" },
+    summarizer: { model: "mac/qwen3.8-27b" },
+  };
+  const policyWith = (extra) => JSON.stringify({ ...JSON.parse(EXAMPLE), ...extra });
+  const cfgFile = (obj) => writeFile(mkDir("kukulu-cfg-"), "global.json", JSON.stringify(obj));
+  const envFor = (obj) => ({ env: { KUKULU_CONFIG: cfgFile(obj) } });
+  const gen = async (policyExtra, globalObj, fn) => {
+    const repo = cleanroomRepo({ policy: policyWith(policyExtra) });
+    await live(repo, (s) => fn(repo, s), envFor(globalObj));
+  };
+  const genesisOf = (repo) => logOf(repo).find((e) => e.kind === "genesis");
+
+  await gen({ runners: { locality: "local" } }, { runners: runnersBlock, roles: localRoles }, async (repo, { call }) => {
+    const n = await call("kukulu_next");
+    eq(n.stage, "plan", "a local-only policy with every role on local runners passes genesis");
+    eq(n.gate.checked.at(-1), "routing", "...and the gate ends with routing");
+    eq(genesisOf(repo).data.roles.implementer.runner, "spark", "...genesis records the implementer's runner");
+    eq(genesisOf(repo).data.distinct, "none", "...and the policy's distinct value");
+    ok((await call("kukulu_next")).gate.ok, "...and the next gate passes");
+  });
+
+  await gen({}, { runners: runnersBlock, roles: { ...localRoles, summarizer: { model: "nothing/x" } } }, async (repo, { call }) => {
+    await call("kukulu_next");
+    const r = genesisOf(repo).data.roles;
+    eq(JSON.stringify(r.implementer.identity), JSON.stringify({ source: "operator-measured", weights: D("a"), image: D("b") }), "genesis records operator-measured identity with the digests copied");
+    eq(JSON.stringify(r.reviewer.identity), '{"source":"none"}', "...none for a model on a runner without an identity");
+    eq(r.summarizer.runner, null, "...an unmatched string has no runner");
+    eq(JSON.stringify(r.summarizer.identity), '{"source":"none"}', "...and identity none");
+    eq(r.implementer.family + "|" + r.reviewer.family, "nemotron|qwen", "...with each role's family");
+  });
+  await gen({}, {}, async (repo, { call }) => {
+    await call("kukulu_next");
+    const r = genesisOf(repo).data.roles;
+    eq(JSON.stringify(r.planner.identity) + "|" + r.planner.family, '{"source":"vendor-asserted"}|claude', "genesis records vendor-asserted identity for opus");
+  });
+
+  {
+    const repo = cleanroomRepo({ policy: policyWith({ runners: { locality: "local" } }) });
+    const head = git(repo, ["rev-parse", "HEAD"]);
+    await live(repo, async ({ call }) => {
+      isError(await call("kukulu_next"), /clean-room genesis refused: routing: planner resolves to opus on runner anthropic \(locality remote\)/, "the default routing fails a local-only policy at genesis");
+    }, envFor({ runners: runnersBlock }));
+    ok(!hasFile(repo, ".kukulu/cleanroom/log.jsonl"), "...with no log written");
+    ok(!hasFile(repo, ".kukulu/state.json") || !JSON.parse(readFile(repo, ".kukulu/state.json")).cleanroom, "...no state.cleanroom");
+    eq(git(repo, ["rev-parse", "HEAD"]), head, "...and HEAD unmoved");
+  }
+
+  {
+    const repo = cleanroomRepo({ policy: policyWith({ runners: { allow: ["mac"] } }) });
+    await live(repo, async ({ call }) => {
+      isError(await call("kukulu_next"), /clean-room genesis refused: routing: implementer resolves to runner spark, which policy runners.allow does not name \(mac\)/, "a runner outside runners.allow fails part 2 at genesis");
+    }, envFor({ runners: runnersBlock, roles: localRoles }));
+  }
+
+  {
+    const repo = cleanroomRepo({ policy: policyWith({ roles: { distinct: "model" } }) });
+    await live(repo, async ({ call }) => {
+      isError(await call("kukulu_next"), /clean-room genesis refused: routing: the implementer and the reviewer both resolve to qwen3.8-27b; policy roles.distinct "model" needs two different models/, "roles.distinct model refuses two roles on one model at genesis");
+    }, envFor({ runners: runnersBlock, roles: { implementer: { model: "mac/qwen3.8-27b" }, reviewer: { model: "Other/qwen3.8-27b" } } }));
+  }
+  {
+    const roles = { implementer: { model: "opus" }, reviewer: { model: "sonnet" } };
+    const m = cleanroomRepo({ policy: policyWith({ roles: { distinct: "model" } }) });
+    await live(m, async ({ call }) => eq((await call("kukulu_next")).stage, "plan", "opus and sonnet pass model"), envFor({ roles }));
+    const f = cleanroomRepo({ policy: policyWith({ roles: { distinct: "family" } }) });
+    await live(f, async ({ call }) => isError(await call("kukulu_next"), /the implementer \(opus\) and the reviewer \(sonnet\) are both family claude; policy roles.distinct "family" needs two families/, "...and fail family"), envFor({ roles }));
+  }
+  for (const [roles, label] of [
+    [{ implementer: { model: "mac/qwen3.8-27b" }, reviewer: { model: "spark/nemotron-3.5-super-nvfp4" } }, "a Qwen model and a Nemotron model pass family"],
+    [{ implementer: { model: "mac/alpha-1" }, reviewer: { model: "mac/beta-1" } }, "two different unknown strings pass family"],
+  ]) {
+    const repo = cleanroomRepo({ policy: policyWith({ roles: { distinct: "family" } }) });
+    await live(repo, async ({ call }) => eq((await call("kukulu_next")).stage, "plan", label), envFor({ runners: runnersBlock, roles }));
+  }
+
+  {
+    const repo = cleanroomRepo({ policy: policyWith({}) });
+    await live(repo, async ({ call }) => {
+      eq((await call("kukulu_next")).stage, "plan", "genesis passes before the routing changes");
+      const cfgPath = path.join(repo, "docs", "kukulu.json");
+      const base = fs.existsSync(cfgPath) ? JSON.parse(fs.readFileSync(cfgPath, "utf8")) : {};
+      fs.writeFileSync(cfgPath, JSON.stringify({ ...base, roles: { reviewer: { model: "haiku" } } }));
+      const h = await call("kukulu_next");
+      eq(h.stage, "halt", "changing a role's model after genesis halts the next kukulu_next");
+      like(h.reason, /^clean-room gate failed: routing: routing changed since genesis: reviewer now resolves to haiku on anthropic \(genesis: opus on anthropic\); restore the routing/, "...with the routing reason");
+      const last = logOf(repo).filter((e) => e.kind === "gate").at(-1);
+      eq(last.data.failed, "routing", "...and the failing gate entry is in the chain");
+    }, envFor({}));
+  }
+
+  {
+    // the same model strings, but the runner prefixes move: "mac/" now belongs to the spark runner
+    const repo = cleanroomRepo({ policy: policyWith({}) });
+    const file = cfgFile({ runners: runnersBlock, roles: localRoles });
+    await live(repo, async ({ call }) => {
+      eq((await call("kukulu_next")).stage, "plan", "genesis passes before a role's runner changes");
+      fs.writeFileSync(file, JSON.stringify({ runners: { spark: { ...runnersBlock.spark, match: ["spark/", "mac/"] }, mac: { ...runnersBlock.mac, match: ["mac-old/"] } }, roles: localRoles }));
+      const h = await call("kukulu_next");
+      eq(h.stage, "halt", "changing a role's runner after genesis fails the gate's routing check");
+      like(h.reason, /^clean-room gate failed: routing: routing changed since genesis: planner now resolves to mac\/qwen3\.8-27b on spark \(genesis: mac\/qwen3\.8-27b on mac\)/, "...with the routing reason");
+      eq(logOf(repo).filter((e) => e.kind === "gate").at(-1).data.failed, "routing", "...and the failing gate entry is in the chain");
+    }, { env: { KUKULU_CONFIG: file } });
+  }
+}
+
+// ---------------------------------------------------------------- control mode in genesis (P1-02)
+
+{
+  const policy = JSON.stringify({ ...JSON.parse(EXAMPLE), mode: "control-positive", control: { priorArt: ["vendor/"] } });
+  const repo = cleanroomRepo({ policy });
+  await live(repo, async ({ call }) => {
+    const n = await call("kukulu_next");
+    eq(n.gate.ok, true, "a control-positive policy passes gate check 1 at genesis");
+    const g = logOf(repo).find((e) => e.kind === "genesis");
+    eq(g.data.mode, "control-positive", "...the genesis records mode control-positive");
+    eq(JSON.stringify(g.data.control), '{"priorArt":["vendor/"]}', "...and control.priorArt as written");
+    ok((await call("kukulu_next")).gate.ok, "...and the next gate passes too");
+  });
+  const plain = cleanroomRepo();
+  await live(plain, async ({ call }) => {
+    await call("kukulu_next");
+    const g = logOf(plain).find((e) => e.kind === "genesis");
+    eq(g.data.mode + "|" + ("control" in g.data), "clean-room|false", "a clean-room genesis records mode clean-room and no control");
+  });
+}
+
+// ---------------------------------------------------------------- lockfiles and denied packages (P2-11)
+
+{
+  const lock = (name) => fs.readFileSync(path.join(ROOT, "test", "fixtures", "lockfiles", name), "utf8");
+  const flat = (list) => list.map((p) => `${p.name}@${p.version}`).join(",");
+  eq(flat(lockfilePackages("Cargo.lock", lock("Cargo.lock"))), "cleanflate@0.1.0,flate2@1.0.30,serde_json@1.0.117", "Cargo.lock yields every package name and version");
+  eq(flat(lockfilePackages("package-lock.json", lock("package-lock.json"))), "left-pad@1.3.0,pako@2.1.0,b@0.4.1", "package-lock.json yields top-level and nested packages");
+  eq(flat(lockfilePackages("npm-shrinkwrap.json", lock("npm-shrinkwrap.json"))), flat(lockfilePackages("package-lock.json", lock("package-lock.json"))), "npm-shrinkwrap.json parses like package-lock.json");
+  eq(flat(lockfilePackages("Cargo.lock", lock("subtable/Cargo.lock"))), "cleanflate@0.1.0", "a sub-table after a [[package]] does not overwrite the package's name or version");
+  eq(flat(lockfilePackages("uv.lock", lock("uv.lock"))), "demo@0.1.0,zlib-ng@0.5.1", "uv.lock yields its packages, not the dependency entries");
+  eq(flat(lockfilePackages("poetry.lock", lock("poetry.lock"))), "requests@2.32.3,urllib3@2.2.2", "poetry.lock yields its packages, not the sub-table keys");
+  eq(flat(lockfilePackages("requirements.txt", lock("requirements.txt"))), "requests@2.32.3,numpy@null,flask@null,Zlib_Ng@0.5.1", "requirements.txt yields names and == pins only, skipping comments and options");
+  eq(flat(lockfilePackages("requirements-dev.txt", lock("requirements-dev.txt"))), "pytest@8.2.0", "requirements-dev.txt is read too");
+  eq(LOCKFILES.map(([n]) => lockfileEcosystem(n)).join() + "|" + lockfileEcosystem("requirements-prod.txt") + "|" + lockfileEcosystem("Cargo.toml") + "|" + lockfileEcosystem("notes.txt") + "|" + lockfileEcosystem("requirements.in"), "cargo,npm,npm,pypi,pypi|pypi|null|null|null", "lockfileEcosystem maps every form and nothing else");
+  let thrown = null;
+  try { lockfilePackages("package-lock.json", "{nope"); } catch (e) { thrown = e; }
+  ok(thrown instanceof CleanroomError && /package-lock\.json is not valid JSON/.test(thrown.message), "a lockfile that does not parse is a CleanroomError");
+  eq(normalizePackageName("cargo", "Libz_Sys"), "libz-sys", "cargo names compare with - and _ equal");
+  eq(normalizePackageName("pypi", "Zlib__Ng.Core"), "zlib-ng-core", "PyPI names follow PEP 503");
+  eq(normalizePackageName("npm", "Left_Pad") + "|" + (normalizePackageName("npm", "a-b") === normalizePackageName("npm", "a_b")), "Left_Pad|false", "npm names compare as written");
+  const policy = loadPolicy(JSON.stringify(base({ deny: { packages: { cargo: ["FLATE2", "libz_sys"], pypi: ["zlib.ng"] } } })));
+  eq(deniedPackage(policy, "cargo", lockfilePackages("Cargo.lock", lock("Cargo.lock")))?.name, "flate2", "deniedPackage finds a denied crate");
+  eq(deniedPackage(policy, "cargo", [{ name: "libz-sys", version: "1" }])?.name, "libz-sys", "...across - and _");
+  eq(deniedPackage(policy, "pypi", lockfilePackages("uv.lock", lock("uv.lock")))?.name, "zlib-ng", "...and across PEP 503 spellings");
+  eq(deniedPackage(policy, "npm", lockfilePackages("package-lock.json", lock("package-lock.json"))), null, "an ecosystem with no entry denies nothing");
+
+  const policyText = JSON.stringify({ ...JSON.parse(EXAMPLE), deny: { ...JSON.parse(EXAMPLE).deny, packages: { cargo: ["flate2"] } } });
+  const withLock = (name, text) => {
+    const repo = cleanroomRepo({ policy: policyText });
+    writeFile(repo, name, text);
+    git(repo, ["add", "-A"]);
+    git(repo, ["commit", "-qm", "add the lockfile"]);
+    return repo;
+  };
+  {
+    const repo = withLock("Cargo.lock", lock("Cargo.lock"));
+    await live(repo, async ({ call }) => {
+      const n = await call("kukulu_next");
+      eq(n.stage, "halt", "gate check 10 fails on a denied crate in Cargo.lock");
+      eq(n.reason, "clean-room gate failed: packages: Cargo.lock contains flate2 1.0.30, which policy deny.packages.cargo names; remove the dependency, and know that its source may already have been read", "...with the exact reason");
+      eq(gateEntries(repo).at(-1).data.failed, "packages", "...recorded in the chain");
+    });
+  }
+  {
+    const repo = withLock("Cargo.lock", lock("Cargo.lock").replace(/\[\[package\]\]\nname = "flate2"[\s\S]*?(?=\[\[package\]\]\nname = "serde_json")/, ""));
+    await live(repo, async ({ call }) => {
+      const n = await call("kukulu_next");
+      eq(n.stage, "plan", "gate check 10 passes a clean lockfile");
+      eq(n.gate.checked.at(-1), "packages", "...and the gate lists packages last");
+      eq(gateEntries(repo).at(-1).data.checks, 9, "...recording nine checks under hook with deny.packages");
+    });
+  }
+  {
+    const repo = withLock("sub/requirements.txt", "flate2==1\n");
+    await live(repo, async ({ call }) => {
+      eq((await call("kukulu_next")).stage, "plan", "a lockfile of an ecosystem the policy does not name is not read");
+    });
+  }
+}
+
+// ---------------------------------------------------------------- the guard and denied packages (P2-12)
+
+{
+  const policy = loadPolicy(JSON.stringify(base({ deny: { network: true, packages: { cargo: ["flate2"], npm: ["left-pad"] } } })));
+  const bash = (command) => evaluate(policy, { tool_name: "Bash", tool_input: { command }, cwd: "/p" }, { root: "/p", home: "/h" });
+  const v = bash("cargo add flate2@1");
+  eq(v.decision + "|" + v.reason, "denied|denied package: flate2 is in policy deny.packages.cargo", "a denied package add names the package and the ecosystem");
+  eq(bash("npm install --save-dev @scope/ok left-pad").reason, "denied package: left-pad is in policy deny.packages.npm", "...past options and other operands, even with the network rule on");
+  eq(bash("cd x && cargo add serde flate2").reason, "denied package: flate2 is in policy deny.packages.cargo", "...in the later segment of a command line");
+  eq(bash("cargo +nightly add Flate2").decision, "denied", "...whatever the case or a toolchain selector");
+  eq(bash("npm install @scope/ok").decision, "denied", "(the network rule still denies an npm install that adds nothing denied)");
+  eq(bash("npm install @scope/ok").reason.startsWith("network command"), true, "...with its own reason");
+  eq(bash("cargo search flate2").decision, "allowed", "a subcommand that adds nothing is not an add");
+}
+
+// ---------------------------------------------------------------- token use per subagent (P3-02)
+
+{
+  const TRANSCRIPT = path.join(ROOT, "test", "fixtures", "transcripts", "subagent.jsonl");
+  const stop = (repo, extra = {}, env = {}) => runHook(LOGGER, { hook_event_name: "SubagentStop", agent_type: "kukulu-implementer", agent_transcript_path: TRANSCRIPT, session_id: "s-7", model: "claude-sonnet-x", cwd: repo, ...extra }, { CLAUDE_PROJECT_DIR: repo, CLAUDE_PLUGIN_ROOT: ROOT, HOME: mkDir("kukulu-home-"), ...env });
+  const usageOf = (repo) => logOf(repo).filter((e) => e.kind === "usage");
+  const repo = cleanroomRepo();
+  setState(repo, { cleanroom: { genesis: "a".repeat(64) } });
+  const r = stop(repo);
+  eq(r.status, 0, "the logger exits 0 on SubagentStop");
+  const u = usageOf(repo);
+  eq(u.length, 1, "it appends one usage entry");
+  eq(JSON.stringify(u[0].data.models), JSON.stringify({
+    "claude-sonnet-x": { requests: 2, input: 300, output: 50, cacheRead: 1000, cacheWrite: 50 },
+    "claude-haiku-x": { requests: 2, input: 17, output: 8, cacheRead: 5, cacheWrite: 0 },
+  }), "the logger sums a subagent transcript's usage with the duplicate requestId counted once");
+  eq(u[0].data.first + "|" + u[0].data.last + "|" + u[0].data.cost, "2026-10-26T09:59:59.000Z|2026-10-26T10:00:05.000Z|0.043", "...with the first and last timestamps and the cost");
+  eq(u[0].role + "|" + u[0].tool + "|" + u[0].decision + "|" + u[0].session + "|" + u[0].stage, "kukulu-implementer|null|null|s-7|implement", "...as the agent's entry: role, no tool or decision, session and stage");
+  const noCost = path.join(mkDir("kukulu-tr-"), "t.jsonl");
+  fs.writeFileSync(noCost, fs.readFileSync(TRANSCRIPT, "utf8").replace(/"costUSD": 0\.03/, '"x": 1').replace(/,"costUSD":0\.03/, ""));
+  stop(repo, { agent_transcript_path: noCost });
+  eq(usageOf(repo).at(-1).data.cost, null, "a counted line without a cost makes the total null");
+  stop(repo, { agent_transcript_path: undefined, transcript_path: TRANSCRIPT });
+  eq(usageOf(repo).at(-1).data.models["claude-haiku-x"].requests, 2, "the session transcript is read when there is no agent transcript");
+  stop(repo, { agent_transcript_path: path.join(repo, "nope.jsonl") });
+  like(usageOf(repo).at(-1).data.error, /ENOENT/, "an unreadable transcript gives a usage entry with error");
+  const empty = path.join(mkDir("kukulu-tr-"), "e.jsonl");
+  fs.writeFileSync(empty, '{"type":"user"}\n');
+  stop(repo, { agent_transcript_path: empty });
+  like(usageOf(repo).at(-1).data.error, /no assistant line with usage/, "a transcript with nothing to count gives a usage entry with error");
+  ok(verifyChain(fs.readFileSync(path.join(repo, ".kukulu", "cleanroom", "log.jsonl"), "utf8").split("\n").filter(Boolean)).ok, "the chain still verifies");
+
+  const general = plannedRepo();
+  stop(general);
+  ok(!hasFile(general, ".kukulu/cleanroom/log.jsonl"), "general mode writes nothing on SubagentStop");
+
+  // the budget: the median hook run minus the median bare Node start, over ten runs each, as the fast-path budget is asserted
+  const median = (xs) => xs.slice().sort((a, b) => a - b)[Math.floor(xs.length / 2)];
+  const time = (fn) => median(Array.from({ length: 10 }, () => {
+    const t0 = process.hrtime.bigint();
+    fn();
+    return Number(process.hrtime.bigint() - t0) / 1e6;
+  }));
+  const bare = time(() => spawnSync(process.execPath, ["-e", "0"]));
+  const fast = time(() => stop(general));
+  ok(fast - bare < 50, `the SubagentStop hook's fast path costs under 50 ms beyond Node's own startup (${(fast - bare).toFixed(1)} ms)`);
+  const full = time(() => stop(repo));
+  ok(full - bare < 50, `...and so does the SubagentStop hook with a policy and the fixture transcript (${(full - bare).toFixed(1)} ms)`);
+}
+
 // ---------------------------------------------------------------- gate liveness
 
 {
   const repo = cleanroomRepo();
   await withServer(repo, async ({ call }) => {
     const first = await call("kukulu_next");
-    eq(first.gate.ok + "|" + first.gate.checked.length, "true|7", "the first gate needs no allowed entry, and a passing gate records seven checks");
+    eq(first.gate.ok + "|" + first.gate.checked.length, "true|8", "the first gate needs no allowed entry, and a passing gate records eight checks");
     const second = await call("kukulu_next");
     eq(second.stage + "|" + gateCheck(second.reason), "halt|liveness", "two gates with no allowed entry between them halt with the liveness message");
     eq(second.reason, "clean-room gate failed: liveness: no tool call has been logged since the last gate; the clean-room hooks are not running in this session. Start a new session.", "...in exactly these words");
@@ -1135,7 +1512,7 @@ const gateCheck = (reason) => (reason.match(/^clean-room gate failed: ([\w-]+):/
     logCall(repo);
     const third = await call("kukulu_next");
     eq(third.gate.ok, true, "an allowed entry between gates passes");
-    eq(gateEntries(repo).at(-1).data.checks, 7, "...and is recorded as seven checks");
+    eq(gateEntries(repo).at(-1).data.checks, 8, "...and is recorded as eight checks");
     isError(await call("kukulu_review_submit", { verdict: "APPROVED" }), /clean-room gate failed: liveness: no tool call has been logged/, "a tool's gate has the same liveness rule");
   });
 }
@@ -1256,7 +1633,7 @@ const gateCheck = (reason) => (reason.match(/^clean-room gate failed: ([\w-]+):/
   await withServer(repo, async ({ call }) => {
     const first = (await call("kukulu_status")).cleanroom;
     eq([first.policy, first.mode, first.genesis === stateOf(repo).cleanroom.genesis, first.pinnedPolicyHash === first.policyHash, first.keyFingerprint === loadKey(testKeyFor(repo)).fingerprint, first.lockdown].join("|"), "docs/cleanroom.json|clean-room|true|true|true|false", "kukulu_status.cleanroom reports the policy, mode, genesis, pinned hash, key fingerprint and lockdown");
-    eq(first.chain.entries + "|" + first.chain.lastCheckpoint + "|" + first.denied, "2|null|0", "...and the chain (genesis and the first gate), no checkpoint, no denial");
+    eq(first.chain.entries + "|" + first.chain.lastCheckpoint + "|" + first.denied, "3|null|0", "...and the chain (genesis, the first gate and the stage timeline), no checkpoint, no denial");
     eq(first.chain.tip, readEntries(LOG(repo)).at(-1).hash, "...with the newest hash as its tip");
     eq(first.hooksLive, false, "hooksLive is false with no allowed entry since the last gate");
     logCall(repo);
@@ -1552,6 +1929,60 @@ eq(LANGUAGES.join(","), "rust,c,cpp,go,python,javascript,typescript,java,php", "
     });
   }
 
+  // the positive pair's control bundle (P1-03)
+  {
+    const leftRepo = mkDir("kukulu-control-left-");
+    fs.cpSync(FIX("b"), leftRepo, { recursive: true });
+    git(leftRepo, ["init", "-q", "-b", "main"]);
+    git(leftRepo, ["config", "user.email", "t@example.com"]);
+    git(leftRepo, ["config", "user.name", "T"]);
+    git(leftRepo, ["add", "-A"]);
+    git(leftRepo, ["commit", "-qm", "control result"]);
+    const headSha = git(leftRepo, ["rev-parse", "HEAD"]);
+    const bundle = (opts) => buildBundle(path.join(mkDir("kukulu-control-bundle-"), "bundle"), opts);
+    const withControl = (control, left = leftRepo) => SIM({ pairs: SIM().pairs.map((p) => (p.role === "positive" ? { ...p, left, control } : p)) });
+
+    const good = bundle({ mode: "control-positive", head: headSha });
+    const repo = generalRepo(withControl(good.dir));
+    await withServer(repo, async ({ call }) => {
+      const r = await call("kukulu_similarity");
+      ok(!r.error, "a positive pair referencing a verified control bundle scores" + (r.error ? ": " + r.error : ""));
+      const json = JSON.parse(readFile(repo, ".kukulu/cleanroom/similarity.json"));
+      const positive = json.config.pairs.find((p) => p.role === "positive");
+      eq(positive.control.manifest, createHash("sha256").update(fs.readFileSync(path.join(good.dir, "manifest.json"))).digest("hex"), "similarity.json records the control manifest's SHA-256");
+      eq(positive.control.head + "|" + positive.control.fingerprint, `${headSha}|${good.fingerprint}`, "...the head and the signer's fingerprint");
+      eq(json.config.pairs.find((p) => p.role === "negative").control, undefined, "...and no control on the other pairs");
+    });
+
+    const clean = bundle({ head: headSha });
+    const wrongMode = generalRepo(withControl(clean.dir));
+    await withServer(wrongMode, async ({ call }) => {
+      const e = await call("kukulu_similarity");
+      isError(e, /^the positive pair's control bundle .* does not verify as a positive control: mode: the bundle is clean-room, expected control-positive/, "a clean-room bundle as control refuses");
+      ok(!hasFile(wrongMode, "docs/SIMILARITY.md"), "...before any write");
+    });
+
+    const stale = bundle({ mode: "control-positive", head: "c".repeat(40) });
+    const mismatch = generalRepo(withControl(stale.dir));
+    await withServer(mismatch, async ({ call }) => {
+      isError(await call("kukulu_similarity"), new RegExp(`the positive pair's left side .* is at ${headSha}, but the control bundle was made at ${"c".repeat(40)}; check out the control flight's result there`), "a head mismatch refuses");
+    });
+
+    const missing = generalRepo(withControl(path.join(mkDir("kukulu-nobundle-"), "none")));
+    await withServer(missing, async ({ call }) => {
+      isError(await call("kukulu_similarity"), /does not verify as a positive control: verify\.mjs is missing from it/, "a control directory without a bundle refuses");
+    });
+
+    const onTest = plannedRepo({ config: { cleanroom: { similarity: SIM({ pairs: SIM().pairs.map((p) => (p.role === "test" ? { ...p, control: "x" } : p)) }) } } });
+    await withServer(onTest, async ({ call }) => {
+      isError(await call("kukulu_status"), /pairs\[2\]\.control is only legal on the pair with role "positive"/, "control on a test pair refuses at config load");
+    });
+    const emptyControl = plannedRepo({ config: { cleanroom: { similarity: withControl("") } } });
+    await withServer(emptyControl, async ({ call }) => {
+      isError(await call("kukulu_status"), /pairs\[1\]\.control must be a non-empty string: the directory of a verified control bundle/, "an empty control refuses");
+    });
+  }
+
   // general mode: files, determinism, commit, archive
   {
     const repo = generalRepo(SIM(), {});
@@ -1652,10 +2083,14 @@ eq(LANGUAGES.join(","), "rust,c,cpp,go,python,javascript,typescript,java,php", "
   eq(JSON.stringify(coverageGaps([e(1, "allowed", "implement", 0), e(2, "allowed", "implement", 1)], [], { idleGapHours: 0.5 })), JSON.stringify([{ kind: "idle", from: 1, to: 2, hours: 1 }]), "coverageGaps takes the limit it is given");
   eq(JSON.stringify(coverageGaps([], [line("c3", "N", "s", "implement", "P0-01"), line("d4", "B", "s", "implement", "P0-01"), line("e5", "G", "s", "implement", "P0-01"), line("f6", "U", "s", "implement", "P0-01"), line("g7", "E", "s", "implement", "P0-01")], hours)), JSON.stringify([{ kind: "unsigned-commit", sha: "c3" }, { kind: "unsigned-commit", sha: "d4" }]), "coverageGaps lists unsigned commits (N and B, and no other code)");
   eq(JSON.stringify(coverageGaps([e(1, "gate", "c", 0), e(2, "gate", "c", 5), e(3, "human", "c", 5, { kind: "intervention" })], [line("h8", "N", "no trailer", "", "")], hours).map((g) => g.kind)), JSON.stringify(["silent-gates", "untrailed-commit", "intervention", "idle", "unsigned-commit"]), "coverageGaps orders the kinds as the manifest lists them");
+  const trailed = [line("t1", "N", "P0-01: inside", "implement", "P0-01"), line("t2", "N", "wip", "", "")];
+  eq(coverageGaps([], trailed, hours).map((g) => g.kind + ":" + (g.sha ?? "")).join(), "untrailed-commit:t2,unsigned-commit:t1,unsigned-commit:t2", "under hook every unsigned commit is a gap");
+  eq(coverageGaps([], trailed, { ...hours, level: "container+proxy" }).map((g) => g.kind + ":" + (g.sha ?? "")).join(), "untrailed-commit:t2,unsigned-commit:t2", "under container+proxy a trailed unsigned commit is not a gap, and an untrailed one still is");
   let refused = null;
   try { coverageGaps([], [], { idleGapHours: 0 }); } catch (x) { refused = x; }
   ok(refused instanceof CleanroomError && /idleGapHours, a positive number/.test(refused.message), "coverageGaps refuses a limit that is not a positive number");
-  ok(KNOWN_LIMITS.length === 8 && KNOWN_LIMITS.every((l) => typeof l === "string" && l.endsWith(".")), "KNOWN_LIMITS is the eight fixed strings");
+  ok(KNOWN_LIMITS.length === 12 && KNOWN_LIMITS.every((l) => typeof l.id === "string" && l.text.endsWith(".") && l.levels.length > 0), "KNOWN_LIMITS is the twelve { id, text, levels } entries");
+  eq(JSON.stringify(knownLimitsFor("hook")) + "|" + knownLimitsFor("container+proxy").length, JSON.stringify(KNOWN_LIMITS.filter((l) => l.levels.includes("hook")).map((l) => l.text)) + "|5", "knownLimitsFor returns the texts for a level, in order");
   const tracked = spawnSync("git", ["ls-files", "docs/cleanroom.md"], { cwd: ROOT, encoding: "utf8" }).stdout.trim() === "docs/cleanroom.md";
   ok(tracked, "docs/cleanroom.md is tracked");
   if (tracked) {
@@ -1664,9 +2099,10 @@ eq(LANGUAGES.join(","), "rust,c,cpp,go,python,javascript,typescript,java,php", "
     const start = lines.indexOf("## Known gaps");
     let end = lines.findIndex((l, i) => i > start && l.startsWith("## "));
     if (end < 0) end = lines.length;
-    const bullets = lines.slice(start + 1, end).filter((l) => l.startsWith("- "));
+    const rows = lines.slice(start + 1, end).filter((l) => /^\| `[a-z-]+` \|/.test(l));
     const first5 = (t) => t.replace(/`/g, "").split(/\s+/).slice(0, 5).join(" ");
-    ok(bullets.length === 8 && bullets.every((b, i) => b.slice(2).replace(/`/g, "").includes(first5(KNOWN_LIMITS[i]))), "docs/cleanroom.md's Known gaps lists KNOWN_LIMITS one bullet each, in order");
+    ok(rows.length === 12 && rows.every((r, i) => r.startsWith(`| \`${KNOWN_LIMITS[i].id}\` |`) && r.replace(/`/g, "").includes(first5(KNOWN_LIMITS[i].text))), "docs/cleanroom.md's Known gaps lists KNOWN_LIMITS one table row each, in order");
+    ok(rows.every((r, i) => r.endsWith(`| ${KNOWN_LIMITS[i].levels.includes("hook") ? "yes" : "no"} | ${KNOWN_LIMITS[i].levels.includes("container+proxy") ? "yes" : "no"} |`)), "...with each level column");
     const g = lines.indexOf("### What the guard decides");
     const para = lines.slice(g + 1).find((l) => l.trim() !== "") ?? "";
     ok(para.startsWith("The guard is a tripwire, not a sandbox."), "docs/cleanroom.md opens the guard section with the tripwire paragraph");

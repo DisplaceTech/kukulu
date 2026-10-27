@@ -1,0 +1,61 @@
+{
+  "version": 1,
+  "mode": "clean-room",
+  "runners": {
+    "allow": [
+      "spark",
+      "mac"
+    ],
+    "locality": "local"
+  },
+  "roles": {
+    "distinct": "family"
+  },
+  "enforcement": "container+proxy",
+  "sandbox": {
+    "image": "kukulu-sandbox@sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "mounts": [
+      {
+        "path": "tools/oracle",
+        "mode": "ro"
+      }
+    ],
+    "egress": []
+  },
+  "deny": {
+    "network": true,
+    "words": [
+      "zlib",
+      "miniz",
+      "flate2",
+      "libdeflate",
+      "libz-sys",
+      "libz_sys",
+      "zopfli"
+    ],
+    "packages": {
+      "cargo": [
+        "flate2",
+        "miniz_oxide",
+        "libz-sys",
+        "zlib-rs",
+        "libdeflater"
+      ]
+    }
+  },
+  "allow": {
+    "paths": [
+      "crates/cleanflate/",
+      "docs/"
+    ],
+    "urls": [
+      "https://www.rfc-editor.org/rfc/rfc1951.txt"
+    ]
+  },
+  "lockdown": {
+    "after": "P0-10"
+  },
+  "protected": [
+    "tools/"
+  ]
+}

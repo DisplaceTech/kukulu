@@ -122,7 +122,10 @@ export function mkFailingGhBin() {
 /**
  * A directory holding a `gh` stub that behaves like a GitHub with no pull
  * request until `gh pr create` makes one: `pr view` then reports it, with
- * the `--base` it was created against. Every invocation is appended to
+ * the `--base` it was created against. `pr view <branch> --json …` prints `pr-view.json`
+ * when that exists; `release view` succeeds when `release.json` exists; `release create`
+ * copies its `--notes-file` to `release-notes.txt`, fails with `release-fails` on stderr when
+ * that exists, else writes `release.json` and prints a URL. Every invocation is appended to
  * `<dir>/calls.log`. Prepend the directory to PATH.
  */
 export function mkFakeGhBin() {
@@ -134,6 +137,28 @@ export function mkFakeGhBin() {
 dir=$(dirname "$0")
 printf '%s\\n' "$*" >> "$dir/calls.log"
 case "$1" in --version) exit 0 ;; esac
+if [ "$1 $2" = "pr view" ] && [ -f "$dir/pr-view.json" ]; then
+  case "$3" in -*) ;; *) cat "$dir/pr-view.json"; exit 0 ;; esac
+fi
+if [ "$1 $2" = "release view" ]; then
+  if [ -f "$dir/release.json" ]; then cat "$dir/release.json"; exit 0; fi
+  echo "release not found" >&2
+  exit 1
+fi
+if [ "$1 $2" = "release create" ]; then
+  if [ -f "$dir/release-fails" ]; then cat "$dir/release-fails" >&2; exit 1; fi
+  notes=
+  tag=$3
+  prev=
+  for a in "$@"; do
+    if [ "$prev" = "--notes-file" ]; then notes=$a; fi
+    prev=$a
+  done
+  if [ -n "$notes" ]; then cp "$notes" "$dir/release-notes.txt"; fi
+  printf '{"tag":"%s"}\n' "$tag" > "$dir/release.json"
+  echo "https://github.invalid/releases/tag/$tag"
+  exit 0
+fi
 if [ "$1 $2" = "pr view" ]; then
   if [ ! -f "$dir/pr.json" ]; then echo "no pull requests found for branch" >&2; exit 1; fi
   case " $* " in
@@ -223,6 +248,61 @@ printf -- '-----BEGIN PGP SIGNATURE-----\\n\\nZmFrZQ==\\n-----END PGP SIGNATURE-
   fs.chmodSync(gpg, 0o755);
   if (failAfter !== undefined) fs.writeFileSync(path.join(dir, "fail-after"), String(failAfter));
   return gpg;
+}
+
+/**
+ * A fake container engine for the sandbox tests: a directory holding an executable `docker` script to
+ * put first on PATH. It appends every invocation to `<dir>/calls.log` and answers from files in the
+ * directory: `version.txt`, `image-inspect.txt`, `image-missing`, `inspect.json`, `run-exit` and
+ * `exec-output` (`run` also writes the runtime directory's listing to `runtime-listing.txt`); `exec` otherwise runs the trailing `sh -c <command>` locally in the `-w` directory.
+ * Recorded output lives in `test/fixtures/docker/`; tests copy what they need in. Returns the directory.
+ */
+export function mkFakeDocker() {
+  const dir = mkDir("kukulu-docker-");
+  const docker = path.join(dir, "docker");
+  fs.writeFileSync(
+    docker,
+    `#!/bin/sh
+# Fake docker for tests: records its arguments and answers from files next to it.
+D=$(dirname "$0")
+echo "$*" >> "$D/calls.log"
+case "$1" in
+  --version)
+    if [ -f "$D/version.txt" ]; then cat "$D/version.txt"; else echo "Docker version 27.0.0, build test"; fi
+    exit 0 ;;
+  image)
+    if [ -f "$D/image-missing" ]; then exit 1; fi
+    if [ -f "$D/image-inspect.txt" ]; then cat "$D/image-inspect.txt"; else echo "sha256:0000000000000000000000000000000000000000000000000000000000000000"; fi
+    exit 0 ;;
+  inspect)
+    if [ -f "$D/inspect.json" ]; then cat "$D/inspect.json"; exit 0; fi
+    exit 1 ;;
+  run)
+    # Record what the runtime directory (mounted at /run/kukulu) holds while the container "runs".
+    for a in "$@"; do
+      case "$a" in *:/run/kukulu|*:/run/kukulu:ro) a="\${a%%:ro}"; ls "\${a%%:/run/kukulu}" > "$D/runtime-listing.txt" 2>&1 ;; esac
+    done
+    if [ -f "$D/run-exit" ]; then exit "$(cat "$D/run-exit")"; fi
+    exit 0 ;;
+  exec)
+    if [ -f "$D/exec-output" ]; then cat "$D/exec-output"; exit 0; fi
+    shift
+    wd=.
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        -w) wd="$2"; shift 2 ;;
+        sh) if [ "$2" = "-c" ]; then cd "$wd" && exec sh -c "$3"; fi; shift ;;
+        *) shift ;;
+      esac
+    done
+    exit 1 ;;
+  stop|rm|volume) exit 0 ;;
+esac
+exit 1
+`,
+  );
+  fs.chmodSync(docker, 0o755);
+  return dir;
 }
 
 /** Point `repo`'s local git config at a fake gpg so every commit is signed. */
@@ -400,7 +480,7 @@ const sha256Of = (bytes) => createHash("sha256").update(bytes).digest("hex");
  * `opts.checkpointKey` signs the second checkpoint instead (to build a bad one),
  * `opts.policyText` is the policy. `opts.clock()` replaces the time entries are stamped with,
  * `opts.extra(log)` appends more entries (after the first checkpoint), `opts.commits` is commits.txt,
- * `opts.gaps` and `opts.idleGapHours` are the manifest's coverage, `opts.cleanroomHash` (default none, the 0.7.0 shape) is pinned in the genesis entry and the manifest's plugin object, `opts.similarity` is a similarity.json's text.
+ * `opts.gaps` and `opts.idleGapHours` are the manifest's coverage, `opts.cleanroomHash` (default none, the 0.7.0 shape) is pinned in the genesis entry and the manifest's plugin object, `opts.similarity` is a similarity.json's text, `opts.mode` (default `clean-room`) is the genesis's and the manifest's mode, `opts.head` the manifest's `repo.head`, `opts.roles` (a role to `{ model, runner, endpoint, locality, identity, family }` object, written into the genesis; the manifest gets each role with `reported` and `usage` recounted from the `usage` entries, which `opts.extra` can append), `opts.enforcement` (`hook` by default, or `container+proxy`, which records a boundary built from `test/fixtures/docker/inspect.json` in the genesis and the manifest, and an egress summary counted from the entries) the enforcement level.
  * The manifest's denials are counted from the entries here, independently of the verifier. Returns `{ dir, key, fingerprint, manifest, entries }`.
  */
 export function buildBundle(dir, opts = {}) {
@@ -430,7 +510,13 @@ export function buildBundle(dir, opts = {}) {
     );
     return CR.appendEntry(log, { kind: "checkpoint", stage: "implement", ...base, data });
   };
-  CR.appendEntry(log, { kind: "genesis", stage: "controller", ...base, data: { mode: opts.mode ?? "clean-room", policyHash, guardHash, loggerHash, hooksHash, ...(opts.cleanroomHash ? { cleanroomHash: opts.cleanroomHash } : {}), pluginVersion: "0.7.0", keyFingerprint: key.fingerprint, baseBranch: "main", head: "a".repeat(40) } });
+  const level = opts.enforcement ?? "hook";
+  let boundary = null;
+  if (level === "container+proxy") {
+    const c = JSON.parse(fs.readFileSync(path.join(ROOT, "test", "fixtures", "docker", "inspect.json"), "utf8").replaceAll("__ROOT__", "/work/proj"))[0];
+    boundary = { engine: "docker", image: c.Image, network: c.HostConfig.NetworkMode, mounts: c.Mounts.map((m) => ({ source: m.Source, destination: m.Destination, rw: m.RW })).sort((a, b) => (a.destination < b.destination ? -1 : 1)) };
+  }
+  CR.appendEntry(log, { kind: "genesis", stage: "controller", ...base, data: { mode: opts.mode ?? "clean-room", enforcement: level, ...(opts.roles ? { roles: opts.roles } : {}), ...(boundary ? { boundary } : {}), policyHash, guardHash, loggerHash, hooksHash, ...(opts.cleanroomHash ? { cleanroomHash: opts.cleanroomHash } : {}), pluginVersion: "0.7.0", keyFingerprint: key.fingerprint, baseBranch: "main", head: "a".repeat(40) } });
   CR.appendEntry(log, { kind: "gate", stage: "controller", ...base, data: { checks: 7, ok: true } });
   CR.appendEntry(log, { kind: "allowed", stage: "implement", task: "P0-01", ...base, tool: "Read", target: "/p/a.rs", decision: "allowed" });
   CR.appendEntry(log, { kind: "denied", stage: "implement", task: "P0-01", ...base, tool: "Read", target: "/usr/include/zlib.h", decision: "denied", reason: "denied path: /usr/include/zlib.h (deny.paths)" });
@@ -452,6 +538,13 @@ export function buildBundle(dir, opts = {}) {
   }
   for (const d of denied) verdicts[classified.get(d.seq) ?? "unclassified"] += 1;
 
+  const egress = {};
+  for (const e of entries) {
+    if (e.kind !== "egress") continue;
+    egress[e.target] ??= { allowed: 0, denied: 0 };
+    egress[e.target][e.decision === "allowed" ? "allowed" : "denied"] += 1;
+  }
+
   const sources = {
     "policy.json": policyText,
     "SUMMARY.md": "# Summary\n",
@@ -472,8 +565,10 @@ export function buildBundle(dir, opts = {}) {
     version: 1,
     flight: "bundle-test",
     plugin: { version: "0.7.0", guardHash, loggerHash, hooksHash, ...(opts.cleanroomHash ? { cleanroomHash: opts.cleanroomHash } : {}), verifierHash: sha256Of(verifierBytes) },
-    repo: { baseBranch: "main", base: "a".repeat(40), head: "b".repeat(40), branch: "build/test" },
-    mode: "clean-room",
+    repo: { baseBranch: "main", base: "a".repeat(40), head: opts.head ?? "b".repeat(40), branch: "build/test" },
+    mode: opts.mode ?? "clean-room",
+    enforcement: { level, ...(boundary ? { boundary, egress } : {}) },
+    ...(opts.roles ? { roles: Object.fromEntries(Object.entries(opts.roles).map(([role, r]) => [role, { ...r, ...CR.rolesUsage(entries)[role], assurance: "configuration" }])) } : { roles: null }),
     genesis: entries[0],
     policy: { path: "docs/cleanroom.json", hashes: [policyHash], current: policyHash },
     chain: { entries: entries.length, first: entries[0].hash, tip: entries.at(-1).hash },
@@ -482,7 +577,7 @@ export function buildBundle(dir, opts = {}) {
     calls: { total: 3, byTool: { Read: 2, Bash: 1 }, byStage: { implement: 3 }, readCapable: 3 },
     human: { instructions: 1, interventions: 0, verdicts: 0 },
     selfTest: { ok: true, cases: 164, at: "2026-01-01T00:00:00.000Z" },
-    coverage: { gaps: opts.gaps ?? [], knownLimits: [], idleGapHours: opts.idleGapHours ?? 4 },
+    coverage: { gaps: opts.gaps ?? [], knownLimits: CR.knownLimitsFor(level), idleGapHours: opts.idleGapHours ?? 4, ...(level === "container+proxy" ? { unsignedTrailed: sources["commits.txt"].split("\n").filter(Boolean).filter((l) => { const f = l.split("\x1f"); return (f[1] === "N" || f[1] === "B") && (f[3] ?? "") !== ""; }).length } : {}) },
     similarity: opts.similarity === undefined ? null : { sha256: sha256Of(opts.similarity) },
     files: listed.map((name) => {
       const bytes = fs.readFileSync(path.join(dir, name));
@@ -494,6 +589,53 @@ export function buildBundle(dir, opts = {}) {
   fs.writeFileSync(path.join(dir, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
   signBundleManifest(dir, key);
   return { dir, key, fingerprint: key.fingerprint, manifest, entries };
+}
+
+/**
+ * Two bundles for the comparison script's tests, fully deterministic apart from the keys: `a` is a hook flight, `b` a
+ * container+proxy one with egress, stage and usage entries; both carry roles and a similarity.json whose parameters are
+ * the defaults. `opts.bSimilarityConfig` overrides B's parameters, `opts.noSimilarity` leaves both without one.
+ */
+export function buildComparePair(dir, opts = {}) {
+  const metrics = ["ngram_jaccard@5", "ngram_containment@5", "ngram_jaccard@10", "ngram_containment@10", "ident_jaccard", "ident_match_rate_left", "comment_jaccard"];
+  const config = { ngram: [5, 10], minIdentLen: 6, commentNgram: 5, languages: { ".rs": "rust", ".c": "c", ".h": "c" } };
+  const similarity = (verdict, config2, neg, pos) => JSON.stringify({
+    config: config2,
+    rows: metrics.flatMap((m, i) => [
+      { pair: "independent", role: "negative", metric: m, score: neg + i / 100, c: null, band: null },
+      { pair: "derived", role: "positive", metric: m, score: pos + i / 100, c: null, band: null },
+    ]),
+    verdict,
+  });
+  const routed = (model, runner, source, family) => ({ model, runner, endpoint: runner ? "http://spark.test:8000" : null, locality: runner ? "local" : "unknown", identity: { source }, family });
+  const roles = (implementer) => ({ planner: routed("opus", "anthropic", "vendor-asserted", "claude"), implementer, reviewer: routed("opus", "anthropic", "vendor-asserted", "claude"), summarizer: routed("opus", "anthropic", "vendor-asserted", "claude") });
+  const usage = (log, role, model, input, output, cost) => CR.appendEntry(log, { kind: "usage", stage: "implement", role, tool: null, decision: null, data: { models: { [model]: { requests: 1, input, output, cacheRead: 0, cacheWrite: 0 } }, first: "2026-01-01T00:00:00.000Z", last: "2026-01-01T00:01:00.000Z", cost } });
+  const stage = (log, event, name) => CR.appendEntry(log, { kind: "stage", stage: name, role: "controller", data: { event, stage: name, round: 0 } });
+  const clock = (start) => { let t = Date.parse(start); return () => (t += 30000); };
+  const a = buildBundle(path.join(dir, "a"), {
+    clock: clock("2026-02-01T00:00:00.000Z"),
+    roles: roles(routed("opus", "anthropic", "vendor-asserted", "claude")),
+    similarity: opts.noSimilarity ? undefined : similarity("shows no similarity beyond independent work", config, 0.1, 0.9),
+    extra: (log) => {
+      stage(log, "start", "plan"); stage(log, "end", "plan"); stage(log, "start", "implement"); stage(log, "end", "implement");
+      usage(log, "kukulu-implementer", "opus", 1200, 300, 0.5);
+      CR.appendEntry(log, { kind: "human", stage: "controller", role: "operator", target: "carry on with the plan", data: { kind: "instruction", via: "kukulu_cleanroom_record" } });
+    },
+  });
+  const b = buildBundle(path.join(dir, "b"), {
+    clock: clock("2026-02-02T00:00:00.000Z"),
+    enforcement: "container+proxy",
+    roles: roles(routed("spark/nemotron", "spark", "operator-measured", "nemotron")),
+    similarity: opts.noSimilarity ? undefined : similarity("is between the controls", opts.bSimilarityConfig ?? config, 0.2, 0.8),
+    extra: (log) => {
+      stage(log, "start", "plan"); stage(log, "end", "plan"); stage(log, "start", "implement"); stage(log, "end", "implement");
+      usage(log, "kukulu-implementer", "spark/nemotron", 5000, 800, null);
+      usage(log, "kukulu:reviewer", "opus", 90, 10, 0.01);
+      CR.appendEntry(log, { kind: "egress", stage: "controller", role: "session", tool: null, target: "spark.test:8000", decision: "allowed", reason: "runner endpoint spark", data: { bytesUp: 1, bytesDown: 2, ms: 3 } });
+      CR.appendEntry(log, { kind: "egress", stage: "controller", role: "session", tool: null, target: "example.com:443", decision: "denied", reason: "not allowed by this flight's policy" });
+    },
+  });
+  return { a, b };
 }
 
 /** Sign `dir/manifest.json` with `key`, writing `manifest.sig` (base64 Ed25519 over the manifest's bytes). */

@@ -1,0 +1,10 @@
+{
+  "name": "demo",
+  "lockfileVersion": 3,
+  "packages": {
+    "": { "name": "demo", "version": "1.0.0" },
+    "node_modules/left-pad": { "version": "1.3.0" },
+    "node_modules/pako": { "version": "2.1.0" },
+    "node_modules/a/node_modules/b": { "version": "0.4.1" }
+  }
+}

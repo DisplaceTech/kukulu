@@ -911,3 +911,97 @@ Derived from docs/SPEC.md v0.8.0 on 2026-10-26. SPEC.md wins over this file.
 - C-02's `.mcp.json` passes three named variables to the server; whether an unnamed one is inherited is a Claude Code detail. Resolution: `.mcp.json` names `KUKULU_CONTROLLER_SOCKET` too (P2-02).
 - §6 F lists `docs/HANDOFF.md`'s first line but no task writes HANDOFF (the implementer does, at `kukulu_run_finish`). Resolution: CLAUDE.md's flight notes give the line, and P4-06 repeats it.
 - The 0.7.2 flight notes in CLAUDE.md say "`policies.archive` defaults to `true` … is written only in `cfgFrom`"; nothing changes there. Noted so the reviewer does not look for a task.
+
+## Review fixes (round 1)
+
+### R1-01: Mount the runtime directory read-only and hold gate check 9 to the exact mount list
+
+**Goal:** Nothing inside the container can write the runtime directory (hooks-empty/, run.json, the sockets), and gate check 9 accepts only the exact mount list SPEC C-01 names, so the box can neither plant a hook the host's git runs nor start with an extra or substituted mount.
+**Files touched:** scripts/sandbox.mjs, mcp/server.mjs, test/sandbox.mjs, test/fixtures/docker/inspect.json, test/fixtures/docker/README.md, docs/sandbox.md, docs/cleanroom.md, docs/architecture.md, CHANGELOG.md
+**Design constraints:** SPEC §3 principle 7, §6 C-01 ("exactly the mount list above"), C-04, C-07; REVIEW F-01. containerArgs mounts "-v", `${runtimeDir}:/run/kukulu:ro` (sockets connect through a read-only bind mount; Linux checks the socket inode, not the mount). boundaryCheck refuses, with reasons written for a model and wrapped as today (`clean-room genesis refused: boundary: ...` / `clean-room gate failed: boundary: ...`): a writable set other than exactly the project root and /home/kukulu (`read-write mounts are <list>; only the project and the home volume may be writable`); /run/kukulu missing, writable, or whose source is not the directory holding KUKULU_SANDBOX_HOOKS_PATH; /home/kukulu that is not a volume named `<KUKULU_SANDBOX>-home` (inspectContainer keeps Type and Name); a same-path mount whose source differs from its destination; any destination outside the expected set (the project, the fixed read-only list, sandbox.mounts, control.priorArt, the plugin root, /run/kukulu, /home/kukulu), naming it. Keep sandbox-network-none, sandbox-no-escape-flags, server-synchronous and relay-not-in-server green. The fixture inspect.json changes /run/kukulu to RW false. Docs: docs/cleanroom.md gate item 9, docs/sandbox.md mount list and runtime directory, docs/architecture.md:118. CHANGELOG under ## [0.8.0] ### Fixed (or amend the Added line), citing the review.
+**Acceptance tests:** test/sandbox.mjs: "containerArgs ... is exactly the expected list" updated to expect `<runtimeDir>:/run/kukulu:ro`; "gate check 9 halts on a writable /run/kukulu" and "genesis refuses a writable /run/kukulu" (the recorded fixture with RW true, reason naming only the project and the home volume); "gate check 9 halts on an extra read-only mount" (a Mounts entry /etc-ro RW false, reason naming the destination); "gate check 9 halts when /home/kukulu is a bind mount of a host directory"; "gate check 9 halts when a same-path mount's source differs"; the existing passing case still passes. Integration step (KUKULU_SANDBOX_IT=1): the script also prints RUNTIME_WRITE_FAIL when `touch /run/kukulu/x` fails and SOCKET_OK when `node -e` connects to /run/kukulu/log.sock; assert both. Run the integration step once if docker is on PATH and record the outcome in the commit body.
+**Out of scope:** Restricting which entry kinds the log socket accepts (a spec issue); the proxy; signing.
+**Verification:** kukulu_verify; KUKULU_SANDBOX_IT=1 node test/sandbox.mjs when docker is available.
+**Depends on:** none
+
+### R1-02: The constraint scan never reads through a symlink that leaves the project
+
+**Goal:** kukulu_verify's constraint scan (which runs outside the boundary) never reads or returns the content of a listed path whose real path lies outside the project root, so a symlink cannot turn constraint hits into a read of the checkpoint key.
+**Files touched:** mcp/server.mjs, test/constraints.mjs, docs/mcp-tools.md, CHANGELOG.md
+**Design constraints:** SPEC §3 principle 7, §6 C-04; REVIEW F-02. In checkConstraints, a listed path that is a symlink (lstat) whose fs.realpathSync is not the root or under it is not read; the rule's result gains `skipped: [<path>]` (documented in docs/mcp-tools.md kukulu_verify) and the path never appears in any hit text. A symlink that resolves inside the project keeps today's behavior. Applies in every mode. server-synchronous. CHANGELOG ### Fixed under ## [0.8.0].
+**Acceptance tests:** test/constraints.mjs: "a tracked symlink to a file outside the project is not scanned" (a temp file outside the repo holding a secret line, a committed symlink to it, a constraint whose pattern matches the secret; kukulu_verify's results contain no hit with that text and the rule lists the symlink under skipped); "a symlink inside the project is still scanned".
+**Out of scope:** Other tools' reads; the similarity scorer's side walk (a note in REVIEW).
+**Verification:** kukulu_verify.
+**Depends on:** none
+
+### R1-03: Behind the sandbox, run the plugin's verifier, never one from the project tree
+
+**Goal:** Under KUKULU_SANDBOX, kukulu_similarity's control-bundle check and kukulu_attest's self-check run the plugin's own scripts/verify-attestation.mjs with the same arguments, so no script the box can write runs on the host.
+**Files touched:** mcp/server.mjs, test/sandbox.mjs, docs/mcp-tools.md, docs/sandbox.md, CHANGELOG.md
+**Design constraints:** SPEC §3 principle 7, §6 C-04, B-02; REVIEW F-03. verifyControlBundle (mcp/server.mjs:3730) and attest's verify run (mcp/server.mjs:4059) use path.join(PLUGIN_ROOT, "scripts", "verify-attestation.mjs") when envVar("SANDBOX") is set; without it nothing changes (SPEC B-02 as written). Refusal texts unchanged. server-synchronous. Docs: docs/mcp-tools.md kukulu_similarity and kukulu_attest say which verifier runs behind the sandbox; docs/sandbox.md What runs where. CHANGELOG ### Fixed under ## [0.8.0].
+**Acceptance tests:** test/sandbox.mjs: "behind the sandbox a control bundle's own verify.mjs never runs" (a control bundle built with buildBundle whose verify.mjs is replaced by a script that writes a marker file and prints a passing JSON verdict; with KUKULU_SANDBOX set kukulu_similarity refuses with `the positive pair's control bundle ... does not verify as a positive control` and the marker does not exist; without KUKULU_SANDBOX the bundle's own script runs, as SPEC B-02 says); "behind the sandbox kukulu_attest checks the bundle with the plugin's verifier" (prove which file ran, for example with a temp plugin copy whose verifier records its own path, per CLAUDE.md's clean-room tests protocol).
+**Out of scope:** Changing B-02 outside the sandbox; publish-bundle.mjs and compare-bundles.mjs (operator-run scripts).
+**Verification:** kukulu_verify.
+**Depends on:** none
+
+### R1-04: --expect control-positive still prints CONTROL (positive)
+
+**Goal:** A passing control bundle prints `verify-attestation: CONTROL (positive)` as its last line whether or not --expect control-positive is given; only the exit status differs (3 without, 0 with), as SPEC B-01 says.
+**Files touched:** scripts/verify-attestation.mjs, test/attest.mjs, docs/cleanroom.md, CHANGELOG.md
+**Design constraints:** SPEC §6 B-01, PLAN P1-02; REVIEW F-08. verifier-node-only; the verifier keeps its duplicated code. A clean-room bundle still prints PASS. --json output and exit codes unchanged. docs/cleanroom.md:87 describes the corrected output. If test/fixtures/bundles/ holds a verify.mjs copy, leave the recorded bundle's bytes alone.
+**Acceptance tests:** test/attest.mjs: the "...printing PASS" assertion becomes "...and 0 with --expect control-positive, still printing CONTROL (positive) as the last line"; a clean-room bundle with --expect clean-room prints PASS.
+**Out of scope:** Exit codes; --json; publish-bundle.mjs's VERIFY.txt.
+**Verification:** kukulu_verify.
+**Depends on:** none
+
+### R1-05: Test the sandbox mechanics SPEC names: box source, lockdown on sandbox.egress, stop, tag-only image
+
+**Goal:** test/sandbox.mjs covers four mechanics of scripts/sandbox.mjs that no test catches today: the log socket's source box wins over a box-supplied source, sandbox.egress hosts are denied after lockdown, stop signals the run.json pid, and run refuses a tag-only image with nothing started.
+**Files touched:** test/sandbox.mjs, scripts/sandbox.mjs
+**Design constraints:** SPEC §6 C-01 test list ("run refuses a tag-only image"), C-02 ("every entry it could add carries source: box"), C-03 ("the last two hold only until lockdown"), PLAN P2-06 (stop); REVIEW F-04. Change scripts/sandbox.mjs only if a test shows a defect. Recorded docker data stays in test/fixtures/docker/.
+**Acceptance tests:** test/sandbox.mjs: "the log socket marks a box entry source box even when the box sends another source" (send data.source controller; the appended entry has box); "sandbox.egress hosts are denied after lockdown" (egressDecision with lockdown true, reason lockdown is active); "stop signals the pid in run.json" (a sleeping child's pid in run.json; after main(["stop"]) the child has exited on SIGTERM and run.json is gone); "run refuses a tag-only image with nothing started" (policy image without @sha256, exit 1, the loadPolicy message on stderr, no run line in calls.log). Each would fail against the mutants listed in REVIEW F-04.
+**Out of scope:** Behavior changes beyond a defect a new test exposes.
+**Verification:** kukulu_verify.
+**Depends on:** R1-01
+
+### R1-06: Test the git -c options and the runner part of routing, fix the cache crate name, correct kukulu_next's docs
+
+**Goal:** The server's untested C-04 and A-02 mechanics get tests, gate check 10 recognizes a pre-release crate directory, and docs/mcp-tools.md stops calling kukulu_next read-only.
+**Files touched:** mcp/server.mjs, test/sandbox.mjs, test/cleanroom.mjs, docs/mcp-tools.md, CHANGELOG.md
+**Design constraints:** SPEC §6 C-04 ("a commit runs with the two -c options"), A-02 part 1 (model and runner), C-07, §3 principle 10; PLAN P2-11 (the crate is the part before the last -<digit...>); REVIEW F-05. The crate regex at mcp/server.mjs:284 takes the part before the last `-<digit>` segment, so flate2-1.0.0-rc.1 is flate2. docs/mcp-tools.md:5: two read-only tools, and kukulu_next writes only the stage timeline (and the wave record). server-synchronous. CHANGELOG ### Fixed under ## [0.8.0] for the crate name.
+**Acceptance tests:** test/sandbox.mjs: "a commit inside the sandbox turns the repository's fsmonitor off" (a repo-local core.fsmonitor naming a script that writes a marker and exits 1; kukulu_plan_commit under KUKULU_SANDBOX leaves no marker, and without KUKULU_SANDBOX the marker appears); "gate check 10 fails on a denied crate at a pre-release version in the sandbox cache" (exec-output lists flate2-1.0.0-rc.1). test/cleanroom.mjs: "changing a role's runner after genesis fails the gate's routing check" (same model string, the global runners moved so its prefix belongs to another runner; kukulu_next halts with `routing changed since genesis` and the failing gate entry is in the chain).
+**Out of scope:** Other gate checks; the timeline's commit policy.
+**Verification:** kukulu_verify.
+**Depends on:** R1-05
+
+### R1-07: Test the control-path symlink rule and the lockfile sub-table rule
+
+**Goal:** test/cleanroom.mjs kills the two surviving mutants in mcp/cleanroom.mjs: isControl requiring every canonical form under control.priorArt, and the TOML reader ending a [[package]] block's own keys at a later table header.
+**Files touched:** test/cleanroom.mjs, test/fixtures/lockfiles/
+**Design constraints:** REVIEW F-06; SPEC §6 B-01, C-07; PLAN P1-01 and P2-11 interpretations. A lockfile fixture added under test/fixtures/lockfiles/ keeps the README's statement that the files are hand-written minimal forms (a subdirectory if the basename must be poetry.lock or Cargo.lock). No change to mcp/cleanroom.mjs unless a test shows a defect.
+**Acceptance tests:** test/cleanroom.mjs: "a symlink under control.priorArt that resolves to a deny.paths file outside it is still denied in control mode" (evaluate on a temp root with prior/link -> ../secret/zlib.c, deny.paths ["secret/"], control.priorArt ["prior/"]); "a sub-table after a [[package]] does not overwrite the package's name or version" (a [package.metadata]-style table holding name = "other" after the block; lockfilePackages returns the block's own name and version).
+**Out of scope:** Other guard rules; other lockfile forms.
+**Verification:** kukulu_verify.
+**Depends on:** none
+
+### R1-08: Test publish-bundle --check's integrity checks and escape the literal characters
+
+**Goal:** publish-bundle.mjs --check's checks of SHA256SUMS (an unlisted file, a listed file that is missing, a malformed line, a missing SHA256SUMS) are tested, and the scripts write the macron letter and the em dash as Unicode escapes.
+**Files touched:** scripts/publish-bundle.mjs, scripts/compare-bundles.mjs, test/bundles.mjs
+**Design constraints:** SPEC §6 B-03 ("checks SHA256SUMS"), PLAN P1-04 (every file but SHA256SUMS and VERIFY.txt is listed; the macron letter written as the Unicode escape of U+016B), PLAN P3-04 (the em dash written as its escape), CLAUDE.md v0-8-0 notes; REVIEW F-07. scripts/publish-bundle.mjs:66 and scripts/compare-bundles.mjs:12 use escapes; output bytes unchanged (VERIFY.txt and test/fixtures/compare/expected.txt stay byte-identical). scripts-node-builtins.
+**Acceptance tests:** test/bundles.mjs: "--check fails on a file not listed in SHA256SUMS, naming it"; "--check fails on a listed file that is missing"; "--check fails on a malformed SHA256SUMS line"; "--check fails cleanly when SHA256SUMS is missing" (exit 1, the message, no stack trace); "publish-bundle.mjs and compare-bundles.mjs hold no literal macron letter or em dash" (read the files, assert neither character appears); the existing VERIFY.txt and expected.txt assertions still pass.
+**Out of scope:** Publishing behavior; the verifier.
+**Verification:** kukulu_verify.
+**Depends on:** none
+
+## Review fixes (round 2)
+
+### R2-01: The constraint scan never reads a file reached through a symlinked directory that leaves the project
+
+**Goal:** kukulu_verify's constraint scan resolves the real path of every listed file, not only of a path that is itself a symlink, so a tracked file under a directory that was swapped for a symlink to a host directory is never read and its content never appears in a hit (REVIEW round 2 F-01; completes R1-02).
+**Files touched:** mcp/server.mjs, test/constraints.mjs, docs/mcp-tools.md, CHANGELOG.md
+**Design constraints:** SPEC §3 principle 7, §6 C-04; REVIEW round 2 F-01. In checkConstraints (mcp/server.mjs, around line 3295) compute fs.realpathSync(full) for every listed file that exists; when it is neither the real root nor under it (realRoot + path.sep), push the file to skippedLinks and continue without reading. Read the resolved path you checked, not the original, so the check and the read agree. A file whose real path stays inside the project is scanned as before, so the existing inside-link case keeps passing. server-synchronous (no async/await). docs/mcp-tools.md kukulu_verify Returns: the sentence 'A listed path that is a symlink whose real path lies outside the project is never read' becomes one that covers a file reached through a symlinked directory too. CHANGELOG: amend the existing R1-02 line under ## [0.8.0] ### Fixed (do not add a new heading).
+**Acceptance tests:** test/constraints.mjs: "a tracked file reached through a symlinked directory that leaves the project is not scanned": commit src/keys/secret.js (a dummy line), then remove src/keys and replace it with a symlink to a temp directory outside the repo holding secret.js with console.log('top-secret');. kukulu_verify's constraint result contains no hit whose text includes top-secret, and its skipped list includes src/keys/secret.js. Against the current code this case fails (the server returns the hit, as REVIEW round 2 F-01 reproduced). The existing cases "a tracked symlink to a file outside the project is not scanned" and "a symlink inside the project is still scanned" still pass.
+**Out of scope:** Other outside reads (packagesCheck, kukulu_attest's documents and lockfiles, the similarity scorer); they are listed under Spec issues in REVIEW.md. The unreachable /run/kukulu writable message (a note).
+**Verification:** kukulu_verify
+**Depends on:** none

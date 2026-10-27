@@ -1,0 +1,13 @@
+ARG NODE_IMAGE=node:22-bookworm-slim
+FROM ${NODE_IMAGE}
+ARG CLAUDE_CODE_VERSION=latest
+ARG KUKULU_UID=1000
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} \
+    && (userdel -r node 2>/dev/null || true) \
+    && useradd --create-home --home-dir /home/kukulu --shell /bin/sh --uid ${KUKULU_UID} kukulu
+USER kukulu
+WORKDIR /home/kukulu
+ENTRYPOINT ["node"]

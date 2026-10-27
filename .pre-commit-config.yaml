@@ -39,7 +39,8 @@ repos:
         # The MCP writes these files (log headings with no blank line after
         # them), so they cannot be kept lint-clean by hand; docs/flights/ will
         # hold archived copies of them (S-07).
-        exclude: '^docs/(PLAN|PROGRESS|HANDOFF|REVIEW|SUMMARY)\.md$|^docs/flights/'
+        # Recorded bundles are signed byte for byte, so their markdown cannot be reformatted.
+        exclude: '^docs/(PLAN|PROGRESS|HANDOFF|REVIEW|SUMMARY)\.md$|^docs/flights/|^test/fixtures/bundles/.*/'
         args: ["--config", ".markdownlint.yaml"]
 
   - repo: https://github.com/gitleaks/gitleaks

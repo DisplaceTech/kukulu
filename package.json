@@ -1,6 +1,6 @@
 {
   "name": "kukulu-claude-plugin",
-  "version": "0.7.2",
+  "version": "0.8.0",
   "private": true,
   "description": "Claude Code plugin: spec-driven plan → implement → review → summarize pipeline with per-stage model switching",
   "type": "module",

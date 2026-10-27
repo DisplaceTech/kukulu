@@ -7,7 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import {
-  finish, ok, eq, like, isError,
+  finish, ok, eq, like, isError, ROOT,
   mkDir, plannedRepo, withServer, readFile, writeFile, subject, hasFile,
   markTasks, setState, git, mkBareRemote, mkFakeGhBin, mkFakeGpg, useFakeSigner,
   headingSpacingProblems, planDoc, progressDoc, DEFAULT_TASKS,
@@ -657,6 +657,22 @@ for (const [cmd, want, label] of [
   });
 }
 
+// A rename is two paths, not one record: with rename detection on, the residue is still classified per path (0.7.2 REVIEW note).
+{
+  const repo = mutationRepo({ config: { verify: ["git mv tests/old-seeds.txt tests/new-seeds.txt; node test/add.test.mjs"] } });
+  writeFile(repo, "tests/old-seeds.txt", "# seeds\nmore seeds so the rename is above the similarity threshold\n");
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-qm", "seeds file"]);
+  git(repo, ["config", "--local", "diff.renames", "true"]);
+  await withServer(repo, async ({ call }) => {
+    const r = await call("kukulu_mutate", { file: "src/add.mjs", find: "a + b", replace: "a - b" });
+    ok(!r.error, "a mutation whose command renames a tracked file runs" + (r.error ? `: ${r.error}` : ""));
+    eq(JSON.stringify(r.restoredChanges), JSON.stringify([{ path: "tests/new-seeds.txt", change: "content" }, { path: "tests/old-seeds.txt", change: "deleted" }]), "a renamed residue is classified as content under rename detection: both paths, deleted and content");
+    eq(readFile(repo, "tests/old-seeds.txt"), "# seeds\nmore seeds so the rename is above the similarity threshold\n", "...and the original is back");
+    eq(git(repo, ["status", "--porcelain"]), "", "...with a clean tree");
+  });
+}
+
 // A per-call timeout only ever shortens the configured one (cleanflate F-06).
 {
   const repo = mutationRepo({ config: { verify: [{ cmd: "sleep 30", timeoutMs: 600000 }] } });
@@ -1022,7 +1038,9 @@ for (const [archive, want] of [[undefined, true], [true, true], [false, false]])
 
 // ---------------------------------------------------------------- pr_finalize (S-14)
 
-const DRAFT_PR = '{"number":1,"url":"https://github.invalid/pull/1","state":"OPEN","isDraft":true,"baseRefName":"main","title":"Widget thing"}\n';
+// Recorded gh output lives in test/fixtures/gh/, never inline.
+const ghFixture = (name) => fs.readFileSync(path.join(ROOT, "test", "fixtures", "gh", name), "utf8");
+const DRAFT_PR = ghFixture("pr-draft.json");
 
 /** A summarized build branch with a bare origin and a fake gh holding a draft PR. `signed` signs every commit on it. */
 function finalizeRepo({ signed = false, policies = {}, summarized = true } = {}) {
@@ -1090,7 +1108,7 @@ for (const [label, args, policies, expect, mergeFails] of [
   ["breaking", { breaking: true }, {}, { calls: ["pr ready"], merge: "skipped: breaking", ready: true }],
   ["finalize ready", { breaking: false }, { finalize: "ready" }, { calls: ["pr ready"], merge: "skipped: policy", ready: true }],
   ["finalize draft", { breaking: false }, { finalize: "draft" }, { calls: [], merge: "skipped: policy", ready: false }],
-  ["merge unavailable", { breaking: false }, {}, { calls: ["pr ready", "pr merge --auto --merge --subject Widget thing (#1)"], merge: 'unavailable: auto-merge is not allowed; set policies.finalize to "ready" to stop asking', ready: true }, "auto-merge is not allowed\nsecond line\n"],
+  ["merge unavailable", { breaking: false }, {}, { calls: ["pr ready", "pr merge --auto --merge --subject Widget thing (#1)"], merge: 'unavailable: auto-merge is not allowed; set policies.finalize to "ready" to stop asking', ready: true }, ghFixture("merge-not-allowed.txt")],
 ]) {
   const { repo, ghDir, opts } = finalizeRepo({ signed: true, policies });
   if (mergeFails) writeFile(ghDir, "merge-fails", mergeFails);
@@ -1164,6 +1182,7 @@ eq((await finalizeWithChangelog(changelog("## [Unreleased]\n\n### Breaking chang
 for (const [label, policies, stateExtra, wantSignatures, wantAwait] of [
   ["finalize does not wait under signing off", { signing: "off" }, {}, "not required: policies.signing is off", false],
   ["finalize does not wait under auto with no signing configured", { signing: "auto" }, { signing: "none" }, "not required: signing is not configured", false],
+  ["finalize does not wait under the sandbox record", { signing: "auto" }, { signing: "off (sandbox: commits inside the boundary are unsigned; the signed checkpoints vouch for them)" }, "not required: commits made inside the sandbox are unsigned; the signed checkpoints vouch for them", false],
   ["finalize still waits under auto after a fallback", { signing: "auto" }, { signing: "off (commit signing failed: x)" }, "required", true],
   ["finalize still waits under required", { signing: "required" }, {}, "required", true],
 ]) {
@@ -1210,7 +1229,7 @@ for (const [label, policies, stateExtra, wantSignatures, wantAwait] of [
   eq((await calls({})).merges.join("|"), "pr merge --auto --merge --subject Widget thing (#1)", "finalize passes the PR title as the merge subject");
   eq((await calls({ mergeMethod: "squash" })).merges.join("|"), "pr merge --auto --squash --subject Widget thing (#1)", "...for squash too");
   eq((await calls({ mergeMethod: "rebase" })).merges.join("|"), "pr merge --auto --rebase", "...and no subject for rebase");
-  const failed = await calls({}, (ghDir) => writeFile(ghDir, "view-title-fails", "title lookup refused\nsecond line\n"));
+  const failed = await calls({}, (ghDir) => writeFile(ghDir, "view-title-fails", ghFixture("view-title-refused.txt")));
   eq(failed.r.merge, "enabled (default subject: title lookup refused)", "a failed title lookup merges with the default subject: merge says so");
   eq(failed.merges.join("|"), "pr merge --auto --merge", "...and passes no --subject");
 }
@@ -1438,6 +1457,143 @@ function resignRepo({ extraState = {} } = {}) {
     eq(readFile(repo, "docs/PLAN.md").split("## Review fixes (round 1)").length - 1, 1, "...PLAN.md holds the fix section exactly once");
     eq(readFile(repo, "docs/PROGRESS.md").split("R1-01").length - 1, 1, "...and PROGRESS.md names R1-01 exactly once");
   });
+}
+
+// ---------------------------------------------------------------- kukulu_release (E-01)
+
+const RELEASE_ENTRY = "## [1.2.3] - 2026-10-26\n\n### Added\n\n- the thing\n\n### Fixed\n\n- the other thing\n";
+const releaseChangelog = (entry = RELEASE_ENTRY) => `# Changelog\n\n${entry === null ? "## [Unreleased]\n\n- not released yet\n" : `${entry}\n## [1.2.2] - 2026-01-01\n\n- old\n`}`;
+
+/** A merged, archived flight: main is one merge commit behind origin, and the fake gh knows the PR is MERGED. */
+function releaseRepo({ changelog = releaseChangelog(), prState = "MERGED", archived = true, signed = false } = {}) {
+  const repo = plannedRepo();
+  if (signed) useFakeSigner(repo, mkFakeGpg());
+  const remote = mkBareRemote();
+  if (archived) {
+    writeFile(repo, "docs/flights/x/PROGRESS.md", "# Progress\n\nBranch: build/x\nStarted: 2026-10-20T00:00:00.000Z\n");
+    writeFile(repo, "docs/flights/x/state.json", JSON.stringify({ signing: signed ? "on" : "none" }) + "\n");
+    setState(repo, { archived: { slug: "x", dir: "docs/flights/x", at: "2026-10-26T00:00:00.000Z" } });
+  }
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-qm", "chore: archive flight x"]);
+  git(repo, ["remote", "add", "origin", remote]);
+  git(repo, ["push", "-q", "origin", "main"]);
+  git(repo, ["checkout", "-q", "-b", "build/x"]);
+  writeFile(repo, "CHANGELOG.md", changelog);
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-qm", "docs: changelog"]);
+  git(repo, ["checkout", "-q", "main"]);
+  git(repo, ["merge", "-q", "--no-ff", "build/x", "-m", "Merge pull request #7 from build/x"]);
+  const merge = git(repo, ["rev-parse", "HEAD"]);
+  git(repo, ["push", "-q", "origin", "main"]);
+  git(repo, ["reset", "-q", "--hard", "HEAD~1"]);
+  git(repo, ["update-ref", "-d", "refs/remotes/origin/main"]);
+  const ghDir = mkFakeGhBin();
+  writeFile(ghDir, "pr-view.json", JSON.stringify({ state: prState, mergeCommit: { oid: merge }, number: 7, url: "https://github.invalid/pull/7" }) + "\n");
+  return { repo, remote, merge, ghDir, opts: { env: { PATH: `${ghDir}:${process.env.PATH}` } } };
+}
+const remoteTag = (remote, tag) => spawnSync("git", ["-C", remote, "rev-parse", "--verify", "--quiet", `refs/tags/${tag}^{commit}`], { encoding: "utf8" }).stdout.trim();
+
+{
+  const { repo, remote, merge, ghDir, opts } = releaseRepo();
+  await withServer(repo, async ({ call }) => {
+    const r = await call("kukulu_release");
+    ok(!r.error, "kukulu_release runs on a merged, archived flight" + (r.error ? `: ${r.error}` : ""));
+    eq(r.tag + "|" + r.sha + "|" + r.draft + "|" + r.release, `v1.2.3|${merge}|true|https://github.invalid/releases/tag/v1.2.3`, "kukulu_release makes a draft release on the merged PR's commit");
+    like(readFile(ghDir, "calls.log"), /^release create v1\.2\.3 --verify-tag --title v1\.2\.3 --notes-file \S+ --draft$/m, "...with the documented gh arguments");
+    eq(remoteTag(remote, "v1.2.3"), merge, "...the tag is on origin at the merge commit");
+    eq(git(repo, ["rev-parse", "main"]), merge, "a base behind the merge commit is fast-forwarded");
+    eq(git(repo, ["cat-file", "-t", "v1.2.3"]), "tag", "...and the tag is annotated when nothing asks for a signature");
+    eq(readFile(ghDir, "release-notes.txt"), `### Added\n\n- the thing\n\n### Fixed\n\n- the other thing\n\nSee [CHANGELOG.md](${remote}/blob/v1.2.3/CHANGELOG.md) for the full list.\n`, "the notes file holds the CHANGELOG entry body and the See line");
+    const tagBefore = git(repo, ["rev-parse", "v1.2.3"]);
+    fs.rmSync(path.join(ghDir, "release.json"), { force: true });
+    const again = await call("kukulu_release");
+    ok(!again.error, "a second call works" + (again.error ? `: ${again.error}` : ""));
+    eq(git(repo, ["rev-parse", "v1.2.3"]) + "|" + remoteTag(remote, "v1.2.3"), `${tagBefore}|${merge}`, "a second call creates only the release: the tag is untouched");
+    eq(readFile(ghDir, "calls.log").split("\n").filter((l) => l.startsWith("release create")).length, 2, "...and only the release was asked of gh again");
+    isError(await call("kukulu_release"), /the tag v1\.2\.3 already exists \(at [0-9a-f]{7}\); bump CHANGELOG\.md's newest entry before releasing/, "once a release exists, a third call refuses");
+  }, opts);
+}
+
+{
+  const { repo, ghDir, opts } = releaseRepo();
+  await withServer(repo, async ({ call }) => {
+    const r = await call("kukulu_release", { publish: true });
+    eq(r.draft, false, "publish: true says draft false");
+    ok(!/--draft/.test(readFile(ghDir, "calls.log")), "publish omits --draft");
+    isError(await call("kukulu_release", { publish: "yes" }), /publish must be a boolean/, "a non-boolean publish is refused");
+  }, opts);
+}
+
+{
+  const repo = plannedRepo();
+  await withServer(repo, async ({ call }) => {
+    isError(await call("kukulu_release"), /^kukulu_release releases the newest archived flight, and none is archived; archive it first$/, "no archived flight refuses");
+  });
+}
+
+{
+  const { repo, remote, opts } = releaseRepo({ prState: "OPEN" });
+  await withServer(repo, async ({ call }) => {
+    isError(await call("kukulu_release"), /^the flight's PR \(https:\/\/github\.invalid\/pull\/7\) is OPEN; kukulu_release runs after a human merges it$/, "an unmerged PR refuses");
+    eq(remoteTag(remote, "v1.2.3") + git(repo, ["tag", "--list"]), "", "...with no tag anywhere");
+  }, opts);
+}
+
+{
+  const { repo, remote, merge, opts } = releaseRepo({ changelog: releaseChangelog(null) });
+  await withServer(repo, async ({ call }) => {
+    isError(await call("kukulu_release"), new RegExp(`^CHANGELOG\\.md at ${merge.slice(0, 7)} has no numbered entry; add ## \\[x\\.y\\.z\\] before releasing$`), "no numbered CHANGELOG entry at the merge commit refuses");
+    eq(remoteTag(remote, "v1.2.3"), "", "...and no tag is pushed");
+  }, opts);
+}
+
+{
+  const { repo, remote, ghDir, opts } = releaseRepo();
+  git(repo, ["tag", "v1.2.3", "HEAD"]);
+  git(repo, ["push", "-q", "origin", "v1.2.3"]);
+  const before = remoteTag(remote, "v1.2.3");
+  await withServer(repo, async ({ call }) => {
+    isError(await call("kukulu_release"), /the tag v1\.2\.3 already exists \(at [0-9a-f]{7}\); bump CHANGELOG\.md's newest entry before releasing/, "an existing tag refuses");
+    eq(remoteTag(remote, "v1.2.3"), before, "...with no tag pushed over it");
+    ok(!/release create/.test(fs.existsSync(path.join(ghDir, "calls.log")) ? readFile(ghDir, "calls.log") : ""), "...and no release created");
+  }, opts);
+}
+
+{
+  const { repo, remote, merge, ghDir, opts } = releaseRepo();
+  writeFile(ghDir, "release-fails", ghFixture("release-validation-failed.txt"));
+  await withServer(repo, async ({ call }) => {
+    isError(await call("kukulu_release"), /^the tag v1\.2\.3 was pushed; create the release by hand with gh release create v1\.2\.3 --verify-tag, or call kukulu_release again: HTTP 422: validation failed$/, "a failing gh release create leaves the pushed tag and says so");
+    eq(remoteTag(remote, "v1.2.3"), merge, "...the tag stays on origin");
+    fs.rmSync(path.join(ghDir, "release-fails"));
+    const r = await call("kukulu_release");
+    ok(!r.error && r.sha === merge, "...and a second call creates the release" + (r.error ? `: ${r.error}` : ""));
+  }, opts);
+}
+
+{
+  const { repo, opts } = releaseRepo();
+  writeFile(repo, "docs/PLAN.md", readFile(repo, "docs/PLAN.md") + "\nedit\n");
+  await withServer(repo, async ({ call }) => {
+    isError(await call("kukulu_release"), /the working tree is not clean/, "a dirty tracked tree refuses");
+  }, opts);
+  const other = releaseRepo();
+  git(other.repo, ["checkout", "-q", "-b", "elsewhere"]);
+  await withServer(other.repo, async ({ call }) => {
+    isError(await call("kukulu_release"), /main is not checked out/, "a base branch that is not checked out refuses");
+  }, other.opts);
+}
+
+{
+  const { repo, merge, opts } = releaseRepo({ signed: true });
+  git(repo, ["config", "--local", "tag.gpgsign", "true"]);
+  await withServer(repo, async ({ call }) => {
+    const r = await call("kukulu_release");
+    ok(!r.error, "a signed tag is made when tag.gpgsign is true" + (r.error ? `: ${r.error}` : ""));
+    like(git(repo, ["cat-file", "-p", "v1.2.3"]), /-----BEGIN PGP SIGNATURE-----/, "...git cat-file shows a signature");
+    eq(git(repo, ["rev-parse", "v1.2.3^{commit}"]), merge, "...on the merge commit");
+  }, opts);
 }
 
 finish();

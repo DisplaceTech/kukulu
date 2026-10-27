@@ -1,0 +1,6 @@
+{"type": "assistant", "requestId": "req_1", "timestamp": "2026-10-26T10:00:00.000Z", "message": {"model": "claude-sonnet-x", "usage": {"input_tokens": 100, "output_tokens": 20, "cache_read_input_tokens": 1000, "cache_creation_input_tokens": 50}}, "costUSD": 0.01}
+{"type": "assistant", "requestId": "req_1", "timestamp": "2026-10-26T10:00:01.000Z", "message": {"model": "claude-sonnet-x", "usage": {"input_tokens": 100, "output_tokens": 40, "cache_read_input_tokens": 1000, "cache_creation_input_tokens": 50}}, "costUSD": 0.02}
+{"type": "user", "timestamp": "2026-10-26T10:00:02.000Z"}
+{"type": "assistant", "requestId": "req_2", "timestamp": "2026-10-26T10:00:03.000Z", "message": {"model": "claude-sonnet-x", "usage": {"input_tokens": 200, "output_tokens": 30}}, "costUSD": 0.03}
+{"type": "assistant", "requestId": "req_3", "timestamp": "2026-10-26T10:00:05.000Z", "message": {"model": "claude-haiku-x", "usage": {"input_tokens": 10, "output_tokens": 5, "cache_read_input_tokens": 5}}, "costUSD": 0.001}
+{"type": "assistant", "timestamp": "2026-10-26T09:59:59.000Z", "message": {"model": "claude-haiku-x", "usage": {"input_tokens": 7, "output_tokens": 3}}, "costUSD": 0.002}

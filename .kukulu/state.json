@@ -15,9 +15,9 @@
   "signing": null,
   "rounds": [],
   "archived": {
-    "slug": "v0-7-2",
-    "dir": "docs/flights/v0-7-2",
-    "at": "2026-10-26T20:04:43.339Z"
+    "slug": "v0-8-0",
+    "dir": "docs/flights/v0-8-0",
+    "at": "2026-10-27T05:20:04.258Z"
   },
-  "breaking": true
+  "breaking": false
 }

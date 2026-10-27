@@ -28,6 +28,7 @@ const EXPECTED_TOOLS = [
   "kukulu_attest",
   "kukulu_flight_archive",
   "kukulu_pr_finalize",
+  "kukulu_release",
   "kukulu_agents_sync",
   "kukulu_config_show",
 ];

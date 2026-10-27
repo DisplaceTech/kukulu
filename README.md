@@ -6,7 +6,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/License-Apache%202.0-blue" alt="Apache License 2.0" />
-  <img src="https://img.shields.io/badge/version-0.7.2-informational" alt="Version 0.7.2" />
+  <img src="https://img.shields.io/badge/version-0.8.0-informational" alt="Version 0.8.0" />
   <img src="https://img.shields.io/badge/Node-%E2%89%A5%2022-339933?logo=nodedotjs&logoColor=white" alt="Node 22 or later" />
   <img src="https://img.shields.io/badge/Claude%20Code-plugin-D97757" alt="Claude Code plugin" />
   <img src="https://img.shields.io/badge/dependencies-none-brightgreen" alt="No dependencies" />
@@ -200,7 +200,7 @@ Checkbox states in `PROGRESS.md`: `[ ]` todo · `[~]` in progress · `[x]` done 
 
 ## MCP tools
 
-The server exposes twenty-five tools.
+The server exposes twenty-six tools.
 
 | Tool | Does |
 |---|---|
@@ -227,6 +227,7 @@ The server exposes twenty-five tools.
 | `kukulu_attest` | Write the signed attestation bundle for a clean-room flight into `docs/attestation/`, run the bundle's own verifier on it, and commit it only when it passes; the summarizer calls it after the summary |
 | `kukulu_flight_archive` | Move a summarized flight's artifacts into `docs/flights/<slug>/` (the spec stays), write a fresh state, commit and push |
 | `kukulu_pr_finalize` | End a flight: if every commit is signed, mark the draft PR ready and, unless `breaking`, enable auto-merge; otherwise, when the policy expects signatures, keep it a draft and record `awaitingSigning`. `resign: true` is for a human |
+| `kukulu_release` | After a human merges the flight's pull request: tag the merge commit from CHANGELOG.md's newest numbered entry, push the tag and create a GitHub release (a draft unless `publish: true`). For the flight controller, on request only |
 | `kukulu_agents_sync` | Write `.claude/agents/kukulu-<role>.md` from the merged routing config; only changed files are written |
 | `kukulu_config_show` | The merged routing config with the source of every value. Read-only |
 
@@ -234,7 +235,9 @@ Full arguments, return shapes and failure modes: [docs/mcp-tools.md](./docs/mcp-
 
 ## Clean-room mode
 
-A project with a `docs/cleanroom.json` policy runs in clean-room mode: a guard checks every tool call against the policy before it runs, a logger writes every allowed call and every prompt to a hash-chained log with signed checkpoints, and a gate refuses to start a stage if any of that machinery has changed since the flight began. At the end of the flight `kukulu_attest` writes `docs/attestation/`, a signed bundle whose own `verify.mjs` checks the manifest, the signature, the chain, the checkpoints, the policy, the guard, the mode, the denials, the coverage gaps and the similarity report with nothing but Node (see [Verifying offline](./docs/cleanroom.md#verifying-offline)). Without the policy file nothing changes and nothing is paid for. The method is patent pending (U.S. Provisional Application No. 64/178,095, Displace Technologies LLC). [docs/cleanroom.md](./docs/cleanroom.md) has the policy reference, the log format, the gate and the known gaps.
+A project with a `docs/cleanroom.json` policy runs in clean-room mode: a guard checks every tool call against the policy before it runs, a logger writes every allowed call and every prompt to a hash-chained log with signed checkpoints, and a gate refuses to start a stage if any of that machinery has changed since the flight began. At the end of the flight `kukulu_attest` writes `docs/attestation/`, a signed bundle whose own `verify.mjs` checks the manifest, the signature, the chain, the checkpoints, the policy, the guard, the mode, the denials, the coverage gaps, the similarity report, the enforcement level and the roles with nothing but Node (see [Verifying offline](./docs/cleanroom.md#verifying-offline)). Without the policy file nothing changes and nothing is paid for. The method is patent pending (U.S. Provisional Application No. 64/178,095, Displace Technologies LLC). [docs/cleanroom.md](./docs/cleanroom.md) has the policy reference, the log format, the gate and the known gaps.
+
+With `"enforcement": "container+proxy"` in the policy, `node scripts/sandbox.mjs run` starts the harness inside a container that has no network of its own: model traffic reaches only the runner endpoints through an allowlisting proxy, the controller and the signing key stay outside, and gate check 9 proves at every stage that the container is the one the flight began in. Runners (where each role's model is served) are declared in the global config, `scripts/model-identity.mjs` pins a model's weights by digest, a positive-control flight shows what a contaminated build scores, and `scripts/publish-bundle.mjs` and `scripts/compare-bundles.mjs` publish and compare bundles. See [docs/sandbox.md](./docs/sandbox.md), [docs/publishing.md](./docs/publishing.md) and [docs/routing.md](./docs/routing.md#runners).
 
 ## The guard hook
 
@@ -266,12 +269,14 @@ Everything is on disk and committed, so `/kukulu:go-flight` can be re-run from a
 │   ├── kukulu.config.example.json   the global routing config, explained in docs/routing.md
 │   └── ccr/                     claude-code-router provider manifests
 ├── docs/                        architecture · MCP reference · routing · spec guide · runbook
-└── test/                        harness + thirteen suites, run by test/run.mjs
+└── test/                        harness + fifteen suites, run by test/run.mjs
 ```
 
 ## Documentation map
 
 - [**docs/architecture.md**](./docs/architecture.md): why the pipeline is split this way, what each stage may and may not do, and where state lives
+- [**docs/sandbox.md**](./docs/sandbox.md): the sandbox: the sockets that cross the container boundary, and what an agent inside can and cannot do with them
+- [**docs/publishing.md**](./docs/publishing.md): publishing an attestation bundle with `scripts/publish-bundle.mjs`, and re-checking a published copy
 - [**docs/mcp-tools.md**](./docs/mcp-tools.md): every tool, argument, return field and refusal
 - [**docs/routing.md**](./docs/routing.md): per-role model routing, covering the global config file, profiles, and running stages through a router like claude-code-router
 - [**docs/writing-specs.md**](./docs/writing-specs.md): how to write a `SPEC.md` the planner can turn into a usable plan
@@ -297,7 +302,7 @@ npm test -- guard protocol     # one or more suites by name
 KEEP_REPO=1 npm test -- drive  # keep the temp repos to poke at afterwards
 ```
 
-Thirteen suites, about 3,000 assertions. They cover the plugin manifests and documentation links, the JSON-RPC transport, the `kukulu_next` decision table, the implement-stage tools, the review and summary tools, per-role routing (config merge, `kukulu_agents_sync`, `kukulu_config_show`), `docs/kukulu.json` constraints and their fixture self-tests, `kukulu_feedback_log` and the feedback policy, parallel streams (waves, partition validation, worktrees, merge-back), the guard hook, and serial and parallel end-to-end flights driven over real stdio against a real git repo. CI runs all of it on Node 22, 24 and 26, again on macOS, and again on a machine with no GitHub CLI installed.
+Fifteen suites, about 4,000 assertions. They cover the plugin manifests and documentation links, the JSON-RPC transport, the `kukulu_next` decision table, the implement-stage tools, the review and summary tools, per-role routing (config merge, `kukulu_agents_sync`, `kukulu_config_show`), `docs/kukulu.json` constraints and their fixture self-tests, `kukulu_feedback_log` and the feedback policy, parallel streams (waves, partition validation, worktrees, merge-back), the guard hook, and serial and parallel end-to-end flights driven over real stdio against a real git repo. CI runs all of it on Node 22, 24 and 26, again on macOS, and again on a machine with no GitHub CLI installed.
 
 ## Contributing
 

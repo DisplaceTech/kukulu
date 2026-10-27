@@ -9,6 +9,14 @@
             "command": "\"${CLAUDE_PLUGIN_ROOT}\"/scripts/implement-guard.mjs"
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/scripts/cleanroom-log.mjs"
+          }
+        ]
       }
     ],
     "Stop": [

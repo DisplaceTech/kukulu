@@ -6834,5 +6834,756 @@
    "cwd": "__ROOT__"
   },
   "expect": "allowed"
+ },
+ {
+  "name": "Read of control priorArt is allowed in control mode (P1-01)",
+  "policy": {
+   "version": 1,
+   "mode": "control-positive",
+   "control": {
+    "priorArt": [
+     "prior/"
+    ]
+   },
+   "deny": {
+    "network": false,
+    "paths": [
+     "prior/"
+    ],
+    "words": [
+     "zlib"
+    ]
+   }
+  },
+  "input": {
+   "tool_name": "Read",
+   "tool_input": {
+    "file_path": "__ROOT__/prior/zlib.c"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "cat of control priorArt is allowed in control mode (P1-01)",
+  "policy": {
+   "version": 1,
+   "mode": "control-positive",
+   "control": {
+    "priorArt": [
+     "prior/"
+    ]
+   },
+   "deny": {
+    "network": false,
+    "paths": [
+     "prior/"
+    ],
+    "words": [
+     "zlib"
+    ]
+   }
+  },
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat prior/zlib.c"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "Read of prior/zlib.c in clean-room mode (P1-01)",
+  "policy": {
+   "version": 1,
+   "deny": {
+    "network": false,
+    "paths": [
+     "prior/"
+    ],
+    "words": [
+     "zlib"
+    ]
+   }
+  },
+  "input": {
+   "tool_name": "Read",
+   "tool_input": {
+    "file_path": "__ROOT__/prior/zlib.c"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "deny\\.paths"
+ },
+ {
+  "name": "cat prior/zlib.c in clean-room mode (P1-01)",
+  "policy": {
+   "version": 1,
+   "deny": {
+    "network": false,
+    "paths": [
+     "prior/"
+    ],
+    "words": [
+     "zlib"
+    ]
+   }
+  },
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat prior/zlib.c"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "deny\\.paths"
+ },
+ {
+  "name": "Write to docs/cleanroom.json in control mode (P1-01)",
+  "policy": {
+   "version": 1,
+   "mode": "control-positive",
+   "control": {
+    "priorArt": [
+     "prior/"
+    ]
+   },
+   "deny": {
+    "network": false,
+    "paths": [
+     "prior/"
+    ],
+    "words": [
+     "zlib"
+    ]
+   }
+  },
+  "input": {
+   "tool_name": "Write",
+   "tool_input": {
+    "file_path": "__ROOT__/docs/cleanroom.json",
+    "content": "{}"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected"
+ },
+ {
+  "name": "Write to control priorArt is still denied by deny.paths (P1-01)",
+  "policy": {
+   "version": 1,
+   "mode": "control-positive",
+   "control": {
+    "priorArt": [
+     "prior/"
+    ]
+   },
+   "deny": {
+    "network": false,
+    "paths": [
+     "prior/"
+    ]
+   }
+  },
+  "input": {
+   "tool_name": "Write",
+   "tool_input": {
+    "file_path": "__ROOT__/prior/zlib.c",
+    "content": "x"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "deny\\.paths"
+ },
+ {
+  "name": "rm of control priorArt is still denied by deny.paths (P1-01)",
+  "policy": {
+   "version": 1,
+   "mode": "control-positive",
+   "control": {
+    "priorArt": [
+     "prior/"
+    ]
+   },
+   "deny": {
+    "network": false,
+    "paths": [
+     "prior/"
+    ]
+   }
+  },
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "rm prior/zlib.c"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "deny\\.paths"
+ },
+ {
+  "name": "Read outside control priorArt is still denied in control mode (P1-01)",
+  "policy": {
+   "version": 1,
+   "mode": "control-positive",
+   "control": {
+    "priorArt": [
+     "prior/"
+    ]
+   },
+   "deny": {
+    "network": false,
+    "paths": [
+     "prior/",
+     "other/"
+    ]
+   }
+  },
+  "input": {
+   "tool_name": "Read",
+   "tool_input": {
+    "file_path": "__ROOT__/other/x.c"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "deny\\.paths"
+ },
+ {
+  "name": "cargo add flate2 (P2-12)",
+  "policy": {
+   "version": 1,
+   "deny": {
+    "network": false,
+    "packages": {
+     "cargo": [
+      "flate2",
+      "miniz_oxide"
+     ],
+     "npm": [
+      "left-pad"
+     ],
+     "pypi": [
+      "zlib-ng"
+     ]
+    }
+   }
+  },
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cargo add flate2"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "denied package: .* deny\\.packages\\.cargo"
+ },
+ {
+  "name": "cargo add flate2@1 (P2-12)",
+  "policy": {
+   "version": 1,
+   "deny": {
+    "network": false,
+    "packages": {
+     "cargo": [
+      "flate2",
+      "miniz_oxide"
+     ],
+     "npm": [
+      "left-pad"
+     ],
+     "pypi": [
+      "zlib-ng"
+     ]
+    }
+   }
+  },
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cargo add flate2@1"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "denied package: .* deny\\.packages\\.cargo"
+ },
+ {
+  "name": "cargo add miniz-oxide (P2-12)",
+  "policy": {
+   "version": 1,
+   "deny": {
+    "network": false,
+    "packages": {
+     "cargo": [
+      "flate2",
+      "miniz_oxide"
+     ],
+     "npm": [
+      "left-pad"
+     ],
+     "pypi": [
+      "zlib-ng"
+     ]
+    }
+   }
+  },
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cargo add miniz-oxide"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "denied package: .* deny\\.packages\\.cargo"
+ },
+ {
+  "name": "npm install left-pad (P2-12)",
+  "policy": {
+   "version": 1,
+   "deny": {
+    "network": false,
+    "packages": {
+     "cargo": [
+      "flate2",
+      "miniz_oxide"
+     ],
+     "npm": [
+      "left-pad"
+     ],
+     "pypi": [
+      "zlib-ng"
+     ]
+    }
+   }
+  },
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "npm install left-pad"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "denied package: .* deny\\.packages\\.npm"
+ },
+ {
+  "name": "npm i left-pad@2 (P2-12)",
+  "policy": {
+   "version": 1,
+   "deny": {
+    "network": false,
+    "packages": {
+     "cargo": [
+      "flate2",
+      "miniz_oxide"
+     ],
+     "npm": [
+      "left-pad"
+     ],
+     "pypi": [
+      "zlib-ng"
+     ]
+    }
+   }
+  },
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "npm i left-pad@2"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "denied package: .* deny\\.packages\\.npm"
+ },
+ {
+  "name": "npm add left-pad (P2-12)",
+  "policy": {
+   "version": 1,
+   "deny": {
+    "network": false,
+    "packages": {
+     "cargo": [
+      "flate2",
+      "miniz_oxide"
+     ],
+     "npm": [
+      "left-pad"
+     ],
+     "pypi": [
+      "zlib-ng"
+     ]
+    }
+   }
+  },
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "npm add left-pad"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "denied package: .* deny\\.packages\\.npm"
+ },
+ {
+  "name": "pip install zlib-ng (P2-12)",
+  "policy": {
+   "version": 1,
+   "deny": {
+    "network": false,
+    "packages": {
+     "cargo": [
+      "flate2",
+      "miniz_oxide"
+     ],
+     "npm": [
+      "left-pad"
+     ],
+     "pypi": [
+      "zlib-ng"
+     ]
+    }
+   }
+  },
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "pip install zlib-ng"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "denied package: .* deny\\.packages\\.pypi"
+ },
+ {
+  "name": "pip install zlib_ng==1 (P2-12)",
+  "policy": {
+   "version": 1,
+   "deny": {
+    "network": false,
+    "packages": {
+     "cargo": [
+      "flate2",
+      "miniz_oxide"
+     ],
+     "npm": [
+      "left-pad"
+     ],
+     "pypi": [
+      "zlib-ng"
+     ]
+    }
+   }
+  },
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "pip install zlib_ng==1"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "denied package: .* deny\\.packages\\.pypi"
+ },
+ {
+  "name": "uv add zlib-ng (P2-12)",
+  "policy": {
+   "version": 1,
+   "deny": {
+    "network": false,
+    "packages": {
+     "cargo": [
+      "flate2",
+      "miniz_oxide"
+     ],
+     "npm": [
+      "left-pad"
+     ],
+     "pypi": [
+      "zlib-ng"
+     ]
+    }
+   }
+  },
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "uv add zlib-ng"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "denied package: .* deny\\.packages\\.pypi"
+ },
+ {
+  "name": "cargo add serde (P2-12)",
+  "policy": {
+   "version": 1,
+   "deny": {
+    "network": false,
+    "packages": {
+     "cargo": [
+      "flate2",
+      "miniz_oxide"
+     ],
+     "npm": [
+      "left-pad"
+     ],
+     "pypi": [
+      "zlib-ng"
+     ]
+    }
+   }
+  },
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cargo add serde"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "npm install react (P2-12)",
+  "policy": {
+   "version": 1,
+   "deny": {
+    "network": false,
+    "packages": {
+     "cargo": [
+      "flate2",
+      "miniz_oxide"
+     ],
+     "npm": [
+      "left-pad"
+     ],
+     "pypi": [
+      "zlib-ng"
+     ]
+    }
+   }
+  },
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "npm install react"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "pip install requests (P2-12)",
+  "policy": {
+   "version": 1,
+   "deny": {
+    "network": false,
+    "packages": {
+     "cargo": [
+      "flate2",
+      "miniz_oxide"
+     ],
+     "npm": [
+      "left-pad"
+     ],
+     "pypi": [
+      "zlib-ng"
+     ]
+    }
+   }
+  },
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "pip install requests"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "uv add httpx (P2-12)",
+  "policy": {
+   "version": 1,
+   "deny": {
+    "network": false,
+    "packages": {
+     "cargo": [
+      "flate2",
+      "miniz_oxide"
+     ],
+     "npm": [
+      "left-pad"
+     ],
+     "pypi": [
+      "zlib-ng"
+     ]
+    }
+   }
+  },
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "uv add httpx"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "cargo build (P2-12)",
+  "policy": {
+   "version": 1,
+   "deny": {
+    "network": false,
+    "packages": {
+     "cargo": [
+      "flate2",
+      "miniz_oxide"
+     ],
+     "npm": [
+      "left-pad"
+     ],
+     "pypi": [
+      "zlib-ng"
+     ]
+    }
+   }
+  },
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cargo build"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "rsync --remove-sent-files docs/cleanroom.json build/ (P2-13)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "rsync --remove-sent-files docs/cleanroom.json build/"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "rsync --remove-sent-files removes it"
+ },
+ {
+  "name": "cd docs && pax -r -f a.tar (P2-13)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd docs && pax -r -f a.tar"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "pax extracts into"
+ },
+ {
+  "name": "pax -w -f docs/cleanroom.json src (P2-13)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "pax -w -f docs/cleanroom.json src"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "rsync --remove-sent-files build/a.o out/ (P2-13)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "rsync --remove-sent-files build/a.o out/"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "pax -f a.tar (P2-13)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "pax -f a.tar"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "cd build && pax -r -f a.tar (P2-13)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd build && pax -r -f a.tar"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "Read under a deny.paths entry is denied, the entry checked in its real form too (symlinked root)",
+  "policy": {
+   "version": 1,
+   "deny": {
+    "network": false,
+    "paths": [
+     "secret/"
+    ]
+   }
+  },
+  "input": {
+   "tool_name": "Read",
+   "tool_input": {
+    "file_path": "__ROOT__/secret/key.c"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "^denied path: .*secret/key\\.c \\(deny\\.paths\\)$"
+ },
+ {
+  "name": "Read beside a deny.paths entry is allowed (symlinked root)",
+  "policy": {
+   "version": 1,
+   "deny": {
+    "network": false,
+    "paths": [
+     "secret/"
+    ]
+   }
+  },
+  "input": {
+   "tool_name": "Read",
+   "tool_input": {
+    "file_path": "__ROOT__/public/key.c"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
  }
 ]

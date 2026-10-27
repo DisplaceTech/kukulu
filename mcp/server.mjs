@@ -17,7 +17,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import {
-  CleanroomError, loadPolicy, policyHash, appendEntry, readEntries, logPathFor, generateKey, loadKey, signCheckpoint, verifyCheckpoint, verifyChain, evaluate, lockdownActive, ZERO_HASH, scorePair, position, verdictOf, LIMITS, coverageGaps, KNOWN_LIMITS, summarizeEntries, signBytes,
+  CleanroomError, loadPolicy, policyHash, appendEntry, readEntries, logPathFor, generateKey, loadKey, signCheckpoint, verifyCheckpoint, verifyChain, evaluate, lockdownActive, normalizeModel, familyOf, controlPaths, rolesUsage, lockfileEcosystem, lockfilePackages, deniedPackage, normalizePackageName, ZERO_HASH, scorePair, position, verdictOf, LIMITS, coverageGaps, knownLimitsFor, summarizeEntries, signBytes,
 } from "./cleanroom.mjs";
 
 /**
@@ -89,8 +89,17 @@ const MCP_ALLOW_RULE = "mcp__plugin_kukulu_kukulu";
 // plugin.
 const PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
+// Inside the sandbox the server does not run: the relay pipes this process's stdio to the
+// controller socket, where the real server runs outside the container with the key and the
+// project's .kukulu. It goes through spawnSync because the relay needs node:net, which this
+// file never imports.
+if (envVar("CONTROLLER_SOCKET")) {
+  const relayed = spawnSync(process.execPath, [path.join(PLUGIN_ROOT, "mcp", "relay.mjs")], { stdio: "inherit" });
+  process.exit(relayed.status ?? 1);
+}
+
 // Keep in sync with .claude-plugin/plugin.json and package.json; test/plugin.mjs checks it.
-const VERSION = "0.7.2";
+const VERSION = "0.8.0";
 
 // ---------------------------------------------------------------- clean-room mode (SPEC D-06)
 
@@ -121,13 +130,225 @@ function cleanroomModeBreak(st, policyPresent, planPresent) {
 }
 const modeBreakText = (why) => `clean-room coverage is broken: the mode changed after genesis (${why}); archive this flight with kukulu_flight_archive and start another`;
 
+/** Each role's resolved model, runner, locality, identity and family, as genesis records them (SPEC A-03). */
+function rolesRecord(routing) {
+  const record = {};
+  for (const role of ROLES) {
+    const e = routing.roles[role];
+    const measured = e.runner && e.runner !== "anthropic" ? routing.runners?.[e.runner]?.identities?.[e.model] : undefined;
+    const identity = measured
+      ? { source: "operator-measured", weights: measured.weights, ...(measured.image ? { image: measured.image } : {}) }
+      : e.runner === "anthropic" ? { source: "vendor-asserted" } : { source: "none" };
+    record[role] = { model: e.model, runner: e.runner, endpoint: e.endpoint, locality: e.locality, identity, family: familyOf(e.model) };
+  }
+  return record;
+}
+
+/** Why the resolved roles break the policy or differ from genesis, or null; the first failing part wins (SPEC A-02, A-04). */
+function routingCheck(policy, roles, genesisRoles) {
+  const name = (r) => r ?? "none";
+  if (genesisRoles) {
+    for (const role of ROLES) {
+      const was = genesisRoles[role];
+      if (was && (was.model !== roles[role].model || (was.runner ?? null) !== (roles[role].runner ?? null))) {
+        return `routing changed since genesis: ${role} now resolves to ${roles[role].model} on ${name(roles[role].runner)} (genesis: ${was.model} on ${name(was.runner)}); restore the routing, or archive this flight and start another`;
+      }
+    }
+  }
+  if (policy.runners.allow) {
+    for (const role of ROLES) {
+      if (!policy.runners.allow.includes(roles[role].runner)) {
+        return `${role} resolves to runner ${name(roles[role].runner)}, which policy runners.allow does not name (${policy.runners.allow.join(", ")})`;
+      }
+    }
+  }
+  if (policy.runners.locality === "local") {
+    for (const role of ROLES) {
+      if (roles[role].locality !== "local") {
+        return `${role} resolves to ${roles[role].model} on runner ${name(roles[role].runner)} (locality ${roles[role].locality}); a local-only flight needs every role on a local runner. Route it to one in ~/.config/kukulu/config.json, or set runners.locality to "any"`;
+      }
+    }
+  }
+  const imp = roles.implementer.model;
+  const rev = roles.reviewer.model;
+  if (policy.roles.distinct === "model" && normalizeModel(imp) === normalizeModel(rev)) {
+    return `the implementer and the reviewer both resolve to ${normalizeModel(imp)}; policy roles.distinct "model" needs two different models. Route one of them elsewhere`;
+  }
+  if (policy.roles.distinct === "family" && familyOf(imp) === familyOf(rev)) {
+    return `the implementer (${imp}) and the reviewer (${rev}) are both family ${familyOf(imp)}; policy roles.distinct "family" needs two families`;
+  }
+  return null;
+}
+
+/** `{ host, port }` of a URL with the port defaulted by scheme, or null when it is not a URL. */
+function hostPortOfUrl(url) {
+  try {
+    const u = new URL(url);
+    return { host: u.hostname.replace(/^\[|\]$/g, "").toLowerCase(), port: u.port ? Number(u.port) : u.protocol === "https:" ? 443 : 80 };
+  } catch {
+    return null;
+  }
+}
+
+/** The container as the engine reports it, or `{ error }` with the engine's first stderr line. */
+function inspectContainer(engine, name) {
+  const r = spawnSync(engine, ["inspect", name], { encoding: "utf8", timeout: 30000 });
+  if (r.error || r.status !== 0) return { error: `could not inspect container ${name}: ${(r.error?.message || (r.stderr || "").trim().split("\n")[0] || `exit ${r.status}`)}` };
+  try {
+    const c = JSON.parse(r.stdout)[0];
+    return {
+      id: c.Id,
+      running: Boolean(c.State?.Running),
+      image: c.Image,
+      network: c.HostConfig?.NetworkMode,
+      mounts: (c.Mounts ?? []).map((m) => ({ source: m.Source, destination: m.Destination, rw: Boolean(m.RW), type: m.Type, name: m.Name })).sort((a, b) => (a.destination < b.destination ? -1 : a.destination > b.destination ? 1 : 0)),
+    };
+  } catch (e) {
+    return { error: `could not inspect container ${name}: the engine's output is not the JSON it should be (${e.message})` };
+  }
+}
+
+const mountKey = (m) => `${m.destination}\0${m.source}\0${m.rw}`;
+
+/**
+ * Gate check 9 (SPEC C-01): this server runs behind the sandbox, and the container is the one
+ * genesis recorded. Returns `{ reason }` on failure, else `{ id, boundary }`.
+ */
+function boundaryCheck(cc, policy, recorded) {
+  const name = envVar("SANDBOX");
+  if (!name) return { reason: "this flight's policy requires enforcement container+proxy, but this server is not behind a K\u016bkulu sandbox; start the session with node scripts/sandbox.mjs run" };
+  const engine = envVar("SANDBOX_ENGINE") || "docker";
+  const c = inspectContainer(engine, name);
+  if (c.error) return { reason: c.error };
+  if (!c.running) return { reason: `container ${name} is not running` };
+  const digest = /@(sha256:[0-9a-f]{64})$/.exec(policy.sandbox.image ?? "")?.[1];
+  if (c.image !== digest) return { reason: `image is ${c.image}, but the policy pins ${digest}` };
+  if (c.network !== "none") return { reason: `network is ${c.network}, but the policy requires none` };
+  const writable = c.mounts.filter((m) => m.rw).map((m) => m.destination).sort();
+  const allowed = [...new Set([ROOT, "/home/kukulu"])].sort();
+  if (writable.join("\n") !== allowed.join("\n")) {
+    return { reason: `read-write mounts are ${writable.join(", ")}; only the project and the home volume may be writable` };
+  }
+  const home = os.homedir();
+  const expand = (e) => (e === "~" || e.startsWith("~/") ? path.join(home, e.slice(1)) : path.resolve(ROOT, e));
+  const required = [
+    cleanroomPolicyPath(cc), P.stateDir, path.join(ROOT, ".claude"), path.join(ROOT, ".git", "config"), path.join(ROOT, ".git", "hooks"), path.join(ROOT, ".git", "info"),
+    P.spec, PLUGIN_ROOT, ...policy.sandbox.mounts.map((m) => expand(m.path)), ...controlPaths(policy, { root: ROOT, home }),
+  ];
+  for (const p of required) {
+    if (!c.mounts.some((m) => m.destination === p && !m.rw)) return { reason: `mount ${p} is missing` };
+  }
+  // The runtime directory holds hooks-empty/, run.json and the sockets; the box must not be able to write it (SPEC C-01, C-04).
+  const runtime = c.mounts.find((m) => m.destination === "/run/kukulu");
+  if (!runtime) return { reason: "mount /run/kukulu is missing" };
+  if (runtime.rw) return { reason: "mount /run/kukulu is writable; the runtime directory must be mounted read-only" };
+  const hooksPath = envVar("SANDBOX_HOOKS_PATH");
+  if (!hooksPath || runtime.source !== path.dirname(hooksPath)) {
+    return { reason: `mount /run/kukulu has source ${runtime.source}, but the directory holding KUKULU_SANDBOX_HOOKS_PATH is ${hooksPath ? path.dirname(hooksPath) : "not set"}; start the session with node scripts/sandbox.mjs run` };
+  }
+  const homeMount = c.mounts.find((m) => m.destination === "/home/kukulu");
+  if (homeMount.type !== "volume" || homeMount.name !== `${name}-home`) {
+    return { reason: `mount /home/kukulu is ${homeMount.type === "volume" ? `the volume ${homeMount.name}` : `a ${homeMount.type ?? "unknown"} mount of ${homeMount.source}`}, but it must be the volume ${name}-home` };
+  }
+  const expected = new Set([ROOT, "/home/kukulu", "/run/kukulu", ...required]);
+  for (const m of c.mounts) {
+    if (!expected.has(m.destination)) return { reason: `mount ${m.destination} is not one the policy and the sandbox define; remove it from the container` };
+    if (m.destination !== "/run/kukulu" && m.destination !== "/home/kukulu" && m.source !== m.destination) {
+      return { reason: `mount ${m.destination} has source ${m.source}; a project or policy mount must have the same path on the host as in the container` };
+    }
+  }
+  const boundary = { engine, image: c.image, network: c.network, mounts: c.mounts.map((m) => ({ source: m.source, destination: m.destination, rw: m.rw })) };
+  if (recorded) {
+    for (const field of ["engine", "image", "network"]) {
+      if (recorded[field] !== boundary[field]) return { reason: `${field} is ${boundary[field]}, but genesis recorded ${recorded[field]}` };
+    }
+    const now = boundary.mounts.map(mountKey).sort().join("\n");
+    const then = (recorded.mounts ?? []).map(mountKey).sort().join("\n");
+    if (now !== then) return { reason: `mounts are ${boundary.mounts.map((m) => `${m.destination}${m.rw ? " (rw)" : ""}`).join(", ")}, but genesis recorded ${(recorded.mounts ?? []).map((m) => `${m.destination}${m.rw ? " (rw)" : ""}`).join(", ")}` };
+  }
+  return { id: c.id, boundary };
+}
+
+/** The tracked lockfiles, in `git ls-files` order: `{ path, ecosystem }`. */
+function trackedLockfiles() {
+  return git(["ls-files"], { allowFail: true }).out.split("\n").filter(Boolean).map((p) => ({ path: p, ecosystem: lockfileEcosystem(path.basename(p)) })).filter((l) => l.ecosystem !== null);
+}
+
+/**
+ * Gate check 10 (SPEC C-07): no tracked lockfile names a package the policy denies, and under
+ * container+proxy the sandbox's cargo cache holds none. Returns a reason or null.
+ */
+function packagesCheck(policy) {
+  for (const file of trackedLockfiles()) {
+    if (!Object.keys(policy.deny.packages).includes(file.ecosystem)) continue;
+    let packages;
+    try {
+      packages = lockfilePackages(path.basename(file.path), read(path.join(ROOT, file.path)));
+    } catch (e) {
+      return `${file.path} cannot be read: ${e.message}`;
+    }
+    const hit = deniedPackage(policy, file.ecosystem, packages);
+    if (hit) return `${file.path} contains ${hit.name} ${hit.version ?? "unpinned"}, which policy deny.packages.${file.ecosystem} names; remove the dependency, and know that its source may already have been read`;
+  }
+  if (policy.enforcement === "container+proxy" && (policy.deny.packages.cargo ?? []).length) {
+    const engine = envVar("SANDBOX_ENGINE") || "docker";
+    const r = spawnSync(engine, ["exec", envVar("SANDBOX"), "find", "/home/kukulu/.cargo/registry/src", "-mindepth", "2", "-maxdepth", "2", "-type", "d"], { encoding: "utf8", timeout: 30000 });
+    if (r.status !== 0 && !/No such file or directory/.test(r.stderr || "")) {
+      return `could not list the sandbox's cargo cache: ${(r.stderr || r.error?.message || `exit ${r.status}`).trim().split("\n")[0]}`;
+    }
+    const denied = new Set(policy.deny.packages.cargo.map((n) => normalizePackageName("cargo", n)));
+    for (const dir of (r.status === 0 ? r.stdout : "").split("\n").filter(Boolean)) {
+      // The crate is what precedes the first -<major>.<minor>.<patch> segment, so a pre-release such as flate2-1.0.0-rc.1 is flate2.
+      const crate = /^(.*?)-\d+\.\d+\.\d+(?:[-+].*)?$/.exec(path.basename(dir))?.[1];
+      if (crate && denied.has(normalizePackageName("cargo", crate))) return `the sandbox's cargo cache holds ${dir}`;
+    }
+  }
+  return null;
+}
+
+/** Commits that carry a stage trailer but no signature, from the lines of commits.txt. */
+function unsignedTrailedCount(commitLines) {
+  return commitLines.filter(Boolean).filter((line) => {
+    const [, signature, , stage] = line.split("\x1f");
+    return (signature === "N" || signature === "B") && (stage ?? "") !== "";
+  }).length;
+}
+
+/** Every allowed `egress` entry after genesis must name a host the policy allows, lockdown ignored; returns a reason or null. */
+function egressAudit(policy, entries) {
+  const named = new Set(policy.sandbox.egress.map((e) => e.toLowerCase()));
+  for (const url of policy.allow.urls) {
+    const hp = hostPortOfUrl(url);
+    if (hp) named.add(`${hp.host}:${hp.port}`);
+  }
+  for (const r of Object.values(resolveRouting().roles)) {
+    const hp = r.endpoint ? hostPortOfUrl(r.endpoint) : null;
+    if (hp) named.add(`${hp.host}:${hp.port}`);
+  }
+  for (const e of entries) {
+    if (e.kind === "egress" && e.decision === "allowed" && !named.has(String(e.target).toLowerCase())) {
+      return `egress entry ${e.seq} allowed ${e.target}, which no runner endpoint, sandbox.egress or allow.urls entry names`;
+    }
+  }
+  return null;
+}
+
 /**
  * Append the genesis entry and record the hashes the gate will compare against,
  * in one commit with the log. A policy that does not load is a refusal.
  */
 function cleanroomGenesis(cc, st) {
   const policyBytes = fs.readFileSync(cleanroomPolicyPath(cc));
-  loadPolicy(policyBytes.toString("utf8"));
+  const policy = loadPolicy(policyBytes.toString("utf8"));
+  const roles = rolesRecord(resolveRouting());
+  const routingReason = routingCheck(policy, roles, null);
+  if (routingReason) throw new ToolError(`clean-room genesis refused: routing: ${routingReason}`);
+  let boundary = null;
+  if (policy.enforcement === "container+proxy") {
+    const b = boundaryCheck(cc, policy, null);
+    if (b.reason) throw new ToolError(`clean-room genesis refused: boundary: ${b.reason}`);
+    boundary = b.boundary;
+  }
   const key = ensureKey(cc);
   const hashes = pluginHashes();
   const logPath = cleanroomLogPath();
@@ -139,7 +360,7 @@ function cleanroomGenesis(cc, st) {
       kind: "genesis",
       stage: "controller",
       role: "session",
-      data: { mode: "clean-room", policyHash: policyHash(policyBytes), ...hashes, pluginVersion: VERSION, keyFingerprint: key.fingerprint, baseBranch: cc.baseBranch, head },
+      data: { mode: policy.mode, policyHash: policyHash(policyBytes), ...hashes, pluginVersion: VERSION, keyFingerprint: key.fingerprint, baseBranch: cc.baseBranch, head, roles, distinct: policy.roles.distinct, ...(policy.mode === "control-positive" ? { control: { priorArt: policy.control.priorArt } } : {}), enforcement: policy.enforcement, ...(boundary ? { boundary } : {}) },
     });
     st.cleanroom = { genesis: entry.hash, policyHash: policyHash(policyBytes), ...hashes };
     saveState(st);
@@ -196,13 +417,13 @@ function runGate(stage, st = loadState()) {
     return failed("guard", `hooks/hooks.json cannot be read: ${e.message}`);
   }
   const registers = (event, script) => (hooks[event] || []).some((entry) => (entry.hooks || []).some((h) => String(h.command || "").includes(script)));
-  for (const [event, script] of [["PreToolUse", "cleanroom-guard.mjs"], ["PostToolUse", "cleanroom-log.mjs"], ["UserPromptSubmit", "cleanroom-log.mjs"]]) {
+  for (const [event, script] of [["PreToolUse", "cleanroom-guard.mjs"], ["PostToolUse", "cleanroom-log.mjs"], ["UserPromptSubmit", "cleanroom-log.mjs"], ["SubagentStop", "cleanroom-log.mjs"]]) {
     if (!registers(event, script)) return failed("guard", `hooks/hooks.json no longer registers ${script} on ${event}`);
   }
 
   // 4. self-test
   checked.push("self-test");
-  const selfTest = runShell(`node ${shellQuote(path.join(PLUGIN_ROOT, "scripts", "cleanroom-guard.mjs"))} --self-test ${shellQuote(policyPath)}`, GATE_SELF_TEST_MS);
+  const selfTest = runShell(`node ${shellQuote(path.join(PLUGIN_ROOT, "scripts", "cleanroom-guard.mjs"))} --self-test ${shellQuote(policyPath)}`, GATE_SELF_TEST_MS, ROOT, { inside: false });
   if (!selfTest.ok) return failed("self-test", (selfTest.stderrTail || selfTest.stdoutTail || `exit ${selfTest.exitCode}`).split("\n")[0]);
 
   // 5. lockdown: once the lockdown task is done, an allowed URL must be denied
@@ -238,7 +459,31 @@ function runGate(stage, st = loadState()) {
     return failed("liveness", "no tool call has been logged since the last gate; the clean-room hooks are not running in this session. Start a new session.");
   }
 
-  appendEntry(logPath, { kind: "gate", stage, role: "session", data: { checks: checked.length, ok: true, ...(unpinned.length ? { unpinned } : {}) } });
+  // 8. routing: the roles still resolve as genesis recorded, and still satisfy the policy
+  checked.push("routing");
+  const genesisRoles = chain.entries[0]?.data?.roles;
+  const routingReason = routingCheck(policy, rolesRecord(resolveRouting()), genesisRoles);
+  if (routingReason) return failed("routing", routingReason);
+
+  // 9. boundary: under container+proxy, the container is the one genesis recorded and nothing it allowed out is outside the policy
+  let container = null;
+  if (policy.enforcement === "container+proxy") {
+    checked.push("boundary");
+    const b = boundaryCheck(cc, policy, chain.entries[0]?.data?.boundary ?? null);
+    if (b.reason) return failed("boundary", b.reason);
+    const leak = egressAudit(policy, chain.entries.slice(1));
+    if (leak) return failed("boundary", leak);
+    container = b.id;
+  }
+
+  // 10. packages: no tracked lockfile, and no sandbox cache, holds a package the policy denies
+  if (Object.keys(policy.deny.packages).length) {
+    checked.push("packages");
+    const reason = packagesCheck(policy);
+    if (reason) return failed("packages", reason);
+  }
+
+  appendEntry(logPath, { kind: "gate", stage, role: "session", data: { checks: checked.length, ok: true, ...(container ? { container } : {}), ...(unpinned.length ? { unpinned } : {}) } });
   return { ok: true, checked };
 }
 
@@ -368,8 +613,23 @@ function ensureLineInFile(file, line) {
   return true;
 }
 
+/**
+ * The arguments for one git call. Inside the sandbox the repository's hooks are code from the
+ * project, and the server runs outside the container: git is pointed at an empty hooks directory
+ * and told not to start a file-system monitor (SPEC C-04). Every git call in this file goes through it.
+ */
+function gitArgv(args) {
+  if (!envVar("SANDBOX")) return args;
+  let hooks = envVar("SANDBOX_HOOKS_PATH");
+  if (!hooks) {
+    hooks = path.join(os.tmpdir(), "kukulu-hooks-empty");
+    fs.mkdirSync(hooks, { recursive: true });
+  }
+  return ["-c", `core.hooksPath=${hooks}`, "-c", "core.fsmonitor=false", ...args];
+}
+
 function git(args, { allowFail = false, cwd = ROOT } = {}) {
-  const r = spawnSync("git", args, { cwd, encoding: "utf8" });
+  const r = spawnSync("git", gitArgv(args), { cwd, encoding: "utf8" });
   if (r.status !== 0 && !allowFail) {
     throw new ToolError(`git ${args.join(" ")} failed: ${(r.stderr || r.stdout || "").trim()}`);
   }
@@ -389,7 +649,7 @@ const SIGNING_FAILURE = /gpg failed to sign|failed to sign|signing failed|cannot
  */
 function signingProbe() {
   const run = (args) =>
-    spawnSync("git", args, {
+    spawnSync("git", gitArgv(args), {
       cwd: ROOT,
       encoding: "utf8",
       timeout: SIGNING_TIMEOUT_MS,
@@ -430,7 +690,7 @@ function commitStaged(rels, message, opts = {}) {
   const { stage } = opts;
   message = withTrailers(message, opts);
   const run = (args) =>
-    spawnSync("git", args, {
+    spawnSync("git", gitArgv(args), {
       cwd: ROOT,
       encoding: "utf8",
       timeout: SIGNING_TIMEOUT_MS,
@@ -460,6 +720,8 @@ function commitStaged(rels, message, opts = {}) {
   if (policy === "required") {
     throw new ToolError(`policies.signing is 'required' and the commit could not be signed: ${line}. Nothing was committed; fix the signing agent or set policies.signing to 'off', then call this tool again.`);
   }
+  // Bookkeeping that can wait does not switch the run's signing off: the caller rolls back and tries again later.
+  if (opts.noSigningFallback) throw new ToolError(`git commit failed: the commit could not be signed: ${line}`);
   const snapFiles = [P.state, P.feedback].map((f) => [f, exists(f) ? fs.readFileSync(f) : null]);
   const prevSign = git(["config", "--local", "--get", "commit.gpgsign"], { allowFail: true }).out;
   const undoFallback = () => {
@@ -752,12 +1014,16 @@ function validateSimilarity(sim) {
   sim.pairs.forEach((p, i) => {
     const at = `${where}.pairs[${i}]`;
     if (!isObj(p)) throw new ToolError(`${at} must be an object { id, role, left, right }`);
-    for (const k of Object.keys(p)) if (!["id", "role", "left", "right"].includes(k)) throw new ToolError(`${at} has an unknown key '${k}'`);
+    for (const k of Object.keys(p)) if (!["id", "role", "left", "right", "control"].includes(k)) throw new ToolError(`${at} has an unknown key '${k}'`);
     if (typeof p.id !== "string" || !PAIR_ID.test(p.id)) throw new ToolError(`${at}.id must be a slug (lowercase letters, digits and -, at most 40 characters)`);
     if (seen.has(p.id)) throw new ToolError(`${where}.pairs defines the id '${p.id}' more than once`);
     seen.add(p.id);
     if (!PAIR_ROLES.includes(p.role)) throw new ToolError(`${at}.role must be one of ${PAIR_ROLES.join(", ")} (got ${JSON.stringify(p.role)})`);
     roles[p.role]++;
+    if (p.control !== undefined) {
+      if (p.role !== "positive") throw new ToolError(`${at}.control is only legal on the pair with role "positive"`);
+      if (!nonEmptyString(p.control)) throw new ToolError(`${at}.control must be a non-empty string: the directory of a verified control bundle`);
+    }
     for (const side of ["left", "right"]) {
       if (!nonEmptyString(p[side])) throw new ToolError(`${at}.${side} must be a non-empty string: a directory (absolute, ~, repo-relative) or "subject"`);
       if (p[side] === "subject" && sim.subject === undefined) throw new ToolError(`${at}.${side} is "subject", but ${where}.subject is not set`);
@@ -791,7 +1057,7 @@ function normalizeSimilarity(sim) {
   if (sim === undefined) return null;
   return {
     subject: sim.subject ?? [],
-    pairs: sim.pairs.map((p) => ({ id: p.id, role: p.role, left: p.left, right: p.right })),
+    pairs: sim.pairs.map((p) => ({ id: p.id, role: p.role, left: p.left, right: p.right, ...(p.role === "positive" ? { control: p.control ?? null } : {}) })),
     languages: sim.languages ?? DEFAULT_SIMILARITY_LANGUAGES,
     // ⚠️ ASSUMPTION: the n-gram sizes, identifier and comment bounds come from cleanflate-bench; the margin is strict "pos > neg" until measured.
     ngram: sim.ngram ?? [5, 10],
@@ -981,7 +1247,7 @@ const ROLE_KEYS = ["model", "effort"];
 const EFFORTS = ["low", "medium", "high", "xhigh", "max"];
 const ANTHROPIC_ALIASES = ["fable", "opus", "sonnet", "haiku", "inherit"];
 const PERMISSION_MODES = ["default", "acceptEdits", "auto", "dontAsk", "bypassPermissions", "plan", "manual"];
-const GLOBAL_KEYS = ["roles", "profiles", "profile", "permissionMode"];
+const GLOBAL_KEYS = ["roles", "profiles", "profile", "permissionMode", "runners"];
 
 const isAnthropicModel = (m) => ANTHROPIC_ALIASES.includes(m) || m.startsWith("claude-");
 
@@ -1080,6 +1346,89 @@ function validateRolesBlock(roles, where) {
   }
 }
 
+const RUNNER_KEYS = ["endpoint", "locality", "match", "identities"];
+const RUNNER_NAME = /^[a-z0-9][a-z0-9-]{0,39}$/;
+const DIGEST = /^sha256:[0-9a-f]{64}$/;
+const ANTHROPIC_ENDPOINT = "https://api.anthropic.com";
+
+/** `where` names the block itself, e.g. "global config <path> runners". Returns the map, `{}` when absent. */
+function validateRunners(runners, where) {
+  if (runners === undefined) return {};
+  if (typeof runners !== "object" || runners === null || Array.isArray(runners)) {
+    throw new ToolError(`${where} must be an object`);
+  }
+  const seen = new Map();
+  for (const [name, block] of Object.entries(runners)) {
+    if (!RUNNER_NAME.test(name)) {
+      throw new ToolError(`${where}.${name} is not a runner name (lowercase letters, digits and -, at most 40 characters)`);
+    }
+    if (name === "anthropic") throw new ToolError(`${where}.anthropic is reserved for the built-in Anthropic runner`);
+    if (typeof block !== "object" || block === null || Array.isArray(block)) {
+      throw new ToolError(`${where}.${name} must be an object`);
+    }
+    for (const [k, v] of Object.entries(block)) {
+      if (!RUNNER_KEYS.includes(k)) throw new ToolError(`${where}.${name} has an unknown key '${k}'`);
+      if (k === "endpoint") {
+        let u = null;
+        try { u = typeof v === "string" ? new URL(v) : null; } catch { u = null; }
+        const ok = u && (u.protocol === "http:" || u.protocol === "https:") && u.username === "" && u.password === ""
+          && (u.pathname === "" || u.pathname === "/") && u.search === "" && u.hash === "";
+        if (!ok) {
+          throw new ToolError(`${where}.${name}.endpoint must be http(s)://host[:port] with no path, query or credentials (got ${JSON.stringify(v)})`);
+        }
+      } else if (k === "locality") {
+        if (v !== "local" && v !== "remote") throw new ToolError(`${where}.${name}.locality must be "local" or "remote"`);
+      } else if (k === "match") {
+        if (!Array.isArray(v) || v.length === 0 || v.some((x) => typeof x !== "string" || !x)) {
+          throw new ToolError(`${where}.${name}.match must be a non-empty array of model-string prefixes`);
+        }
+        for (const prefix of v) {
+          if (seen.has(prefix) && seen.get(prefix) !== name) {
+            throw new ToolError(`${where}.${seen.get(prefix)}.match and ${where}.${name}.match both name the prefix ${JSON.stringify(prefix)}; a prefix may belong to one runner`);
+          }
+          seen.set(prefix, name);
+        }
+      } else if (k === "identities") {
+        if (typeof v !== "object" || v === null || Array.isArray(v)) {
+          throw new ToolError(`${where}.${name}.identities must be an object`);
+        }
+        for (const [model, id] of Object.entries(v)) {
+          if (typeof id !== "object" || id === null || Array.isArray(id)) {
+            throw new ToolError(`${where}.${name}.identities[${JSON.stringify(model)}] must be an object with weights and optional image`);
+          }
+          for (const [ik, iv] of Object.entries(id)) {
+            if (ik !== "weights" && ik !== "image") {
+              throw new ToolError(`${where}.${name}.identities[${JSON.stringify(model)}] has an unknown key '${ik}'`);
+            }
+            if (typeof iv !== "string" || !DIGEST.test(iv)) {
+              throw new ToolError(`${where}.${name}.identities[${JSON.stringify(model)}].${ik} must be sha256:<64 hex>`);
+            }
+          }
+          if (id.weights === undefined) {
+            throw new ToolError(`${where}.${name}.identities[${JSON.stringify(model)}].weights must be sha256:<64 hex>`);
+          }
+        }
+      }
+    }
+  }
+  return runners;
+}
+
+/** Which runner serves a model: the built-in one for Anthropic ids, else the longest configured match prefix. */
+function runnerFor(model, runners) {
+  if (isAnthropicModel(model)) return { runner: "anthropic", endpoint: ANTHROPIC_ENDPOINT, locality: "remote" };
+  let best = null;
+  let bestLen = -1;
+  for (const [name, r] of Object.entries(runners || {})) {
+    for (const prefix of r.match || []) {
+      if (model.startsWith(prefix) && prefix.length > bestLen) { best = name; bestLen = prefix.length; }
+    }
+  }
+  if (best === null) return { runner: null, endpoint: null, locality: "unknown" };
+  const r = runners[best];
+  return { runner: best, endpoint: r.endpoint ?? null, locality: r.locality ?? "unknown" };
+}
+
 /** `where` names the key itself, e.g. "global config <path> permissionMode". */
 function validatePermissionMode(mode, where) {
   if (mode === undefined) return;
@@ -1097,6 +1446,7 @@ function resolveRouting() {
   const global = loadGlobalConfig();
   validateRolesBlock(global.data.roles, `global config ${global.path} roles`);
   validatePermissionMode(global.data.permissionMode, `global config ${global.path} permissionMode`);
+  const runners = validateRunners(global.data.runners, `global config ${global.path} runners`);
   if (global.data.profiles !== undefined) {
     if (typeof global.data.profiles !== "object" || global.data.profiles === null || Array.isArray(global.data.profiles)) {
       throw new ToolError(`global config ${global.path} 'profiles' must be an object`);
@@ -1149,7 +1499,9 @@ function resolveRouting() {
       effortDropped[role] = effort;
       effort = undefined;
     }
-    roles[role] = { model, effort, source: { model: modelSource, effort: effortSource } };
+    const run = runnerFor(model, runners);
+    const runnerSource = run.runner === "anthropic" ? "builtin" : run.runner === null ? "none" : "global";
+    roles[role] = { model, effort, ...run, source: { model: modelSource, effort: effortSource, runner: runnerSource } };
   }
 
   let permissionMode = "acceptEdits";
@@ -1163,6 +1515,7 @@ function resolveRouting() {
     profile,
     profileSource,
     roles,
+    runners,
     permissionMode,
     permissionModeSource,
     effortDropped,
@@ -1197,9 +1550,9 @@ function routingTable(r) {
     const e = r.roles[role];
     const effort = e.effort !== undefined ? e.effort : "–";
     const source = e.source.model === e.source.effort ? e.source.model : `model:${e.source.model} effort:${e.source.effort}`;
-    return `| ${role} | kukulu-${role} | ${e.model} | ${effort} | ${source} |`;
+    return `| ${role} | kukulu-${role} | ${e.model} | ${e.runner ?? "–"} | ${effort} | ${source} |`;
   });
-  return ["| role | agent | model | effort | source |", "|---|---|---|---|---|", ...rows].join("\n");
+  return ["| role | agent | model | runner | effort | source |", "|---|---|---|---|---|---|", ...rows].join("\n");
 }
 
 /** Roles whose generated agent file currently exists on disk. */
@@ -1275,8 +1628,12 @@ function configShow() {
     permissionMode: r.permissionMode,
     permissionModeSource: r.permissionModeSource,
     roles: Object.fromEntries(
-      ROLES.map((role) => [role, { agent: `kukulu-${role}`, model: r.roles[role].model, effort: r.roles[role].effort, source: r.roles[role].source }]),
+      ROLES.map((role) => {
+        const e = r.roles[role];
+        return [role, { agent: `kukulu-${role}`, model: e.model, effort: e.effort, runner: e.runner, endpoint: e.endpoint, locality: e.locality, source: e.source }];
+      }),
     ),
+    runners: r.runners,
     effortDropped: r.effortDropped,
     agentsGenerated: generated,
     agentsStale: stale,
@@ -1937,6 +2294,7 @@ function status() {
     feedbackCount: countFeedback(),
     longestCommandTimeoutMs: longestCommandTimeoutMs(),
     review: { mutationFixRounds: cfg().review.mutationFixRounds },
+    sandbox: envVar("SANDBOX") ?? null,
     reviewRoundsInPlan: reviewRoundCount(),
     branch: null,
     started: null,
@@ -1976,6 +2334,8 @@ function status() {
   out.strayArtifacts = out.artifacts["PLAN.md"] === "absent" ? Object.keys(out.artifacts).filter((k) => out.artifacts[k] === "untracked") : [];
   out.lastReviewCommit = lastReviewCommit(g.inRepo);
   out.cleanroom = cleanroomStatus(st);
+  out.timeline = Array.isArray(st.timeline) ? st.timeline : [];
+  out.stageSeconds = stageSecondsOf(out.timeline);
   return out;
 }
 
@@ -2024,7 +2384,31 @@ function requiredSigningPolicy(st) {
   }
 }
 
-function next() {
+/**
+ * Base health (SPEC E-02): after an archived flight, with no plan config yet, the constraints that flight carried are
+ * scanned over the tracked tree (self-test and scan, no command), and the sentence for the planner names those the
+ * base fails. `null` when there is nothing to say or the archive cannot be read.
+ */
+function baseHealth(st) {
+  if (!st.archived || exists(P.config)) return null;
+  const file = ["kukulu.json", "foun" + "dry.json"].map((n) => path.join(ROOT, st.archived.dir, n)).find(exists);
+  if (!file) return null;
+  try {
+    const archived = cfgFrom(JSON.parse(read(file)), null);
+    if (!archived.constraints.length) return null;
+    const failing = checkConstraints(archived.constraints, ROOT, []).results.filter((r) => !r.ok);
+    if (!failing.length) return null;
+    const named = failing.map((r) => (r.hits[0] ? `${r.id} (${r.hits[0].file}:${r.hits[0].line})` : `${r.id} (its fixture fails)`)).join(", ");
+    return {
+      failing: failing.length,
+      sentence: `The base fails ${failing.length} constraint(s) carried from flight ${st.archived.slug}: ${named}; decide in the plan whether a task restores them or the spec changed them.`,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function nextDecision() {
   const routing = resolveRouting();
   const s = status();
   const c = cfg();
@@ -2150,6 +2534,11 @@ function next() {
         return stage("plan", `policies.signing is 'required' and the signing probe failed: ${probe.line}. Fix the signing agent before planning, or set policies.signing to 'auto' or 'off'.`);
       }
     }
+    const health = baseHealth(st);
+    if (health) {
+      const planned = stage("plan", `${planReason}; base health: ${health.failing} failing`);
+      return { ...planned, prompt: `${planned.prompt} ${health.sentence}` };
+    }
     return stage("plan", planReason);
   }
   const offer = streamOffer();
@@ -2194,7 +2583,15 @@ const PROMPTS = {
  * configured), or `"off (probe failed: <reason>)"` for `auto` falling back.
  * Throws under `required` when signing is not configured or the probe fails.
  */
+const SANDBOX_SIGNING_REFUSAL = "policies.signing is 'required', but commits made inside the sandbox cannot be signed: the signing agent stays outside the boundary. Set policies.signing to 'auto' or 'off'; the signed checkpoints vouch for every commit's head";
+const SANDBOX_SIGNING = "off (sandbox: commits inside the boundary are unsigned; the signed checkpoints vouch for them)";
+
 function probeSigning(signingPolicy, st) {
+  // No signing socket crosses the boundary, so the probe would only fail. The server's own commits keep the operator's setting.
+  if (envVar("SANDBOX") && signingPolicy !== "off") {
+    if (signingPolicy === "required") throw new ToolError(SANDBOX_SIGNING_REFUSAL);
+    return SANDBOX_SIGNING;
+  }
   if (signingPolicy === "off") {
     git(["config", "--local", "commit.gpgsign", "false"]);
     return "off";
@@ -2301,6 +2698,7 @@ function startRun({ sync = false } = {}) {
     if (!exists(p)) throw new ToolError(`${rel(p)} is missing (${k}); run the plan stage first`);
   }
   const c = cfg();
+  if (envVar("SANDBOX") && c.policies.signing === "required") throw new ToolError(SANDBOX_SIGNING_REFUSAL);
   const g = gitFacts();
   if (!g.inRepo) throw new ToolError("not a git repository");
   // A branch this call cuts from the base is already up to date; only an existing build branch can lag behind it.
@@ -2414,6 +2812,9 @@ function ensureStreamWorktree(stream, buildBranch, cc) {
 }
 
 function runStart({ stream } = {}) {
+  if (stream !== undefined && envVar("SANDBOX")) {
+    throw new ToolError("parallel streams are not supported inside the sandbox (.kukulu/ is read-only there); run a serial plan, or set parallel.maxStreams to 1");
+  }
   const res = startRun({ sync: stream === undefined });
   if (stream === undefined) return res;
 
@@ -2761,8 +3162,14 @@ const TAIL_CHARS = 4000;
 // up on the runner itself (which should never need it).
 const RUNNER_BACKSTOP_MS = 30_000;
 
-function runShell(cmd, timeoutMs, cwd = ROOT) {
-  const spec = { cmd, cwd, timeoutMs, maxOutputBytes: OUTPUT_LIMIT_BYTES, keepBytes: TAIL_CHARS * 8 };
+function runShell(cmd, timeoutMs, cwd = ROOT, { inside = true } = {}) {
+  // Behind the sandbox a command runs in the container, never here: `exec` with an inner timeout
+  // (the supervisor outside can only kill the engine's client, not the process in the container).
+  const inContainer = inside && envVar("SANDBOX");
+  const wrapped = inContainer
+    ? `${envVar("SANDBOX_ENGINE") || "docker"} exec -w ${shellQuote(cwd)} ${envVar("SANDBOX")} timeout -k 5 ${Math.ceil(timeoutMs / 1000)} sh -c ${shellQuote(cmd)}`
+    : cmd;
+  const spec = { cmd: wrapped, cwd, timeoutMs, maxOutputBytes: OUTPUT_LIMIT_BYTES, keepBytes: TAIL_CHARS * 8 };
   const r = spawnSync(process.execPath, [RUNNER, JSON.stringify(spec)], {
     encoding: "utf8",
     timeout: timeoutMs + RUNNER_BACKSTOP_MS,
@@ -2878,17 +3285,26 @@ function checkConstraints(constraints, cwd = ROOT, ignore = []) {
     const files = listed.ok ? [...new Set(listed.out.split("\n").filter(Boolean))].filter((f) => !skip.has(f)) : [];
     const excluded = c.exclude || [];
     const hits = [];
+    const skippedLinks = [];
+    const realRoot = fs.realpathSync(cwd);
     for (const file of files) {
       if (excluded.some((ex) => pathUnder(file, ex))) continue;
       const full = path.join(cwd, file);
       if (!exists(full)) continue; // e.g. a submodule gitlink git ls-files can list but fs cannot read
-      read(full)
+      // This scan runs outside the sandbox: a symlink leaving the project would read the host's files (SPEC C-04).
+      // Resolve every file, not only a symlink: a parent directory swapped for a link leaves the file itself a regular one.
+      const real = fs.realpathSync(full);
+      if (real !== realRoot && !real.startsWith(realRoot + path.sep)) {
+        skippedLinks.push(file);
+        continue;
+      }
+      read(real)
         .split("\n")
         .forEach((text, i) => {
           if (testLine(c, text)) hits.push({ file, line: i + 1, text });
         });
     }
-    return { id: c.id, ok: hits.length === 0, fixture: null, hits };
+    return { id: c.id, ok: hits.length === 0, fixture: null, hits, ...(skippedLinks.length ? { skipped: skippedLinks } : {}) };
   });
   return { ok: results.every((r) => r.ok), results };
 }
@@ -3003,7 +3419,8 @@ function recoverMutation() {
 }
 
 /** Tracked paths that differ from HEAD (modified, deleted or staged), sorted. */
-const trackedChanges = () => git(["diff", "--name-only", "HEAD"]).out.split("\n").filter(Boolean).sort();
+// --no-renames: a rename is a deleted path and an added one, and both must be named to be put back.
+const trackedChanges = () => git(["diff", "--name-only", "--no-renames", "HEAD"]).out.split("\n").filter(Boolean).sort();
 
 /**
  * What differs between HEAD and the working tree for each path: `deleted`, `mode`
@@ -3011,7 +3428,7 @@ const trackedChanges = () => git(["diff", "--name-only", "HEAD"]).out.split("\n"
  * included). Read before the paths are restored (SPEC D-03).
  */
 function classifyChanges(paths) {
-  const raw = spawnSync("git", ["diff", "--raw", "-z", "--abbrev=40", "HEAD", "--", ...paths], { cwd: ROOT, encoding: "utf8" }).stdout || "";
+  const raw = spawnSync("git", gitArgv(["diff", "--raw", "--no-renames", "-z", "--abbrev=40", "HEAD", "--", ...paths]), { cwd: ROOT, encoding: "utf8" }).stdout || "";
   const parts = raw.split("\0");
   const byPath = new Map();
   for (let i = 0; i + 1 < parts.length; i += 2) {
@@ -3044,7 +3461,16 @@ function undoMutationResidue(before) {
   const untrackedBefore = new Set(before.untracked);
   const restored = trackedChanges().filter((p) => !dirtyBefore.has(p));
   const restoredChanges = restored.length ? classifyChanges(restored) : [];
-  if (restored.length) git(["checkout", "-q", "HEAD", "--", ...restored]);
+  if (restored.length) {
+    // A path the command staged that HEAD does not have (the new side of a `git mv`) cannot be checked out: it is unstaged and removed.
+    const inHead = new Set(git(["ls-tree", "-r", "--name-only", "HEAD", "--", ...restored]).out.split("\n").filter(Boolean));
+    const gone = restored.filter((p) => !inHead.has(p));
+    if (gone.length) {
+      git(["rm", "-q", "-f", "--cached", "--", ...gone]);
+      for (const p of gone) fs.rmSync(path.join(ROOT, p), { force: true });
+    }
+    if (inHead.size) git(["checkout", "-q", "HEAD", "--", ...inHead]);
+  }
   const removed = untrackedPaths().filter((p) => !untrackedBefore.has(p));
   for (const p of removed) fs.rmSync(path.join(ROOT, p), { force: true });
   return { restored, removed, restoredChanges };
@@ -3317,6 +3743,42 @@ function walkFiles(dir) {
 }
 
 /**
+ * Check the positive pair's control bundle (SPEC B-02): the bundle's own verifier, run with
+ * --expect control-positive, must pass, and the pair's left side must be at the commit the control
+ * flight was made at. Returns what similarity.json records, or null when the pair names no bundle.
+ */
+function verifyControlBundle(sim) {
+  const positive = sim.pairs.find((p) => p.role === "positive");
+  if (!positive?.control) return null;
+  const dir = similarityDirs(positive.control, sim)[0];
+  const refuse = (why) => new ToolError(`the positive pair's control bundle ${dir} does not verify as a positive control: ${why}`);
+  const verifier = path.join(dir, "verify.mjs");
+  if (!exists(verifier)) throw refuse("verify.mjs is missing from it");
+  // Behind the sandbox the bundle is a directory the box could have written, so its own verify.mjs would run on the host (SPEC C-04).
+  const script = envVar("SANDBOX") ? path.join(PLUGIN_ROOT, "scripts", "verify-attestation.mjs") : verifier;
+  const run = spawnSync(process.execPath, [script, dir, "--expect", "control-positive", "--json"], { encoding: "utf8", timeout: GATE_SELF_TEST_MS });
+  let verdict = null;
+  try {
+    verdict = JSON.parse(run.stdout);
+  } catch {
+    verdict = null;
+  }
+  if (run.status !== 0 || !verdict?.ok) {
+    const first = verdict?.reasons?.[0];
+    throw refuse(first ? `${first.check}: ${first.reason}` : (run.stderr || "").trim().split("\n")[0] || `exit ${run.status}`);
+  }
+  const manifestBytes = fs.readFileSync(path.join(dir, "manifest.json"));
+  const manifest = JSON.parse(manifestBytes.toString("utf8"));
+  const left = positive.left === "subject" ? ROOT : similarityDirs(positive.left, sim)[0];
+  const at = spawnSync("git", gitArgv(["-C", left, "rev-parse", "HEAD"]), { encoding: "utf8" });
+  const head = at.status === 0 ? at.stdout.trim() : null;
+  if (head !== manifest.repo?.head) {
+    throw new ToolError(`the positive pair's left side ${left} is at ${head ?? "no commit"}, but the control bundle was made at ${manifest.repo?.head}; check out the control flight's result there`);
+  }
+  return { manifest: sha256Hex(manifestBytes), head: manifest.repo.head, fingerprint: manifest.signer.fingerprint };
+}
+
+/**
  * Score the configured pairs (SPEC E-03). Runs only inside the server: no agent
  * tool ever reads the comparison corpus, the agents get numbers back, and every
  * byte the scorer read is hashed into the chain (E-03a). Refused while an
@@ -3329,6 +3791,9 @@ function similarity() {
   if (exists(P.lock)) throw new ToolError(`an implementation run is armed (${rel(P.lock)} exists); kukulu_similarity is a summarize-stage tool, so run it after kukulu_run_finish`);
   const st = loadState();
   if (st.verdict !== "APPROVED") throw new ToolError("the flight is not reviewed APPROVED yet; score contamination after the review approves the build");
+
+  // A positive pair that names a control bundle is checked before any file is read: the bundle must verify as a control flight, and the left side must be the tree it was made at.
+  const controlRecord = verifyControlBundle(sim);
 
   // Resolve and read every side once.
   const sides = new Map();
@@ -3400,7 +3865,8 @@ function similarity() {
     }
   }
   const skipped = unmapped.size;
-  const json = `${JSON.stringify({ config: sim, files, rows, verdict, limits: LIMITS, at: new Date().toISOString() }, null, 2)}\n`;
+  const recorded = controlRecord ? { ...sim, pairs: sim.pairs.map((p) => (p.id === positive.id ? { ...p, control: controlRecord } : p)) } : sim;
+  const json = `${JSON.stringify({ config: recorded, files, rows, verdict, limits: LIMITS, at: new Date().toISOString() }, null, 2)}\n`;
   const jsonPath = path.join(P.stateDir, "cleanroom", "similarity.json");
 
   // docs/SIMILARITY.md carries no timestamp, so the same inputs give the same bytes.
@@ -3534,9 +4000,9 @@ function attest({ evidence } = {}) {
   const key = loadKey(cc.cleanroom.signingKey);
   const policyPath = cleanroomPolicyPath(cc);
   const policyBytes = fs.readFileSync(policyPath);
-  const selfTest = runShell("node " + shellQuote(path.join(PLUGIN_ROOT, "scripts", "cleanroom-guard.mjs")) + " --self-test " + shellQuote(policyPath), GATE_SELF_TEST_MS);
+  const selfTest = runShell("node " + shellQuote(path.join(PLUGIN_ROOT, "scripts", "cleanroom-guard.mjs")) + " --self-test " + shellQuote(policyPath), GATE_SELF_TEST_MS, ROOT, { inside: false });
   if (!selfTest.ok) throw new ToolError("the guard self-test fails, so nothing was attested: " + (selfTest.stderrTail || selfTest.stdoutTail || "exit " + selfTest.exitCode).split("\n")[0]);
-  const gl = spawnSync("git", ["log", "--format=%H%x1f%G?%x1f%s%x1f%(trailers:key=Kukulu-Stage,valueonly,separator=%x2C)%x1f%(trailers:key=Kukulu-Task,valueonly,separator=%x2C)", base + "..HEAD"], { cwd: ROOT, encoding: "utf8" });
+  const gl = spawnSync("git", gitArgv(["log", "--format=%H%x1f%G?%x1f%s%x1f%(trailers:key=Kukulu-Stage,valueonly,separator=%x2C)%x1f%(trailers:key=Kukulu-Task,valueonly,separator=%x2C)", base + "..HEAD"]), { cwd: ROOT, encoding: "utf8" });
   if (gl.status !== 0) throw new ToolError("git log " + base + "..HEAD failed: " + (gl.stderr || "").trim());
   const verifierBytes = fs.readFileSync(path.join(PLUGIN_ROOT, "scripts", "verify-attestation.mjs"));
   const hashes = pluginHashes();
@@ -3557,13 +4023,36 @@ function attest({ evidence } = {}) {
   const policyHashes = [];
   for (const e of checkpoints) if (!policyHashes.includes(e.data.policyHash)) policyHashes.push(e.data.policyHash);
   const idleGapHours = cc.cleanroom.idleGapHours;
+  // 0.7.x genesis entries record no enforcement level: they were hook flights.
+  const level = genesis.data?.enforcement ?? "hook";
+  const egress = {};
+  for (const e of entries) {
+    if (e.kind !== "egress") continue;
+    egress[e.target] ??= { allowed: 0, denied: 0 };
+    egress[e.target][e.decision === "allowed" ? "allowed" : "denied"] += 1;
+  }
+  const usageByRole = rolesUsage(entries);
   const manifest = {
     version: 1,
     flight: cc.flight ?? gitFacts().branch,
     plugin: { version: VERSION, ...hashes, verifierHash: sha256Hex(verifierBytes) },
     repo: { baseBranch: cc.baseBranch, base, head, branch: gitFacts().branch },
-    mode: "clean-room",
+    mode: genesis.data?.mode ?? "clean-room",
+    enforcement: { level, ...(level === "container+proxy" ? { boundary: genesis.data.boundary, egress } : {}) },
+    // Packages a lockfile names are outside the claim: the log cannot show what their source contained.
+    packages: trackedLockfiles().map((f) => {
+      const bytes = fs.readFileSync(path.join(ROOT, f.path));
+      let list = [];
+      try {
+        list = lockfilePackages(path.basename(f.path), bytes.toString("utf8"));
+      } catch {
+        list = [];
+      }
+      return { path: f.path, sha256: sha256Hex(bytes), ecosystem: f.ecosystem, packages: list.map((p) => (p.version ? `${p.name}@${p.version}` : p.name)), outsideClaim: true };
+    }),
     genesis,
+    // A flight that began on 0.7.x has no roles in its genesis. "configuration" is the weakest assurance: the roles are what the routing said; "egress" means the proxy also saw the traffic to the runner.
+    roles: genesis.data?.roles ? Object.fromEntries(ROLES.map((role) => [role, { ...genesis.data.roles[role], ...usageByRole[role], assurance: level === "container+proxy" ? "egress" : "configuration" }])) : null,
     policy: { path: cc.cleanroom.policy, hashes: policyHashes, current: policyHash(policyBytes) },
     chain: { entries: entries.length, first: entries[0].hash, tip: entries[entries.length - 1].hash },
     checkpoints: checkpoints.map((e) => ({ seq: e.seq, event: e.data.event, git: e.data.git, signature: e.data.signature, ok: verifyCheckpoint(e, key.publicKey) })),
@@ -3571,7 +4060,7 @@ function attest({ evidence } = {}) {
     calls: counts.calls,
     human: counts.human,
     selfTest: { ok: true, cases: Number(/\((\d+) cases\)/.exec(selfTest.stdoutTail || "")?.[1] ?? 0), at: new Date().toISOString() },
-    coverage: { gaps: coverageGaps(entries, gl.stdout.split("\n"), { idleGapHours }), knownLimits: KNOWN_LIMITS, idleGapHours },
+    coverage: { gaps: coverageGaps(entries, gl.stdout.split("\n"), { idleGapHours, level }), knownLimits: knownLimitsFor(level), idleGapHours, ...(level === "container+proxy" ? { unsignedTrailed: unsignedTrailedCount(gl.stdout.split("\n")) } : {}) },
     similarity: files.has("similarity.json") ? { sha256: sha256Hex(files.get("similarity.json")) } : null,
     files: [...files].map(([name, bytes]) => ({ path: name, sha256: sha256Hex(bytes), bytes: bytes.length })),
     signer: { fingerprint: key.fingerprint, publicKey: "publisher.pub" },
@@ -3596,7 +4085,7 @@ function attest({ evidence } = {}) {
         fs.writeFileSync(path.join(dir, name), bytes);
       }
       // The verifier that ships in the bundle checks the bundle before anything is committed.
-      const run = spawnSync(process.execPath, [path.join(dir, "verify.mjs"), dir, "--key", key.fingerprint, "--json"], { encoding: "utf8", timeout: GATE_SELF_TEST_MS });
+      const run = spawnSync(process.execPath, [envVar("SANDBOX") ? path.join(PLUGIN_ROOT, "scripts", "verify-attestation.mjs") : path.join(dir, "verify.mjs"), dir, "--key", key.fingerprint, "--expect", genesis.data?.mode ?? "clean-room", "--json"], { encoding: "utf8", timeout: GATE_SELF_TEST_MS });
       let verdict;
       try {
         verdict = JSON.parse(run.stdout);
@@ -4031,12 +4520,82 @@ function summaryCommit({ content } = {}) {
 }
 
 /** The one line the operator needs when a flight's commits are not all signed. */
+/**
+ * The stage timeline (SPEC D-01): when each stage started and ended, as `{ event, stage, round, at }` in
+ * `state.timeline` in every mode and, in clean-room mode, as `stage` entries in the chain. The open span is
+ * the last record when it is a `start`. A new stage closes it and opens another; `done` and `halt` close it;
+ * the same stage and round again writes nothing.
+ */
+function recordTimeline(res) {
+  const st = loadState();
+  const timeline = Array.isArray(st.timeline) ? st.timeline : [];
+  const last = timeline.at(-1);
+  const open = last?.event === "start" ? last : null;
+  const at = new Date().toISOString();
+  const records = [];
+  if (res.stage === "done" || res.stage === "halt") {
+    if (open) records.push({ event: "end", stage: open.stage, round: open.round, at });
+  } else if (!open || open.stage !== res.stage || open.round !== res.round) {
+    if (open) records.push({ event: "end", stage: open.stage, round: open.round, at });
+    records.push({ event: "start", stage: res.stage, round: res.round, at });
+  }
+  if (!records.length) return res;
+  const crPaths = cleanroomPaths(st);
+  const paths = [P.state, ...crPaths];
+  // The timeline is bookkeeping: when it cannot be committed (a signer that is down, say) the files are put back and
+  // the decision is returned as it was, with a note; the next call records the same transition again.
+  try {
+    withRollback(paths, () => {
+    st.timeline = [...timeline, ...records];
+    saveState(st);
+    if (crPaths.length) {
+      for (const r of records) {
+        appendEntry(cleanroomLogPath(), {
+          kind: "stage",
+          stage: r.stage,
+          role: "controller",
+          ...(r.event === "start" ? { model: res.model ?? null } : {}),
+          data: { event: r.event, stage: r.stage, round: r.round, ...(r.event === "start" ? { agent: res.agent ?? null, model: res.model ?? null } : {}) },
+        });
+      }
+    }
+    if (gitFacts().inRepo) gitCommitIfChanged(paths, records.at(-1).event === "start" ? `chore: stage ${records.at(-1).stage}` : "chore: stage end", { stage: "controller", noSigningFallback: true });
+    });
+  } catch (e) {
+    return { ...res, timelineNote: `the stage timeline was not recorded this call: ${e instanceof Error ? e.message : String(e)}` };
+  }
+  return res;
+}
+
+function next() {
+  return recordTimeline(nextDecision());
+}
+
+/** Whole seconds each stage has run, from the timeline's spans; an open span counts up to now. */
+function stageSecondsOf(timeline) {
+  const out = {};
+  let open = null;
+  const add = (stage, from, to) => {
+    out[stage] = (out[stage] ?? 0) + Math.max(0, Math.round((Date.parse(to) - Date.parse(from)) / 1000));
+  };
+  for (const r of timeline ?? []) {
+    if (r.event === "start") open = r;
+    else if (r.event === "end" && open) {
+      add(open.stage, open.at, r.at);
+      open = null;
+    }
+  }
+  if (open) add(open.stage, open.at, new Date().toISOString());
+  return out;
+}
+
 function nextSteps(mergeBase) {
   return `Unlock the signing agent, then tell the flight controller to finalize with re-signing: kukulu_pr_finalize({ resign: true }). Or by hand: git rebase -f --rebase-merges --gpg-sign ${mergeBase}, then git push --force-with-lease, then kukulu_pr_finalize({}).`;
 }
 
 /** Whether finalize holds the PR for signatures: always under `required`, and under `auto` unless signing was never configured (SPEC B-03). */
 function signaturesExpected(policy, signing) {
+  if (typeof signing === "string" && signing.startsWith("off (sandbox:")) return false;
   return policy === "required" || (policy === "auto" && signing !== "none");
 }
 
@@ -4044,6 +4603,9 @@ function signaturesExpected(policy, signing) {
 function signingNoteFor(signing) {
   if (typeof signing !== "string" || signing === "on") return null;
   if (signing === "off" || signing === "none") return "Commits in this run are unsigned and kukulu_pr_finalize will not wait for signatures.";
+  if (signing.startsWith("off (sandbox:")) {
+    return "Commits made inside the sandbox are unsigned: commit with git -c commit.gpgsign=false commit -F <file>; the signed checkpoints vouch for every commit's head, and kukulu_pr_finalize will not wait for signatures.";
+  }
   if (signing.startsWith("off (")) {
     return "Commits from here on are unsigned; kukulu_pr_finalize will wait for signatures, so unlock the signing agent and call kukulu_run_start again to resume signing, or re-sign at the end.";
   }
@@ -4136,7 +4698,8 @@ function prFinalize({ breaking, resign } = {}) {
   }
   // A re-sign is the operator asking for signatures, whatever the policy says.
   const expected = resign === true || signaturesExpected(cc.policies.signing, recordedSigning);
-  const signatures = expected ? "required" : cc.policies.signing === "off" ? "not required: policies.signing is off" : "not required: signing is not configured";
+  const sandboxed = typeof recordedSigning === "string" && recordedSigning.startsWith("off (sandbox:");
+  const signatures = expected ? "required" : cc.policies.signing === "off" ? "not required: policies.signing is off" : sandboxed ? "not required: commits made inside the sandbox are unsigned; the signed checkpoints vouch for them" : "not required: signing is not configured";
   const mb = git(["merge-base", cc.baseBranch, "HEAD"], { allowFail: true }).out;
   if (!mb) throw new ToolError(`cannot find a merge base with baseBranch '${cc.baseBranch}'; check out the build branch, or fix baseBranch in docs/kukulu.json`);
 
@@ -4192,7 +4755,7 @@ function prFinalize({ breaking, resign } = {}) {
         gitCommitIfChanged(crPaths, "chore: clean-room record", { stage: "controller" });
       });
     }
-    const rb = spawnSync("git", ["rebase", "-f", "--rebase-merges", "--gpg-sign", mb], {
+    const rb = spawnSync("git", gitArgv(["rebase", "-f", "--rebase-merges", "--gpg-sign", mb]), {
       cwd: ROOT,
       encoding: "utf8",
       timeout: cc.commandTimeoutMs,
@@ -4645,6 +5208,107 @@ function planCommit({ renumber } = {}) {
   };
 }
 
+// ---------------------------------------------------------------- kukulu_release (SPEC E-01)
+
+/** The repository's browsable URL from origin's: scp-like and ssh forms become https, `.git` and credentials go. */
+function repoUrlFromOrigin() {
+  const raw = git(["remote", "get-url", "origin"], { allowFail: true }).out;
+  if (!raw) throw new ToolError("origin has no URL; kukulu_release needs a GitHub remote named origin");
+  const scp = /^(?:[^@/]+@)?([^:/]+):(?!\/\/)(.+?)(?:\.git)?\/?$/.exec(raw);
+  if (scp && !raw.startsWith("/") && !/^[A-Za-z]:\\/.test(raw)) return `https://${scp[1]}/${scp[2]}`;
+  return raw.replace(/^ssh:\/\/(?:[^@/]+@)?/, "https://").replace(/^(https?:\/\/)[^@/]+@/, "$1").replace(/\.git\/?$/, "");
+}
+
+/**
+ * Tag the newest archived flight's merged pull request, push the tag, and create a GitHub release from the
+ * CHANGELOG entry (a draft unless `publish`). Every refusal comes before the first write; a repeated call
+ * does only what is still missing.
+ */
+function release({ publish } = {}) {
+  if (publish !== undefined && typeof publish !== "boolean") throw new ToolError("publish must be a boolean");
+  const st = loadState();
+  if (!st.archived) throw new ToolError("kukulu_release releases the newest archived flight, and none is archived; archive it first");
+  const archiveDir = path.join(ROOT, st.archived.dir);
+  const archivedProgress = path.join(archiveDir, "PROGRESS.md");
+  const branch = exists(archivedProgress) ? /^Branch:\s*(.+)$/m.exec(read(archivedProgress))?.[1]?.trim() : null;
+  if (!branch || branch.startsWith("(")) throw new ToolError(`the archived ${st.archived.dir}/PROGRESS.md names no Branch:; kukulu_release cannot find the flight's pull request`);
+  const c = cfg();
+  const ghRun = (args) => {
+    const r = spawnSync("gh", args, { cwd: ROOT, encoding: "utf8", timeout: CHECKS_TIMEOUT_MS });
+    if (r.error) throw new ToolError(`gh ${args.slice(0, 2).join(" ")} failed: ${r.error.code === "ETIMEDOUT" ? `timed out after ${CHECKS_TIMEOUT_MS} ms` : r.error.message}`);
+    return r;
+  };
+  const view = ghRun(["pr", "view", branch, "--json", "state,mergeCommit,number,url"]);
+  if (view.status !== 0) throw new ToolError(`gh pr view ${branch} failed: ${(view.stderr || view.stdout || "").trim().split("\n")[0] || `exit ${view.status}`}`);
+  let pr;
+  try {
+    pr = JSON.parse(view.stdout);
+  } catch {
+    throw new ToolError(`gh pr view ${branch} printed output that is not JSON`);
+  }
+  if (pr.state !== "MERGED" || !pr.mergeCommit?.oid) throw new ToolError(`the flight's PR (${pr.url}) is ${pr.state}; kukulu_release runs after a human merges it`);
+  const sha = pr.mergeCommit.oid;
+  // The merge was made on GitHub, so the commit may not be here yet.
+  const fetched = git(["fetch", "origin"], { allowFail: true });
+  const changelog = git(["show", `${sha}:CHANGELOG.md`], { allowFail: true });
+  if (!changelog.ok && !fetched.ok) throw new ToolError(`git fetch origin failed: ${fetched.err.split("\n")[0]}`);
+  const lines = changelog.ok ? changelog.out.split("\n") : [];
+  const start = lines.findIndex((l) => /^## \[\d+\.\d+\.\d+[^\]]*\]/.test(l));
+  const firstEntry = lines.findIndex((l) => l.startsWith("## ["));
+  const version = start >= 0 && start === firstEntry ? /^## \[(\d+\.\d+\.\d+[^\]]*)\]/.exec(lines[start])[1] : null;
+  if (!version) throw new ToolError(`CHANGELOG.md at ${sha.slice(0, 7)} has no numbered entry; add ## [x.y.z] before releasing`);
+  const tag = `v${version}`;
+  let end = lines.findIndex((l, i) => i > start && l.startsWith("## "));
+  if (end === -1) end = lines.length;
+  const body = lines.slice(start + 1, end).join("\n").trim();
+
+  const localTag = git(["rev-parse", "--verify", "--quiet", `refs/tags/${tag}^{commit}`], { allowFail: true });
+  const remoteTags = git(["ls-remote", "--tags", "origin", `refs/tags/${tag}`, `refs/tags/${tag}^{}`], { allowFail: true });
+  const remoteLines = remoteTags.out.split("\n").filter(Boolean).map((l) => l.split("\t"));
+  const remoteSha = (remoteLines.find(([, ref]) => ref.endsWith("^{}")) ?? remoteLines[0])?.[0] ?? null;
+  const existing = localTag.ok ? localTag.out : remoteSha;
+  let skipTag = false;
+  if (existing) {
+    const noRelease = ghRun(["release", "view", tag]).status !== 0;
+    if (existing === sha && noRelease) skipTag = true;
+    else throw new ToolError(`the tag ${tag} already exists (at ${existing.slice(0, 7)}); bump CHANGELOG.md's newest entry before releasing`);
+  }
+  if (gitFacts().branch !== c.baseBranch) throw new ToolError(`${c.baseBranch} is not checked out; check it out (clean) and call kukulu_release again`);
+  if (trackedDirtyLines().length) throw new ToolError(`the working tree is not clean; commit or stash before calling kukulu_release:\n${trackedDirtyLines().join("\n")}`);
+  const ff = git(["merge", "--ff-only", `origin/${c.baseBranch}`], { allowFail: true });
+  if (!git(["merge-base", "--is-ancestor", sha, "HEAD"], { allowFail: true }).ok) {
+    throw new ToolError(`${c.baseBranch} does not contain the merge commit ${sha.slice(0, 7)} after a fast-forward pull${ff.ok ? "" : ` (${ff.err.split("\n")[0]})`}; merge or rebase by hand, then call kukulu_release again`);
+  }
+
+  if (!skipTag) {
+    let signed = git(["config", "--get", "tag.gpgsign"], { allowFail: true }).out === "true";
+    if (!signed) {
+      try {
+        signed = JSON.parse(read(path.join(archiveDir, "state.json"))).signing === "on";
+      } catch {
+        signed = false;
+      }
+    }
+    const made = spawnSync("git", gitArgv(["tag", signed ? "-s" : "-a", tag, "-m", tag, sha]), { cwd: ROOT, encoding: "utf8", timeout: SIGNING_TIMEOUT_MS, env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } });
+    if (made.status !== 0 || made.error) throw new ToolError(`git tag ${tag} failed: ${((made.stderr || made.stdout || made.error?.message || "").trim().split("\n")[0]) || "unknown error"}`);
+  }
+  if (!remoteSha) {
+    const pushed = spawnSync("git", gitArgv(["push", "origin", `refs/tags/${tag}`]), { cwd: ROOT, encoding: "utf8", timeout: SIGNING_TIMEOUT_MS, env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } });
+    if (pushed.status !== 0 || pushed.error) {
+      if (!skipTag) git(["tag", "-d", tag], { allowFail: true });
+      throw new ToolError(`git push origin ${tag} failed: ${((pushed.stderr || pushed.stdout || pushed.error?.message || "").trim().split("\n")[0]) || "unknown error"}`);
+    }
+  }
+  const notes = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "kukulu-release-")), "notes.md");
+  fs.writeFileSync(notes, `${body}\n\nSee [CHANGELOG.md](${repoUrlFromOrigin()}/blob/${tag}/CHANGELOG.md) for the full list.\n`);
+  const created = ghRun(["release", "create", tag, "--verify-tag", "--title", tag, "--notes-file", notes, ...(publish === true ? [] : ["--draft"])]);
+  fs.rmSync(path.dirname(notes), { recursive: true, force: true });
+  if (created.status !== 0) {
+    throw new ToolError(`the tag ${tag} was pushed; create the release by hand with gh release create ${tag} --verify-tag, or call kukulu_release again: ${(created.stderr || created.stdout || "").trim().split("\n")[0] || `exit ${created.status}`}`);
+  }
+  return { tag, sha, release: (created.stdout || "").trim().split("\n").filter(Boolean).at(-1) ?? null, draft: publish !== true };
+}
+
 // ---------------------------------------------------------------- MCP plumbing
 
 // `required: []` is legal but trips stricter schema validators; omit it instead.
@@ -4656,7 +5320,7 @@ const S = (props, required = []) => ({
 });
 const TOOLS = [
   { name: "kukulu_status", description: "Everything the pipeline knows from disk: which docs exist, task counts by state, branch/base/head, lock, round, review verdict, review.mutationFixRounds, and the pull request's CI checks as prChecks (every gh call bounded to 30 s). Read-only.", inputSchema: S({}), fn: () => ({ ...status(), prChecks: prChecks() }) },
-  { name: "kukulu_next", description: "Deterministic stage selection: returns { stage, agent, agentFallback, fallbackAgent, restartRequired, model, agentModel, agentModelExact, round, reason, prompt, streams? }. stage is plan | implement | review | summarize | done | halt. agentModel is the value to pass as the Agent tool's model when agentFallback is true (an alias, or null to pass none); agentModelExact is false when a full claude-* id was mapped to its family alias. restartRequired is true only when the routed model cannot be reached without relaunching the session. Read-only, except that when a parallel wave's partition is invalid it records once (state, one feedback entry, one commit, only on a build branch) that the wave runs serially. When streams is present, spawn one implementer per entry, all at once, and wait for all of them.", inputSchema: S({}), fn: next },
+  { name: "kukulu_next", description: "Deterministic stage selection: returns { stage, agent, agentFallback, fallbackAgent, restartRequired, model, agentModel, agentModelExact, round, reason, prompt, streams? }. stage is plan | implement | review | summarize | done | halt. agentModel is the value to pass as the Agent tool's model when agentFallback is true (an alias, or null to pass none); agentModelExact is false when a full claude-* id was mapped to its family alias. restartRequired is true only when the routed model cannot be reached without relaunching the session. Writes only the stage timeline (state.timeline, and in clean-room mode a stage entry in the chain, committed as chore: stage <stage>) and, when a parallel wave's partition is invalid, a record (state, one feedback entry, one commit, only on a build branch) that the wave runs serially. When streams is present, spawn one implementer per entry, all at once, and wait for all of them.", inputSchema: S({}), fn: next },
   { name: "kukulu_plan_commit", description: "Validate the plan as a whole and commit it: docs/PLAN.md, docs/PROGRESS.md, docs/kukulu.json and CLAUDE.md must exist and agree (task headings, numbering, dependencies, streams, config, from references). Every problem is listed at once, as numbered lines and as structuredContent.problems [{ check, id?, message }]; nothing is committed while any remain. With renumber: true (only before any run has started) it first renumbers split ids everywhere. On success it commits 'plan: derive build plan from SPEC' and returns { commit, tasks, phases, waves, renumbered }. For the planner, as its last step.", inputSchema: S({ renumber: { type: "boolean", description: "rewrite split or out-of-sequence task ids (such as P1-02a) to a clean P<n>-01.. sequence everywhere they appear, then validate and commit; refused once a run has started" } }), fn: planCommit },
   { name: "kukulu_run_start", description: "Begin (or resume) an implementation run: create/reuse the build branch, arm the implement guard lock, stamp Branch/Started in PROGRESS.md, commit. Idempotent. The result carries signingNote when commits are or will be unsigned and says whether kukulu_pr_finalize will wait for signatures. With stream, also create (or resume) that stream's git worktree for a parallel wave, run parallel.setup in it, and return its cwd: do all of that stream's work inside cwd.", inputSchema: S({ stream: { type: "string", description: "a stream of the current parallel wave, when kukulu_next handed you one" } }), fn: runStart },
   { name: "kukulu_task_next", description: "Select the next task (first [~], else first [ ]), auto-skip tasks whose dependencies are blocked, mark it [~], and return its PLAN.md text plus dependency log entries. Returns { done: true } when none remain.", inputSchema: S({ stream: { type: "string", description: "restrict to this stream's tasks (parallel waves only)" } }), fn: taskNext },
@@ -4766,6 +5430,12 @@ const TOOLS = [
   },
   { name: "kukulu_flight_archive", description: "Archive a summarized flight so the repository can run its next flight: move PLAN, PROGRESS, HANDOFF, REVIEW, SUMMARY, kukulu.json, .kukulu/state.json and .kukulu/feedback.jsonl into docs/flights/<slug>/ and docs/attestation/ into docs/flights/<slug>/attestation/ (copying SPEC.md, which stays), write a fresh state.json, commit 'chore: archive flight <slug>' and push per policy. slug defaults to the 'flight' key in docs/kukulu.json. Refused unless the flight is summarized, no run is armed, and the tree is clean. All-or-nothing. Returns { slug, dir, moved, copied, commit, push }.", inputSchema: S({ slug: { type: "string", description: "lowercase letters, digits and - (at most 40 characters); defaults to docs/kukulu.json's flight" } }), fn: flightArchive },
   { name: "kukulu_pr_finalize", description: "End a flight. Checks that every commit since the merge base with baseBranch is signed (judged from the commits, not from state): if so, or if the policy does not expect signatures (policies.signing off, or auto with signing never configured; the result says so in signatures), marks the draft PR ready and, unless breaking is true, enables auto-merge (gh pr merge --auto, never an immediate merge), per policies.finalize and policies.mergeMethod. If any commit is unsigned and signatures are expected the PR stays a draft, state.awaitingSigning is recorded, the steps are appended to SUMMARY.md, and kukulu_next reports done until it is resolved. breaking is required on the first call unless CHANGELOG.md decides it. Returns { signed, unsigned, ready, merge, signatures, breaking, breakingSource, awaitingSigning, resigned, push, pr, next? }; signatures is required or not required: <why>; merge is enabled, skipped: breaking, skipped: policy, skipped: no pull request, skipped: awaiting signing or unavailable: <why>.", inputSchema: S({ breaking: { type: "boolean", description: "whether this flight is a breaking change, so its PR must not auto-merge; optional when CHANGELOG.md decides (its newest entry has or lacks a Breaking changes section; a disagreeing value is refused), required on the first call otherwise, remembered after" }, resign: { type: "boolean", description: "HUMAN-INITIATED ONLY: never pass this on your own. Re-sign every commit of the branch (git rebase -f --rebase-merges --gpg-sign), force-push with lease, then finalize. For an operator who has unlocked the signing agent after an awaiting-signing result" } }), fn: prFinalize },
+  {
+    name: "kukulu_release",
+    description: "Release the newest archived flight after a human has merged its pull request: tag the merge commit v<x.y.z> from CHANGELOG.md's newest numbered entry (signed when tag.gpgsign is true or the flight's commits were signed), push the tag, and create a GitHub release from that entry (a draft unless publish is true). Fast-forwards the checked-out base branch to origin first. Refuses before any write when no flight is archived, the PR is not MERGED, the CHANGELOG has no numbered entry at the merge commit, or the tag already exists (unless it is at the merge commit and has no release yet, when only the release is created). A repeated call creates only what is missing. For the flight controller, on the operator's request only. Returns { tag, sha, release, draft }.",
+    inputSchema: S({ publish: { type: "boolean", description: "create the release as published instead of a draft; default false" } }),
+    fn: release,
+  },
   {
     name: "kukulu_agents_sync",
     description: "Generate .claude/agents/kukulu-<role>.md from the merged routing config (plugin defaults < global file < profile < docs/kukulu.json roles). Writes only files whose content changed, excludes them from git, and returns the resolved per-role table. `restartRequired` is true only when this is the directory's first population and a changed role's model cannot be named directly by the Agent tool. Also ensures the MCP allow rule in .claude/settings.local.json (`permissions` in the result), without which a subagent's first kukulu_status call is denied under any permission mode.",

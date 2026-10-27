@@ -16,8 +16,14 @@ export class CleanroomError extends Error {
 }
 
 const TASK_ID = /^[PR]\d+-\d+$/;
-const POLICY_KEYS = ["version", "deny", "allow", "lockdown", "protected"];
-const DENY_KEYS = ["tools", "network", "paths", "pathPatterns", "words", "commandPatterns"];
+const POLICY_KEYS = ["version", "deny", "allow", "lockdown", "protected", "runners", "roles", "mode", "control", "enforcement", "sandbox"];
+const SANDBOX_KEYS = ["image", "mounts", "egress"];
+const PACKAGE_ECOSYSTEMS = ["cargo", "npm", "pypi"];
+const CONTROL_KEYS = ["priorArt"];
+const RUNNERS_KEYS = ["allow", "locality"];
+const ROLES_KEYS = ["distinct"];
+const RUNNER_NAME = /^[a-z0-9][a-z0-9-]{0,39}$/;
+const DENY_KEYS = ["tools", "network", "paths", "pathPatterns", "words", "commandPatterns", "packages"];
 const ALLOW_KEYS = ["paths", "urls"];
 const LOCKDOWN_KEYS = ["after"];
 const PATTERN_KEYS = ["id", "pattern", "flags", "shouldMatch", "shouldNotMatch"];
@@ -111,8 +117,85 @@ export function loadPolicy(text) {
     throw new CleanroomError(`policy lockdown.after must be a task id such as "P0-10" (got ${JSON.stringify(lockdown.after)})`);
   }
 
+  const runners = raw.runners === undefined ? {} : raw.runners;
+  if (!isObject(runners)) throw new CleanroomError("policy runners must be an object");
+  onlyKeys(runners, RUNNERS_KEYS, "runners");
+  if (runners.allow !== undefined && (!Array.isArray(runners.allow) || !runners.allow.length
+    || runners.allow.some((n) => typeof n !== "string" || !RUNNER_NAME.test(n)))) {
+    throw new CleanroomError("policy runners.allow must be a non-empty array of runner names (lowercase letters, digits and -)");
+  }
+  if (runners.locality !== undefined && runners.locality !== "local" && runners.locality !== "any") {
+    throw new CleanroomError(`policy runners.locality must be "local" or "any" (got ${JSON.stringify(runners.locality)})`);
+  }
+  const roles = raw.roles === undefined ? {} : raw.roles;
+  if (!isObject(roles)) throw new CleanroomError("policy roles must be an object");
+  onlyKeys(roles, ROLES_KEYS, "roles");
+  if (roles.distinct !== undefined && !["none", "model", "family"].includes(roles.distinct)) {
+    throw new CleanroomError(`policy roles.distinct must be "none", "model" or "family" (got ${JSON.stringify(roles.distinct)})`);
+  }
+
+  if (raw.mode !== undefined && raw.mode !== "clean-room" && raw.mode !== "control-positive") {
+    throw new CleanroomError(`policy mode must be "clean-room" or "control-positive" (got ${JSON.stringify(raw.mode)})`);
+  }
+  const mode = raw.mode ?? "clean-room";
+  const control = raw.control === undefined ? {} : raw.control;
+  if (!isObject(control)) throw new CleanroomError("policy control must be an object");
+  onlyKeys(control, CONTROL_KEYS, "control");
+  if (control.priorArt !== undefined && (!Array.isArray(control.priorArt) || !control.priorArt.length
+    || control.priorArt.some((e) => typeof e !== "string" || !e))) {
+    throw new CleanroomError("policy control.priorArt must be a non-empty array of non-empty strings");
+  }
+  if (mode === "control-positive" && control.priorArt === undefined) {
+    throw new CleanroomError('policy control.priorArt is required when mode is "control-positive": list the prior art the control flight is given');
+  }
+  if (mode === "clean-room" && control.priorArt !== undefined) {
+    throw new CleanroomError('policy control.priorArt is only legal when mode is "control-positive" (mode is "clean-room")');
+  }
+
+  const enforcement = raw.enforcement ?? "hook";
+  if (enforcement === "container+proxy+audit") throw new CleanroomError('policy enforcement "container+proxy+audit" is 0.9.0\'s level; this release cannot run it');
+  if (enforcement !== "hook" && enforcement !== "container+proxy") {
+    throw new CleanroomError(`policy enforcement must be "hook" or "container+proxy" (got ${JSON.stringify(raw.enforcement)})`);
+  }
+  const sandbox = raw.sandbox === undefined ? {} : raw.sandbox;
+  if (!isObject(sandbox)) throw new CleanroomError("policy sandbox must be an object");
+  onlyKeys(sandbox, SANDBOX_KEYS, "sandbox");
+  if (enforcement === "container+proxy" && sandbox.image === undefined) {
+    throw new CleanroomError('policy sandbox.image is required when enforcement is "container+proxy": the image as <name>@sha256:<digest>');
+  }
+  if (enforcement === "hook" && sandbox.image !== undefined) throw new CleanroomError('policy sandbox.image is only legal when enforcement is "container+proxy"');
+  if (sandbox.image !== undefined && (typeof sandbox.image !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._/-]*@sha256:[0-9a-f]{64}$/.test(sandbox.image))) {
+    throw new CleanroomError(`policy sandbox.image must be <name>@sha256:<64 hex>; a tag alone (got ${JSON.stringify(sandbox.image)}) does not pin the image`);
+  }
+  if (sandbox.mounts !== undefined && !Array.isArray(sandbox.mounts)) throw new CleanroomError("policy sandbox.mounts must be an array of { path, mode }");
+  const mounts = (sandbox.mounts ?? []).map((m, i) => {
+    if (!isObject(m)) throw new CleanroomError(`policy sandbox.mounts[${i}] must be an object { path, mode }`);
+    onlyKeys(m, ["path", "mode"], `sandbox.mounts[${i}]`);
+    if (typeof m.path !== "string" || !m.path) throw new CleanroomError(`policy sandbox.mounts[${i}].path must be a non-empty string`);
+    if (m.mode !== "ro") throw new CleanroomError(`policy sandbox.mounts[${i}].mode must be "ro"; the project is the only read-write mount`);
+    return { path: m.path, mode: "ro" };
+  });
+  if (sandbox.egress !== undefined && !Array.isArray(sandbox.egress)) throw new CleanroomError("policy sandbox.egress must be an array of host:port strings");
+  const egress = (sandbox.egress ?? []).map((e, i) => {
+    if (typeof e !== "string" || !/^[A-Za-z0-9.-]+:\d{1,5}$/.test(e)) throw new CleanroomError(`policy sandbox.egress[${i}] must be host:port`);
+    return e;
+  });
+  const packages = {};
+  if (deny.packages !== undefined) {
+    if (!isObject(deny.packages)) throw new CleanroomError("policy deny.packages must be an object keyed by ecosystem (cargo, npm, pypi)");
+    onlyKeys(deny.packages, PACKAGE_ECOSYSTEMS, "deny.packages");
+    for (const [eco, names] of Object.entries(deny.packages)) packages[eco] = stringArray(names, `deny.packages.${eco}`);
+    for (const [eco, names] of Object.entries(packages)) {
+      if (!names.length) throw new CleanroomError(`policy deny.packages.${eco} must be a non-empty array of non-empty strings`);
+    }
+  }
+
   return {
     version: 1,
+    mode,
+    enforcement,
+    sandbox: { image: sandbox.image ?? null, mounts, egress },
+    control: { priorArt: control.priorArt ? control.priorArt.slice() : [] },
     deny: {
       tools: stringArray(deny.tools, "deny.tools"),
       network: deny.network ?? true,
@@ -120,6 +203,7 @@ export function loadPolicy(text) {
       pathPatterns: patternList(deny.pathPatterns, "deny.pathPatterns"),
       words: stringArray(deny.words, "deny.words"),
       commandPatterns: patternList(deny.commandPatterns, "deny.commandPatterns"),
+      packages,
     },
     allow: {
       paths: stringArray(allow.paths, "allow.paths"),
@@ -127,7 +211,38 @@ export function loadPolicy(text) {
     },
     lockdown: { after: lockdown.after ?? null },
     protected: stringArray(raw.protected, "protected"),
+    runners: { allow: runners.allow ? runners.allow.slice() : null, locality: runners.locality ?? "any" },
+    roles: { distinct: roles.distinct ?? "none" },
   };
+}
+
+/** A model string lowercased with every leading `<provider>/` or `<provider>,` segment removed. */
+export function normalizeModel(s) {
+  let out = String(s).toLowerCase();
+  while (/^[^/,]+[/,]/.test(out)) out = out.replace(/^[^/,]+[/,]/, "");
+  return out;
+}
+
+// ⚠️ ASSUMPTION: a table of family patterns, measured against the routing
+// strings real flights use. Each pattern runs on the normalized string; the
+// first match names the family. Written only here.
+export const MODEL_FAMILIES = [
+  { family: "claude", pattern: /^(?:fable|opus|sonnet|haiku|inherit)$|^claude-/ },
+  { family: "qwen", pattern: /qwen/ },
+  { family: "nemotron", pattern: /nemotron/ },
+  { family: "mistral", pattern: /mistral|devstral|codestral|magistral|mixtral/ },
+  { family: "deepseek", pattern: /deepseek/ },
+  { family: "glm", pattern: /^glm|[-_/]glm/ },
+  { family: "llama", pattern: /llama/ },
+  { family: "gemma", pattern: /gemma/ },
+  { family: "gpt", pattern: /^gpt|[-_/]gpt|^o[1-9]\b/ },
+];
+
+/** The family a model string belongs to, or `unknown:<normalized string>`. */
+export function familyOf(model) {
+  const n = normalizeModel(model);
+  for (const { family, pattern } of MODEL_FAMILIES) if (pattern.test(n)) return family;
+  return `unknown:${n}`;
 }
 
 /** SHA-256 of a file's bytes, as lowercase hex; a string is hashed as UTF-8. */
@@ -138,13 +253,16 @@ export function policyHash(bytes) {
 // ---------------------------------------------------------------- the hash chain
 
 export const ENTRY_KEYS = ["seq", "prev", "at", "kind", "stage", "task", "role", "model", "session", "tool", "target", "decision", "reason"];
-export const KINDS = ["genesis", "allowed", "denied", "human", "gate", "checkpoint", "score", "attest", "resume"];
+export const KINDS = ["genesis", "allowed", "denied", "human", "gate", "checkpoint", "score", "attest", "resume", "egress", "stage", "usage"];
+
+// ⚠️ ASSUMPTION: how long a hook waits for the log socket before it fails closed.
+export const LOG_SOCKET_TIMEOUT_MS = 2000;
 export const ZERO_HASH = "0".repeat(64);
 
 // ⚠️ ASSUMPTION: a logged target longer than this is cut; cleanflate's log used the same bound.
 export const TARGET_MAX = 4000;
 
-const LOCK_WAIT_MS = 2000;
+const LOCK_WAIT_MS = 2 * 1000;
 const LOCK_RETRY_MS = 10;
 
 /** A string cut to TARGET_MAX characters; anything else passes through. */
@@ -718,6 +836,11 @@ const underPrefix = (p, prefix) => {
 /** A policy path entry made absolute: `~` is home, a relative entry is repo-relative. */
 const resolvePrefix = (entry, root, home) => canonicalPaths(entry, { cwd: root, home })[0];
 
+/** The control flight's prior art, resolved like deny.paths entries; empty in clean-room mode (SPEC B-01). */
+export function controlPaths(policy, env) {
+  return (policy.control?.priorArt ?? []).map((e) => resolvePrefix(e, env.root, env.home));
+}
+
 /**
  * The paths no write tool or write-family command may touch (SPEC D-10): the
  * rules, the evidence, the configuration that selects them, the hooks that
@@ -761,13 +884,21 @@ export function evaluate(policy, hookInput, env) {
   const writeForms = (p, base = shellCwd) => canonicalPaths(p, { cwd: base, home });
   const lockdown = lockdownActive(policy, env.progressText);
   const prefixes = (list) => list.map((e) => resolvePrefix(e, root, home));
+  // A denying prefix in its literal and its real form: a read path is checked in both of its own forms, and when the root is
+  // reached through a symlink (macOS /var, /tmp) a link to a denied file has only its real form under the denied directory.
+  const bothForms = (list) => [...new Set(list.flatMap((p) => canonicalPaths(p, { cwd: root, home })))];
   // The signing key is read-denied like a deny.paths entry; its public half and every other protected file stay readable.
-  const denyPaths = [...prefixes(policy.deny.paths), ...(env.keyPath ? [env.keyPath] : [])];
+  const denyPaths = bothForms([...prefixes(policy.deny.paths), ...(env.keyPath ? [env.keyPath] : [])]);
   const allowPaths = prefixes(policy.allow.paths);
-  const protectedList = env.protected ?? protectedPaths(policy, env);
+  const protectedList = bothForms(env.protected ?? protectedPaths(policy, env));
   const forms = (p) => canonicalPaths(p, { cwd: shellCwd, home });
   const inRepo = (p) => forms(p).some((f) => underPrefix(f, root));
   const exempt = (p) => forms(p).some((f) => allowPaths.some((a) => underPrefix(f, a)));
+  // Prior art a control flight is given is readable: it is exempt from deny.paths, pathPatterns and deny.words, for reads only (SPEC B-01).
+  // Each entry in both its literal and real form: isControl asks that every form of the read path lie under one, and on macOS a
+  // root under /var or /tmp resolves to /private/..., so a literal-only list would deny every prior-art read.
+  const controlList = (policy.control?.priorArt ?? []).flatMap((e) => canonicalPaths(e, { cwd: root, home }));
+  const isControl = (p) => controlList.length > 0 && forms(p).every((f) => controlList.some((c) => underPrefix(f, c)));
   const wordIn = (text) => {
     const lower = String(text).toLowerCase();
     return policy.deny.words.some((w) => lower.includes(w.toLowerCase()));
@@ -819,6 +950,7 @@ export function evaluate(policy, hookInput, env) {
       if (v) return denied(`protected path: ${v}`);
     }
     // 5. deny.paths, pathPatterns and forbidden words
+    if (!WRITE_TOOLS.has(tool) && typeof base === "string" && base && isControl(base)) return NO_ISSUES;
     if (typeof base === "string" && base) {
       const v = pathVerdict(base);
       if (v) return v;
@@ -886,6 +1018,21 @@ export function evaluate(policy, hookInput, env) {
         const v = bashVerdict(shellString, depth + 1);
         if (v.decision === "denied") return v;
       }
+      // 6.0 adding a package the policy denies: judged before the network rule of the same segment, so the reason names the package (SPEC C-07).
+      {
+        const adds = { cargo: ["cargo", ["add"]], npm: ["npm", ["install", "i", "add"]], pip: ["pypi", ["install"]], uv: ["pypi", ["add"]] }[word];
+        if (adds) {
+          const [ecosystem, subcommands] = adds;
+          const at = rest.findIndex((t) => !t.startsWith("-") && !t.startsWith("+"));
+          if (at >= 0 && subcommands.includes(rest[at])) {
+            const blocked = new Set((policy.deny.packages?.[ecosystem] ?? []).map((n) => normalizePackageName(ecosystem, n)));
+            for (const spec of rest.slice(at + 1).filter((t) => !t.startsWith("-"))) {
+              const name = /^@?[^@=<>~![]+/.exec(spec)?.[0];
+              if (name && blocked.has(normalizePackageName(ecosystem, name))) return denied(`denied package: ${name} is in policy deny.packages.${ecosystem}`);
+            }
+          }
+        }
+      }
       // The segment is judged with every rule below, so a `cd ~/.cargo/registry` operand is a token under 6b; the directory it names takes effect afterwards.
       // 6a. network commands
       if (policy.deny.network) {
@@ -900,7 +1047,8 @@ export function evaluate(policy, hookInput, env) {
       // An rsync operand that names a host (`host:path`, `user@host:path`, `rsync://...`) reaches the network.
       if (policy.deny.network && word === "rsync" && rsyncParts(rest).operands.some((t) => /^rsync:\/\//i.test(t) || /^[^/]*:/.test(t))) return denied("network command rsync is denied");
       // 6b. any token under deny.paths or matching a pathPattern
-      const pathTokens = rest.filter(isPathLike);
+      const controlRead = (t) => READ_FAMILY.has(word) && isControl(tokenPath(t));
+      const pathTokens = rest.filter((t) => isPathLike(t) && !controlRead(t));
       for (const t of pathTokens) {
         const v = pathVerdict(tokenPath(t));
         if (v) return v;
@@ -913,7 +1061,7 @@ export function evaluate(policy, hookInput, env) {
         // A bare operand (`cat zlib.txt`) is the same file as `./zlib.txt`, so it gets the same decision.
         const operands = rest.filter((t, i) => !patterns.has(i) && (isPathLike(t) || !t.startsWith("-")));
         for (const t of operands) {
-          if (wordIn(t) && !exempt(tokenPath(t))) return denied(`forbidden word in path argument: ${t}`);
+          if (wordIn(t) && !exempt(tokenPath(t)) && !controlRead(t)) return denied(`forbidden word in path argument: ${t}`);
         }
         const outside = realPaths.length ? realPaths.some((t) => !inRepo(tokenPath(t))) : !inRepo(".");
         if (outside) {
@@ -930,7 +1078,7 @@ export function evaluate(policy, hookInput, env) {
         const textOperands = patternOperands(word, rest);
         const bare = word === "cd" || word === "pushd" || READ_FAMILY.has(word);
         for (let i = 0; bare && i < rest.length; i++) {
-          if (isPathLike(rest[i]) || textOperands.has(i) || rest[i].startsWith("-")) continue;
+          if (isPathLike(rest[i]) || textOperands.has(i) || rest[i].startsWith("-") || controlRead(rest[i])) continue;
           const v = pathVerdict(rest[i]);
           if (v) return v;
         }
@@ -941,12 +1089,13 @@ export function evaluate(policy, hookInput, env) {
       const bareWord = word === "cd" || word === "pushd" || READ_FAMILY.has(word);
       for (let i = 0; i < rest.length; i++) {
         const reaching = isPathLike(rest[i]) || (bareWord && !rest[i].startsWith("-"));
-        if (reaching && !textual.has(i) && (/[*?[{]/.test(tokenPath(rest[i])) || (bareWord && /[*?[{]/.test(shellCwd)))) {
+        if (reaching && !textual.has(i) && !controlRead(rest[i]) && (/[*?[{]/.test(tokenPath(rest[i])) || (bareWord && /[*?[{]/.test(shellCwd)))) {
           const v = reachVerdict(rest[i], shellCwd, false);
           if (v) return v;
         }
       }
       for (const t of recursiveOperands(word, rest) ?? []) {
+        if (controlRead(t)) continue;
         const v = reachVerdict(t, shellCwd, true);
         if (v) return v;
       }
@@ -965,9 +1114,9 @@ export function evaluate(policy, hookInput, env) {
             for (const src of operands.slice(0, -1)) {
               const forms = writeForms(tokenPath(src));
               const q = protectedList.find((p) => forms.some((x) => underPrefix(p, x)));
-              if (q) return denied(`protected path: ${q.replace(/\/$/, "")} (rsync --remove-source-files removes it)`);
+              if (q) return denied(`protected path: ${q.replace(/\/$/, "")} (rsync ${removesSources} removes it)`);
               const f = forms.find((x) => protectedList.some((p) => underPrefix(x, p)));
-              if (f) return denied(`protected path: ${f} (rsync --remove-source-files removes it)`);
+              if (f) return denied(`protected path: ${f} (rsync ${removesSources} removes it)`);
             }
           }
           const landed = operands.slice(0, -1).map((src) => {
@@ -999,6 +1148,22 @@ export function evaluate(policy, hookInput, env) {
           if (hit) return denied(`protected path: ${hit} (${word} extracts into ${dirs.length ? dirs[dirs.length - 1] : "."}; the archive's contents cannot be known)`);
         }
         if (writesArchive && file !== null && file !== "-") {
+          const forms = writeForms(tokenPath(file));
+          const f = forms.find((x) => protectedList.some((q) => underPrefix(x, q)));
+          if (f) return denied(`protected path: ${f}`);
+          const w = wildcardNames(forms, protectedList);
+          if (w) return denied(`protected path: ${w} (can be named by the wildcard ${file})`);
+        }
+      }
+      // pax reads and writes archives like tar: -r alone extracts into the current directory, -w alone writes the -f archive (SPEC C-08).
+      if (word === "pax") {
+        const { extract, writes, file } = paxParts(rest);
+        if (extract) {
+          const forms = [shellCwd, ...writeForms(shellCwd)];
+          const hit = protectedList.find((q) => forms.some((x) => underPrefix(q, x) || underPrefix(x, q)));
+          if (hit) return denied(`protected path: ${hit} (pax extracts into ${shellCwd}; the archive's contents cannot be known)`);
+        }
+        if (writes && file !== null && file !== "-") {
           const forms = writeForms(tokenPath(file));
           const f = forms.find((x) => protectedList.some((q) => underPrefix(x, q)));
           if (f) return denied(`protected path: ${f}`);
@@ -1310,7 +1475,7 @@ function rsyncParts(rest) {
   const operands = [];
   let recursive = false;
   let deletes = false;
-  let removesSources = false;
+  let removesSources = null;
   for (let i = 0; i < rest.length; i++) {
     const t = rest[i];
     if (t === "--") {
@@ -1325,7 +1490,7 @@ function rsyncParts(rest) {
     if (t.startsWith("--")) {
       const given = t.split("=")[0];
       if (RSYNC_DELETES.has(given)) deletes = true;
-      if (given === "--remove-source-files") removesSources = true;
+      if (given === "--remove-source-files" || given === "--remove-sent-files") removesSources = given;
       const hits = ["--recursive", "--archive"].filter((n) => n.startsWith(given));
       if (given.length > 2 && hits.length === 1) recursive = true;
     } else {
@@ -1336,6 +1501,31 @@ function rsyncParts(rest) {
     if (opt && opt.value === null) i++;
   }
   return { operands, recursive, deletes, removesSources };
+}
+
+// pax's short options that take a value; its options come before its operands (the file patterns).
+const PAX_VALUED = new Set("fsbxopTUG");
+
+/**
+ * What a pax command line does to the file system: `-r` without `-w` extracts, `-w` without `-r` writes
+ * the `-f` archive, both together (copy mode) is not modelled, neither lists. `file` is the -f value.
+ */
+function paxParts(rest) {
+  const modes = new Set();
+  let file = null;
+  for (let i = 0; i < rest.length; i++) {
+    const t = rest[i];
+    if (t === "--" || !t.startsWith("-") || t === "-") break;
+    for (let k = 1; k < t.length; k++) {
+      modes.add(t[k]);
+      if (PAX_VALUED.has(t[k])) {
+        const value = k + 1 < t.length ? t.slice(k + 1) : (rest[++i] ?? null);
+        if (t[k] === "f") file = value;
+        break;
+      }
+    }
+  }
+  return { extract: modes.has("r") && !modes.has("w"), writes: modes.has("w") && !modes.has("r"), file };
 }
 
 // BSD and GNU tar under their other names parse the same options.
@@ -1739,17 +1929,33 @@ function redirectTargets(segment) {
 
 // ---------------------------------------------------------------- coverage gaps
 
-/** What the guard cannot see, stated in every bundle's manifest as coverage.knownLimits (0.7.1 SPEC A-01). */
+/** The enforcement levels in rank order: a bundle built under a lower one is weaker (SPEC C-06). */
+export const ENFORCEMENT_LEVELS = ["hook", "container+proxy", "container+proxy+audit"];
+
+/**
+ * The places the log does not vouch for the work, each with the enforcement levels it still applies to (SPEC C-06). The list
+ * shrinks at the higher level. scripts/verify-attestation.mjs duplicates this table and knownLimitsFor on purpose.
+ */
 export const KNOWN_LIMITS = [
-  "Interpreter escapes (python3 -c, node -e) are not parsed, so a path or word inside the quoted program is not seen.",
-  "Shell expansion beyond ~ and $HOME is not evaluated: other variables, and strings assembled at run time (a base64 decode, a variable holding a command), so a path or command built that way is not seen.",
-  "Option and wrapper spellings the tables do not model are not recognized: the guard judges a command by its text, its wrapper and option parsing follows GNU coreutils, findutils and sudo (and BSD/macOS forms where their manual pages differ), and no table can be proved complete across tool versions.",
-  "Commands that run a command from their arguments (find -exec, watch, parallel, busybox) and programs outside the fixed network and write lists (unlink, shred, perl -i, cargo fetch) are not recognized.",
-  "pathPatterns regexes are matched on the paths a call names, not on the files a recursive read or a glob reaches below a directory.",
-  "Subprocesses of a make target are not individual tool calls, so what they read is not logged.",
-  "MCP server internals are not tool calls, so what a server reads on its own is not logged.",
-  "Hooks load at session start, so a session that writes the policy is not covered until the next one; the gate's liveness check catches a session with no hooks at all.",
+  { id: "interpreter", text: "Interpreter escapes (python3 -c, node -e) are not parsed, so a path or word inside the quoted program is not seen.", levels: ["hook"] },
+  { id: "expansion", text: "Shell expansion beyond ~ and $HOME is not evaluated: other variables, and strings assembled at run time (a base64 decode, a variable holding a command), so a path or command built that way is not seen.", levels: ["hook"] },
+  { id: "spellings", text: "Option and wrapper spellings the tables do not model are not recognized: the guard judges a command by its text, its wrapper and option parsing follows GNU coreutils, findutils and sudo (and BSD/macOS forms where their manual pages differ), and no table can be proved complete across tool versions.", levels: ["hook"] },
+  { id: "indirect", text: "Commands that run a command from their arguments (find -exec, watch, parallel, busybox) and programs outside the fixed network and write lists (unlink, shred, perl -i, cargo fetch) are not recognized.", levels: ["hook"] },
+  { id: "patterns", text: "pathPatterns regexes are matched on the paths a call names, not on the files a recursive read or a glob reaches below a directory.", levels: ["hook"] },
+  { id: "make", text: "Subprocesses of a make target are not individual tool calls, so what they read is not logged.", levels: ["hook"] },
+  { id: "mcp", text: "MCP server internals are not tool calls, so what a server reads on its own is not logged.", levels: ["hook"] },
+  { id: "session", text: "Hooks load at session start, so a session that writes the policy is not covered until the next one; the gate's liveness check catches a session with no hooks at all.", levels: ["hook", "container+proxy"] },
+  { id: "training", text: "What a model learned in training is outside every boundary; the similarity score, not the log, measures it.", levels: ["hook", "container+proxy"] },
+  { id: "packages", text: "Packages named in a lockfile are outside the claim; deny.packages and the gate keep named prior-art packages out of the lockfiles and the cache, and the manifest lists what the lockfiles name.", levels: ["hook", "container+proxy"] },
+  { id: "config-writable", text: "Inside the boundary docs/kukulu.json stays writable, because the planner writes it; only the guard protects it after the plan exists.", levels: ["container+proxy"] },
+  { id: "tls", text: "The proxy sees host and port, not paths or content inside TLS; whatever an allowed host serves is reachable.", levels: ["container+proxy"] },
 ];
+
+/** The known-limit texts that apply at an enforcement level, in order. */
+export function knownLimitsFor(level) {
+  if (!ENFORCEMENT_LEVELS.includes(level)) throw new CleanroomError(`enforcement level must be one of ${ENFORCEMENT_LEVELS.join(", ")} (got ${JSON.stringify(level)})`);
+  return KNOWN_LIMITS.filter((l) => l.levels.includes(level)).map((l) => l.text);
+}
 
 /**
  * The places the log does not vouch for the work, from the entries and the
@@ -1757,7 +1963,7 @@ export const KNOWN_LIMITS = [
  * kinds, shapes and order are the ones scripts/verify-attestation.mjs recomputes,
  * which has its own copy of these definitions so a bundle can be checked alone.
  */
-export function coverageGaps(entries, commitLines, { idleGapHours }) {
+export function coverageGaps(entries, commitLines, { idleGapHours, level = "hook" }) {
   if (typeof idleGapHours !== "number" || !(idleGapHours > 0)) throw new CleanroomError("coverageGaps needs idleGapHours, a positive number of hours");
   const commits = commitLines.filter(Boolean).map((line) => {
     const [sha, signature, subject, stage] = line.split("\x1f");
@@ -1776,8 +1982,116 @@ export function coverageGaps(entries, commitLines, { idleGapHours }) {
     const hours = (Date.parse(b.at) - Date.parse(a.at)) / 3600000;
     if (hours > idleGapHours) gaps.push({ kind: "idle", from: a.seq, to: b.seq, hours: Math.round(hours * 100) / 100 });
   }
-  for (const c of commits) if (c.signature === "N" || c.signature === "B") gaps.push({ kind: "unsigned-commit", sha: c.sha });
+  // Under container+proxy a commit made inside the boundary is unsigned on purpose and its head is vouched for by a
+  // checkpoint; only an unsigned commit with no stage trailer is still a gap.
+  for (const c of commits) {
+    if ((c.signature === "N" || c.signature === "B") && !(level === "container+proxy" && c.stage !== "")) gaps.push({ kind: "unsigned-commit", sha: c.sha });
+  }
   return gaps;
+}
+
+// ---------------------------------------------------------------- lockfiles and denied packages (SPEC C-07)
+
+/** The lockfile basenames the gate and the manifest read, with their ecosystem; `requirements*.txt` is pypi too. */
+export const LOCKFILES = [["Cargo.lock", "cargo"], ["package-lock.json", "npm"], ["npm-shrinkwrap.json", "npm"], ["uv.lock", "pypi"], ["poetry.lock", "pypi"]];
+
+/** The ecosystem a basename is the lockfile of, or null. */
+export function lockfileEcosystem(basename) {
+  const named = LOCKFILES.find(([name]) => name === basename);
+  if (named) return named[1];
+  return /^requirements.*\.txt$/.test(basename) ? "pypi" : null;
+}
+
+/** `[{ name, version }]` of a lockfile's text; `version` is null when unpinned. A file that does not parse is a CleanroomError. */
+export function lockfilePackages(basename, text) {
+  const ecosystem = lockfileEcosystem(basename);
+  if (ecosystem === null) throw new CleanroomError(`${basename} is not a lockfile this release reads`);
+  if (basename === "package-lock.json" || basename === "npm-shrinkwrap.json") {
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch (e) {
+      throw new CleanroomError(`${basename} is not valid JSON: ${e.message}`);
+    }
+    const out = [];
+    for (const [key, entry] of Object.entries(data?.packages ?? {})) {
+      const at = key.lastIndexOf("node_modules/");
+      if (at < 0) continue;
+      out.push({ name: key.slice(at + "node_modules/".length), version: typeof entry?.version === "string" ? entry.version : null });
+    }
+    return out;
+  }
+  if (ecosystem === "pypi" && basename.startsWith("requirements")) {
+    const out = [];
+    for (const raw of text.split("\n")) {
+      const line = raw.replace(/(^|\s)#.*$/, "").trim();
+      if (!line || line.startsWith("-")) continue;
+      const name = /^[A-Za-z0-9._-]+/.exec(line)?.[0];
+      if (!name) continue;
+      const pinned = /^(?:\[[^\]]*\])?\s*==\s*([^\s;,]+)/.exec(line.slice(name.length));
+      out.push({ name, version: pinned ? pinned[1] : null });
+    }
+    return out;
+  }
+  // Cargo.lock, uv.lock, poetry.lock: [[package]] blocks of `key = "value"` lines. A later table header ends the block's own keys.
+  const out = [];
+  let current = null;
+  let own = false;
+  for (const raw of text.split("\n")) {
+    const line = raw.trimEnd();
+    if (line === "[[package]]") {
+      current = { name: null, version: null };
+      out.push(current);
+      own = true;
+      continue;
+    }
+    if (/^\[/.test(line)) {
+      own = false;
+      continue;
+    }
+    if (!own || !current) continue;
+    const kv = /^(name|version)\s*=\s*"([^"]*)"\s*$/.exec(line);
+    if (kv) current[kv[1]] = kv[2];
+  }
+  return out.filter((p) => p.name !== null);
+}
+
+/** A package name as its ecosystem compares it: cargo folds case and `_` to `-`, PyPI follows PEP 503, npm is as written. */
+export function normalizePackageName(ecosystem, name) {
+  if (ecosystem === "cargo") return String(name).toLowerCase().replaceAll("_", "-");
+  if (ecosystem === "pypi") return String(name).toLowerCase().replace(/[-_.]+/g, "-");
+  return String(name);
+}
+
+/** The first package the policy's deny.packages names for this ecosystem, or null. */
+export function deniedPackage(policy, ecosystem, packages) {
+  const denied = new Set((policy.deny?.packages?.[ecosystem] ?? []).map((n) => normalizePackageName(ecosystem, n)));
+  return packages.find((p) => denied.has(normalizePackageName(ecosystem, p.name))) ?? null;
+}
+
+/**
+ * Per role, the models the endpoint reported and the token sums of the `usage` entries of that role's agents
+ * (SPEC D-02): `{ reported: [sorted model names], usage: { requests, input, output, cacheRead, cacheWrite, cost } }`.
+ * `cost` is null when any counted entry's is; an entry that holds an `error` is skipped.
+ * scripts/verify-attestation.mjs duplicates this on purpose.
+ */
+export function rolesUsage(entries) {
+  const out = {};
+  for (const role of ["planner", "implementer", "reviewer", "summarizer"]) {
+    const agent = new RegExp(`^kukulu[-:]${role}$`);
+    const reported = new Set();
+    const usage = { requests: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 };
+    for (const e of entries) {
+      if (e.kind !== "usage" || !agent.test(e.role ?? "") || !e.data || e.data.error) continue;
+      for (const [model, m] of Object.entries(e.data.models ?? {})) {
+        reported.add(model);
+        for (const key of ["requests", "input", "output", "cacheRead", "cacheWrite"]) usage[key] += m[key] ?? 0;
+      }
+      usage.cost = usage.cost === null || typeof e.data.cost !== "number" ? null : Math.round((usage.cost + e.data.cost) * 1e6) / 1e6;
+    }
+    out[role] = { reported: [...reported].sort(), usage };
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------- what an attestation counts

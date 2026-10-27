@@ -76,6 +76,22 @@ A project can still override any role for itself, in `docs/kukulu.json`:
 
 Only the keys you name change; everything else keeps coming from the profile or the defaults. Run `kukulu_config_show` in any Kūkulu-enabled session to see the resolved table and where each value came from.
 
+## Runners
+
+A runner is a place a model is served from. Runners live in the global file under `runners`, because endpoints are facts about one person's machines. The template shows two:
+
+| Key | Type | Meaning |
+|---|---|---|
+| `runners.<name>` | object | `<name>` is a slug (`/^[a-z0-9][a-z0-9-]{0,39}$/`); `anthropic` is reserved and refused |
+| `.endpoint` | `http(s)://host[:port]` | Where the runner serves. A path, query or credentials in it are refused |
+| `.locality` | `"local"` or `"remote"` | Whether the endpoint is the operator's own hardware |
+| `.match` | non-empty array of strings | Prefixes of a role's model string. Two runners sharing a prefix are refused |
+| `.identities` | object | Optional. Exact model string to `{ weights, image? }`, each `sha256:<64 hex>` |
+
+Resolution: a role's model is served by the built-in `anthropic` runner (endpoint `https://api.anthropic.com`, locality `remote`) when it is an Anthropic alias or a `claude-*` id. Otherwise the configured runner whose `match` entry is the longest prefix of the model string wins. To pin a model's identity, run `node scripts/model-identity.mjs <weights dir or files> [--image sha256:<digest>]` on the inference host, where the weights are, and paste its `weights:` line (and the image digest) into that runner's `identities` entry under the exact model string. The controller usually cannot read the weights, and hashing tens of gigabytes at every genesis would stall the server, so the digest is measured once, there. The script sorts the files by relative path, so the argument order does not matter, and it writes nothing.
+
+A model no runner matches resolves to runner `null`, endpoint `null` and locality `unknown`; `kukulu_config_show` and the routing table show runner `–` for it. A policy that requires a local runner fails closed on locality `unknown`.
+
 ## Routing through claude-code-router (v3)
 
 The model string Kūkulu writes reaches Claude Code unchanged, and Claude Code sends it to whatever `ANTHROPIC_BASE_URL` the session is running under. A `provider/model` string therefore only means something when the session is launched through a router that understands that syntax; plain Claude Code cannot do anything with `Ollama/qwen3.6:35b-a3b`. [claude-code-router](https://github.com/musistudio/claude-code-router) (CCR) is one such router. This section covers its current release line (v3.x, latest v3.1.1 as of this writing). All facts below are cited to CCR's own docs at [ccrdesk.top](https://ccrdesk.top/); read them yourself before relying on any of this in an unattended flight.
@@ -123,6 +139,8 @@ CCR also supports routing a subagent's request independently of the main session
 
 Ollama's Anthropic-compatible endpoint (`/v1/messages`) does not support prompt caching: Ollama's own docs list "prompt caching/`cache_control`" under "not supported" ([source](https://docs.ollama.com/api/anthropic-compatibility)). Routing the `implementer` role to a local Ollama model therefore means every turn re-sends the full prompt, so keep the model's context window and your task sizes in mind. OpenRouter's Anthropic-compatible endpoint does support `cache_control` breakpoints for several backing providers ([source](https://openrouter.ai/docs/features/prompt-caching)).
 
+Prefix caching is off in some vLLM recipes, so a long flight against a vLLM runner can re-read its whole prompt every turn unless the recipe turns it on. Either way, prefill dominates long flights on a local runner, so keep task sizes small and the context window no larger than the work needs. The context cap belongs to the runner: set it there (vLLM's `--max-model-len`, Ollama's `num_ctx`); Kūkulu cannot set it from the client.
+
 `effort` is dropped for any model that is not a known Anthropic alias or a `claude-*` id (see "How routing works" above).
 
 ## Starting points
@@ -136,6 +154,8 @@ As of this writing, for a 48 GB Apple Silicon machine running Ollama locally:
 | `planner` | `opus` (the default) | The plan is the whole product; everything downstream inherits its mistakes |
 
 Set the context cap in Ollama itself (`num_ctx` on the model, or a Modelfile); the client side of the connection does not control it.
+
+For a clean-room flight that must stay on your own hardware, name the machines as [runners](#runners) and route the roles to them. A common split is to plan and review on a laptop-class model and implement on a larger one served from a dedicated host (profile B in `docs/sandbox.md`'s worked flight); `roles.distinct` in the policy then keeps the implementer and the reviewer from being the same model or family.
 
 ## Running a stage by hand
 

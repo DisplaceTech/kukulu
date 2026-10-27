@@ -1,19 +1,63 @@
 {
   "roles": {
-    "planner": { "model": "opus", "effort": "high" },
-    "implementer": { "model": "sonnet", "effort": "medium" },
-    "reviewer": { "model": "opus", "effort": "high" },
-    "summarizer": { "model": "opus", "effort": "medium" }
+    "planner": {
+      "model": "opus",
+      "effort": "high"
+    },
+    "implementer": {
+      "model": "sonnet",
+      "effort": "medium"
+    },
+    "reviewer": {
+      "model": "opus",
+      "effort": "high"
+    },
+    "summarizer": {
+      "model": "opus",
+      "effort": "medium"
+    }
   },
   "profiles": {
     "local": {
-      "implementer": { "model": "Ollama/qwen3.6:35b-a3b" },
-      "reviewer": { "model": "OpenRouter/deepseek/deepseek-v4-pro" }
+      "implementer": {
+        "model": "Ollama/qwen3.6:35b-a3b"
+      },
+      "reviewer": {
+        "model": "OpenRouter/deepseek/deepseek-v4-pro"
+      }
     },
     "cheap": {
-      "implementer": { "model": "haiku", "effort": "medium" },
-      "summarizer": { "model": "haiku", "effort": "low" }
+      "implementer": {
+        "model": "haiku",
+        "effort": "medium"
+      },
+      "summarizer": {
+        "model": "haiku",
+        "effort": "low"
+      }
     }
   },
-  "permissionMode": "acceptEdits"
+  "permissionMode": "acceptEdits",
+  "runners": {
+    "spark": {
+      "endpoint": "http://spark.tail1234.ts.net:8000",
+      "locality": "local",
+      "match": [
+        "spark/"
+      ],
+      "identities": {
+        "spark/nemotron-3.5-super-nvfp4": {
+          "weights": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+          "image": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      }
+    },
+    "mac": {
+      "endpoint": "http://mac.tail1234.ts.net:11434",
+      "locality": "local",
+      "match": [
+        "mac/"
+      ]
+    }
+  }
 }

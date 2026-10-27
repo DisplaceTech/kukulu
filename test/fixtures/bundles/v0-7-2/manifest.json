@@ -1,0 +1,166 @@
+{
+  "version": 1,
+  "flight": "bundle-test",
+  "plugin": {
+    "version": "0.7.0",
+    "guardHash": "f499a625f596d9cb2ffb25e4d5579a26a92ac20c969bb57f70892813bc6c94b6",
+    "loggerHash": "dc07ac416ecf35c34cab7645dd1f937d47a02531fac239f0e1f118f694f4e56e",
+    "hooksHash": "12d15dc5f882892d25b3a80eb9280490fa9a9987da9dcdf31ecff6eaccec4f59",
+    "cleanroomHash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "verifierHash": "b60610b62d46eb608c26055edb7722ca9170de92a7dc17d6db31555e703b2ad5"
+  },
+  "repo": {
+    "baseBranch": "main",
+    "base": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "head": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "branch": "build/test"
+  },
+  "mode": "clean-room",
+  "genesis": {
+    "seq": 1,
+    "prev": "0000000000000000000000000000000000000000000000000000000000000000",
+    "at": "2026-10-20T10:02:00.000Z",
+    "kind": "genesis",
+    "stage": "controller",
+    "task": null,
+    "role": "session",
+    "model": "claude-test",
+    "session": "s-1",
+    "tool": null,
+    "target": null,
+    "decision": null,
+    "reason": null,
+    "data": {
+      "mode": "clean-room",
+      "policyHash": "00c6399f6fef6419fb2bb98edd9ec1cbe883397cd1c8d225047cde73491fecc0",
+      "guardHash": "f499a625f596d9cb2ffb25e4d5579a26a92ac20c969bb57f70892813bc6c94b6",
+      "loggerHash": "dc07ac416ecf35c34cab7645dd1f937d47a02531fac239f0e1f118f694f4e56e",
+      "hooksHash": "12d15dc5f882892d25b3a80eb9280490fa9a9987da9dcdf31ecff6eaccec4f59",
+      "cleanroomHash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "pluginVersion": "0.7.0",
+      "keyFingerprint": "sha256:0561a28f9799e9f209ffbddfc810e9da44f81017d4aafde13db056232c013d8d",
+      "baseBranch": "main",
+      "head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "hash": "4374dd445e18630f7db403d8f3513a6521c311604320d3ce7399d8b0ca60d62d"
+  },
+  "policy": {
+    "path": "docs/cleanroom.json",
+    "hashes": [
+      "00c6399f6fef6419fb2bb98edd9ec1cbe883397cd1c8d225047cde73491fecc0"
+    ],
+    "current": "00c6399f6fef6419fb2bb98edd9ec1cbe883397cd1c8d225047cde73491fecc0"
+  },
+  "chain": {
+    "entries": 8,
+    "first": "4374dd445e18630f7db403d8f3513a6521c311604320d3ce7399d8b0ca60d62d",
+    "tip": "8820072d2d5787e46d483935722f7e318f6ae183cfd46717fd2e4dc9a1cb0bf9"
+  },
+  "checkpoints": [
+    {
+      "seq": 6,
+      "event": "run-start",
+      "git": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "signature": "avtMyEvZXKwJqOG2UNtrAt/J7a837sFMfy8GTrsW0ljDAUNtofD5Jd7kPfL4ngCoBhi4U4TKuTAP5AyjmfgDBw==",
+      "ok": true
+    },
+    {
+      "seq": 8,
+      "event": "kukulu_run_finish",
+      "git": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "signature": "vEpg8x5x6pN34EOnhHiaqhaC/Sbbn69hM7BUAjYgu7hM2bpCl7Sw100ZElBjrcCX6hv8Tkn31J8rpVxF0M3UCA==",
+      "ok": true
+    }
+  ],
+  "denials": {
+    "total": 1,
+    "byReason": {
+      "denied path: /usr/include/zlib.h (deny.paths)": 1
+    },
+    "verdicts": {
+      "prior-art attempt": 0,
+      "false positive": 0,
+      "offline test": 0,
+      "unclassified": 1
+    }
+  },
+  "calls": {
+    "total": 3,
+    "byTool": {
+      "Read": 2,
+      "Bash": 1
+    },
+    "byStage": {
+      "implement": 3
+    },
+    "readCapable": 3
+  },
+  "human": {
+    "instructions": 1,
+    "interventions": 0,
+    "verdicts": 0
+  },
+  "selfTest": {
+    "ok": true,
+    "cases": 164,
+    "at": "2026-01-01T00:00:00.000Z"
+  },
+  "coverage": {
+    "gaps": [],
+    "knownLimits": [],
+    "idleGapHours": 4
+  },
+  "similarity": null,
+  "files": [
+    {
+      "path": "log.jsonl",
+      "sha256": "ba1f9239406ba2cad14f344bb3f5a1999d35f7c08ebd096266d1b245425d072b",
+      "bytes": 4942
+    },
+    {
+      "path": "policy.json",
+      "sha256": "00c6399f6fef6419fb2bb98edd9ec1cbe883397cd1c8d225047cde73491fecc0",
+      "bytes": 939
+    },
+    {
+      "path": "SUMMARY.md",
+      "sha256": "88501c2f5e6660af97d9cafe49c86afa7adff4dc92cbe9e27141b4ef45642ee8",
+      "bytes": 10
+    },
+    {
+      "path": "REVIEW.md",
+      "sha256": "fb76e21ea75cb187840d64fe26654726be2db6ea4c3ef6fdb288831412f7b2dd",
+      "bytes": 40
+    },
+    {
+      "path": "PROGRESS.md",
+      "sha256": "278a8236256ab76c294d9aca48ee72a2419bf33596ab7138181079be948a70aa",
+      "bytes": 11
+    },
+    {
+      "path": "kukulu.json",
+      "sha256": "ca3d163bab055381827226140568f3bef7eaac187cebd76878e0b63e9e442356",
+      "bytes": 3
+    },
+    {
+      "path": "state.json",
+      "sha256": "ca3d163bab055381827226140568f3bef7eaac187cebd76878e0b63e9e442356",
+      "bytes": 3
+    },
+    {
+      "path": "commits.txt",
+      "sha256": "6e4dfed857dbfeb5761d7650dc607496fa56e0ab7ecf57be0d6655951995618e",
+      "bytes": 72
+    },
+    {
+      "path": "publisher.pub",
+      "sha256": "674c2fa2adef1ead2413879b9649f5048fe71eb9e42c24f406b9c483d7e1badc",
+      "bytes": 113
+    }
+  ],
+  "signer": {
+    "fingerprint": "sha256:0561a28f9799e9f209ffbddfc810e9da44f81017d4aafde13db056232c013d8d",
+    "publicKey": "publisher.pub"
+  },
+  "at": "2026-01-01T00:00:00.000Z"
+}

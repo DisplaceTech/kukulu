@@ -4,6 +4,53 @@ All notable changes to this plugin. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] — 2026-10-27
+
+### Added
+
+- Runners in the global config (`runners`), and each role's runner, endpoint and locality in `kukulu_config_show` and the routing table (G-01, A-01).
+- Clean-room policy keys `runners.allow`, `runners.locality` and `roles.distinct` (G-01, G-03).
+- Clean-room gate check 8, `routing`, and each role's model, runner, identity and family in the genesis entry (G-01, G-02, G-03).
+- `scripts/model-identity.mjs`, which hashes a model's weight files into one reproducible digest for a runner's `identities` (G-02, A-03).
+- Positive-control mode in the clean-room policy and the guard: `mode` and `control.priorArt` (G-04, B-01).
+- The offline verifier reports a passing control bundle as `CONTROL (positive)` and exits 3, never as a pass; `--expect clean-room|control-positive` names the mode a bundle must have, and the genesis and manifest record `mode` (G-04, B-01).
+- A verified control bundle can be the positive similarity pair by reference: `cleanroom.similarity` pairs gain `control`, which `kukulu_similarity` verifies and records in `similarity.json` (G-04, B-02).
+- `scripts/publish-bundle.mjs`, which writes a publishable copy of a verified bundle with `SHA256SUMS` and `VERIFY.txt` and re-checks one, and `docs/publishing.md` (G-05, B-03).
+- Clean-room policy keys `enforcement`, `sandbox.image`, `sandbox.mounts`, `sandbox.egress` and `deny.packages`, the log kinds `egress`, `stage` and `usage`, and `templates/cleanroom.local-only.example.json` (G-06, G-08).
+- `mcp/relay.mjs` and the controller socket: a server started with `KUKULU_CONTROLLER_SOCKET` relays its stdio to `scripts/sandbox.mjs`, which runs the real server per connection; `kukulu_status` reports `sandbox` (G-06, C-02).
+- The log socket: with `KUKULU_LOG_SOCKET` set, the clean-room hooks send every entry to `scripts/sandbox.mjs`, which appends it with `data.source: "box"`, and fail closed when the socket is unreachable; `docs/sandbox.md` describes the sockets (G-06, C-02).
+- The egress proxy: a `CONNECT`-only proxy on `proxy.sock` that allows the roles' runner endpoints, `sandbox.egress` and `allow.urls` hosts (the last two until lockdown), logs every decision as an `egress` entry, and a loopback bridge in `scripts/sandbox-entry.mjs` (G-06, C-03).
+- `scripts/sandbox.mjs doctor`, the exact container argument list (`containerArgs`), the plan it is built from, and `templates/sandbox/Containerfile` (G-06, C-01).
+- `scripts/sandbox.mjs run` and `stop`: the three listeners and the container in the foreground, with every refusal before anything starts (G-06, C-01).
+- Clean-room gate check 9, `boundary`: under `enforcement` `container+proxy` genesis records the container's image, network and mounts, and every gate proves the server is behind the sandbox, the container is as recorded and every allowed `egress` entry names a host the policy allows (G-06, C-01, C-03).
+- Commands inside the boundary: behind the sandbox every verify, extraVerify, build and mutate command runs through `<engine> exec` with an inner `timeout`, every git call the server makes ignores the repository's hooks, and a stream run start refuses (G-06, C-04).
+- The enforcement level in the attestation manifest, verifier check 11 (`enforcement`), `--require-enforcement <level>` and per-level known limits: twelve `{ id, text, levels }` entries, ten of them for `hook` and five for `container+proxy` (G-07, C-06 ⚠️ NEW MATTER).
+- Signing under the boundary: behind the sandbox `kukulu_run_start` refuses `policies.signing: "required"` and records `off (sandbox: …)` under `auto`, finalize does not wait for signatures, and the verifier reports trailed unsigned commits under `container+proxy` as one note (G-06, C-05).
+- Lockfile parsers for `Cargo.lock`, `package-lock.json`, `npm-shrinkwrap.json`, `uv.lock`, `poetry.lock` and `requirements*.txt`, gate check 10 (`packages`) against `deny.packages`, and the manifest's `packages` list (G-08, C-07).
+- The clean-room guard denies `cargo add`, `npm install|i|add`, `pip install` and `uv add` of a package named in `deny.packages` (G-08, C-07).
+- Stage timing: `kukulu_next` records when each stage starts and ends in `state.timeline` (every mode) and as `stage` entries in the chain (clean-room mode), committed as `chore: stage <stage>`, and `kukulu_status` reports `timeline` and `stageSeconds` (G-10, D-01).
+- Token use per role: on `SubagentStop` in clean-room mode the logger reads the subagent's transcript and appends a `usage` entry with per-model token sums, first and last timestamps and cost (G-10, D-02).
+- The manifest's `roles` carry `reported` models and `usage` sums, and the verifier's check 12 (`roles`) recounts them from the `usage` entries and notes a reported model that routing did not declare (G-02, G-10).
+- `scripts/compare-bundles.mjs`, which compares two attestation bundles side by side and, with `--trees`, scores their result trees against each other (G-09, D-03).
+- `kukulu_release`, which tags the newest archived flight's merged pull request, pushes the tag and creates a GitHub release from the CHANGELOG entry, as a draft unless asked to publish (E-01, the 2026-10-20 notes' open question 2).
+- Base health before planning: after an archived flight, `kukulu_next` scans the tracked tree with the archived constraints and tells the planner which ones the base fails (E-02).
+
+### Changed
+
+- `kukulu_next` is no longer read-only: it records the stage timeline, committing `.kukulu/state.json` (and, in clean-room mode, the log) as `chore: stage <stage>` on whatever branch the server is on, and a flight's last call leaves one local `chore: stage end` commit (G-10, D-01).
+- A clean-room flight started on 0.7.x cannot continue on 0.8.0: `hooks/hooks.json` and the hook scripts changed, and gate check 3 pins them (SPEC section 1).
+- `rsync --remove-sent-files` and `pax` get the rules of their siblings, `--remove-source-files` and `tar` (the 0.7.2 known-gap candidates, C-08).
+
+### Fixed
+
+- `classifyChanges` reads the diff without rename detection, so a rename never pairs records wrongly; `kukulu_mutate` names both sides of a renamed residue and puts a staged new side back by unstaging and removing it (0.7.2 REVIEW note).
+- The sandbox mounts its runtime directory read-only, and gate check 9 and genesis accept only the exact mount list: the project and the home volume writable, `/run/kukulu` read-only with the hooks directory's parent as its source, no extra mount, no bind-mounted home, no same-path mount with a different source (REVIEW F-01, C-01).
+- The constraint scan of `kukulu_verify` never reads through a symlink, or a symlinked directory, that leaves the project: the path is listed under the rule's `skipped` instead (REVIEW F-02, C-04).
+- Behind the sandbox, `kukulu_similarity` and `kukulu_attest` check a bundle with the plugin's own `scripts/verify-attestation.mjs`, never a `verify.mjs` from the project tree (REVIEW F-03, C-04).
+- The offline verifier prints `CONTROL (positive)` for a passing control bundle with or without `--expect control-positive`; only the exit status differs (REVIEW F-08, B-01).
+- The clean-room guard checks `deny.paths`, the signing key, the protected paths and `control.priorArt` in their real form as well as their literal one, so a project reached through a symlink (macOS `/var` and `/tmp`) neither lets a link to a denied or protected file through nor denies a control flight its own prior art.
+- Gate check 10 recognizes a pre-release crate directory in the sandbox's cargo cache (`flate2-1.0.0-rc.1` is `flate2`), and `docs/mcp-tools.md` no longer calls `kukulu_next` read-only (REVIEW F-05, C-07).
+
 ## [0.7.2] — 2026-10-26
 
 ### Changed
