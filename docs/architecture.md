@@ -106,7 +106,7 @@ The gate sits between stage selection and the stage:
 
 ```mermaid
 flowchart LR
-    N["kukulu_next picks a stage"] --> G{"gate: seven checks"}
+    N["kukulu_next picks a stage"] --> G{"gate: up to ten checks"}
     G -->|"all pass"| S["the stage runs"]
     G -->|"one fails"| H["gate entry in the log, then halt"]
     S --> T["each tool call: guard decides, logger records"]
@@ -115,7 +115,7 @@ flowchart LR
     S -->|"summarize"| A["attestation bundle, verified offline"]
 ```
 
-The checks, in order, are mode, policy, guard, self-test, lockdown, chain and liveness; [cleanroom.md](./cleanroom.md) lists them. They are not part of the stage decisions above, and a failing gate does not change what `kukulu_next` would pick: it refuses to let the stage start. Once genesis is written the mode is sticky: removing the policy file or starting in another mode is a gate failure, so the only way out of clean-room mode is to archive the flight.
+The checks, in order, are mode, policy, guard, self-test, lockdown, chain, liveness and routing (the roles still resolve as genesis recorded and satisfy the policy), then boundary under `container+proxy` (the server is behind the sandbox, and the container is the one genesis recorded: no network, only the project writable, every protected path read-only, nothing allowed out that the policy does not name) and packages when `deny.packages` names a package (no lockfile or cache holds one): ten at most. [cleanroom.md](./cleanroom.md) lists them, and [sandbox.md](./sandbox.md) describes the boundary. They are not part of the stage decisions above, and a failing gate does not change what `kukulu_next` would pick: it refuses to let the stage start. Once genesis is written the mode is sticky: removing the policy file or starting in another mode is a gate failure, so the only way out of clean-room mode is to archive the flight.
 
 ## Who may write what
 

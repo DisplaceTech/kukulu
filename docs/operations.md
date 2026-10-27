@@ -184,6 +184,10 @@ At the end of a flight, `kukulu_pr_finalize` looks at the commits themselves, ne
 
 The controller calls `kukulu_pr_finalize({ resign: true })` only when you tell go-flight "signing is unlocked, finish it"; no agent ever passes `resign` on its own. A flight that finalizes cleanly leaves `chore: finalize flight` behind it, and re-enables the operator's own signing setting if a fallback had switched it off.
 
+## Running in the sandbox
+
+A policy with `"enforcement": "container+proxy"` is run with `node scripts/sandbox.mjs run` (see [sandbox.md](./sandbox.md)). Two things differ from an ordinary flight. **Egress:** the container has no network of its own; the only way out is the proxy, which allows the roles' runner endpoints always and `sandbox.egress` and the `allow.urls` hosts until lockdown, and refuses everything else, a literal IP included. Every decision is an `egress` entry in the log, and the gate refuses to start a stage if the log shows an allowed connection the policy does not name. If the model router cannot reach its runner, check the proxy's `egress` entries before the network. **Signing:** see [Signing](#signing); commits made inside the container are unsigned by design, and the signed checkpoints vouch for them.
+
 ## Configuration
 
 `docs/kukulu.json`, written by the planner, read by the MCP:

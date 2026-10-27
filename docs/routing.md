@@ -139,6 +139,8 @@ CCR also supports routing a subagent's request independently of the main session
 
 Ollama's Anthropic-compatible endpoint (`/v1/messages`) does not support prompt caching: Ollama's own docs list "prompt caching/`cache_control`" under "not supported" ([source](https://docs.ollama.com/api/anthropic-compatibility)). Routing the `implementer` role to a local Ollama model therefore means every turn re-sends the full prompt, so keep the model's context window and your task sizes in mind. OpenRouter's Anthropic-compatible endpoint does support `cache_control` breakpoints for several backing providers ([source](https://openrouter.ai/docs/features/prompt-caching)).
 
+Prefix caching is off in some vLLM recipes, so a long flight against a vLLM runner can re-read its whole prompt every turn unless the recipe turns it on. Either way, prefill dominates long flights on a local runner, so keep task sizes small and the context window no larger than the work needs. The context cap belongs to the runner: set it there (vLLM's `--max-model-len`, Ollama's `num_ctx`); Kūkulu cannot set it from the client.
+
 `effort` is dropped for any model that is not a known Anthropic alias or a `claude-*` id (see "How routing works" above).
 
 ## Starting points
@@ -152,6 +154,8 @@ As of this writing, for a 48 GB Apple Silicon machine running Ollama locally:
 | `planner` | `opus` (the default) | The plan is the whole product; everything downstream inherits its mistakes |
 
 Set the context cap in Ollama itself (`num_ctx` on the model, or a Modelfile); the client side of the connection does not control it.
+
+For a clean-room flight that must stay on your own hardware, name the machines as [runners](#runners) and route the roles to them. A common split is to plan and review on a laptop-class model and implement on a larger one served from a dedicated host (profile B in `docs/sandbox.md`'s worked flight); `roles.distinct` in the policy then keeps the implementer and the reviewer from being the same model or family.
 
 ## Running a stage by hand
 

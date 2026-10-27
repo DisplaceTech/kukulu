@@ -17,7 +17,9 @@ Every behaviour change to the server therefore needs a test, because the thing u
 | `mcp/server.mjs` | Every deterministic operation, and the JSON-RPC transport |
 | `mcp/run-command.mjs` | Runs one verify/mutate/setup command in its own process group, bounded in time and output, for the synchronous server |
 | `mcp/relay.mjs` | Inside the sandbox: pipes the server's stdio to the controller socket; `node:` only, reached by the server only through `spawnSync` |
-| `scripts/sandbox.mjs` | The sandbox launcher: the controller socket now, then the log socket, proxy, `doctor`, `run` and `stop` |
+| `scripts/sandbox-entry.mjs` | The container's entrypoint: bridges `127.0.0.1:3128` to the proxy socket, then starts the harness; `node:` only |
+| `templates/sandbox/Containerfile`, `templates/cleanroom.local-only.example.json` | The sandbox image template, and the worked local-only, sandboxed policy |
+| `scripts/sandbox.mjs` | The sandbox launcher: the controller, log and proxy sockets, `planFor` and `containerArgs`, and the `doctor`, `run` and `stop` subcommands |
 | `scripts/implement-guard.mjs` | The Stop / SubagentStop hook |
 | `scripts/lint.sh` | Dependency-free syntax and manifest lint |
 | `scripts/check-names.mjs` | Fails on a misplaced kahakō or an ASCII spelling of the display name in prose; run by `scripts/lint.sh` |
