@@ -7544,5 +7544,46 @@
    "cwd": "__ROOT__"
   },
   "expect": "allowed"
+ },
+ {
+  "name": "Read under a deny.paths entry is denied, the entry checked in its real form too (symlinked root)",
+  "policy": {
+   "version": 1,
+   "deny": {
+    "network": false,
+    "paths": [
+     "secret/"
+    ]
+   }
+  },
+  "input": {
+   "tool_name": "Read",
+   "tool_input": {
+    "file_path": "__ROOT__/secret/key.c"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "^denied path: .*secret/key\\.c \\(deny\\.paths\\)$"
+ },
+ {
+  "name": "Read beside a deny.paths entry is allowed (symlinked root)",
+  "policy": {
+   "version": 1,
+   "deny": {
+    "network": false,
+    "paths": [
+     "secret/"
+    ]
+   }
+  },
+  "input": {
+   "tool_name": "Read",
+   "tool_input": {
+    "file_path": "__ROOT__/public/key.c"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
  }
 ]

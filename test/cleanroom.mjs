@@ -145,6 +145,14 @@ const pattern = (extra = {}) => ({ id: "p", pattern: "/build/", shouldMatch: ["/
   const readVia = (file) => evaluate(linked, { tool_name: "Read", tool_input: { file_path: path.join(aliasRoot, file) }, cwd: aliasRoot }, { root: aliasRoot, home: "/h" }).decision;
   fs.writeFileSync(path.join(root, "prior", "zlib.c"), "x\n");
   eq(readVia("prior/zlib.c"), "allowed", "a control.priorArt read is allowed when the project root is reached through a symlink");
+  eq(readVia("prior/link"), "denied", "...and a symlink out of the prior art to a deny.paths file is still denied there");
+  const catVia = (file) => evaluate(linked, { tool_name: "Bash", tool_input: { command: `cat ${file}` }, cwd: aliasRoot }, { root: aliasRoot, home: "/h" }).decision;
+  eq(catVia("prior/link"), "denied", "...through cat as well");
+  fs.mkdirSync(path.join(root, ".kukulu"), { recursive: true });
+  fs.writeFileSync(path.join(root, ".kukulu", "state.json"), "{}\n");
+  fs.symlinkSync(".kukulu/state.json", path.join(root, "state-link"));
+  const writeVia = evaluate(linked, { tool_name: "Write", tool_input: { file_path: path.join(aliasRoot, "state-link"), content: "x" }, cwd: aliasRoot }, { root: aliasRoot, home: "/h" });
+  eq(writeVia.decision, "denied", "a write through a symlink to a protected file is denied when the project root is reached through a symlink");
 }
 
 {

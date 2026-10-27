@@ -884,10 +884,13 @@ export function evaluate(policy, hookInput, env) {
   const writeForms = (p, base = shellCwd) => canonicalPaths(p, { cwd: base, home });
   const lockdown = lockdownActive(policy, env.progressText);
   const prefixes = (list) => list.map((e) => resolvePrefix(e, root, home));
+  // A denying prefix in its literal and its real form: a read path is checked in both of its own forms, and when the root is
+  // reached through a symlink (macOS /var, /tmp) a link to a denied file has only its real form under the denied directory.
+  const bothForms = (list) => [...new Set(list.flatMap((p) => canonicalPaths(p, { cwd: root, home })))];
   // The signing key is read-denied like a deny.paths entry; its public half and every other protected file stay readable.
-  const denyPaths = [...prefixes(policy.deny.paths), ...(env.keyPath ? [env.keyPath] : [])];
+  const denyPaths = bothForms([...prefixes(policy.deny.paths), ...(env.keyPath ? [env.keyPath] : [])]);
   const allowPaths = prefixes(policy.allow.paths);
-  const protectedList = env.protected ?? protectedPaths(policy, env);
+  const protectedList = bothForms(env.protected ?? protectedPaths(policy, env));
   const forms = (p) => canonicalPaths(p, { cwd: shellCwd, home });
   const inRepo = (p) => forms(p).some((f) => underPrefix(f, root));
   const exempt = (p) => forms(p).some((f) => allowPaths.some((a) => underPrefix(f, a)));
