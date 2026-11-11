@@ -33,7 +33,7 @@ Started: 2026-11-11T18:32:19.610Z
 - [x] R2-01 Fix the ASCII display name at docs/PLAN.md:525 that turns lint and CI red
 - [x] R2-02 Guard: a << inside ${...} or $[...] is not a heredoc operator
 - [x] R2-03 Guard tests: sed's attached long-option value and the (( subshell check
-- [ ] R2-04 cargo test refusal: compare each cargo test with its own --
+- [x] R2-04 cargo test refusal: compare each cargo test with its own --
 
 ## Log
 
@@ -151,3 +151,7 @@ Added expansionEnd and a branch in stripHeredocs so << inside ${...} / $[...] is
 ### R2-03 — d776945
 
 Tests only: three guard fixtures (R2-03) and a sedInPlace table row for --expression=s/a/b/ -i f. No guard change, no existing fixture changed. verify ok.
+
+### R2-04 — 0fcd760
+
+validateMutation now computes the first -- and the first {filter} after each cargo test's own position. Interpretation: a filter before the cargo test (none after it) is not judged against it; only a missing -- refuses then. Two routing assertions added. verify ok.
