@@ -68,19 +68,25 @@ function collect(dir) {
       t.output += m.output ?? 0;
     }
   }
-  const scores = (role) => Object.fromEntries((similarity?.rows ?? []).filter((r) => r.role === role).map((r) => [r.metric, r.score]));
+  // A row without `group` belongs to `default` (a bundle made before groups existed), in first-appearance order.
+  const groups = {};
+  for (const r of similarity?.rows ?? []) {
+    if (r.role !== "negative" && r.role !== "positive") continue;
+    ((groups[r.group ?? "default"] ??= { negative: {}, positive: {} })[r.role])[r.metric] = r.score;
+  }
+  const negativeOf = groups.default ?? Object.values(groups)[0] ?? { negative: {} };
   return {
     modeAndEnforcement: { mode: manifest.mode, level: manifest.enforcement?.level ?? "hook", ...(manifest.enforcement?.egress ? { egress: manifest.enforcement.egress } : {}) },
     gates: { run: gates.length, failed: gates.filter((g) => g.data?.failed).length },
     humanRecords: manifest.human ? { instructions: manifest.human.instructions ?? 0, interventions: manifest.human.interventions ?? 0, verdicts: manifest.human.verdicts ?? 0 } : null,
     denialsByReason: manifest.denials?.byReason ?? null,
     coverageGapsByKind: manifest.coverage?.gaps ? counts(manifest.coverage.gaps.map((g) => g.kind)) : null,
-    similarity: similarity ? { verdict: similarity.verdict, negative: scores("negative"), positive: scores("positive") } : null,
+    similarity: similarity ? { verdict: similarity.verdict, groups } : null,
     roles: manifest.roles ? Object.fromEntries(ROLES.filter((r) => manifest.roles[r]).map((r) => [r, { model: manifest.roles[r].model, runner: manifest.roles[r].runner, identity: manifest.roles[r].identity?.source ?? "none", family: manifest.roles[r].family }])) : null,
     wallTimePerStage: Object.keys(stageSeconds).length ? stageSeconds : null,
     tokensPerRoleAndModel: Object.keys(tokens).length ? tokens : null,
     _similarityConfig: similarity?.config ?? null,
-    _negative: scores("negative"),
+    _negative: negativeOf.negative,
   };
 }
 
@@ -109,7 +115,7 @@ function linesOf(key, v) {
     case "humanRecords": return [`${v.instructions} instructions, ${v.interventions} interventions, ${v.verdicts} verdicts`];
     case "denialsByReason":
     case "coverageGapsByKind": return [joined(v)];
-    case "similarity": return [v.verdict ?? DASH, ...Object.keys(v.negative).map((metric) => `  ${metric}: negative ${fixed(v.negative[metric])} positive ${fixed(v.positive[metric])}`)];
+    case "similarity": return [v.verdict ?? DASH, ...Object.entries(v.groups).flatMap(([group, g]) => Object.keys(g.negative).map((metric) => `  ${group} ${metric}: negative ${fixed(g.negative[metric])} positive ${fixed(g.positive[metric])}`))];
     case "roles": return Object.entries(v).map(([role, r]) => `${role}: ${r.model} on ${r.runner ?? "none"} (${r.identity}, ${r.family})`);
     case "wallTimePerStage": return [byKey(v).map(([stage, s]) => `${stage} ${s} s`).join(", ")];
     case "tokensPerRoleAndModel": return Object.entries(v).map(([role, models]) => `${role}: ${byKey(models).map(([m, t]) => `${m} ${t.input} in / ${t.output} out`).join(", ")}`);

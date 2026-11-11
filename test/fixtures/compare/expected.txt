@@ -20,21 +20,21 @@ coverage gaps by kind
 
 similarity
   A: shows no similarity beyond independent work
-    ngram_jaccard@5: negative 0.1000 positive 0.9000
-    ngram_containment@5: negative 0.1100 positive 0.9100
-    ngram_jaccard@10: negative 0.1200 positive 0.9200
-    ngram_containment@10: negative 0.1300 positive 0.9300
-    ident_jaccard: negative 0.1400 positive 0.9400
-    ident_match_rate_left: negative 0.1500 positive 0.9500
-    comment_jaccard: negative 0.1600 positive 0.9600
+    default ngram_jaccard@5: negative 0.1000 positive 0.9000
+    default ngram_containment@5: negative 0.1100 positive 0.9100
+    default ngram_jaccard@10: negative 0.1200 positive 0.9200
+    default ngram_containment@10: negative 0.1300 positive 0.9300
+    default ident_jaccard: negative 0.1400 positive 0.9400
+    default ident_match_rate_left: negative 0.1500 positive 0.9500
+    default comment_jaccard: negative 0.1600 positive 0.9600
   B: is between the controls
-    ngram_jaccard@5: negative 0.2000 positive 0.8000
-    ngram_containment@5: negative 0.2100 positive 0.8100
-    ngram_jaccard@10: negative 0.2200 positive 0.8200
-    ngram_containment@10: negative 0.2300 positive 0.8300
-    ident_jaccard: negative 0.2400 positive 0.8400
-    ident_match_rate_left: negative 0.2500 positive 0.8500
-    comment_jaccard: negative 0.2600 positive 0.8600
+    default ngram_jaccard@5: negative 0.2000 positive 0.8000
+    default ngram_containment@5: negative 0.2100 positive 0.8100
+    default ngram_jaccard@10: negative 0.2200 positive 0.8200
+    default ngram_containment@10: negative 0.2300 positive 0.8300
+    default ident_jaccard: negative 0.2400 positive 0.8400
+    default ident_match_rate_left: negative 0.2500 positive 0.8500
+    default comment_jaccard: negative 0.2600 positive 0.8600
 
 roles
   A: planner: opus on anthropic (vendor-asserted, claude)
