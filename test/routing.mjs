@@ -815,6 +815,8 @@ for (const [value, got, label] of [
   isError(await statusWith("cargo test {filter} -- --nocapture"), /runs cargo test with \{filter\} before --/, "...also when -- comes after the filter");
   ok(!(await statusWith("cargo test --workspace -- {filter}")).error, "cargo test --workspace -- {filter} loads");
   isError(await statusWith("cargo build --release && cargo test {filter}"), /^docs\/kukulu\.json mutation\.targeted\.rust\.cmd runs cargo test with \{filter\} before --; cargo test takes one TESTNAME, so a list filter fails\. Write it as "cargo test <options> -- \{filter\}"$/, "a cargo test after another cargo command with {filter} before -- is refused");
+  isError(await statusWith("cargo fmt -- --check && cargo test {filter}"), /^docs\/kukulu\.json mutation\.targeted\.rust\.cmd runs cargo test with \{filter\} before --; cargo test takes one TESTNAME, so a list filter fails\. Write it as "cargo test <options> -- \{filter\}"$/, "a cargo test whose only -- belongs to an earlier command is refused");
+  ok(!(await statusWith("cargo fmt -- --check && cargo test -- {filter}")).error, "cargo fmt -- --check && cargo test -- {filter} loads");
   ok(!(await statusWith("cargo build && cargo test -- {filter}")).error, "cargo build && cargo test -- {filter} loads");
   ok(!(await statusWith("cargo +nightly test -- {filter}")).error, "cargo +nightly test -- {filter} loads");
   ok(!(await statusWith("vendor/bin/phpunit --filter {filter}")).error, "a non-cargo command with {filter} and no -- still loads");

@@ -979,12 +979,13 @@ function validateMutation(mutation) {
     // `cargo test` takes one TESTNAME; libtest, behind `--`, takes several, so a list filter must go after it.
     const words = entry.cmd.split(/\s+/).filter(Boolean);
     // Every `cargo` in the command counts: `cargo build && cargo test {filter}` runs the second one too.
-    const dashes = words.indexOf("--");
-    const filterAt = words.findIndex((w) => w.includes("{filter}"));
     for (let at = words.indexOf("cargo"); at !== -1; at = words.indexOf("cargo", at + 1)) {
       let k = at + 1;
       while (k < words.length && /^[-+]/.test(words[k])) k++;
-      if (words[k] === "test" && (dashes === -1 || filterAt < dashes)) {
+      // Each cargo test is compared with its own `--`: one that belongs to an earlier command does not count.
+      const dashes = words.indexOf("--", k);
+      const filterAt = words.findIndex((w, j) => j > k && w.includes("{filter}"));
+      if (words[k] === "test" && (dashes === -1 || (filterAt !== -1 && filterAt < dashes))) {
         throw new ToolError(`${where}.cmd runs cargo test with {filter} before --; cargo test takes one TESTNAME, so a list filter fails. Write it as "cargo test <options> -- {filter}"`);
       }
     }
