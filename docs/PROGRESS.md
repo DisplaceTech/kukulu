@@ -18,7 +18,7 @@ Started: 2026-11-11T18:32:19.610Z
 - [x] P2-02 Policies in the global file and in profiles
 - [x] P2-03 Grouped similarity pairs
 - [x] P2-04 compare-bundles keys its scores by group
-- [ ] P2-05 An alias is the model it resolves to
+- [x] P2-05 An alias is the model it resolves to
 - [ ] P2-06 Phase 2 end: push and record the manual check
 - [ ] P3-01 kukulu_next supplies the Agent call's description
 - [ ] P3-02 The implementer sees its own task's log
@@ -82,3 +82,7 @@ validateSimilarity: group slug, per-group role counts, grouped refusal texts onl
 ### P2-04 — a2224f9
 
 compare-bundles: similarity item is { verdict, groups: { g: { negative, positive } } } (rows without group are default); text prints "  <group> <metric>: negative x positive y"; cross score negative is the default group's, else the first. Harness buildComparePair gained aGrouped; recorded expected.txt updated (default group name added to control lines); docs/cleanroom.md updated. Full npm test passed.
+
+### P2-05 — 1578ca5
+
+sameModel exported from mcp/cleanroom.mjs and duplicated (with a normalizeModel copy) in scripts/verify-attestation.mjs; check 12 notes only when a reported model is not sameModel with the declared one, text unchanged. Tests in test/attest.mjs (shared table of 14 pairs in both copies, alias no note, other family note). Docs and CHANGELOG updated. Full npm test and both guard self-tests passed.
