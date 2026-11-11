@@ -436,6 +436,22 @@ const logLines = (dir) => fs.readFileSync(path.join(dir, "log.jsonl"), "utf8").s
   eq(noted.status, 0, "a reported model other than the routed one does not fail the bundle");
   like(noted.stdout, /^verify-attestation: note: implementer: the endpoint reported mystery-model, spark\/nemotron; routing declared spark\/nemotron$/m, "...it prints the note, with the exact text");
 
+  // P2-05: an alias and the id it resolves to are one model.
+  const PAIRS = [
+    ["sonnet", "claude-sonnet-5-5", true], ["opus", "claude-opus-5-5", true], ["haiku", "claude-haiku-4-5", true], ["fable", "claude-fable-1-0", true],
+    ["sonnet", "claude-opus-5-5", false], ["inherit", "claude-sonnet-5-5", true], ["inherit", "spark/nemotron", false],
+    ["claude-sonnet-4", "claude-sonnet-4-20250514", true], ["claude-sonnet-4", "claude-sonnet-4-2025", false],
+    ["spark/nemotron", "SPARK/Nemotron", true], ["x/opus", "claude-opus-5-5", true], ["opus", "opus", true], ["opus", "ghost", false], ["sonnet", "claude-sonnet", false],
+  ];
+  eq(JSON.stringify(PAIRS.map(([d, r]) => V.sameModel(d, r))), JSON.stringify(PAIRS.map(([d, r]) => CR.sameModel(d, r))), "sameModel gives identical answers in both copies");
+  eq(JSON.stringify(PAIRS.map(([d, r]) => CR.sameModel(d, r))), JSON.stringify(PAIRS.map(([, , want]) => want)), "...and the answers are the rules: alias, inherit, dated snapshot, equal after normalizing");
+  const sonnetRoles = { ...routed, implementer: { ...routed.implementer, model: "sonnet", runner: "anthropic", family: "claude" } };
+  const aliased = fresh({ roles: sonnetRoles, extra: (log) => usageEntry(log, "kukulu-implementer", { "claude-sonnet-5-5": m(1, 1, 1) }, 0.01) });
+  const aRun = run(aliased.dir);
+  ok(aRun.status === 0 && !/the endpoint reported/.test(aRun.stdout), "an alias-resolved reported model gives no note");
+  const wrongFamily = fresh({ roles: sonnetRoles, extra: (log) => usageEntry(log, "kukulu-implementer", { "claude-opus-5-5": m(1, 1, 1) }, 0.01) });
+  like(run(wrongFamily.dir).stdout, /^verify-attestation: note: implementer: the endpoint reported claude-opus-5-5; routing declared sonnet$/m, "a reported model of another family still gives the note");
+
   const old = fresh();
   const o = run(old.dir);
   eq(o.status, 0, "a manifest without roles (0.7.x) passes check 12");

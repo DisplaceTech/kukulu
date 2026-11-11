@@ -223,6 +223,21 @@ export function normalizeModel(s) {
   return out;
 }
 
+/**
+ * Whether the model an endpoint reported is the model routing declared: equal once normalized, an alias
+ * (`opus`, `sonnet`, `haiku`, `fable`) and an id it resolves to (`claude-<alias>-...`), `inherit` and any
+ * `claude-` id, or a model and its dated snapshot (`<model>-` and eight digits). Duplicated in
+ * scripts/verify-attestation.mjs on purpose, and test/attest.mjs feeds both the same pairs.
+ */
+export function sameModel(declared, reported) {
+  const d = normalizeModel(declared);
+  const r = normalizeModel(reported);
+  if (d === r) return true;
+  if (["opus", "sonnet", "haiku", "fable"].includes(d) && r.startsWith(`claude-${d}-`)) return true;
+  if (d === "inherit" && r.startsWith("claude-")) return true;
+  return r.startsWith(`${d}-`) && /^\d{8}$/.test(r.slice(d.length + 1));
+}
+
 // ⚠️ ASSUMPTION: a table of family patterns, measured against the routing
 // strings real flights use. Each pattern runs on the normalized string; the
 // first match names the family. Written only here.
