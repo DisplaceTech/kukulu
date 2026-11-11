@@ -15,7 +15,7 @@ Started: 2026-11-11T18:32:19.610Z
 - [x] P1-05 A flight slug that collides with an archive is refused at plan time
 - [x] P1-06 Phase 1 end: push and record the manual checks
 - [x] P2-01 finalize defaults to ready
-- [ ] P2-02 Policies in the global file and in profiles
+- [x] P2-02 Policies in the global file and in profiles
 - [ ] P2-03 Grouped similarity pairs
 - [ ] P2-04 compare-bundles keys its scores by group
 - [ ] P2-05 An alias is the model it resolves to
@@ -70,3 +70,7 @@ Push: done. Manual check: NOT VERIFIED (human): with the working tree as the plu
 ### P2-01 — 98508c7
 
 cfgFrom defaults finalize to ready (only place); DEFAULT_STATE.policies = cfgFrom({}, null).policies (eight keys); configShow returns policies. Docs, README step 4 and CHANGELOG updated. Interpretation: test/review.mjs finalizeRepo merges finalize auto into its policies (null means no block) so the existing auto-merge cases keep their meaning; new default case added. Tests: routing, review, state. All suites passed after the review fix (earlier run showed only review failing).
+
+### P2-02 — 534904e
+
+validatePolicies(policies, where) with named messages and enum "; got"; GLOBAL_KEYS gains policies; profiles may hold only policies (validateRolesBlock allowPolicies). resolvePolicies() layers default<global<profile<project with sources; cfg() and finalizeConfig return layered policies, cfgFrom stays project-only. configShow gains policySources (policies now layered); Run policies sentence names finalize and its source. Docs (operations Policy layers, routing, mcp-tools, README) and CHANGELOG. Interpretation: resolvePolicies does not check the selected profile exists (resolveRouting refuses); finalize-draft test is in routing.mjs with its own repo setup. Full npm test passed.
