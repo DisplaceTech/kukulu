@@ -11,7 +11,7 @@ Started: 2026-11-11T18:32:19.610Z
 - [x] P1-01 The plugin sets its own MCP timeout
 - [x] P1-02 A command timeout the client would cut short is refused
 - [x] P1-03 No clean-room genesis after the archive
-- [ ] P1-04 kukulu_release reads the merged flight from origin
+- [x] P1-04 kukulu_release reads the merged flight from origin
 - [ ] P1-05 A flight slug that collides with an archive is refused at plan time
 - [ ] P1-06 Phase 1 end: push and record the manual checks
 - [ ] P2-01 finalize defaults to ready
@@ -54,3 +54,7 @@ mcpTimeoutMs() (cached, reads PLUGIN_ROOT/.mcp.json) and cfgFrom(c, planIds, lim
 ### P1-03 — b9f9c48
 
 In nextDecision the genesis, gate and gate-failure halt moved below the halted, awaiting-signing and archived-done returns (mode-break halt unchanged). Tests in test/cleanroom.mjs, appended to the existing archive flight block plus a halted-no-genesis block. Docs (mcp-tools, architecture) and CHANGELOG updated. Interpretation: no log means no log.jsonl; the cleanroom directory itself remains after archive. Full npm test passed.
+
+### P1-04 — 27f15a0
+
+release() rewritten to the plan order: fetch origin, read origin/<base>:.kukulu/state.json archived, Branch and signing from the archived dir on origin, gh pr view, CHANGELOG refusal with flight and PR, tag/push/release as before, then fastForward and localState last; the checkout, dirty-tree and ancestor refusals are removed. TOOLS description and docs/mcp-tools.md, CONTRIBUTING review row, CHANGELOG updated. releaseRepo in test/review.mjs now puts the archive commit on the merged build branch with local main behind; old pinned-refusal tests replaced. Interpretation: localState is judged before the fast-forward (stale even when fastForward is done). test/harness.mjs unchanged. Full npm test passed.
