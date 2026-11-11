@@ -1175,7 +1175,7 @@ export function evaluate(policy, hookInput, env) {
       const redirects = redirectTargets(segment).flatMap((t) => braceExpand(t));
       const allArgs = rest;
       let writeDenied = null;
-      if (WRITE_FAMILY.has(word)) {
+      if (WRITE_FAMILY.has(word) && (word !== "sed" || sedInPlace(allArgs.flatMap((t) => braceExpand(t))))) {
         // The shell expands braces before the command runs, so `rm -rf {docs,src}` is `rm -rf docs src`.
         const rest = allArgs.flatMap((t) => braceExpand(t));
         if (word === "git" && rest[0] === "config" && rest.some((t) => /core\.hookspath/i.test(t))) return denied("protected path: git config core.hooksPath");
@@ -1185,8 +1185,11 @@ export function evaluate(policy, hookInput, env) {
         const gitCwd = git ? git.dirs.reduce((base, d) => canonicalPaths(tokenPath(d), { cwd: base, home })[0], shellCwd) : shellCwd;
         // These git forms write only .git/ or nothing, so their pathspecs are not write targets; `--output` of diff, log and show still names a file they write (SPEC A-03).
         const indexOnly = git && INDEX_ONLY_GIT.has(git.sub) ? gitOutputValues(git.sub, rest, git.subIndex) : null;
+        // A sed that edits in place writes only its file operands, never its script or an option's value.
+        const sedSkip = word === "sed" ? sedScan(rest).skip : null;
         rest.forEach((t, i) => {
           if (writeDenied) return;
+          if (sedSkip && sedSkip.has(i)) return;
           if (indexOnly && i > git.subIndex && !indexOnly.has(i)) return;
           if (!(!t.startsWith("-") || isPathLike(t))) return;
           const f = writeForms(tokenPath(t), git && i > git.subIndex ? gitCwd : shellCwd).find((x) => protectedList.some((p) => underPrefix(x, p)));
@@ -1370,6 +1373,65 @@ function destinationPathsFor(word, rest, spec) {
     return { target: standsForDir ? dir : `${dir.replace(/\/+$/, "") || "/"}/${base}`, standsForDir, dir };
   });
   return { dir, recursive, targets };
+}
+
+/**
+ * Reads sed's arguments (the tokens after the word `sed`): whether it edits in
+ * place, and the indexes that are not file operands (options, their values,
+ * the script, and BSD sed's empty suffix after a bare -i).
+ */
+function sedScan(args) {
+  const skip = new Set();
+  let inPlace = false;
+  let sawExplicit = false;
+  let script = -1;
+  let ended = false;
+  for (let i = 0; i < args.length; i++) {
+    const t = args[i];
+    if (ended) {
+      if (script === -1 && !sawExplicit) script = i;
+      continue;
+    }
+    if (t === "--") {
+      skip.add(i);
+      ended = true;
+      continue;
+    }
+    if (!(t.startsWith("-") && t.length > 1)) {
+      if (script === -1) script = i;
+      continue;
+    }
+    skip.add(i);
+    if (/^--(?:expression|file|line-length)$/.test(t)) {
+      if (t !== "--line-length") sawExplicit = true;
+      if (i + 1 < args.length) skip.add(++i);
+    } else if (/^--(?:expression|file|line-length)=/.test(t)) {
+      if (!t.startsWith("--line-length")) sawExplicit = true;
+    } else if (t === "--in-place" || t.startsWith("--in-place=")) {
+      inPlace = true;
+    } else if (/^-[A-Za-z]/.test(t)) {
+      for (let k = 1; k < t.length; k++) {
+        const c = t[k];
+        if (c === "i") {
+          inPlace = true;
+          if (t === "-i" && args[i + 1] === "") skip.add(++i);
+          break;
+        }
+        if (c === "e" || c === "f" || c === "l") {
+          if (c !== "l") sawExplicit = true;
+          if (k === t.length - 1 && i + 1 < args.length) skip.add(++i);
+          break;
+        }
+      }
+    }
+  }
+  if (script !== -1 && !sawExplicit) skip.add(script);
+  return { inPlace, skip };
+}
+
+/** True when a sed invocation edits its files in place: -i, -i<suffix>, --in-place[=<suffix>] or a short cluster holding i. */
+export function sedInPlace(args) {
+  return sedScan(args).inPlace;
 }
 
 /**
@@ -1940,7 +2002,7 @@ export const KNOWN_LIMITS = [
   { id: "interpreter", text: "Interpreter escapes (python3 -c, node -e) are not parsed, so a path or word inside the quoted program is not seen.", levels: ["hook"] },
   { id: "expansion", text: "Shell expansion beyond ~ and $HOME is not evaluated: other variables, and strings assembled at run time (a base64 decode, a variable holding a command), so a path or command built that way is not seen.", levels: ["hook"] },
   { id: "spellings", text: "Option and wrapper spellings the tables do not model are not recognized: the guard judges a command by its text, its wrapper and option parsing follows GNU coreutils, findutils and sudo (and BSD/macOS forms where their manual pages differ), and no table can be proved complete across tool versions.", levels: ["hook"] },
-  { id: "indirect", text: "Commands that run a command from their arguments (find -exec, watch, parallel, busybox) and programs outside the fixed network and write lists (unlink, shred, perl -i, cargo fetch) are not recognized.", levels: ["hook"] },
+  { id: "indirect", text: "Commands that run a command from their arguments (find -exec, watch, parallel, busybox) and programs outside the fixed network and write lists (unlink, shred, perl -i, sed's w command, cargo fetch) are not recognized.", levels: ["hook"] },
   { id: "patterns", text: "pathPatterns regexes are matched on the paths a call names, not on the files a recursive read or a glob reaches below a directory.", levels: ["hook"] },
   { id: "make", text: "Subprocesses of a make target are not individual tool calls, so what they read is not logged.", levels: ["hook"] },
   { id: "mcp", text: "MCP server internals are not tool calls, so what a server reads on its own is not logged.", levels: ["hook"] },

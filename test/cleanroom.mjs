@@ -17,7 +17,7 @@ import {
   ENTRY_KEYS, KINDS, ZERO_HASH, TARGET_MAX, truncateTarget, canonical, entryHash, appendEntry, readEntries, verifyChain, logPathFor, targetOf, projectContext, entryFields,
   tokenize, LANGUAGES, scorePair, position, verdictOf, LIMITS, BANDS,
   splitSegments, shellWords, commandWord, isPathLike, tokenPath, canonicalPaths,
-  evaluate, lockdownActive, NETWORK_COMMANDS, READ_FAMILY, WRITE_FAMILY, protectedPaths,
+  evaluate, sedInPlace, lockdownActive, NETWORK_COMMANDS, READ_FAMILY, WRITE_FAMILY, protectedPaths,
   coverageGaps, KNOWN_LIMITS, knownLimitsFor,
   normalizeModel, familyOf, controlPaths, LOG_SOCKET_TIMEOUT_MS,
   LOCKFILES, lockfileEcosystem, lockfilePackages, normalizePackageName, deniedPackage,
@@ -875,6 +875,27 @@ async function genesisRepo(planOpts = {}) {
   eq(NETWORK_COMMANDS.join("|"), "curl|wget|gh|ssh|scp|nc|git clone|git fetch|git pull|pip download|cargo vendor|cargo download|npm install|npm i|npm ci|go get|composer install", "NETWORK_COMMANDS is the fixed list");
   eq([...READ_FAMILY].join(" "), "cat less more head tail grep egrep fgrep rg ag ack find fd locate ls tree sed awk bat strings xxd od hexdump file zcat zless zgrep view vi vim nano emacs", "READ_FAMILY is the fixed list");
   eq([...WRITE_FAMILY].join(" "), "cp mv rm tee sed truncate chmod chown ln install dd git", "WRITE_FAMILY is the fixed list");
+}
+
+{
+  // The command word is a variable so no line of this file reads as a GNU in-place sed (no-gnu-sed-inplace).
+  const SED = "sed";
+  const policy = loadPolicy(EXAMPLE);
+  const root = mkDir("kukulu-sed-root-");
+  const home = mkDir("kukulu-sed-home-");
+  const run = (command) => evaluate(policy, { tool_name: "Bash", tool_input: { command }, cwd: root }, { root, home, progressText: null, policyPath: path.join(root, "docs", "cleanroom.json"), pluginRoot: path.join(home, "plugin-root"), keyPath: path.join(home, "k.pem"), planExists: true });
+  const yes = [["-i"], ["-i.bak"], ["--in-place"], ["--in-place=.bak"], ["-Ei"], ["-ni"], ["-ie"], ["-e", "s/a/b/", "-i", "f"]];
+  const no = [["-n"], ["-e", "s/a/b/"], ["-n", "-e", "1p", "-e", "2p"], ["-l", "80", "-n"], ["--", "-i"], ["s/a/b/", "f", "--", "-i"]];
+  ok(yes.every((a) => sedInPlace(a) === true) && no.every((a) => sedInPlace(a) === false), "sedInPlace reads -i, -i<suffix>, --in-place, --in-place=<suffix> and a cluster containing i");
+  const r1 = run(`${SED} -n 480p .kukulu/cleanroom/log.jsonl`);
+  eq(r1.decision, "allowed", "a read-only sed on the clean-room log is allowed");
+  const r2 = run(`${SED} -e s/a/b/ -i .mcp.json`);
+  eq(r2.decision + "|" + r2.reason, `denied|protected path: ${path.join(root, ".mcp.json")}`, "an in-place sed with -e before -i writes only the file operands");
+  eq(run(`${SED} -e s/a/b/ -i src/a.rs`).decision, "allowed", "...and a plain file stays allowed");
+  eq(run(`${SED} -i '' s/a/b/ .mcp.json`).decision, "denied", "an in-place sed with an empty BSD suffix keeps the suffix out of the operands");
+  eq(run(`${SED} -i '' s/a/b/ src/a.rs`).decision, "allowed", "...so the empty suffix and the script are not targets");
+  const w = KNOWN_LIMITS.find((l) => l.id === "indirect");
+  ok(w.text.includes("sed's w command") && KNOWN_LIMITS.length === 12, "KNOWN_LIMITS indirect names sed's w command");
 }
 
 // ---------------------------------------------------------------- the guard hook

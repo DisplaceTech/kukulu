@@ -4,6 +4,16 @@ All notable changes to this plugin. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- The guard judges `sed` as a write only in place, so a read-only `sed -n` of a protected file is allowed (project-g F-01, F-03, F-04, F-06, F-09, F-11, F-15).
+
+### Changed
+
+- sed's `w` command is listed under the `indirect` known gap (A-01).
+
 ## [0.8.0] — 2026-10-27
 
 ### Added

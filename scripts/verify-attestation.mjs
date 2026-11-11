@@ -22,7 +22,7 @@ export const KNOWN_LIMITS = [
   { id: "interpreter", text: "Interpreter escapes (python3 -c, node -e) are not parsed, so a path or word inside the quoted program is not seen.", levels: ["hook"] },
   { id: "expansion", text: "Shell expansion beyond ~ and $HOME is not evaluated: other variables, and strings assembled at run time (a base64 decode, a variable holding a command), so a path or command built that way is not seen.", levels: ["hook"] },
   { id: "spellings", text: "Option and wrapper spellings the tables do not model are not recognized: the guard judges a command by its text, its wrapper and option parsing follows GNU coreutils, findutils and sudo (and BSD/macOS forms where their manual pages differ), and no table can be proved complete across tool versions.", levels: ["hook"] },
-  { id: "indirect", text: "Commands that run a command from their arguments (find -exec, watch, parallel, busybox) and programs outside the fixed network and write lists (unlink, shred, perl -i, cargo fetch) are not recognized.", levels: ["hook"] },
+  { id: "indirect", text: "Commands that run a command from their arguments (find -exec, watch, parallel, busybox) and programs outside the fixed network and write lists (unlink, shred, perl -i, sed's w command, cargo fetch) are not recognized.", levels: ["hook"] },
   { id: "patterns", text: "pathPatterns regexes are matched on the paths a call names, not on the files a recursive read or a glob reaches below a directory.", levels: ["hook"] },
   { id: "make", text: "Subprocesses of a make target are not individual tool calls, so what they read is not logged.", levels: ["hook"] },
   { id: "mcp", text: "MCP server internals are not tool calls, so what a server reads on its own is not logged.", levels: ["hook"] },

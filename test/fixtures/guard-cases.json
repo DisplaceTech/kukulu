@@ -7585,5 +7585,168 @@
    "cwd": "__ROOT__"
   },
   "expect": "allowed"
+ },
+ {
+  "name": "sed -i 1d .kukulu/cleanroom/log.jsonl (P0-01)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "sed -i 1d .kukulu/cleanroom/log.jsonl"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "sed -ni 1p docs/cleanroom.json (P0-01)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "sed -ni 1p docs/cleanroom.json"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "sed --in-place=.bak s/a/b/ .mcp.json (P0-01)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "sed --in-place=.bak s/a/b/ .mcp.json"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "sed -i.bak s/a/b/ .mcp.json (P0-01)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "sed -i.bak s/a/b/ .mcp.json"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "sed -Ei s/a/b/ .mcp.json (P0-01)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "sed -Ei s/a/b/ .mcp.json"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "sed -e s/a/b/ -i .mcp.json (P0-01)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "sed -e s/a/b/ -i .mcp.json"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "sed -i '' s/a/b/ .mcp.json (P0-01)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "sed -i '' s/a/b/ .mcp.json"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "sed -n 480p .kukulu/cleanroom/log.jsonl (P0-01)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "sed -n 480p .kukulu/cleanroom/log.jsonl"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "sed -n 1p .mcp.json (P0-01)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "sed -n 1p .mcp.json"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "cd __HOME__/plugin-root; sed -n 2910,2990p mcp/server.mjs (P0-01)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd __HOME__/plugin-root; sed -n 2910,2990p mcp/server.mjs"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "sed -n -e 1p -e 2p docs/cleanroom.json (P0-01)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "sed -n -e 1p -e 2p docs/cleanroom.json"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "sed -i s/a/b/ src/a.rs (P0-01)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "sed -i s/a/b/ src/a.rs"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
  }
 ]
