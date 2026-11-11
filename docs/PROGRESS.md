@@ -7,7 +7,7 @@ Started: 2026-11-11T18:32:19.610Z
 
 - [x] P0-01 sed is a write only in place
 - [x] P0-02 Heredoc bodies are data unless a shell reads them
-- [ ] P0-03 Phase 0 end: push and record the manual check
+- [x] P0-03 Phase 0 end: push and record the manual check
 - [ ] P1-01 The plugin sets its own MCP timeout
 - [ ] P1-02 A command timeout the client would cut short is refused
 - [ ] P1-03 No clean-room genesis after the archive
@@ -38,3 +38,7 @@ sedInPlace and internal sedScan added to mcp/cleanroom.mjs; rule 6d runs for sed
 ### P0-02 — d8622ce
 
 Work is in commit 2360d70 (a feedback commit landed after it, so d8622ce is an empty marker commit). stripHeredocs exported; splitSegments splits stripped text (internal splitRaw is the old splitter); bashVerdict judges shell-read bodies as commands, unquoted non-shell bodies' substitutions only, quoted bodies not at all. A delimiter of digits only is not a heredoc. 8 fixtures (P0-02), none existing changed. Docs and CHANGELOG added. Full npm test passed; only the no-hardcoded-mcp-timeout constraint hits (docs/kukulu.json itself, pre-existing). Lesson: call kukulu_feedback_log only after kukulu_task_done, since it moves HEAD.
+
+### P0-03 — 01bc90e
+
+Push: done (origin build/2026-11-11). Manual check: NOT VERIFIED (human): in a live clean-room session with claude --plugin-dir ., a read-only sed -n 1p of the log and a heredoc that writes prior-art paths into a scratch file are allowed, and the apostrophe case (cat <<EOF > x.txt / it's fine / EOF / rm -rf .kukulu/cleanroom) is denied.
