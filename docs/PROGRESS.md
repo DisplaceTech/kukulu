@@ -17,7 +17,7 @@ Started: 2026-11-11T18:32:19.610Z
 - [x] P2-01 finalize defaults to ready
 - [x] P2-02 Policies in the global file and in profiles
 - [x] P2-03 Grouped similarity pairs
-- [ ] P2-04 compare-bundles keys its scores by group
+- [x] P2-04 compare-bundles keys its scores by group
 - [ ] P2-05 An alias is the model it resolves to
 - [ ] P2-06 Phase 2 end: push and record the manual check
 - [ ] P3-01 kukulu_next supplies the Agent call's description
@@ -78,3 +78,7 @@ validatePolicies(policies, where) with named messages and enum "; got"; GLOBAL_K
 ### P2-03 — 87dc13d
 
 validateSimilarity: group slug, per-group role counts, grouped refusal texts only when a group is named. normalizeSimilarity keeps group only when given. similarity(): per-group controls, rows gain group (after pair), SIMILARITY.md lists one line per group and gains a group column only when grouped; verifyControlBundle now returns a map pair id to record for every positive pair with a control. Interpretation: SIMILARITY.md always lists group lines (default for ungrouped); the statement test was updated accordingly. Docs, CONTRIBUTING row, CHANGELOG. Full npm test passed. P2-04 must make compare-bundles read the grouped rows (the CHANGELOG line already names it).
+
+### P2-04 — a2224f9
+
+compare-bundles: similarity item is { verdict, groups: { g: { negative, positive } } } (rows without group are default); text prints "  <group> <metric>: negative x positive y"; cross score negative is the default group's, else the first. Harness buildComparePair gained aGrouped; recorded expected.txt updated (default group name added to control lines); docs/cleanroom.md updated. Full npm test passed.
