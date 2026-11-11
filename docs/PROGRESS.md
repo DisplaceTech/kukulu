@@ -30,6 +30,10 @@ Started: 2026-11-11T18:32:19.610Z
 - [x] R1-02 Guard: heredoc misdetection, abbreviated sed long options, and untested sed and heredoc mechanics
 - [x] R1-03 kukulu_release: test the signing outcome read from origin, localState current and fastForward up to date
 - [x] R1-04 Profile policies messages, cargo test detection on any cargo, and README's finalize row
+- [ ] R2-01 Fix the ASCII display name at docs/PLAN.md:525 that turns lint and CI red
+- [ ] R2-02 Guard: a << inside ${...} or $[...] is not a heredoc operator
+- [ ] R2-03 Guard tests: sed's attached long-option value and the (( subshell check
+- [ ] R2-04 cargo test refusal: compare each cargo test with its own --
 
 ## Log
 

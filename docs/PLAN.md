@@ -555,3 +555,45 @@ Derived from docs/SPEC.md v0.8.1 on 2026-11-11. SPEC.md wins over this file.
 **Out of scope:** Any new policy key; the global file's message form; cargo nextest; kukulu_mutate's filter quoting; other README rows.
 **Verification:** kukulu_verify with the files touched.
 **Depends on:** none
+
+## Review fixes (round 2)
+
+### R2-01: Fix the ASCII display name at docs/PLAN.md:525 that turns lint and CI red
+
+**Goal:** npm run lint, pre-commit and the plugin suite pass again, and the four PR checks that fail on check-names today go green.
+**Files touched:** docs/PLAN.md
+**Design constraints:** This is the one hand edit of docs/PLAN.md this review sanctions: the bad text came from the round-1 review submission, and no tool can amend a committed fix section. On line 525 only (R1-01's Out of scope field), replace the seven-letter ASCII spelling of the display name, in the phrase about the constraint engine's own tooling, with Kūkulu written with U+016B. No other byte of docs/PLAN.md changes: the commit's diff is that one line. Do not edit scripts/check-names.mjs, loosen any check, or touch any other file. progress-no-bare-macron: the task log writes the macron letter only inside the display name, and the commit body may simply say 'the ASCII display name'.
+**Acceptance tests:** The CI checks failing on PR #6 today, all from this one check-names line: test (node 22), test (node 24), test (node 26), and pre-commit (yamllint / shellcheck / markdownlint / gitleaks). Locally: node scripts/check-names.mjs exits 0, and test/plugin.mjs's check-names assertion passes (it is the plugin suite's only failure today).
+**Out of scope:** Any other PLAN.md text; scripts/check-names.mjs; the server's review submission path (logged as pipeline friction).
+**Verification:** kukulu_verify: ok true (npm run lint, pre-commit run --all-files and npm test all pass). git show --stat of the commit lists docs/PLAN.md with one line changed. After the round's push, kukulu_status prChecks shows those four checks passing.
+**Depends on:** none
+
+### R2-02: Guard: a << inside ${...} or $[...] is not a heredoc operator
+
+**Goal:** No parameter expansion or old-style arithmetic that holds << hides the commands after it from the guard; the four forms denied at the merge base are denied again.
+**Files touched:** mcp/cleanroom.mjs, test/cleanroom.mjs, test/fixtures/guard-cases.json, docs/cleanroom.md, CHANGELOG.md
+**Design constraints:** SPEC 6 A-02 and principles 1, 3, 6 and 8; CLAUDE.md's guard-rule protocol: every new fixture name ends with ' (R2-02)', append cases with a script that loads the file and dumps it with indent=1 and no ASCII escaping, policy "template", cwd __ROOT__, and no existing fixture changes its expect or reason. cleanroom-module-pure and server-synchronous hold. In stripHeredocs, outside quotes, as the existing (( branch does: a ${ copies through to its matching } (nesting-aware for inner ${ and {, honoring single quotes, double quotes and backslashes inside), and a $[ copies through to its matching ]; a << inside either is never an operator. An unclosed ${ or $[ is not special (the same reading R1-02 gave an unclosed ((). A << after the closing } is still an operator, so echo ${#x}<<y stays a real heredoc. docs/cleanroom.md: the heredoc paragraph names ${...} and $[...] beside $((...)), ((...)) and the comment. CHANGELOG.md: extend the existing ### Fixed line R1-02 added (the one citing A-01, A-02) to name ${...} and $[...]; add no new heading.
+**Acceptance tests:** New fixtures in test/fixtures/guard-cases.json, each ending (R2-02). Denied, reason protected path: .*: 'echo $[1<<n]' newline 'rm -rf .kukulu/cleanroom'; 'echo ${x#<<y}' newline 'rm -rf .kukulu/cleanroom'; 'echo ${x:-<<y}' newline 'rm -rf .kukulu/cleanroom'; 'y=${x/<</z}' newline 'rm -rf .kukulu/cleanroom'. Each of the four is allowed at HEAD before the fix and denied at the merge base 36df873, which is the regression. Allowed: 'echo ${#x}<<y' newline 'rm -rf .kukulu/cleanroom' (bash reads a heredoc after the expansion, so the rm line is its unterminated body). test/cleanroom.mjs: 'stripHeredocs ignores << inside ${...} and $[...]' (text unchanged, bodies []). Every existing fixture keeps its decision and reason.
+**Out of scope:** Judging an unterminated heredoc body as commands (a spec issue for the owner); a heredoc piped into a shell; backtick parsing; any other command word or guard rule.
+**Verification:** kukulu_verify with the files touched (runs both guard self-tests); also node scripts/cleanroom-guard.mjs --self-test templates/cleanroom.example.json before committing. The commit body states that no existing fixture changed.
+**Depends on:** none
+
+### R2-03: Guard tests: sed's attached long-option value and the (( subshell check
+
+**Goal:** The two mechanics R1-02 added that no test covers each have a fixture that fails without them.
+**Files touched:** test/fixtures/guard-cases.json, test/cleanroom.mjs
+**Design constraints:** Tests only: change mcp/cleanroom.mjs only if a new fixture exposes a real bug, and then the commit body says so. CLAUDE.md's guard-rule protocol: names end ' (R2-03)', append with indent=1 and no ASCII escaping, policy "template", cwd __ROOT__, no existing fixture changes. no-gnu-sed-inplace: test source builds an in-place sed through the existing SED variable.
+**Acceptance tests:** Denied, reason protected path: .*: 'sed --expression=s/a/b/ -i .mcp.json' and 'sed --e=s/a/b/ -i .mcp.json' (both fail when sedScan's 'if (!hasValue && i + 1 < args.length) skip.add(++i);' loses '!hasValue &&', because -i is then swallowed as the value). Allowed: "((cd src); cat <<'EOF' > notes.txt" newline '$(rm -rf .kukulu)' newline 'EOF' newline ')' (a subshell holding a quoted heredoc, whose body is data; fails when arithmeticEnd's 'return command[i - 1] === ")" ? i : -1;' becomes 'return i;'). test/cleanroom.mjs: the sedInPlace table gains ["--expression=s/a/b/", "-i", "f"] as true. Both mutants survived the targeted cleanroom suite (1371/1371) in round 2.
+**Out of scope:** Any change to the guard's behavior; other sed options; other command words.
+**Verification:** kukulu_verify with the files touched; node scripts/cleanroom-guard.mjs --self-test templates/cleanroom.example.json before committing.
+**Depends on:** R2-02
+
+### R2-04: cargo test refusal: compare each cargo test with its own --
+
+**Goal:** Every cargo test in a mutation.targeted command is refused when its {filter} is not after a standalone -- that follows that cargo test, whatever -- another command in the line carries.
+**Files touched:** mcp/server.mjs, test/routing.mjs
+**Design constraints:** SPEC 6 F-04 and principles 5 and 9; server-synchronous. In validateMutation, for each cargo occurrence whose next non-option word (k) is test, take the first -- after k and the first word containing {filter} after k; refuse when no -- follows k or when that filter comes before it. The refusal text is unchanged, so docs and CHANGELOG need no change. Today dashes and filterAt are computed once for the whole command (mcp/server.mjs:982-983), so cargo fmt -- --check && cargo test {filter} loads.
+**Acceptance tests:** test/routing.mjs: 'a cargo test whose only -- belongs to an earlier command is refused' (cargo fmt -- --check && cargo test {filter}, asserting the full F-04 message, which fails at HEAD); 'cargo fmt -- --check && cargo test -- {filter} loads'. All existing cargo assertions keep passing.
+**Out of scope:** cargo nextest; shell parsing of && and ; beyond word order; kukulu_mutate's filter quoting.
+**Verification:** kukulu_verify with the files touched.
+**Depends on:** none

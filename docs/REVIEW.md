@@ -1,88 +1,71 @@
 # Review: build/2026-11-11 (Kūkulu 0.8.1)
-Round: 1
+Round: 2
 
 **Verdict: CHANGES REQUESTED**
 
-Reviewed all 21 task commits from `36df873` to `6c85f34` against SPEC v0.8.1 and PLAN.md. I ran `kukulu_verify` myself. `npm run lint`, `pre-commit` and `npm test` pass (4,720 assertions in 15 suites). The constraints result is `ok: false`, and finding 1 explains why. I also ran 12 mutants through `kukulu_mutate` and checked the guard against the merge base's `mcp/cleanroom.mjs` (a copy of `git show 36df873:mcp/cleanroom.mjs`, with both copies' `evaluate` given the same payloads).
+Reviewed the round-1 fix commits `ea1a1c9` to `135b775` (R1-01 to R1-04) from `2f92562` to `7c49fa8`, against SPEC v0.8.1, PLAN.md's `## Review fixes (round 1)` and the round-1 findings. I ran `kukulu_verify` myself. All 33 constraints are `ok` with no hits, so R1-01 worked. Every suite passes (`state`, `implement`, `review`, `routing`, `cleanroom`, `attest` and the rest) except `plugin`, which fails one assertion. `npm run lint` and `pre-commit` fail on that same check, and finding 1 explains it. I ran 8 mutants through `kukulu_mutate` on the round's files. I also ran the guard forms below through both HEAD's `evaluate` and the merge base's (`git show 36df873:mcp/cleanroom.mjs` in a temp directory), and checked each against real bash.
+
+`prChecks` is `fail`. Four checks fail on PR #6: `test (node 22)`, `test (node 24)`, `test (node 26)` and `pre-commit (yamllint / shellcheck / markdownlint / gitleaks)`. `test (no gh on PATH)` was pending. `gitleaks`, `actionlint`, `site checks` and Cloudflare Pages pass. The job logs show that every failure is the single `check-names` line of finding 1.
 
 ## Findings
 
-### 1. Category 1: the constraint `no-hardcoded-mcp-timeout` matches its own definition (`docs/kukulu.json:772-821`)
+### 1. Category 3: CI and local lint are red on `docs/PLAN.md:525` (`check-names`)
 
-The rule's `paths` include `docs/`, and its `exclude` does not list `docs/kukulu.json`. That file holds the rule's own description, its pattern and its `shouldMatch` fixtures, so the scan reports 10 hits there on every run. `kukulu_verify` has therefore returned `ok: false` on every task of the flight. It also blocks a `kukulu_task_done` log that names the value. `kukulu_mutate` reports every mutant as "killed: constraint no-hardcoded-mcp-timeout caught the mutation", even when the test command passed, so each mutate result has to be read by hand (logged as feedback).
+`scripts/check-names.mjs` reports `docs/PLAN.md:525: the display name is written Kūkulu in prose, with the macron; ASCII spellings belong in code spans only`. The line is R1-01's **Out of scope** field. It is text that my own round-1 submission put into PLAN.md through `kukulu_review_submit`: the display name spelled in ASCII, in prose. The implementer correctly declined to edit PLAN.md by hand.
 
-The code itself is clean: no file outside `.mcp.json` and `docs/kukulu.json` spells the value. The rule is wrong, not the code.
+- **What breaks:** `npm run lint`, `pre-commit run --all-files` and the `plugin` suite all fail, and so do the four CI checks named above. `kukulu_verify` cannot return `ok: true` while this stands.
+- **Minimal fix:** in `docs/PLAN.md:525`, replace the ASCII spelling with the display name written with U+016B. Change no other byte of PLAN.md. This is the one hand edit of PLAN.md this review sanctions, because no tool can amend a committed fix section. (Task R2-01.)
+- Logged as pipeline friction: `kukulu_review_submit` does not run the name check on the text it appends.
 
-- **What breaks:** no task can ever show a green verify, and a real violation of this rule or any other is hidden behind a result that is always red.
-- **Minimal fix:** add `"docs/kukulu.json"` to that rule's `exclude`. Change nothing else in the rule. (Task R1-01, from the planner's config.)
+### 2. Guard regression: `<<` inside `${...}` or `$[...]` is still read as a heredoc (`mcp/cleanroom.mjs:599-696`, `stripHeredocs`)
 
-### 2. Guard regression: a misdetected heredoc hides the commands after it (`mcp/cleanroom.mjs:599-668`, `stripHeredocs`)
+R1-02 taught `stripHeredocs` to skip `<<` inside `$((...))`, `((...))` and comments. It still treats a `<<` inside a parameter expansion `${...}` or inside the old arithmetic form `$[...]` as a heredoc operator. The unterminated "body" then swallows every later line. Bash runs those lines, as the last column shows. Each form below was denied at the merge base and is allowed at HEAD (`\n` is a newline):
 
-`stripHeredocs` treats any unquoted `<<` with a non-empty, non-numeric word as a heredoc operator. An unterminated body then runs to the end of the command. When the guard sees a heredoc that bash does not, every later line is swallowed as data. Each form below is denied at the merge base and allowed now:
+| Command | merge base | HEAD | bash runs the second line |
+|---|---|---|---|
+| `echo $[1<<n]\nrm -rf .kukulu/cleanroom` | denied | allowed | yes |
+| `echo ${x#<<y}\nrm -rf .kukulu/cleanroom` | denied | allowed | yes |
+| `echo ${x:-<<y}\nrm -rf .kukulu/cleanroom` | denied | allowed | yes |
+| `y=${x/<</z}\nrm -rf .kukulu/cleanroom` | denied | allowed | yes |
 
-| Command (`\n` is a newline) | merge base | now |
-|---|---|---|
-| `echo $((1<<n))\nrm -rf .kukulu/cleanroom` | denied | allowed |
-| `(( x = y << z ))\nrm -rf .kukulu/cleanroom` | denied | allowed |
-| `echo hi # see a<<b\nrm -rf .kukulu/cleanroom` | denied | allowed |
-| `cat <<E'OF' > x.txt\nhi\nEOF\nrm -rf .kukulu/cleanroom` | denied | allowed |
-| `cat <<"E"OF > x.txt\nhi\nEOF\nrm -rf .kukulu/cleanroom` | denied | allowed |
+This is principle 1's first case: a regression of an always-protected write by `rm -rf`, a command word the rules name. It is the same class as round-1 finding 2, which R1-02 fixed only for `((`.
 
-These are regressions (principle 1's first case) of an always-protected write by `rm -rf`, a command word the rules name.
+For contrast, `echo ${#x}<<y` ends the expansion before the `<<`. Bash reads that as a real heredoc, and the guard does too, which is correct.
 
-- **Arithmetic and comments:** in `$((…))` and `((…))`, `<<` is a shift, and inside a comment it is not an operator. The implementer handled only an all-digit operand.
-- **Partly quoted words:** bash removes the quotes from the whole delimiter word and treats it as quoted. The guard looks for the literal `E'OF'` and never finds it.
-- **Minimal fix:** ignore `<<` inside an arithmetic `$((…))` or `((…))` and inside a `#` comment, and apply quote removal to the whole delimiter word. (Task R1-02.)
+- **Minimal fix:** in `stripHeredocs`, copy a `${...}` region through to its matching `}` (quote-aware, nesting-aware) and a `$[...]` region through to its matching `]`, without looking for `<<` inside them. This works the way the `((` branch does. (Task R2-02.)
 
-### 3. Guard regression: GNU sed's abbreviated `--in-place` is judged a read (`mcp/cleanroom.mjs:1528`, `sedScan`)
+### 3. Category 3: two mechanics R1-02 added that no test covers (mutation survivors in `mcp/cleanroom.mjs`)
 
-GNU `getopt_long` accepts any unambiguous prefix of a long option, and `--i` can only mean `--in-place`. So `sed --in s/a/b/ .mcp.json` and `sed --in-pl=.bak s/a/b/ .mcp.json` edit in place. Both were denied at the merge base and are allowed now, because `sedScan` matches only `--in-place` and `--in-place=`. The same applies to prefixes of `--expression`, `--file` and `--line-length`.
+Each of these passed the targeted `cleanroom` suite (1371/1371), which includes the gate's guard self-test:
 
-- **Minimal fix:** treat a long option that is a prefix of one of those four (at least `--i`, `--e`, `--f`, `--l`) the way the full name is treated. (Task R1-02.)
+- `if (!hasValue && i + 1 < args.length) skip.add(++i);` in `sedScan` changed to `if (i + 1 < args.length) skip.add(++i);` survived. An attached `--expression=<script>` (or `--e=…`, `--file=…`, `--l=…`) would then swallow the next token. So `sed --expression=s/a/b/ -i .mcp.json` would skip `-i` and be judged a read. It is denied at HEAD and at the merge base, so the mutant is a silent regression no fixture pins.
+- `arithmeticEnd`'s `return command[i - 1] === ")" ? i : -1;` changed to `return i;` survived. The `))` check is what tells `((cd src); cat <<'EOF' …)`, a subshell holding a heredoc, apart from arithmetic. HEAD allows `((cd src); cat <<'EOF' > notes.txt\n$(rm -rf .kukulu)\nEOF\n)`, because the quoted body is data (SPEC A-02). Under the mutant it is denied. No fixture pins it.
 
-### 4. Category 3: `mcp/cleanroom.mjs` mechanics no test covers (mutation survivors)
+Killed this round:
 
-Each of these passed `node test/cleanroom.mjs` (1359/1359) and both guard self-tests (574 and 570 cases):
+- the comment branch disabled;
+- `--in-place`'s minimum prefix raised to 3;
+- the backslash-quoted delimiter's `quoted = true` deleted;
+- the R1-04 `cargo` loop cut to the first `cargo`;
+- the profile joiner `"."` changed to `" "`;
+- R1-03's `signed = archivedSigning === "on"` changed to `false`.
 
-- `if (t === "-i" && args[i + 1] === "") skip.add(++i);` deleted (`:1535`). The BSD empty suffix becomes the script, and the script becomes a write target. Today's fixtures pass only because `s/a/b/` resolves to an unprotected path.
-- `c === "e" || c === "f" || c === "l"` changed to drop `l` (`:1538`). The value of `-l` becomes the script, and the script becomes a write target.
-- `if (word === "" || /^\d+$/.test(word))` changed to `if (word === "")` (`:649`). The digits-only arithmetic rule has no test.
+(Task R2-03.)
 
-For contrast, these were killed: removing the shell-read body judgment (by the `bash <<'EOF'` fixture) and the verifier's `sameModel` call in check 12 (by `test/attest.mjs`). (Task R1-02.)
+### 4. Category 5: the `cargo test` refusal uses the command's first `--`, not the one after that `cargo test` (`mcp/server.mjs:982-990`)
 
-### 5. Category 3: `kukulu_release` results that no test covers (`mcp/server.mjs:5404`, `:5424`, `:5432`)
+R1-04 made `validateMutation` loop over every `cargo`. But `dashes` and `filterAt` are still computed once for the whole command, so the check compares against the first `--` anywhere. `cargo fmt -- --check && cargo test {filter}` therefore loads, although its `cargo test` gets `{filter}` with no `--` of its own. SPEC F-04 requires that refusal. The reverse order, `cargo test {filter} && cargo fmt -- --check`, is refused only by accident of the same comparison.
 
-Each of these passed `node test/review.mjs` (491/491):
-
-- `signed = archivedSigning === "on"` changed to `signed = false`. SPEC C-02 step 5 requires the signing outcome to be read from `origin/<base>:<archived.dir>/state.json`, and no test checks that a tag is signed because of it. This is an untested SPEC requirement.
-- `localArchived?.slug === archived.slug ? "current"` changed to `false ? "current"`. The `"current"` value of `localState` is never asserted.
-- `fastForward`'s `"up to date"` changed to always `"done"`. One of SPEC's five values is never asserted.
-
-The killed control: making the timeout boundary `>` instead of `>=` failed four `test/routing.mjs` assertions. (Task R1-03.)
-
-### 6. Category 5: the profile `policies` refusal does not match SPEC's text (`mcp/server.mjs:1503`)
-
-SPEC D-02 gives `… profiles.fast.policies.push must be a boolean`. The server passes `where = "<path> profiles.<name>"`, and `validatePolicies` appends ` policies.<key>`, so the message reads `<path> profiles.fast policies.push must be a boolean`, with a space where SPEC has a dot. The test (`test/routing.mjs`, "a bad profile policies shape refuses naming the profile") pins the space form. PLAN's own parenthetical gives SPEC's form. (Task R1-04.)
-
-### 7. Category 5: the `cargo test` refusal checks only the first `cargo` (`mcp/server.mjs:979`)
-
-`words.indexOf("cargo")` finds only the first `cargo`. So `cargo build --release && cargo test {filter}` loads, although it runs `cargo test` with `{filter}` before `--`, which SPEC F-04 says must be refused. (Task R1-04.)
-
-### 8. Category 5 (documentation): README's tool table still describes the old `finalize` default (`README.md:229`)
-
-The `kukulu_pr_finalize` row says the tool "mark[s] the draft PR ready and, unless `breaking`, enable[s] auto-merge" unconditionally. SPEC §6 G requires README to state the new default wherever a sentence states it. (Task R1-04.)
+- **Minimal fix:** for each `cargo … test` occurrence at word `k`, take the first `--` after `k` and the first `{filter}` word after `k`. Refuse when the filter comes before that `--`, or when no `--` follows. The refusal text does not change. (Task R2-04.)
 
 ## Spec issues
 
-- **A-02's shell rule lets `cat <<EOF | bash` through.**
-  - What changed: `cat <<EOF | bash` / `rm -rf .kukulu/cleanroom` / `EOF` was denied at the merge base, by accident of line splitting. It is allowed now, because the segment that owns the body is `cat`.
-  - Why SPEC allows it: SPEC says a body is commands only when the owning segment's command word is a shell, and that "a denial may become an allow only when its body is data handed to a non-shell command".
-  - What I did: the equivalent `printf '…' | bash` was never modelled, so I queued no task. The owner may want a later rule: a heredoc whose pipeline ends in `sh`, `bash`, `zsh`, `dash` or `ksh` is read as commands.
-- **A-01's cluster rule is broader than sed.**
-  - SPEC says any short-option cluster that contains `i` is in place. The implementation scans the cluster letter by letter and stops at `e`, `f` or `l`, whose value is the rest of the token. So `sed -ei .mcp.json` (the script is `i`) is judged a read.
-  - That matches real sed and SPEC's goal ("a `sed` that does not edit in place is never judged a write"), but not the letter of the rule. I recommend changing SPEC's wording rather than the code.
+- **A-02's unterminated heredoc.** Every misdetected heredoc found so far is unterminated (its "delimiter" never appears as a line). When a heredoc is truly unterminated, bash warns and runs nothing after it. So judging an unterminated body as commands, as well as data, would cost nothing in a real command and would close this whole class of regression. SPEC says an unterminated body "runs to the end of the command" and is data, so I queued only the narrow fix. The owner may want that rule in a later release.
+- **Carried from round 1, still open for the owner:**
+  - A heredoc piped into a shell (`cat <<EOF | bash`) is judged as data.
+  - A-01's "a cluster that contains `i`" wording is broader than the implementation's getopt reading of `-e`/`-f`/`-l` values.
 - **Known-gap candidates:**
-  - A heredoc piped into a shell (`cat <<EOF | sh`) is judged as data. This is the case above.
+  - A heredoc piped into a shell (`cat <<EOF | sh`) is read as data.
 
 ## Manual checks still owed
 
@@ -95,16 +78,11 @@ From HANDOFF.md, all NOT VERIFIED (human):
 
 ## Notes
 
-- `kukulu_next`'s `TOOLS` description still lists its result as `{ stage, …, reason, prompt, streams? }` without `description`. `docs/mcp-tools.md` and go-flight do name it, so a model reading only the tool schema will not see it.
-- P1-05: with no `Version:` line, the suggestion reads `<slug>-2 or <slug>-2`.
-- Interpretation choices in HANDOFF.md:
-  - P1-04 judges `localState` before the fast-forward. This is the more useful reading.
-  - P2-03 always lists the group lines in `SIMILARITY.md`. SPEC's "names each group's negative and positive on its own line" allows it.
-  - P3-03 leaves `kukulu_run_resume` out of the skill. This is forced by the plugin test.
-  - P3-04 refuses a `cargo test` with no `--`. This is consistent with SPEC's "before a standalone `--`".
-- Verified with no finding:
-  - C-01's reorder, the D-01 single default and the D-02 layering.
-  - The F-01 escapes, the F-02 `taskLog` and the F-03 tool line.
-  - E-02 duplicated byte for byte, with the shared table in `test/attest.mjs`.
-  - No existing guard fixture changed; the fixture diff is additions only.
-  - No `.gitignore`, CI or editor-config edits.
+- **R1-01 to R1-04 verified:**
+  - R1-01's exclude is the only change to `docs/kukulu.json`, and every constraint is clean.
+  - R1-02's ten fixtures all carry `(R1-02)`, and `git diff 36df873..HEAD -- test/fixtures/guard-cases.json` has no removed lines.
+  - R1-03's three tests each kill their round-1 mutant.
+  - R1-04's profile messages match SPEC D-02's dotted form, and README's finalize row is right.
+- Carried from round 1: `kukulu_next`'s `TOOLS` description still omits `description` from its result shape.
+- Carried from round 1: P1-05's suggestion reads `<slug>-2 or <slug>-2` when the SPEC has no `Version:` line.
+- R1-02's interpretation (an unclosed `((` is not arithmetic) is the safe reading: the heredoc is then still detected and its body read as data, as at a plain `<<`.
