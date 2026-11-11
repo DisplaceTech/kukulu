@@ -8,7 +8,7 @@ Started: 2026-11-11T18:32:19.610Z
 - [x] P0-01 sed is a write only in place
 - [x] P0-02 Heredoc bodies are data unless a shell reads them
 - [x] P0-03 Phase 0 end: push and record the manual check
-- [ ] P1-01 The plugin sets its own MCP timeout
+- [x] P1-01 The plugin sets its own MCP timeout
 - [ ] P1-02 A command timeout the client would cut short is refused
 - [ ] P1-03 No clean-room genesis after the archive
 - [ ] P1-04 kukulu_release reads the merged flight from origin
@@ -42,3 +42,7 @@ Work is in commit 2360d70 (a feedback commit landed after it, so d8622ce is an e
 ### P0-03 — 01bc90e
 
 Push: done (origin build/2026-11-11). Manual check: NOT VERIFIED (human): in a live clean-room session with claude --plugin-dir ., a read-only sed -n 1p of the log and a heredoc that writes prior-art paths into a scratch file are allowed, and the apostrophe case (cat <<EOF > x.txt / it's fine / EOF / rm -rf .kukulu/cleanroom) is denied.
+
+### P1-01 — a172d62
+
+.mcp.json kukulu entry has timeout (24 hours) after args. New operations.md section Long tool calls; MCP_TOOL_TIMEOUT removed from operations.md and mcp-tools.md; longestCommandTimeoutMs row links the section. Tests in test/plugin.mjs; full npm test passed. Only the pre-existing no-hardcoded-mcp-timeout hits inside docs/kukulu.json remain in verify.
