@@ -24,7 +24,7 @@ Started: 2026-11-11T18:32:19.610Z
 - [x] P3-02 The implementer sees its own task's log
 - [x] P3-03 An owner-only block halts for the owner
 - [x] P3-04 A cargo test filter goes after --
-- [ ] P3-05 CHANGELOG 0.8.1 and the version
+- [x] P3-05 CHANGELOG 0.8.1 and the version
 - [ ] P3-06 Phase 3 end: push and record the manual checks
 
 ## Log
@@ -106,3 +106,7 @@ agents/reviewer.md tools line gains kukulu_run_halt; review-build skill gains th
 ### P3-04 — c0f9a07
 
 validateMutation refuses cargo test (after any -/+ tokens) with {filter} before a standalone -- or with no --; full message per plan. plan-build skill, templates/SPEC.md, operations row and CHANGELOG updated. Tests in routing. Interpretation: a cargo test with no -- is refused; only a token exactly cargo is recognized. Full npm test passed.
+
+### P3-05 — bca723e
+
+Unreleased renamed to 0.8.1 dated 2026-11-11 (Added, Fixed, Changed only); every section 6 requirement already had a line. 0.8.1 in package.json, plugin.json, VERSION and the README badge. Gitignored feedback file got its Addressed in header (not staged). Full npm test passed.
