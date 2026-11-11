@@ -30,7 +30,7 @@ Started: 2026-11-11T18:32:19.610Z
 - [x] R1-02 Guard: heredoc misdetection, abbreviated sed long options, and untested sed and heredoc mechanics
 - [x] R1-03 kukulu_release: test the signing outcome read from origin, localState current and fastForward up to date
 - [x] R1-04 Profile policies messages, cargo test detection on any cargo, and README's finalize row
-- [ ] R2-01 Fix the ASCII display name at docs/PLAN.md:525 that turns lint and CI red
+- [x] R2-01 Fix the ASCII display name at docs/PLAN.md:525 that turns lint and CI red
 - [ ] R2-02 Guard: a << inside ${...} or $[...] is not a heredoc operator
 - [ ] R2-03 Guard tests: sed's attached long-option value and the (( subshell check
 - [ ] R2-04 cargo test refusal: compare each cargo test with its own --
@@ -139,3 +139,7 @@ Added 3 review tests (signed tag from origin's archived state.json with GIT_CONF
 ### R1-04 — 135b775
 
 validatePolicies gains a joiner so profile messages read profiles.<name>.policies.<key>; validateMutation loops over every cargo word; README finalize row says auto-merge only under policies.finalize "auto". routing suite 302/302; full npm test all pass except plugin's check-names on docs/PLAN.md:525 (plan text from reviewer, not editable). Interpretation: profile non-object policies message uses the dotted form too.
+
+### R2-01 — e472f15
+
+Replaced the ASCII display name on docs/PLAN.md line 525 with the macron form (one-line diff). check-names exits 0; kukulu_verify ok. Manual check: PR checks should go green after push.
