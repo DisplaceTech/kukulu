@@ -912,7 +912,7 @@ async function genesisRepo(planOpts = {}) {
   const root = mkDir("kukulu-sed-root-");
   const home = mkDir("kukulu-sed-home-");
   const run = (command) => evaluate(policy, { tool_name: "Bash", tool_input: { command }, cwd: root }, { root, home, progressText: null, policyPath: path.join(root, "docs", "cleanroom.json"), pluginRoot: path.join(home, "plugin-root"), keyPath: path.join(home, "k.pem"), planExists: true });
-  const yes = [["-i"], ["-i.bak"], ["--in-place"], ["--in-place=.bak"], ["-Ei"], ["-ni"], ["-ie"], ["-e", "s/a/b/", "-i", "f"], ["--in"], ["--in-pl=.bak"], ["--in-place"]];
+  const yes = [["-i"], ["-i.bak"], ["--in-place"], ["--in-place=.bak"], ["-Ei"], ["-ni"], ["-ie"], ["-e", "s/a/b/", "-i", "f"], ["--expression=s/a/b/", "-i", "f"], ["--in"], ["--in-pl=.bak"], ["--in-place"]];
   const no = [["-n"], ["-e", "s/a/b/"], ["-n", "-e", "1p", "-e", "2p"], ["-l", "80", "-n"], ["--", "-i"], ["s/a/b/", "f", "--", "-i"], ["--follow-symlinks", "-n"]];
   ok(yes.every((a) => sedInPlace(a) === true) && no.every((a) => sedInPlace(a) === false), "sedInPlace reads -i, -i<suffix>, --in-place, --in-place=<suffix> and a cluster containing i");
   const r1 = run(`${SED} -n 480p .kukulu/cleanroom/log.jsonl`);

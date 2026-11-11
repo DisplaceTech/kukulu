@@ -8057,5 +8057,43 @@
    "cwd": "__ROOT__"
   },
   "expect": "allowed"
+ },
+ {
+  "name": "sed --expression=s/a/b/ -i .mcp.json (R2-03)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "sed --expression=s/a/b/ -i .mcp.json"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "sed --e=s/a/b/ -i .mcp.json (R2-03)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "sed --e=s/a/b/ -i .mcp.json"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "((cd src); cat <<'EOF' > notes.txt NL $(rm -rf .kukulu) NL EOF NL ) (R2-03)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "((cd src); cat <<'EOF' > notes.txt\n$(rm -rf .kukulu)\nEOF\n)"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
  }
 ]
