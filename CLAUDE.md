@@ -82,6 +82,7 @@ Mechanical rules are in the `constraints` of a flight's `docs/kukulu.json`, whic
 - `sandbox-no-escape-flags` (from P2-02): `scripts/sandbox.mjs` never contains `--privileged`, `--cap-add`, `--pid=host`, `--pid", "host`, `--security-opt", "seccomp=unconfined`, `docker.sock` or `podman.sock`, comments included.
 - `relay-not-in-server` (from P2-02): `mcp/server.mjs` never imports `node:net`, `net` or `./relay.mjs`; it reaches the relay only through `spawnSync`.
 - `no-hardcoded-log-socket-timeout`: 2000 is written only as `export const LOG_SOCKET_TIMEOUT_MS = 2000;` in `mcp/cleanroom.mjs`; the hooks and the sandbox read the export.
+- `no-hardcoded-mcp-timeout` (from flight v0-8-1): the per-server MCP tool-call timeout (86400000 ms, 24 h, an ⚠️ ASSUMPTION) is written only in `.mcp.json`'s `kukulu` entry; `mcp/`, `scripts/`, `test/`, the skills, the agents, the docs (SPEC, PLAN, flights and spikes excepted), README and CHANGELOG never spell it, in any form (`86_400_000`, `864e5`, `24 * 60 * 60 * 1000`); the server reads it with `mcpTimeoutMs()` and the tests read the file.
 The reviewer checks these by reading, because no line pattern can express them:
 
 - Refusals before writes; rollback on a failed commit (principle 3). The one sanctioned exception is the clean-room gate, which appends its own `gate` entry to the log before it refuses.
@@ -95,7 +96,7 @@ The reviewer checks these by reading, because no line pattern can express them:
 - `scripts/verify-attestation.mjs` duplicates the chain and signature code of `mcp/cleanroom.mjs` on purpose, and a test feeds both the same fixtures and asserts identical results.
 - `policies.archive`'s default `true` (an owner decision since 0.7.2, not an ⚠️ ASSUMPTION) is written only in `cfgFrom`.
 - ⚠️ ASSUMPTION values each live in one place: the "at least three" sweep only in the review-build skill; the 60-line budget only in the plan-build skill; `review.mutationFixRounds`' 2, `cleanroom.similarity.separationMargin`'s 0.0 and `cleanroom.idleGapHours`' 3 only in `cfgFrom`; the 50 ms hook budget only in `test/cleanroom.mjs`; 4000 only in `TARGET_MAX`; the 100 ms log-socket budget only in `test/sandbox.mjs`; `MODEL_FAMILIES` only in `mcp/cleanroom.mjs`.
-- `scripts/verify-attestation.mjs` duplicates `KNOWN_LIMITS`, `knownLimitsFor` and the `level`-aware `coverageGaps` of `mcp/cleanroom.mjs` on purpose, and `test/attest.mjs` feeds both copies the same inputs.
+- `scripts/verify-attestation.mjs` duplicates `KNOWN_LIMITS`, `knownLimitsFor`, the `level`-aware `coverageGaps` and (from P2-05 of flight v0-8-1) `sameModel` of `mcp/cleanroom.mjs` on purpose, and `test/attest.mjs` feeds both copies the same inputs.
 - The controller and the checkpoint key stay outside the boundary: nothing in `scripts/sandbox-entry.mjs` or `mcp/relay.mjs` reads a key, writes `.kukulu/`, or opens a network connection except the loopback bridge; `scripts/sandbox.mjs` is the only file that spawns a container engine.
 - Every `spawnSync("git", …)` in `mcp/server.mjs` goes through `gitArgv` once P2-08 of flight v0-8-0 lands, so the sandbox's `-c core.hooksPath` and `-c core.fsmonitor=false` reach every git call.
 
@@ -280,6 +281,38 @@ Vocabulary fixed for every task (SPEC §5, §6):
 - Entry kinds added: `egress` (the proxy's decisions), `stage` (`kukulu_next`'s start and end), `usage` (SubagentStop token sums). Entries reported from inside the boundary carry `data.source: "box"`.
 - The verifier: check 11 `enforcement`, check 12 `roles`; `--expect clean-room|control-positive`, `--require-enforcement <level>`; exit 0 pass, 1 fail, 2 usage, 3 `CONTROL (positive)`. `ENFORCEMENT_LEVELS` is `hook` < `container+proxy` < `container+proxy+audit`; `knownLimitsFor("hook")` has ten texts, `knownLimitsFor("container+proxy")` five.
 - The sandbox: container `kukulu-<project id>` (16 hex of the real root's SHA-256), home volume `kukulu-<id>-home`, runtime dir `$XDG_RUNTIME_DIR/kukulu/<id>/` (else `~/.cache/kukulu/run/<id>/`) holding `controller.sock`, `log.sock`, `proxy.sock`, `hooks-empty/`, `run.json`; inside, `/run/kukulu/*.sock`, `127.0.0.1:3128`; env `KUKULU_CONTROLLER_SOCKET`, `KUKULU_LOG_SOCKET`; the controller child gets `KUKULU_SANDBOX`, `KUKULU_SANDBOX_ENGINE`, `KUKULU_SANDBOX_HOOKS_PATH`. The policy's image digest is the engine's image id.
+- Refusal texts are quoted in PLAN.md; copy them verbatim.
+
+SPEC.md wins over PLAN.md, and PLAN.md wins over code comments.
+
+## Flight v0-8-1 notes
+
+This flight builds Kūkulu 0.8.1 (SPEC §1): a patch with no new tools, no removed tools and no renamed input fields. The plugin running the flight is the installed 0.8.0, so none of the new behavior is active while the flight runs; where earlier flights' notes disagree with these, these win. This repository has no `docs/cleanroom.json`, so the guard never fires here.
+
+- Every task is serial. `baseBranch` is `main`; build branches are `build/<date>`. The draft PR targets `main`; `policies` is `{ "archive": true, "finalize": "ready" }` because the running 0.8.0 still defaults `finalize` to `"auto"`.
+- The tool count stays 26: `docs/mcp-tools.md` keeps "Twenty-six tools" and README "twenty-six tools".
+- Never edit `docs/SPEC.md`, `docs/flights/`, `docs/plans/`, `site/` or `docs/site/`. `docs/feedback/2026-11-11-project-g.md` is gitignored: only P3-05 edits it, only its header, and never stages it.
+- `CHANGELOG.md`: P0-01 creates `## [Unreleased]` above `## [0.8.0] — 2026-10-27`; lines go under `### Added`, `### Changed` or `### Fixed`, each citing its feedback item (`project-g F-19`) or requirement; no Breaking changes heading. P3-05 renames the heading.
+- `docs/HANDOFF.md` has no "do not merge" line (SPEC §6 G).
+- The macron letter: in prose Kūkulu; in server, script and test source the Unicode escape of U+016B (backslash, `u`, `016b`); in a `kukulu_task_done` log or a reason only inside the display name.
+- 86400000 is written only in `.mcp.json` (`no-hardcoded-mcp-timeout`): docs and the changelog say "24 hours", and a test reads the file or compares against 3600000.
+- A test that needs a plugin with a different `.mcp.json` uses `test/harness.mjs`'s `tempPlugin()` (it copies `mcp/`, `scripts/`, `hooks/`, `templates/`, `agents/`, `skills/`, `test/fixtures/` and `package.json`, not `.mcp.json`), writes the `.mcp.json` it needs into the copy, and starts `startServer(repo, { server: <copy>/mcp/server.mjs })`.
+- Release tests use `test/review.mjs`'s `releaseRepo` (a bare origin from `mkBareRemote`, `mkFakeGhBin` with `pr-view.json`); recorded `gh` output lives in `test/fixtures/gh/`.
+
+Guard vocabulary (SPEC §3 principle 1, §6 A):
+
+- The guard is a tripwire, not a sandbox. Change only the rule the task names; an unmodelled spelling is a known gap, not a defect. Follow the guard-rule protocol; fixture names end `(P0-01)` or `(P0-02)`; the self-test's plugin root is `__HOME__/plugin-root`.
+- `sedInPlace(args)` and `stripHeredocs(command)` are new exports of `mcp/cleanroom.mjs`; `READ_FAMILY`, `WRITE_FAMILY`, `CHECKPOINT_KEYS` and the twelve `KNOWN_LIMITS` ids never change. The `indirect` text gains `sed's w command` after `perl -i`, identically in both copies.
+- A heredoc body is data; it is judged as commands only when the owning segment's command word is `sh`, `bash`, `zsh`, `dash` or `ksh` with no `-c`; an unquoted-delimiter body's `$(…)` and backticks are judged; a quoted one is not scanned.
+
+Server vocabulary (SPEC §6 B–F):
+
+- `mcpTimeoutMs()` reads `<plugin root>/.mcp.json` once per process; `cfgFrom(c, planIds, limit = mcpTimeoutMs())`; the refusal text is SPEC B-02's, with `docs/kukulu.json commandTimeoutMs <n> …` for the key itself.
+- `nextDecision`: the mode-break halt, then the `halted`, `awaitingSigning` and archived-done returns, then genesis and the gate (C-01).
+- `kukulu_release` reads `origin/<base>:.kukulu/state.json`; its result gains `flight`, `localState` (`"current"` or `stale: …`) and `fastForward` (C-02). `kukulu_plan_commit`'s slug collision is problem check `flight` (C-03).
+- `policies.finalize` defaults to `"ready"` in `cfgFrom` only (an owner decision); `DEFAULT_STATE.policies` is `cfgFrom({}, null).policies`. `validatePolicies(policies, where)`, `resolvePolicies()` → `{ policies, sources }`, precedence default < global < profile < project; `kukulu_next` says `finalize=<f> (<source>)`.
+- A similarity pair's `group` (slug, `PAIR_ID`) is kept in the normalized config only when given; every row carries `group` (`default` when none). `sameModel(declared, reported)` is exported by both `mcp/cleanroom.mjs` and `scripts/verify-attestation.mjs`.
+- `description` is `Kūkulu <stage>`, `Kūkulu <stage> round <n>` or `Kūkulu stream <name>`, absent on `done` and `halt`. `taskLog` is `pr.logs[id] ?? null`.
 - Refusal texts are quoted in PLAN.md; copy them verbatim.
 
 SPEC.md wins over PLAN.md, and PLAN.md wins over code comments.

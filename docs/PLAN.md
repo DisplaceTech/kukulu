@@ -1,0 +1,515 @@
+# Kūkulu 0.8.1 build plan
+
+Derived from docs/SPEC.md v0.8.1 on 2026-11-11. SPEC.md wins over this file.
+
+## Decisions
+
+- Phases → SPEC §8's four phases, in order, none merged: the guard (A), long tool calls and after the flight (B, C), policies and evidence (D, E), stage handoffs, documentation and release (F, G). Inside a phase the order is SPEC §6's.
+- The base is green → `main` at `5b08f0f` passes `npm run lint`, both guard self-tests (554 and 550 cases) and `npm test` (4,588 assertions in fifteen suites), measured while planning. No base-fix task is needed.
+- Parallel streams → none; the plan is fully serial, as SPEC's size recommendation says. Nearly every task edits `mcp/server.mjs`, `mcp/cleanroom.mjs`, `CHANGELOG.md` or `docs/operations.md`.
+- Flight slug → `v0-8-1`, the operator's slug (`flight=v0-8-1`), which SPEC's size recommendation also names. `docs/flights/v0-8-1/` does not exist.
+- `baseBranch` → `main`, the branch the plan is committed on and the one SPEC §5.1 names; build branches are `build/<date>`.
+- `policies` → `{ "archive": true, "finalize": "ready" }` exactly as SPEC §5.1 says, because the running 0.8.0 server still defaults `finalize` to `"auto"`. `maxRounds` and `maxRoundsHard` stay 3 and 6.
+- Constraints → the 32 rules of `docs/flights/v0-8-0/kukulu.json` with identical ids, descriptions, patterns, flags, paths, excludes and fixtures (principle 7), plus `no-hardcoded-mcp-timeout` (§5.4). The only edit to a carried rule is that `sandbox-network-none`, `sandbox-no-escape-flags` and `relay-not-in-server` lose their `from: "P2-02"`: that task landed in 0.8.0, so the rules are active from the start, and keeping the gate would have tied them to this flight's own P2-02 (see Spec issues). The `extraVerify` entries lose their `from: "P2-01"` for the same reason. The file is ASCII-only, with JSON escapes for non-ASCII characters.
+- `extraVerify` and `mutation.targeted` → SPEC §7: the two guard self-tests as one `&&` command on the five clean-room paths; `npm run check:site` on `site/`, `docs/site/` and the three site scripts; `suite` = `node test/{filter}.mjs`.
+- §9 Q1 (two flights) → this flight has the fixes; OpenCode and OpenRouter are 0.9.0's. Owner decision of 2026-11-11.
+- §9 Q2 (`finalize`'s default) → `"ready"`, with global and profile overrides (P2-01, P2-02). Owner decision of 2026-11-11.
+- §9 Q3 (similarity groups) → supported (P2-03, P2-04). Owner decision of 2026-11-11.
+- §9 Q4 (the MCP timeout value) → 24 h, an ⚠️ ASSUMPTION written in `.mcp.json` only (P1-01); the constraint `no-hardcoded-mcp-timeout` keeps the number out of every other file, so docs and tests describe it as "24 hours" and read it from the file.
+- §9 Q5 (no progress heartbeat) → deferred to 0.9.0; nothing in this plan touches the transport.
+- §9 Q6 (the reviewer's halt) → a tool grant and a skill rule (P3-03); `kukulu_review_submit` does not change.
+- A-01's mechanism → `sed` stays in both family lists; a new exported `sedInPlace(args)` in `mcp/cleanroom.mjs` decides whether a `sed` segment is a write, and rule 6d runs for `sed` only when it says so (P0-01). A `--` token ends the option scan (anything after it is an operand). The `w` command is a known gap.
+- A-02's mechanism → a new exported `stripHeredocs(command)` in `mcp/cleanroom.mjs` returns the command text with every heredoc body and delimiter line removed, plus the bodies with what owns them; `splitSegments` strips heredocs before it cuts, and `bashVerdict` judges a shell-read body as a further command line and an unquoted-delimiter body's substitutions as today (P0-02).
+- B-02's `commandTimeoutMs` → checked directly, before the commands, with `docs/kukulu.json commandTimeoutMs <n> is not below …` (the SPEC sentence without `.timeoutMs`); every command entry is then checked with the SPEC's `<where>.timeoutMs <n>` form. `mcpTimeoutMs()` reads `<plugin root>/.mcp.json` once per process (the file does not change while the server runs) and `cfgFrom` takes the limit as a third parameter, defaulting to `mcpTimeoutMs()`, so the archived-config path gets the same check (P1-02).
+- C-01's order → `kukulu_next`'s mode-break halt stays where it is (it writes nothing); the genesis write and the gate move below the `halted`, `awaitingSigning` and archived-done returns (P1-03).
+- C-02's result → `localState` is `"current"` when the local state's `archived.slug` equals origin's, else `stale: local <base> names <old slug>; origin/<base> names <slug>` (with `no archived flight` for a local state that has none); `fastForward` takes the five SPEC values verbatim; `finalizeConfig` reads `docs/kukulu.json`, else the archived `kukulu.json` under the local state's `archived.dir`, else the defaults (P1-04).
+- C-03's refusal → one more entry in `kukulu_plan_commit`'s problem list, with `check: "flight"` and the SPEC's text as its message, so it is listed with every other problem and nothing is written (P1-05).
+- D-01's second copy → `DEFAULT_STATE.policies` becomes `cfgFrom({}, null).policies`, so `kukulu_status.policies` before the first run lists every policy key with its default and no literal can disagree with `cfgFrom`. `kukulu_config_show` gains the resolved `policies` in P2-01, because D-01's test reads `finalize` from it; P2-02 adds `policySources` (P2-01, P2-02).
+- D-02's messages → the project file's messages are unchanged; a global or profile message starts with the global file's absolute path (`<path> policies.<key>` or `<path> profiles.<name>.policies.<key>`) and, for an enum key, ends with `; got <JSON value>`, as SPEC's examples show (P2-02).
+- D-02's sentence → `Run policies: signing=<s>, push=<on|off>, pr=<p>, finalize=<f> (<source>).` where `<source>` is `default`, `global`, `profile:<name>` or `project` (P2-02).
+- E-01's config → a normalized pair carries `group` only when the policy gave one (`similarity.json`'s `config` stays "as given"); every row carries `group` (`"default"` when none). `SIMILARITY.md` gets one line per group after the statement, and a `group` column in the raw-scores table only when a pair named a group. `scripts/compare-bundles.mjs` reports `similarity.groups.<group>.{negative,positive}` and prints one line per group and metric; its cross-score section uses the `default` group's negative, else the first group's (P2-03, P2-04).
+- F-01's absence → `description` is present on every `plan`, `implement`, `review` and `summarize` result and on every `streams[]` entry, and absent (not `null`) on `done` and `halt` (P3-01).
+- F-04's detection → the command is split on whitespace; `cargo` followed, after any tokens starting with `-` or `+`, by `test` is a `cargo test`; the refusal fires when a token containing `{filter}` comes before the first token that is exactly `--`, or there is no such token (P3-04).
+- B-01's Claude Code version → the implementer cannot browse, so `docs/operations.md` names the per-server `timeout` field and points at Claude Code's MCP documentation for the version that introduced it; the owner may fill the number in (see Spec issues).
+- Changelog → P0-01 creates `## [Unreleased]` above `## [0.8.0] — 2026-10-27`; every task adds its lines under `### Added`, `### Changed` or `### Fixed`, each citing its feedback item (`project-g F-19`) or requirement; there is no Breaking changes heading. P3-05 renames the heading to `## [0.8.1] — <date>`.
+- HANDOFF.md → no "do not merge" line (SPEC §6 G); the handoff lists the manual checks of all four phases.
+
+## Conventions
+
+- Commit template: `CLAUDE.md` `## Commit template`, title `<ID>: <title>`, written to a file and committed with `git commit -F <file>`. `Measurement: n/a` on every task: nothing is tuned or measured in this flight.
+- Every task's verification is `kukulu_verify` with its Files touched: `npm run lint`, `pre-commit run --all-files` and `npm test` (900 s) always; the guard self-tests for the clean-room paths; `npm run check:site` never fires because no task touches the site.
+- Shared protocols are in `CLAUDE.md` `## Task protocols`: the guard-rule protocol (P0-01, P0-02), the clean-room tests protocol (P1-02, P1-03), the config-key protocol (P2-02, P2-03), the changelog protocol (every task), and the flight notes' plugin-copy and fake-origin notes (P1-02, P1-04).
+- Tests are named by their assertion message; the names below are the messages to use. Write the macron letter in test and script source as a Unicode escape.
+- "The running server" is the installed 0.8.0: none of this flight's behavior is active while it runs, so no task may rely on an earlier task's server change being live in the pipeline.
+
+## Phase 0 — The guard
+
+### P0-01: sed is a write only in place
+
+**Goal:** A `sed` segment is judged by rule 6d only when it edits in place, so a read-only `sed -n` of a protected file is allowed and every in-place form stays denied.
+
+**Files touched:** `mcp/cleanroom.mjs`, `scripts/verify-attestation.mjs`, `test/cleanroom.mjs`, `test/fixtures/guard-cases.json`, `docs/cleanroom.md`, `CHANGELOG.md`
+
+**Design constraints:**
+
+- SPEC §6 A-01, §3 principles 1, 3, 6, 8, 11, Appendix B.1; CLAUDE.md's guard-rule protocol (fixture names end `(P0-01)`); `cleanroom-module-pure`, `server-synchronous`, `verifier-node-only`, `no-gnu-sed-inplace` (the fixtures file is exempt; test source spells `-i` only inside a string handed to `evaluate`).
+- `export function sedInPlace(args)` in `mcp/cleanroom.mjs`, `args` being the tokens after the word `sed`: true when an option token before the first operand or between operands is `-i`, `-i<suffix>`, `--in-place`, `--in-place=<suffix>`, or a short-option cluster (`^-[A-Za-z]+$`) containing `i`. The values of `-e`, `--expression`, `-f`, `--file`, `-l` and `--line-length` (the next token, or the rest of a `--expression=…` form) are not option tokens; after a bare `-i` an empty-string token is BSD sed's suffix, not an operand; a bare `--` ends the scan.
+- Rule 6d in `evaluate`: the write-family branch runs for `sed` only when `sedInPlace(rest)` is true. Then the write targets are the file operands only: never the script token(s) `patternOperands("sed", rest)` already marks, never the values of the options above, never the empty token after a bare `-i`. The reason text stays `protected path: <abs path>`. A `sed` that is not in place is judged by the read rules (6b, 6c) exactly as `grep` is, which it already is.
+- `READ_FAMILY` and `WRITE_FAMILY` do not change (`test/cleanroom.mjs`'s "WRITE_FAMILY is the fixed list" still holds).
+- `KNOWN_LIMITS`' `indirect` entry text, in both `mcp/cleanroom.mjs` and `scripts/verify-attestation.mjs`, byte-identical: `Commands that run a command from their arguments (find -exec, watch, parallel, busybox) and programs outside the fixed network and write lists (unlink, shred, perl -i, sed's w command, cargo fetch) are not recognized.` The entry count stays twelve; `test/attest.mjs`'s "the two tables are identical" and `test/cleanroom.mjs`'s known-gaps table check keep passing because the `docs/cleanroom.md` row changes to match (`perl -i`, sed's `w` command, `cargo fetch`, with the backticks the row already uses).
+- `docs/cleanroom.md` rule 6's write-family sentence says `sed` counts only in place: list the four in-place forms, that the script and the values of `-e`, `-f` and `-l` are never targets, and that any other `sed` is judged as a read like `grep`.
+- Required fixtures, policy `template`, cwd `__ROOT__`, names ending ` (P0-01)`. Denied, reason `protected path`: `sed -i 1d .kukulu/cleanroom/log.jsonl`; `sed -ni 1p docs/cleanroom.json`; `sed --in-place=.bak s/a/b/ .mcp.json`; `sed -i.bak s/a/b/ .mcp.json`; `sed -Ei s/a/b/ .mcp.json`; `sed -e s/a/b/ -i .mcp.json`; `sed -i '' s/a/b/ .mcp.json`. Allowed: `sed -n 480p .kukulu/cleanroom/log.jsonl`; `sed -n 1p .mcp.json`; `cd __HOME__/plugin-root; sed -n 2910,2990p mcp/server.mjs` (the self-test's plugin root is `<home>/plugin-root`); `sed -n -e 1p -e 2p docs/cleanroom.json`; `sed -i s/a/b/ src/a.rs`.
+- No existing fixture changes its decision or reason: `sed script over a deny.paths file is denied` stays denied by rule 6b, and the three existing `-i` fixtures stay denied. The commit body's `Interpretation:` line says "no existing fixture changed".
+- `CHANGELOG.md`: create `## [Unreleased]` above `## [0.8.0] — 2026-10-27` with `### Fixed`: the guard judges `sed` as a write only in place, so a read-only `sed -n` of a protected file is allowed (project-g F-01, F-03, F-04, F-06, F-09, F-11, F-15); and `### Changed`: sed's `w` command is listed under the `indirect` known gap (A-01).
+
+**Acceptance tests:** `test/cleanroom.mjs`: "sedInPlace reads -i, -i<suffix>, --in-place, --in-place=<suffix> and a cluster containing i" (a table over the seven denied forms plus `-ni`, `-Ei`, `-ie`, with `-n`, `-e s/a/b/`, `-n -e 1p -e 2p`, `-l 80 -n` and `-- -i` all false); "a read-only sed on the clean-room log is allowed" (direct `evaluate` of the first allowed fixture); "an in-place sed with -e before -i writes only the file operands" (the `-e s/a/b/ -i .mcp.json` form denied with `protected path: <root>/.mcp.json`, and `sed -e s/a/b/ -i src/a.rs` allowed); "sed -i '' keeps the BSD suffix out of the operands"; "KNOWN_LIMITS indirect names sed's w command" (the text contains `sed's w command` and the count is twelve). The existing "WRITE_FAMILY is the fixed list", the known-gaps table assertions, and `test/attest.mjs`'s "the two tables are identical" keep passing; every existing fixture keeps its decision and reason.
+
+**Out of scope:** heredocs (P0-02); modelling sed's script language (`w`, `W`, `s///w` are a known gap by Appendix B.1); any other command word.
+
+**Verification:** `kukulu_verify` (runs both guard self-tests); also `node scripts/cleanroom-guard.mjs --self-test templates/cleanroom.example.json` before committing.
+
+**Depends on:** none
+
+### P0-02: Heredoc bodies are data unless a shell reads them
+
+**Goal:** `splitSegments` keeps a heredoc body out of the segment list, a body is judged as commands only when a shell reads it, and an apostrophe in a body no longer hides the commands after it.
+
+**Files touched:** `mcp/cleanroom.mjs`, `test/cleanroom.mjs`, `test/fixtures/guard-cases.json`, `docs/cleanroom.md`, `CHANGELOG.md`
+
+**Design constraints:**
+
+- SPEC §6 A-02, §3 principles 1, 3, 6, 8, Appendix B.2; CLAUDE.md's guard-rule protocol (fixture names end `(P0-02)`); `cleanroom-module-pure`, `server-synchronous`.
+- `export function stripHeredocs(command)` → `{ text, bodies }`. The operator is an unquoted `<<` that is not `<<<`, then an optional `-`, optional blanks, and a delimiter word written bare, `'word'`, `"word"` or `\word` (the last three are quoted). The body starts on the line after the one holding the operator; two operators on one line read their bodies in order; a body ends at the first line equal to the word (after leading tabs are stripped for `<<-`); an unterminated body runs to the end of the command; quotes inside a body never affect splitting. `text` is the command with each body and its delimiter line removed (the operator and its word stay in the owning segment's text); each of `bodies` is `{ body, quoted, shell }`, where `shell` is true when the owning segment's command word (`commandWord(shellWords(<the segment text up to the operator>))`) is `sh`, `bash`, `zsh`, `dash` or `ksh` and none of that segment's tokens matches `/^-[A-Za-z]*c[A-Za-z]*$/` (the same test `bashVerdict` uses for `sh -c`).
+- `splitSegments(command)` keeps its signature and return type: it splits `stripHeredocs(command).text`, so a direct caller gets segments without body lines.
+- `bashVerdict(command, depth)`: first `stripHeredocs(command)`; judge `text` as today (`extractSubstitutions`, then `splitSegments`); then for each body: when `shell`, `bashVerdict(body, depth + 1)` (every line becomes a segment, judged as if written after the segment); else when not `quoted`, judge each `extractSubstitutions(body).inner` body with `bashVerdict(sub, depth + 1)`; a quoted non-shell body is not scanned. The owning segment's own words and redirections are judged as today, so `cat <<EOF > docs/cleanroom.json` is still denied by its redirection. A body handed to another interpreter (`python3 - <<'EOF'`) is data, under the existing `interpreter` known limit.
+- `docs/cleanroom.md`: a heredoc paragraph under the Bash rules (after rule 6's list item, before "What is always protected") with the operator, body, unterminated, shell-read, substitution and other-interpreter rules above.
+- Required fixtures, policy `template`, cwd `__ROOT__`, names ending ` (P0-02)`, each command written with real newlines in the JSON string. Denied: `cat <<EOF > x.txt` / `it's fine` / `EOF` / `rm -rf .kukulu/cleanroom` (reason `protected path: .*\.kukulu/cleanroom`); `bash <<'EOF'` / `rm -rf .kukulu/cleanroom` / `EOF` (same reason); `cat <<EOF > docs/cleanroom.json` / `{}` / `EOF` (reason `protected path: .*docs/cleanroom\.json`); `cat <<EOF > out.txt` / `$(cat ~/.cargo/registry/a.rs)` / `EOF` (reason `denied path`). Allowed: `cat > build/k.json <<'EOF'` / `{"priorArt": ["~/.cargo/registry/", "~/.cargo/git/"]}` / `EOF`; `cat <<'EOF' > notes.txt` / `$(rm -rf .kukulu)` / `EOF`; `python3 - <<'EOF'` / `print("~/.cargo/git/x")` / `EOF`; `cat <<-EOF > build/a.txt` / a tab-indented body line / tab-indented `EOF` / `echo done`.
+- The existing cleanflate false-positive fixtures with Python heredocs stay allowed. Any existing fixture whose decision changes is listed in the commit body with its reason; a denial may become an allow only when its body is data handed to a non-shell command. Expect none.
+- `CHANGELOG.md` `### Fixed`: a heredoc body is data unless a shell reads it, so prior-art paths in a heredoc no longer refuse the call, and an apostrophe in a body no longer hides the commands after it (project-g F-11, A-02).
+
+**Acceptance tests:** `test/cleanroom.mjs`: "stripHeredocs removes a body and keeps the operator" (bare, `'EOF'`, `"EOF"`, `\EOF`, `<<-` with tabs, two heredocs on one line, an unterminated body, and `<<<` left alone); "splitSegments does not cut inside a heredoc body" (the apostrophe command gives the segments `cat <<EOF > x.txt` and `rm -rf .kukulu/cleanroom`); "a shell-read heredoc body is judged as commands"; "a quoted-delimiter body is never scanned" (the `$(rm -rf .kukulu)` fixture allowed); "an unquoted-delimiter body's substitutions are judged" (the `~/.cargo/registry/a.rs` fixture denied); "the cleanflate Python heredoc fixtures stay allowed"; every existing fixture keeps its decision and reason.
+
+**Out of scope:** `sed` (P0-01); here-strings (`<<<` is unchanged); modelling interpreters other than the five shells.
+
+**Verification:** `kukulu_verify` (runs both guard self-tests); also `node scripts/cleanroom-guard.mjs --self-test templates/cleanroom.example.json` before committing.
+
+**Depends on:** none
+
+### P0-03: Phase 0 end: push and record the manual check
+
+**Goal:** Push the branch and record Phase 0's manual check for a human.
+
+**Files touched:** none
+
+**Design constraints:** SPEC §8 Phase 0. No code change. Push if policies allow and `origin` exists. An empty commit carries the task, subject `P0-03: Phase 0 end: push and record the manual check`.
+
+**Acceptance tests:** none beyond `kukulu_verify` being green.
+
+**Out of scope:** any change to code or docs.
+
+**Verification:** `kukulu_verify`. The log entry carries `Manual check: NOT VERIFIED (human): in a live clean-room session with claude --plugin-dir ., sed -n 1p .kukulu/cleanroom/log.jsonl and a heredoc that writes prior-art paths into a scratch file are allowed, and the apostrophe case (cat <<EOF > x.txt / it's fine / EOF / rm -rf .kukulu/cleanroom) is denied`.
+
+**Depends on:** none
+
+## Phase 1 — Long tool calls and after the flight
+
+### P1-01: The plugin sets its own MCP timeout
+
+**Goal:** `.mcp.json`'s `kukulu` entry carries a per-server `timeout` of 24 hours, the docs describe long tool calls, and nothing else spells the number.
+
+**Files touched:** `.mcp.json`, `test/plugin.mjs`, `docs/operations.md`, `docs/mcp-tools.md`, `CHANGELOG.md`
+
+**Design constraints:**
+
+- SPEC §5.3, §5.5, §6 B-01, §3 principle 8, §9 question 4; constraint `no-hardcoded-mcp-timeout` (the number appears in `.mcp.json` only: the test, the docs and the changelog say "24 hours" or read the file).
+- `.mcp.json`: `"timeout": 86400000` in the `kukulu` entry, after `"args"` and before `"env"`.
+- `test/plugin.mjs`: read `.mcp.json`, assert `Number.isInteger(timeout) && timeout >= 3600000` on `mcpServers.kukulu.timeout`.
+- `docs/operations.md`: a new `## Long tool calls` section right after the `## When something goes wrong` table, covering: Claude Code's idle timeout (`CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT`, default 1800000 ms, 30 minutes, aborting a stdio tool call that sends no response and no progress); the per-server `timeout` of a `.mcp.json` entry as that server's wall clock and a floor under the idle timeout, which the plugin sets to 24 hours, naming the field and pointing at Claude Code's MCP documentation for the version that introduced it (and that the value must stay below Claude Code's default wall clock of about 28 hours); for an older Claude Code, setting `CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT` in the operator's `settings.json` `env`; and that a queued parallel-stream call still waits behind the running one. The two troubleshooting rows that name `MCP_TOOL_TIMEOUT` and the `## Parallel streams` "tool-call timeout" paragraph change to point at the section; `MCP_TOOL_TIMEOUT` no longer appears in `docs/operations.md` or `docs/mcp-tools.md`.
+- `docs/mcp-tools.md`'s `longestCommandTimeoutMs` row names the plugin's limit (`.mcp.json`'s `timeout`, 24 hours) instead of `MCP_TOOL_TIMEOUT`, and links `operations.md#long-tool-calls`.
+- `CHANGELOG.md` `### Added`: the plugin sets its own MCP tool-call timeout of 24 hours in `.mcp.json`, so a long verify or mutate call is no longer cut off at Claude Code's 30-minute idle limit (project-g F-08, F-12, F-14, B-01).
+
+**Acceptance tests:** `test/plugin.mjs`: "the kukulu server entry sets a timeout of at least an hour"; "operations.md has a Long tool calls section and no longer names MCP_TOOL_TIMEOUT" (`## Long tool calls` present; `MCP_TOOL_TIMEOUT` absent from `docs/operations.md` and `docs/mcp-tools.md`).
+
+**Out of scope:** reading the value in the server and refusing a command timeout (P1-02); progress notifications (§9 question 5).
+
+**Verification:** `kukulu_verify`.
+
+**Depends on:** none
+
+### P1-02: A command timeout the client would cut short is refused
+
+**Goal:** The config loader refuses any command whose effective timeout is at or above the plugin's MCP limit, `longestCommandTimeoutMs` counts `mutation.targeted`, and `kukulu_status` reports `mcpTimeoutMs`.
+
+**Files touched:** `mcp/server.mjs`, `test/routing.mjs`, `test/state.mjs`, `docs/mcp-tools.md`, `docs/operations.md`, `CHANGELOG.md`
+
+**Design constraints:**
+
+- SPEC §6 B-02, §3 principles 2, 3, 4, 5, 8, 9; `server-synchronous`, `no-hardcoded-mcp-timeout`, `no-hardcoded-mutation-fix-rounds` (cfgFrom's `review:` line is untouched); CLAUDE.md's clean-room tests protocol for the plugin copy.
+- `mcpTimeoutMs()`: reads `timeout` from `mcpServers.kukulu` of `<PLUGIN_ROOT>/.mcp.json` (`PLUGIN_ROOT` is the server's own directory's parent, already defined). Returns `null` when the file, the `kukulu` entry or the field is missing, the file is not valid JSON, or the value is not a positive integer. Read once per process and cached.
+- `cfgFrom(c, planIds, limit = mcpTimeoutMs())`: when `limit` is not null, after the existing validation: refuse `docs/kukulu.json commandTimeoutMs <n> is not below the plugin's MCP tool-call limit of <m> ms (.mcp.json "timeout"); Claude Code would abort the call before the command ends. Lower it, or split the command.` when `commandTimeoutMs >= limit`; then, for each normalized `verify`, `extraVerify`, `parallel.setup` and `mutation.targeted` entry whose `timeoutMs >= limit`, refuse with `<where>.timeoutMs <n> is not below the plugin's MCP tool-call limit of <m> ms (.mcp.json "timeout"); Claude Code would abort the call before the command ends. Lower it, or split the command.`, where `<where>` is the key the existing command refusals use (`docs/kukulu.json verify[0]`, `docs/kukulu.json extraVerify['site/'][1]`, `docs/kukulu.json parallel.setup[0]`, `docs/kukulu.json mutation.targeted.suite`). The check comes before any file is written, as the rest of `cfgFrom` does.
+- `longestCommandTimeoutMs()` includes every `mutation.targeted` entry's `timeoutMs`. `status()` gains `mcpTimeoutMs: mcpTimeoutMs()` right after `longestCommandTimeoutMs`.
+- `docs/mcp-tools.md`: a `mcpTimeoutMs` row in `kukulu_status`'s table (the plugin's MCP tool-call limit from `.mcp.json`, `null` when it sets none), and `longestCommandTimeoutMs`'s row says it now counts `mutation.targeted`. `docs/operations.md`: the `commandTimeoutMs`, `verify` and `mutation.targeted` rows and the `## Long tool calls` section name the refusal.
+- `CHANGELOG.md` `### Added`: a `verify`, `extraVerify`, `parallel.setup` or `mutation.targeted` timeout at or above the plugin's MCP limit is refused when the config loads, and `kukulu_status` reports `mcpTimeoutMs` (B-02).
+- Tests start a temp copy of the plugin: `test/harness.mjs`'s `tempPlugin()` (which copies `mcp/`, `scripts/`, `hooks/`, `templates/`, `agents/`, `skills/`, `test/fixtures/` and `package.json`) plus an `.mcp.json` the test writes into the copy with a small `timeout`, and `startServer(repo, { server: <copy>/mcp/server.mjs })`. A second copy without `timeout` (or without `.mcp.json`) gives no refusal and `mcpTimeoutMs: null`. The real `.mcp.json`'s number is never written in a test.
+
+**Acceptance tests:** `test/routing.mjs`: "commandTimeoutMs at the MCP limit is refused"; "a verify entry at the MCP limit is refused" and the same for `extraVerify`, `parallel.setup` and `mutation.targeted` (each asserting the full message, with its `<where>`); "a command one millisecond below the limit loads"; "a plugin without a timeout refuses nothing and reports mcpTimeoutMs null". `test/state.mjs`: "kukulu_status reports mcpTimeoutMs from the plugin's .mcp.json" (an integer of at least 3600000 against the real plugin) and "longestCommandTimeoutMs counts mutation.targeted".
+
+**Out of scope:** changing `.mcp.json` or its documentation beyond the rows named (P1-01); capping `kukulu_mutate`'s own `timeoutMs` argument.
+
+**Verification:** `kukulu_verify`.
+
+**Depends on:** P1-01
+
+### P1-03: No clean-room genesis after the archive
+
+**Goal:** `kukulu_next` writes a genesis only when the call gets past the halted, awaiting-signing and archived-done returns, so a finished flight never re-arms its clean-room log.
+
+**Files touched:** `mcp/server.mjs`, `test/cleanroom.mjs`, `docs/mcp-tools.md`, `docs/architecture.md`, `CHANGELOG.md`
+
+**Design constraints:**
+
+- SPEC §6 C-01, §3 principles 2, 3, 4, 8, Appendix B.4; `server-synchronous`; CLAUDE.md's clean-room tests protocol (per-repo temp key, `HOME` and `CLAUDE_PROJECT_DIR` set for a hook run).
+- In `nextDecision`: the lines `if (policyPresent && !st.cleanroom) cleanroomGenesis(c, st);` and `gateResult = runGate("controller", st);` with its halt move below the `st.halted`, `st.awaitingSigning` and archived-done (`flight <slug> is archived in <dir>; …`) returns. The `cleanroomModeBreak` halt stays where it is. A call that ends in one of those three returns writes nothing and commits nothing (`gate` is `null` on its result). A new flight, with its edited `docs/SPEC.md`, gets past the archived-done return and its genesis is written as today.
+- `docs/mcp-tools.md` `kukulu_next`: the genesis bullet says the genesis is written only once the call has passed the halted, awaiting-signing and archived-done returns, and that after `kukulu_flight_archive` no genesis is written until `docs/SPEC.md` changes. `docs/architecture.md`'s stage-machine text, where it places the genesis or the gate, says the same.
+- `CHANGELOG.md` `### Fixed`: after a flight is archived, `kukulu_next` no longer writes a new clean-room genesis on the finished branch, so `git checkout <base>` needs no stash (project-g F-16, F-17, C-01).
+
+**Acceptance tests:** `test/cleanroom.mjs`, in the genesis section: "kukulu_next after the archive returns done and writes no genesis" (a clean-room flight taken through `kukulu_summary_commit` and `kukulu_flight_archive` with the policy still present: `stage` is `done`, HEAD does not move, `.kukulu/cleanroom/log.jsonl` does not exist, `.kukulu/state.json` is byte-identical); "the hooks append nothing after the archive" (`runHook` of `scripts/cleanroom-log.mjs` with a PostToolUse payload, then no log file); "an edited SPEC after the archive writes the genesis and returns plan"; "a halted clean-room run with no genesis writes none" (state `{ halted: "stopped by hand" }` with a policy and no `cleanroom` record: `halt`, no log file, HEAD unchanged).
+
+**Out of scope:** `kukulu_release` (P1-04); deleting the policy or switching the hooks off at archive time (Appendix B.4).
+
+**Verification:** `kukulu_verify`.
+
+**Depends on:** none
+
+### P1-04: kukulu_release reads the merged flight from origin
+
+**Goal:** `kukulu_release` releases the flight that `origin/<base>` says was archived last, from any branch, with every refusal before the tag, and reports what it did to the local base.
+
+**Files touched:** `mcp/server.mjs`, `test/review.mjs`, `test/harness.mjs`, `docs/mcp-tools.md`, `CONTRIBUTING.md`, `CHANGELOG.md`
+
+**Design constraints:**
+
+- SPEC §6 C-02, §3 principles 2, 3, 4, 8, 9, 10, Appendix B.5; `server-synchronous`, `one-hash-one-signature`; every git call goes through `gitArgv` as the rest of the server's do.
+- The new order of `release({ publish })`, every refusal before the tag: (1) validate `publish` as today; (2) `baseBranch` from `finalizeConfig(loadState())`; (3) `git fetch origin`; a failure refuses `git fetch origin failed: <first line>; kukulu_release reads the merged flight from origin/<base>, so it needs the remote`; (4) read `origin/<base>:.kukulu/state.json` and its `archived`; with none, `origin/<base> has no archived flight; merge the flight's pull request (it carries the archive) and call kukulu_release again`; (5) read `Branch:` from `origin/<base>:<archived.dir>/PROGRESS.md` (a missing or placeholder line refuses as today, naming `origin/<base>`) and the signing outcome from `origin/<base>:<archived.dir>/state.json`; (6) `gh pr view <branch>` and the merge commit as today; (7) a CHANGELOG at the merge with no numbered entry refuses `CHANGELOG.md at <sha7> (the merge of flight <slug>'s PR #<n>) has no numbered entry; add ## [x.y.z] before releasing`; (8) the tag check, create (`-s` or `-a` as today, from the archived `state.json` read in step 5), push and release as today, the tag made on the merge sha; the "is not checked out" refusal, the dirty-tree refusal and the `merge-base --is-ancestor` check are removed; (9) the local base is fast-forwarded only when the checked-out branch is the base and `trackedDirtyLines()` is empty (`git merge --ff-only origin/<base>`), else skipped.
+- The result gains `flight: { slug, dir, from: "origin/<base>" }`, `localState` (`"current"`, or `stale: local <base> names <old slug>; origin/<base> names <slug>`, with `no archived flight` as `<old slug>` when the local state has none) and `fastForward` (`"done"`, `"up to date"`, `"skipped: <base> is not checked out"`, `"skipped: the tree has tracked changes"` or `"failed: <first line>"`). A repeated call still creates only what is missing. The tool's `TOOLS` description says it reads the merged flight from `origin/<base>` and needs no checkout.
+- `test/review.mjs`'s `releaseRepo` helper (and `test/harness.mjs` only if the fake `gh` needs a new recorded file under `test/fixtures/gh/`) is extended so the archive commit lives on the merged build branch on origin while local `main` stays behind; existing release tests that pinned the removed refusals ("a base branch that is not checked out refuses", "a dirty tracked tree refuses", "no archived flight refuses") change to the new behavior.
+- `docs/mcp-tools.md` `kukulu_release`: the new order, refusals, `flight`, `localState` and `fastForward`. `CONTRIBUTING.md`'s `review` suite row names `kukulu_release`.
+- `CHANGELOG.md` `### Changed`: `kukulu_release` reads the merged flight from `origin/<base>`, needs no checkout and reports `fastForward` and `localState`; a stale local base no longer hides behind "no numbered entry" (project-g F-16, F-17, F-18, C-02).
+
+**Acceptance tests:** `test/review.mjs`: "a local base behind origin releases the flight origin archived last, and localState is stale"; "kukulu_release from the build branch releases with fastForward skipped"; "a fetch failure refuses and nothing is tagged" (origin's URL pointed at a missing directory; no local or remote tag afterwards); "no numbered CHANGELOG entry names the merge, the flight and its PR"; "a fast-forward that fails is reported, not ignored" (local `main` with a commit origin lacks: `fastForward` starts `failed:`, and the release was still made); "origin with no archived flight refuses"; "a repeated kukulu_release creates only what is missing" (the existing test, kept green).
+
+**Out of scope:** D-02's policy layers inside `finalizeConfig` (P2-02); merging anything; the controller skill text.
+
+**Verification:** `kukulu_verify`.
+
+**Depends on:** none
+
+### P1-05: A flight slug that collides with an archive is refused at plan time
+
+**Goal:** `kukulu_plan_commit` refuses, before any write, a `flight` slug whose `docs/flights/<slug>/` already exists, and the plan-build skill says how to pick another.
+
+**Files touched:** `mcp/server.mjs`, `test/state.mjs`, `test/review.mjs`, `skills/plan-build/SKILL.md`, `docs/mcp-tools.md`, `CHANGELOG.md`
+
+**Design constraints:**
+
+- SPEC §6 C-03, §3 principles 2, 3, 4, 9; `server-synchronous`.
+- In `validatePlanTexts` (so the problem is listed with every other one): when `configRaw.flight` is a non-empty string and `docs/flights/<flight>/` exists, add `{ check: "flight", message }` with the message `docs/flights/<slug>/ already holds an archived flight; set docs/kukulu.json's flight to an unused slug (for example <slug>-<version digits> or <slug>-2) and call kukulu_plan_commit again`, where `<version digits>` is the digits of the `Version:` line of `docs/SPEC.md` joined by `-` (`0.8.1` gives `0-8-1`), or `2` when there is none. Nothing is committed while any problem remains, as today.
+- `skills/plan-build/SKILL.md`'s slug rule gains one sentence: when the derived slug is taken under `docs/flights/`, append the spec's version digits (`-0-8-1`), or failing that `-2`.
+- `docs/mcp-tools.md` `kukulu_plan_commit`'s checks table gains the `flight` row.
+- `test/review.mjs`: the existing "...and when the destination exists" assertion pins the full archive-time text `docs/flights/w1-share already exists; choose another slug, or remove the old archive` (see Spec issues).
+- `CHANGELOG.md` `### Added`: `kukulu_plan_commit` refuses a flight slug an archive already uses (project-g F-10, C-03).
+
+**Acceptance tests:** `test/state.mjs`, in the plan_commit section: "a flight slug that an archive already uses is refused with nothing written" (a committed `docs/flights/w1/` plus `flight: "w1"`: the error names `docs/flights/w1/`, suggests `w1-<digits>` and `w1-2`, HEAD does not move, no file changes); "a free slug passes". `test/review.mjs`: "the archive-time refusal names the taken directory and says to choose another slug".
+
+**Out of scope:** renaming an archive; `kukulu_flight_archive`'s own refusal (text unchanged; only its test is pinned).
+
+**Verification:** `kukulu_verify`.
+
+**Depends on:** none
+
+### P1-06: Phase 1 end: push and record the manual checks
+
+**Goal:** Push the branch and record Phase 1's manual checks for a human.
+
+**Files touched:** none
+
+**Design constraints:** SPEC §8 Phase 1. No code change. Push if policies allow and `origin` exists. An empty commit carries the task, subject `P1-06: Phase 1 end: push and record the manual checks`.
+
+**Acceptance tests:** none beyond `kukulu_verify` being green.
+
+**Out of scope:** any change to code or docs.
+
+**Verification:** `kukulu_verify`. The log entry carries `Manual check: NOT VERIFIED (human): with the working tree as the plugin, a kukulu_verify whose extraVerify sleeps 40 minutes returns its result instead of an idle-timeout error; after a clean-room flight's archive, git checkout main succeeds from the build branch with no stash`.
+
+**Depends on:** none
+
+## Phase 2 — Policies and evidence
+
+### P2-01: finalize defaults to ready
+
+**Goal:** `policies.finalize` defaults to `"ready"`, written only in `cfgFrom`, and no second copy of the policy defaults can disagree.
+
+**Files touched:** `mcp/server.mjs`, `test/review.mjs`, `test/routing.mjs`, `test/state.mjs`, `docs/operations.md`, `docs/mcp-tools.md`, `README.md`, `CHANGELOG.md`
+
+**Design constraints:**
+
+- SPEC §5.1, §6 D-01, §3 principles 3, 5, 8, §9 question 2; `no-sync-merge` (the `gh pr merge` array is untouched), `no-hardcoded-mutation-fix-rounds`.
+- `cfgFrom`: `finalize: c.policies?.finalize ?? "ready"`, the only place the default is written (an owner decision, not an ⚠️ ASSUMPTION: say so in the comment). `DEFAULT_STATE.policies` becomes `cfgFrom({}, null).policies`, so `kukulu_status.policies` before the first run lists every policy key with its default; a test that pinned the old four-key shape changes to the eight keys. `"auto"` still works when set.
+- `configShow()` gains `policies: cfg().policies` beside `archive` (which stays). `docs/mcp-tools.md` `kukulu_config_show` lists it.
+- Every existing test that relied on the old default sets `finalize: "auto"` explicitly (`test/review.mjs`'s "merge unavailable" case and any other that expects a `pr merge --auto` call), and a new case covers the default.
+- `docs/operations.md`: the configuration example and the `policies.finalize` row say `"ready"` is the default; the `## Signing` "All signed" bullet and the `## What the flight leaves behind` paragraph say `"ready"` (the default) only marks the PR ready and `"auto"` also enables auto-merge unless the flight is breaking. `docs/mcp-tools.md` `kukulu_pr_finalize`: the same. `README.md` step 4: with the default `policies.finalize: "ready"` a fully signed flight's pull request is marked ready for you to merge; `"auto"` also enables auto-merge unless the flight is breaking.
+- `CHANGELOG.md` `### Changed`: `policies.finalize` defaults to `"ready"`: finalize marks the PR ready and enables auto-merge only when `"auto"` is set (project-g F-19, D-01).
+
+**Acceptance tests:** `test/routing.mjs`: "kukulu_config_show reports finalize ready with no policies block". `test/review.mjs`: "kukulu_pr_finalize with no policies block marks the PR ready and runs no gh pr merge" (calls `["pr ready"]`, `merge` `skipped: policy`, `ready` true); the existing "merge unavailable" case passes with `finalize: "auto"`. `test/state.mjs`: "kukulu_status.policies before a run lists every policy default" (eight keys, `finalize` `"ready"`).
+
+**Out of scope:** global and profile policies, `policySources` and the `Run policies:` sentence (P2-02).
+
+**Verification:** `kukulu_verify`.
+
+**Depends on:** none
+
+### P2-02: Policies in the global file and in profiles
+
+**Goal:** Every policy key can be set in the global file or a profile, layered default < global < profile < project, validated with its source named, and reported with `policySources`.
+
+**Files touched:** `mcp/server.mjs`, `test/routing.mjs`, `test/plugin.mjs`, `docs/operations.md`, `docs/routing.md`, `docs/mcp-tools.md`, `README.md`, `CHANGELOG.md`
+
+**Design constraints:**
+
+- SPEC §5.2, §6 D-02, §3 principles 2, 3, 5, 8, 9, Appendix B.6; CLAUDE.md's config-key protocol; `server-synchronous`, `no-hardcoded-mutation-fix-rounds`.
+- `validatePolicies(policies, where = "docs/kukulu.json")`: the project file's messages are unchanged; with another `where`, every message starts with it (`<where> policies has an unknown key 'x'`, `<where> policies.push must be a boolean`) and the enum keys (`signing`, `pr`, `finalize`, `mergeMethod`) end with `; got <JSON value>` (`<global path> policies.finalize must be one of auto, ready, draft; got "x"`). `GLOBAL_KEYS` gains `policies`; `loadGlobalConfig` (or `resolveRouting`) validates `global.data.policies` with `where` = the global file's absolute path, and each `profiles.<name>.policies` with `where` = `<global path> profiles.<name>` (so the message reads `… profiles.fast.policies.push must be a boolean`); `validateRolesBlock` for a profile skips the `policies` key, and a profile may hold only `policies`.
+- `resolvePolicies()` → `{ policies, sources }`: per key, default (`cfgFrom`'s defaults) < global `policies` < the active profile's `policies` (the profile `resolveRouting` selects: `KUKULU_PROFILE`, else the global `profile`) < project `policies`; `sources[key]` is `"default"`, `"global"`, `"profile:<name>"` or `"project"`. `cfg()` returns the layered `policies`; `cfgFrom` stays the project-only resolver; `finalizeConfig(st)` applies the same layers over the archived file's `policies`; `kukulu_run_start`'s `state.policies` is the layered result (it already reads `cfg().policies`).
+- `configShow()` gains `policySources`; `policies` (added by P2-01) is now the layered result; `archive` stays.
+- `kukulu_next`'s sentence: `Run policies: signing=<s>, push=<on|off>, pr=<p>, finalize=<f> (<source>).` with `<source>` from `resolvePolicies().sources.finalize`, followed by the clean-room and signing sentences as today.
+- `docs/operations.md`'s configuration section: a "Policy layers" paragraph (default, global file `policies`, `profiles.<name>.policies`, project), naming the per-key precedence and the sources `kukulu_config_show` reports, with an example global file that sets `finalize` globally; the Environment table is unchanged. `docs/routing.md`'s global-file shape gains `policies` and a profile with only `policies`. `docs/mcp-tools.md`: `kukulu_config_show`'s `policies` and `policySources`; `kukulu_next`'s sentence. `README.md`'s routing sentence says the global file and a profile may also carry `policies`.
+- `test/plugin.mjs`'s "config keys documented" loop, `policies` branch, also asserts `docs/operations.md` documents the global and profile layers: the text contains `` `profiles.<name>.policies` `` and a line with both `global file` and `` `policies` ``.
+- `CHANGELOG.md` `### Added`: `policies` in the global file and in each profile, layered under the project file, with `policySources` in `kukulu_config_show` (project-g F-19, D-02).
+
+**Acceptance tests:** `test/routing.mjs` (each with a global file written by `writeGlobalConfig` and `KUKULU_CONFIG`): "a global policy wins over the default"; "a profile policy wins over the global one"; "a project policy wins over the profile"; "a profile with only policies is accepted"; "a bad global policies shape refuses naming the global file" (the unknown key, the enum form with `; got`, and the boolean form); "a bad profile policies shape refuses naming the profile"; "policySources names where each key came from"; "kukulu_pr_finalize honors a global finalize draft" (no `pr ready`, no `pr merge`); "the Run policies sentence names finalize and its source". `test/plugin.mjs`: "operations.md documents the global and profile policies layers".
+
+**Out of scope:** the default itself (P2-01); any new policy key; `templates/kukulu.config.example.json`.
+
+**Verification:** `kukulu_verify`.
+
+**Depends on:** P2-01
+
+### P2-03: Grouped similarity pairs
+
+**Goal:** A similarity pair may carry `group`, each group has exactly one negative, one positive and at least one test, and every test pair is positioned against its own group's bands.
+
+**Files touched:** `mcp/server.mjs`, `test/cleanroom.mjs`, `docs/operations.md`, `docs/writing-specs.md`, `docs/mcp-tools.md`, `CONTRIBUTING.md`, `CHANGELOG.md`
+
+**Design constraints:**
+
+- SPEC §5.1, §6 E-01 (the key, validation, scoring, controls and the first two output bullets), §3 principles 2, 3, 5, 8, 9, Appendix B.7; CLAUDE.md's config-key protocol; `server-synchronous`.
+- `validateSimilarity`: a pair's legal keys gain `group`, a slug matching `PAIR_ID`, else `cleanroom.similarity.pairs[<i>].group must be a slug (letters, digits and -); got <JSON value>` (with the existing `docs/kukulu.json ` prefix). A pair without one belongs to `default`. Per group: exactly one `negative`, exactly one `positive`, at least one `test`. When no pair names a group, today's three refusal texts stand unchanged; otherwise they read `docs/kukulu.json cleanroom.similarity.pairs group "<g>" needs exactly one pair with role "negative" (found <n>)`, the same for `positive`, and `… group "<g>" needs at least one pair with role "test"`. `control` stays legal only on a positive pair (text unchanged).
+- `normalizeSimilarity`: a normalized pair carries `group` only when the policy gave one, so `similarity.json`'s `config` keeps the pairs as given, groups included.
+- `similarity()`: each test pair is positioned against the negative and positive of its own group (`p.group ?? "default"`); every row gains `group`; `verdictOf` is unchanged. `verifyControlBundle(sim)` checks every positive pair that has a `control` (returning a map from pair id to its record) and the recorded config marks each.
+- `docs/SIMILARITY.md`: after the statement paragraph, one line per group, `- group <g>: negative <id>, positive <id>` (the statement no longer names a single negative and positive; it says the test pairs were placed between each group's controls); the raw-scores table gains a `group` column between `pair` and `role` only when a pair named a group. The same inputs still give the same bytes.
+- `docs/operations.md`'s `cleanroom.similarity` row: `group` and the per-group rule replace "exactly one `negative`, exactly one `positive`". `docs/writing-specs.md` item 4: one band per language pairing, with `group`. `docs/mcp-tools.md` `kukulu_similarity`: rows carry `group`, the per-group lines, the grouped refusals. `CONTRIBUTING.md`'s `cleanroom` suite row names `kukulu_similarity`.
+- `CHANGELOG.md` `### Added`: similarity pairs may carry `group`, one negative and one positive per group, in `kukulu_similarity`, `SIMILARITY.md` and `scripts/compare-bundles.mjs` (project-g F-10, E-01).
+
+**Acceptance tests:** `test/cleanroom.mjs`, validator (as the existing `statusWith` table): "a bad group is refused"; "a group with two negatives is refused naming the group"; "a group with no positive is refused naming the group"; "a group with no test pair is refused naming the group"; "no groups keeps the old refusal texts" (the existing "two negative pairs" assertion kept). Scoring: "a test pair in group rust-c is positioned against its own group's bands" (two groups over `test/fixtures/similarity/` directories; the `rust-c` row's `c` recomputed from that group's negative and positive scores equals the row's, and differs from the `default` group's); "an ungrouped config gives the old rows plus group default" (every row's `group` is `default`, and the rows with `group` removed equal what the existing single-band scoring test pins); "a grouped config's similarity.json keeps the groups and an ungrouped one has none".
+
+**Out of scope:** `scripts/compare-bundles.mjs` and `test/bundles.mjs` (P2-04); the verifier (it only hashes `similarity.json`); any new metric.
+
+**Verification:** `kukulu_verify`.
+
+**Depends on:** none
+
+### P2-04: compare-bundles keys its scores by group
+
+**Goal:** `scripts/compare-bundles.mjs` reports each bundle's negative and positive controls per group and reads a bundle without groups as the `default` group.
+
+**Files touched:** `scripts/compare-bundles.mjs`, `test/bundles.mjs`, `test/harness.mjs`, `docs/cleanroom.md`
+
+**Design constraints:**
+
+- SPEC §6 E-01 (the `scripts/compare-bundles.mjs` bullet), §3 principles 3, 8, 10; `scripts-node-builtins` (the script may import `../mcp/cleanroom.mjs` as it does today).
+- The `similarity` item becomes `{ verdict, groups: { <group>: { negative: { <metric>: score }, positive: { … } } } }`, where a row without `group` belongs to `default`. The text output prints, per group and metric, `  <group> <metric>: negative <x> positive <y>`. The cross-score section (`--trees`) compares against the `default` group's negative, else the first group's. Everything else is unchanged; the script still writes nothing.
+- `docs/cleanroom.md`'s "Comparing two bundles" paragraph says the similarity controls are listed per group.
+- `test/harness.mjs`'s `buildComparePair` (or the test itself, by rewriting one bundle's `similarity.json`) can produce a grouped bundle; recorded data stays under `test/fixtures/compare/`.
+
+**Acceptance tests:** `test/bundles.mjs`: "comparing a grouped and an ungrouped bundle keys the controls by group" (`--json`: A has `groups.default` and `groups.rust-c`, B has only `groups.default`); "the text output prints one control line per group and metric"; "the cross score uses the default group's negative".
+
+**Out of scope:** the server's scoring and validation (P2-03); `--trees` semantics beyond which negative is printed.
+
+**Verification:** `kukulu_verify`.
+
+**Depends on:** P2-03
+
+### P2-05: An alias is the model it resolves to
+
+**Goal:** `sameModel(declared, reported)` exists in both `mcp/cleanroom.mjs` and `scripts/verify-attestation.mjs`, and verifier check 12 notes a reported model only when it is not the declared one.
+
+**Files touched:** `mcp/cleanroom.mjs`, `scripts/verify-attestation.mjs`, `test/attest.mjs`, `docs/cleanroom.md`, `CHANGELOG.md`
+
+**Design constraints:**
+
+- SPEC §6 E-02, §3 principles 3, 8, 11; `cleanroom-module-pure`, `verifier-node-only`, `server-synchronous`; the duplicated code is duplicated on purpose (CLAUDE.md's reviewer-checked list).
+- `export function sameModel(declared, reported)`, identical in both files: after `normalizeModel` on both, true when they are equal; or `declared` is `opus`, `sonnet`, `haiku` or `fable` and `reported` starts with `claude-<declared>-`; or `declared` is `inherit` and `reported` starts with `claude-`; or `reported` is `declared` followed by `-` and exactly eight digits. False otherwise.
+- Verifier check 12 emits its note, text unchanged (`<role>: the endpoint reported <models>; routing declared <model>`), only for a reported model that is not `sameModel` with the declared one.
+- `docs/cleanroom.md`'s offline-verification text for check 12 says an alias and the ids it resolves to count as the same model.
+- `CHANGELOG.md` `### Fixed`: the verifier no longer reports an alias-resolved model as a routing mismatch (project-g F-20, E-02).
+
+**Acceptance tests:** `test/attest.mjs`: "sameModel gives identical answers in both copies" (a shared table of at least ten pairs covering each rule and a false case, both modules fed the same inputs); "an alias-resolved reported model gives no note" (`sonnet` declared, `claude-sonnet-5-5` reported); "a reported model of another family still gives the note" (`sonnet` against `claude-opus-5-5`, with the existing pinned text); the existing `KNOWN_LIMITS` identity assertions keep passing.
+
+**Out of scope:** `familyOf`, `MODEL_FAMILIES`, genesis's routing check.
+
+**Verification:** `kukulu_verify`.
+
+**Depends on:** none
+
+### P2-06: Phase 2 end: push and record the manual check
+
+**Goal:** Push the branch and record Phase 2's manual check for a human.
+
+**Files touched:** none
+
+**Design constraints:** SPEC §8 Phase 2. No code change. Push if policies allow and `origin` exists. An empty commit carries the task, subject `P2-06: Phase 2 end: push and record the manual check`.
+
+**Acceptance tests:** none beyond `kukulu_verify` being green.
+
+**Out of scope:** any change to code or docs.
+
+**Verification:** `kukulu_verify`. The log entry carries `Manual check: NOT VERIFIED (human): with policies.finalize "draft" in the owner's global file, kukulu_config_show in a project with no policies block reports finalize "draft" with policySources.finalize "global"`.
+
+**Depends on:** none
+
+## Phase 3 — Stage handoffs, documentation and release
+
+### P3-01: kukulu_next supplies the Agent call's description
+
+**Goal:** Every `kukulu_next` result that names a stage to spawn, and every `streams[]` entry, carries `description`, and go-flight passes it to the `Agent` tool.
+
+**Files touched:** `mcp/server.mjs`, `skills/go-flight/SKILL.md`, `test/state.mjs`, `test/plugin.mjs`, `docs/mcp-tools.md`, `CHANGELOG.md`
+
+**Design constraints:**
+
+- SPEC §6 F-01, §3 principles 2, 3, 8; `server-synchronous`. In server source the macron letter is the Unicode escape of U+016B (backslash, `u`, `016b`), never the literal character.
+- `stage()` adds `description` for `plan`, `implement`, `review` and `summarize`: `Kūkulu <stage>` when `st.round` is 0, `Kūkulu <stage> round <n>` from round 1 on; each `streams[]` entry gains `description: Kūkulu stream <name>`. Each is at most 60 characters (a stream slug is at most 24). `done` and `halt` carry no `description`.
+- `skills/go-flight/SKILL.md`: the sentence at step 4's head lists `subagent_type`, `description`, `prompt` and optionally `model`; step 1's result list gains `description`; step 4, the parallel-wave paragraph and the fallback retry each pass `description` verbatim (the entry's own for a stream).
+- `docs/mcp-tools.md` `kukulu_next`: `description` in the returns list and on `streams[]`.
+- `CHANGELOG.md` `### Fixed`: `kukulu_next` supplies the `Agent` call's `description`, which go-flight passes on, so the first stage spawn no longer fails validation (project-g F-21, F-01).
+
+**Acceptance tests:** `test/state.mjs`: "every spawnable stage carries a description" (`plan`, `implement`, `review`, `summarize` results, with `Kūkulu <stage>` at round 0 and `Kūkulu implement round 1` after a fix round, each at most 60 characters, written with the escape); "done and halt carry no description"; "each streams entry carries Kūkulu stream <name>" (a streamed plan via the harness's `planDoc`/`progressDoc`). `test/plugin.mjs`: "go-flight names description beside subagent_type and prompt".
+
+**Out of scope:** `effort`; any change to the prompts' text.
+
+**Verification:** `kukulu_verify`.
+
+**Depends on:** none
+
+### P3-02: The implementer sees its own task's log
+
+**Goal:** `kukulu_task_next` returns the task's own log entries as `taskLog`, and the skills say an unblock reason reaches the implementer verbatim and overrides the PLAN.md text.
+
+**Files touched:** `mcp/server.mjs`, `skills/implement/SKILL.md`, `skills/review-build/SKILL.md`, `test/implement.mjs`, `docs/mcp-tools.md`, `CHANGELOG.md`
+
+**Design constraints:**
+
+- SPEC §6 F-02, §3 principles 2, 3, 8; `server-synchronous`.
+- `taskNext`'s result gains `taskLog: pr.logs[task.id] ?? null`, the task's own log entries in the shape `dependencyLogs[<id>]` uses. The tool's `TOOLS` description says so.
+- `skills/implement/SKILL.md` step 2 (Read): read `taskLog` before acting; the newest `unblocked` or `REOPENED` entry's reason overrides the PLAN.md text where the two disagree. `skills/review-build/SKILL.md`'s `unblock` sentence: a reason must state the concrete instruction (what to build instead), because it reaches the implementer verbatim through `taskLog`.
+- `docs/mcp-tools.md` `kukulu_task_next`: the `taskLog` row.
+- `CHANGELOG.md` `### Fixed`: `kukulu_task_next` returns the task's own log as `taskLog`, so an unblock reason reaches the implementer (project-g F-02, F-02).
+
+**Acceptance tests:** `test/implement.mjs`: "an unblocked task's taskLog carries the reviewer's reason" (a blocked task unblocked through `kukulu_review_submit` with a `reason`, then `kukulu_task_next` on it); "a fresh task's taskLog is null"; "a reopened task's taskLog carries REOPENED" (`kukulu_task_reopen`, then `kukulu_task_next`).
+
+**Out of scope:** the reviewer's halt (P3-03); changing what `dependencyLogs` carries.
+
+**Verification:** `kukulu_verify`.
+
+**Depends on:** none
+
+### P3-03: An owner-only block halts for the owner
+
+**Goal:** The reviewer may call `kukulu_run_halt` when the only open item is a task blocked on something only the owner can do, and a halt made during the review stage resumes into review.
+
+**Files touched:** `agents/reviewer.md`, `skills/review-build/SKILL.md`, `test/plugin.mjs`, `test/state.mjs`, `docs/operations.md`, `docs/mcp-tools.md`, `CHANGELOG.md`
+
+**Design constraints:**
+
+- SPEC §6 F-03, §3 principle 2, §9 question 6; `no-fable-default` (only the `tools:` line of `agents/reviewer.md` changes); `kukulu_review_submit` does not change.
+- `agents/reviewer.md`'s `tools:` line gains `mcp__plugin_kukulu_kukulu__kukulu_run_halt` at its end.
+- `skills/review-build/SKILL.md` gains one rule, placed with the verdict rules: when categories 1–3 are clean across the branch and every remaining open item is a task whose blocker only the owner can clear, the reviewer calls `kukulu_run_halt` with `owner action needed: <task id>: <what the owner must do>` and stops without submitting a verdict; after the owner acts and calls `kukulu_run_resume`, the next review unblocks the task with the owner's answer. `test/plugin.mjs`'s existing check that every `kukulu_*` tool the skill names is on the reviewer's `tools:` line keeps passing.
+- `docs/operations.md` `## Halts`: the reviewer's owner-action halt and how to resume it. `docs/mcp-tools.md` `kukulu_run_halt`: the reviewer may call it for an owner-only block.
+- `CHANGELOG.md` `### Added`: the reviewer halts the flight with `owner action needed: …` when the only open item is blocked on the owner (project-g F-07, F-03).
+
+**Acceptance tests:** `test/plugin.mjs`: "agents/reviewer can call kukulu_run_halt"; "review-build tells the reviewer to halt with owner action needed". `test/state.mjs`: "a halt made during the review stage resumes into review" (state `implemented: true, reviewed: false, halted: "owner action needed: P0-02: supply the corpus"` on a clean build branch: `kukulu_next` is `halt`; after `kukulu_run_resume({ reason })`, `kukulu_next` is `review`).
+
+**Out of scope:** a new verdict for `kukulu_review_submit`; the implementer's own halts.
+
+**Verification:** `kukulu_verify`.
+
+**Depends on:** none
+
+### P3-04: A cargo test filter goes after --
+
+**Goal:** `validateMutation` refuses a `mutation.targeted` command that runs `cargo test` with `{filter}` before a standalone `--`, and the planner's instructions give the cargo form.
+
+**Files touched:** `mcp/server.mjs`, `test/routing.mjs`, `skills/plan-build/SKILL.md`, `templates/SPEC.md`, `docs/operations.md`, `CHANGELOG.md`
+
+**Design constraints:**
+
+- SPEC §6 F-04, §3 principles 2, 3, 5, 9; `server-synchronous`.
+- `validateMutation`: split `cmd` on whitespace; the command runs `cargo test` when a token `cargo` is followed, after any tokens starting with `-` or `+`, by a token `test`; it is refused when a token containing `{filter}` comes before the first token that is exactly `--`, or there is no such token: `docs/kukulu.json mutation.targeted.<name>.cmd runs cargo test with {filter} before --; cargo test takes one TESTNAME, so a list filter fails. Write it as "cargo test <options> -- {filter}"`. `cargo test --workspace -- {filter}` loads.
+- `skills/plan-build/SKILL.md`'s `mutation.targeted` sentence and `templates/SPEC.md`'s commands paragraph give the cargo form beside the phpunit one: `"cargo test --workspace -- {filter}"`, because `cargo test` takes one TESTNAME and libtest, behind `--`, takes several.
+- `docs/operations.md`'s `mutation.targeted` row names the cargo rule and the refusal.
+- `CHANGELOG.md` `### Added`: a `cargo test` targeted command with `{filter}` before `--` is refused when the config loads (project-g F-05, F-13, F-04).
+
+**Acceptance tests:** `test/routing.mjs`: "a cargo test targeted command with {filter} before -- is refused" (the full message); "cargo test --workspace -- {filter} loads"; "cargo +nightly test -- {filter} loads"; "a non-cargo command with {filter} and no -- still loads". `test/plugin.mjs`'s existing skill and template checks keep passing.
+
+**Out of scope:** `kukulu_mutate`'s filter quoting; `cargo nextest`.
+
+**Verification:** `kukulu_verify`.
+
+**Depends on:** none
+
+### P3-05: CHANGELOG 0.8.1 and the version
+
+**Goal:** The release reads 0.8.1 everywhere and the changelog entry is complete.
+
+**Files touched:** `CHANGELOG.md`, `package.json`, `.claude-plugin/plugin.json`, `mcp/server.mjs`, `README.md`
+
+**Design constraints:**
+
+- SPEC §1 ("the version reads 0.8.1 everywhere"), §6 G.
+- Rename `## [Unreleased]` to `## [0.8.1] — <today>` with `### Added`, `### Changed` and `### Fixed` only, no Breaking changes heading. Read the lines earlier tasks added; each cites its feedback item or requirement; fill any gap so every §6 requirement (A-01, A-02, B-01, B-02, C-01, C-02, C-03, D-01, D-02, E-01, E-02, F-01 to F-04) has a line.
+- `0.8.1` in `package.json`, `.claude-plugin/plugin.json`, `VERSION` in `mcp/server.mjs`, and README's version badge (`version-0.8.1`, alt `Version 0.8.1`). The tool count stays twenty-six.
+- `docs/feedback/2026-11-11-project-g.md` is local and gitignored: only if it exists, add the header line `Addressed in: docs/SPEC.md v0.8.1 (flight v0-8-1)` after its title, in the form the earlier feedback files use; never stage it; no test reads it.
+
+**Acceptance tests:** `test/plugin.mjs`'s existing "package.json and plugin.json agree on the version", "the MCP server reports the plugin's version" and "CHANGELOG.md's newest entry is the package version".
+
+**Out of scope:** tagging, publishing or merging (that is `kukulu_release`, run by the owner after the merge).
+
+**Verification:** `kukulu_verify`.
+
+**Depends on:** none
+
+### P3-06: Phase 3 end: push and record the manual checks
+
+**Goal:** Push the release branch and record Phase 3's manual checks for a human.
+
+**Files touched:** none
+
+**Design constraints:** SPEC §8 Phase 3, §6 G (HANDOFF). No code change. Push if policies allow and `origin` exists. An empty commit carries the task, subject `P3-06: Phase 3 end: push and record the manual checks`. The handoff written for `kukulu_run_finish` has no "do not merge" line and lists the manual checks of all four phases.
+
+**Acceptance tests:** none beyond `kukulu_verify` being green.
+
+**Out of scope:** any change to code or docs; merging; releasing.
+
+**Verification:** `kukulu_verify`. The log entry carries `Manual check: NOT VERIFIED (human): on the next flight, go-flight's first Agent call carries description and does not fail validation; cargo test --workspace -- a b runs both filters on a stable Rust toolchain`.
+
+**Depends on:** none
+
+## Spec issues
+
+- §3 principle 7 says every constraint of `docs/flights/v0-8-0/kukulu.json` carries over unchanged, but three of them carry `from: "P2-02"` and the guard self-test `extraVerify` entries carry `from: "P2-01"`, ids of the 0.8.0 plan; `kukulu_plan_commit` resolves `from` against this plan, where P2-02 is the global-policies task. Resolution: the gates are dropped (the 0.8.0 tasks landed, so the rules and commands are active from the start); patterns, paths and fixtures are untouched.
+- §6 C-03 says the archive-time refusal "gets the test it has never had", but `test/review.mjs` already asserts `docs/flights/w1-share already exists` on `kukulu_flight_archive`. Resolution: P1-05 pins the full text (`…; choose another slug, or remove the old archive`) in that assertion rather than adding a duplicate.
+- §6 B-01 asks `docs/operations.md` to name "the Claude Code version the docs name" for the per-server `timeout`. The implementer has no web access and nothing on disk names it. Resolution: the section names the field and points at Claude Code's MCP documentation for the version; the owner may fill in the number by hand.
+- §6 D-01's test reads `finalize` from `kukulu_config_show`, which has no `policies` field until D-02. Resolution: P2-01 adds the resolved `policies` to `kukulu_config_show`; P2-02 adds `policySources`.
+- §6 D-02 says the project file's messages are unchanged while its global examples end with `; got "x"`. Resolution: followed literally (P2-02): the `; got` suffix appears only with a non-project `where`.
+- §6 E-01 says `similarity.json` keeps `config` "as given, groups included", while `normalizeSimilarity` fills defaults. Resolution: a normalized pair carries `group` only when the policy gave one; rows always carry it.
+- §4 cites line numbers (`mcp/cleanroom.mjs:807-810`, `mcp/server.mjs:2517`, `:2982`); they are approximate (`nextDecision` holds the genesis write, not `next`). Tasks name functions, not lines.
+- §6 F-02's changelog citation is the feedback item `project-g F-02`, which shares its id with requirement F-02; the changelog lines cite the feedback item first and the requirement second so the two are told apart.
