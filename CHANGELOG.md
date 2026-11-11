@@ -19,6 +19,7 @@ All notable changes to this plugin. Format follows
 
 ### Changed
 
+- `kukulu_release` reads the merged flight from `origin/<base>`, needs no checkout and reports `fastForward` and `localState`; a stale local base no longer hides behind "no numbered entry" (project-g F-16, F-17, F-18, C-02).
 - sed's `w` command is listed under the `indirect` known gap (A-01).
 
 ## [0.8.0] — 2026-10-27
