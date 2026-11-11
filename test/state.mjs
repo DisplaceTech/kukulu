@@ -1189,6 +1189,49 @@ const OLD_LAYOUT = /pre-0\.6\.0 Foundry layout, which 0\.7\.0 no longer reads/;
   }
 }
 
+// ---------------------------------------------------------------- the Agent call's description (F-01)
+
+{
+  const K = "K\u016bkulu";
+  const T = (id, files, extra = {}) => ({ id, title: `Task ${id}`, goal: `do ${id}`, files: files.map((f) => `\`${f}\``).join(", "), ...extra });
+  const seen = [];
+  await withServer(specRepo(), async ({ call }) => { seen.push(["plan", await call("kukulu_next")]); });
+  await withServer(plannedRepo(), async ({ call }) => { seen.push(["implement", await call("kukulu_next")]); });
+  const reviewRepo = plannedRepo();
+  markTasks(reviewRepo, ALL_DONE);
+  setState(reviewRepo, { implemented: true });
+  await withServer(reviewRepo, async ({ call }) => {
+    seen.push(["review", await call("kukulu_next")]);
+    setState(reviewRepo, { reviewed: true, verdict: "APPROVED" });
+    seen.push(["summarize", await call("kukulu_next")]);
+  });
+  ok(seen.every(([name, n]) => n.stage === name && n.description === `${K} ${name}` && n.description.length <= 60), `every spawnable stage carries a description: ${K} <stage> at round 0`);
+  const fix = plannedRepo();
+  setState(fix, { round: 1 });
+  await withServer(fix, async ({ call }) => {
+    eq((await call("kukulu_next")).description, `${K} implement round 1`, `...and ${K} implement round 1 after a fix round`);
+  });
+  const done = plannedRepo();
+  markTasks(done, ALL_DONE);
+  setState(done, { implemented: true, reviewed: true, verdict: "APPROVED", summarized: true });
+  await withServer(done, async ({ call }) => {
+    const n = await call("kukulu_next");
+    ok(n.stage === "done" && !("description" in n), "done and halt carry no description (done)");
+  });
+  await withServer(mkDir(), async ({ call }) => {
+    const n = await call("kukulu_next");
+    ok(n.stage === "halt" && !("description" in n), "...and halt");
+  });
+  const wave = plannedRepo({ tasks: [T("P0-01", ["package.json"]), T("P0-02", ["docs/"]), T("P1-01", ["src/api/a.txt"], { stream: "api" }), T("P1-02", ["src/ui/a.txt"], { stream: "ui" })] });
+  markTasks(wave, { "P0-01": "x", "P0-02": "x" });
+  git(wave, ["add", "-A"]);
+  git(wave, ["commit", "-qm", "chore: serial tasks done"]);
+  await withServer(wave, async ({ call }) => {
+    const n = await call("kukulu_next");
+    eq((n.streams ?? []).map((x) => x.description).join("|"), `${K} stream api|${K} stream ui`, `each streams entry carries ${K} stream <name>`);
+  });
+}
+
 // ---------------------------------------------------------------- every policy default in status (D-01)
 
 {

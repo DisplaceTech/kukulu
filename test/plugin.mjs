@@ -315,6 +315,8 @@ eq((AGENT_MAP.match(/kukulu:/g) || []).length, agentNames.length, "the stage tab
 
 const goFlight = read("skills/go-flight/SKILL.md");
 like(goFlight, /policies\.signing is 'required' and the signing probe failed/, "go-flight stops on a required-signing probe failure");
+like(goFlight, /`subagent_type`, `description`, `prompt`, and optionally `model`/, "go-flight names description beside subagent_type and prompt");
+like(goFlight, /`description`: the `description` value, verbatim/, "...and passes it in step 4");
 const fmGo = frontmatter(goFlight);
 const allowed = String(fmGo["allowed-tools"]).split(",").map((s) => s.trim());
 const toolNames = Array.from(serverSrc.matchAll(/name: "(kukulu_[a-z_]+)"/g), (m) => m[1]);

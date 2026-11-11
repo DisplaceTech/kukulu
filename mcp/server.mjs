@@ -2541,6 +2541,8 @@ function nextDecision() {
       round: st.round,
       reviewRound: st.round + 1,
       reason,
+      // The Agent tool requires a description; the display name carries its macron letter as an escape in source.
+      ...(PROMPTS[name] ? { description: `K\u016bkulu ${name}${st.round > 0 ? ` round ${st.round}` : ""}` } : {}),
       gate: gateResult ? { ok: gateResult.ok, checked: gateResult.checked } : null,
       prompt: PROMPTS[name] ? PROMPTS[name](st.round, s, policySentence, st.round + 1) : null,
       ...extra,
@@ -2577,6 +2579,7 @@ function nextDecision() {
       reason: `wave ${wave.index}: ${ordered.length} stream(s) to run in parallel (${ordered.join(", ")})`,
       streams: ordered.map((name) => ({
         stream: name,
+        description: `K\u016bkulu stream ${name}`,
         agent: info.agent,
         agentFallback: info.agentFallback,
         fallbackAgent: info.fallbackAgent,
