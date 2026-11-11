@@ -861,21 +861,23 @@ const FLIGHT_SLUG = /^[a-z0-9][a-z0-9-]{0,39}$/;
  * original ones; any other `where` (the global file, a profile) starts every message with it, and the enum
  * keys end with `; got <value>`, so the message names the file that is wrong.
  */
-function validatePolicies(policies, where = "docs/kukulu.json") {
+function validatePolicies(policies, where = "docs/kukulu.json", joiner = " ") {
   if (policies === undefined) return;
   const own = where === "docs/kukulu.json";
+  // A profile's block is named profiles.<name>.policies, with a dot (SPEC D-02).
+  const at = `${where}${joiner}policies`;
   const got = (v) => (own ? "" : `; got ${JSON.stringify(v)}`);
   if (typeof policies !== "object" || policies === null || Array.isArray(policies)) {
-    throw new ToolError(own ? "docs/kukulu.json 'policies' must be an object" : `${where} 'policies' must be an object`);
+    throw new ToolError(own ? "docs/kukulu.json 'policies' must be an object" : joiner === "." ? `${at} must be an object` : `${where} 'policies' must be an object`);
   }
   for (const key of Object.keys(policies)) {
-    if (!POLICY_KEYS.includes(key)) throw new ToolError(`${where} policies has an unknown key '${key}'`);
+    if (!POLICY_KEYS.includes(key)) throw new ToolError(`${at} has an unknown key '${key}'`);
   }
   const bool = (key) => {
-    if (policies[key] !== undefined && typeof policies[key] !== "boolean") throw new ToolError(`${where} policies.${key} must be a boolean`);
+    if (policies[key] !== undefined && typeof policies[key] !== "boolean") throw new ToolError(`${at}.${key} must be a boolean`);
   };
   const oneOf = (key, list) => {
-    if (policies[key] !== undefined && !list.includes(policies[key])) throw new ToolError(`${where} policies.${key} must be one of ${list.join(", ")}${got(policies[key])}`);
+    if (policies[key] !== undefined && !list.includes(policies[key])) throw new ToolError(`${at}.${key} must be one of ${list.join(", ")}${got(policies[key])}`);
   };
   oneOf("signing", SIGNING_POLICIES);
   bool("push");
@@ -976,15 +978,14 @@ function validateMutation(mutation) {
     if (entry.cmd.split("{filter}").length - 1 !== 1) throw new ToolError(`${where}.cmd must contain {filter} exactly once`);
     // `cargo test` takes one TESTNAME; libtest, behind `--`, takes several, so a list filter must go after it.
     const words = entry.cmd.split(/\s+/).filter(Boolean);
-    const at = words.indexOf("cargo");
-    if (at !== -1) {
+    // Every `cargo` in the command counts: `cargo build && cargo test {filter}` runs the second one too.
+    const dashes = words.indexOf("--");
+    const filterAt = words.findIndex((w) => w.includes("{filter}"));
+    for (let at = words.indexOf("cargo"); at !== -1; at = words.indexOf("cargo", at + 1)) {
       let k = at + 1;
       while (k < words.length && /^[-+]/.test(words[k])) k++;
-      if (words[k] === "test") {
-        const dashes = words.indexOf("--");
-        if (dashes === -1 || words.findIndex((w) => w.includes("{filter}")) < dashes) {
-          throw new ToolError(`${where}.cmd runs cargo test with {filter} before --; cargo test takes one TESTNAME, so a list filter fails. Write it as "cargo test <options> -- {filter}"`);
-        }
+      if (words[k] === "test" && (dashes === -1 || filterAt < dashes)) {
+        throw new ToolError(`${where}.cmd runs cargo test with {filter} before --; cargo test takes one TESTNAME, so a list filter fails. Write it as "cargo test <options> -- {filter}"`);
       }
     }
     if (entry.timeoutMs !== undefined && (!Number.isInteger(entry.timeoutMs) || entry.timeoutMs <= 0)) {
@@ -1500,7 +1501,7 @@ function resolvePolicies(project = loadConfig() || {}) {
   const profiles = global.data.profiles;
   if (profiles !== undefined && typeof profiles === "object" && profiles !== null && !Array.isArray(profiles)) {
     for (const [name, block] of Object.entries(profiles)) {
-      if (typeof block === "object" && block !== null && !Array.isArray(block)) validatePolicies(block.policies, `${global.path} profiles.${name}`);
+      if (typeof block === "object" && block !== null && !Array.isArray(block)) validatePolicies(block.policies, `${global.path} profiles.${name}`, ".");
     }
   }
   validatePolicies(project.policies);

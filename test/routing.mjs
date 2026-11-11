@@ -770,7 +770,13 @@ for (const [value, got, label] of [
   {
     const file = gp({ profiles: { fast: { policies: { push: "no" } } } });
     await withServer(project(), async ({ call }) => {
-      isError(await call("kukulu_config_show"), /profiles\.fast policies\.push must be a boolean$/, "a bad profile policies shape refuses naming the profile");
+      isError(await call("kukulu_config_show"), /profiles\.fast\.policies\.push must be a boolean$/, "a bad profile policies shape refuses naming the profile");
+    }, { env: { KUKULU_CONFIG: file } });
+  }
+  {
+    const file = gp({ profiles: { fast: { policies: { nope: true } } } });
+    await withServer(project(), async ({ call }) => {
+      isError(await call("kukulu_config_show"), /profiles\.fast\.policies has an unknown key 'nope'$/, "a profile policies block with an unknown key names profiles.<name>.policies");
     }, { env: { KUKULU_CONFIG: file } });
   }
   await withGlobal({ policies: { finalize: "ready" } }, project({ signing: "off" }), async ({ call }) => {
@@ -808,6 +814,8 @@ for (const [value, got, label] of [
   isError(await statusWith("cargo test --workspace {filter}"), /^docs\/kukulu\.json mutation\.targeted\.rust\.cmd runs cargo test with \{filter\} before --; cargo test takes one TESTNAME, so a list filter fails\. Write it as "cargo test <options> -- \{filter\}"$/, "a cargo test targeted command with {filter} before -- is refused");
   isError(await statusWith("cargo test {filter} -- --nocapture"), /runs cargo test with \{filter\} before --/, "...also when -- comes after the filter");
   ok(!(await statusWith("cargo test --workspace -- {filter}")).error, "cargo test --workspace -- {filter} loads");
+  isError(await statusWith("cargo build --release && cargo test {filter}"), /^docs\/kukulu\.json mutation\.targeted\.rust\.cmd runs cargo test with \{filter\} before --; cargo test takes one TESTNAME, so a list filter fails\. Write it as "cargo test <options> -- \{filter\}"$/, "a cargo test after another cargo command with {filter} before -- is refused");
+  ok(!(await statusWith("cargo build && cargo test -- {filter}")).error, "cargo build && cargo test -- {filter} loads");
   ok(!(await statusWith("cargo +nightly test -- {filter}")).error, "cargo +nightly test -- {filter} loads");
   ok(!(await statusWith("vendor/bin/phpunit --filter {filter}")).error, "a non-cargo command with {filter} and no -- still loads");
 }
