@@ -13,7 +13,7 @@ Started: 2026-11-11T18:32:19.610Z
 - [x] P1-03 No clean-room genesis after the archive
 - [x] P1-04 kukulu_release reads the merged flight from origin
 - [x] P1-05 A flight slug that collides with an archive is refused at plan time
-- [ ] P1-06 Phase 1 end: push and record the manual checks
+- [x] P1-06 Phase 1 end: push and record the manual checks
 - [ ] P2-01 finalize defaults to ready
 - [ ] P2-02 Policies in the global file and in profiles
 - [ ] P2-03 Grouped similarity pairs
@@ -62,3 +62,7 @@ release() rewritten to the plan order: fetch origin, read origin/<base>:.kukulu/
 ### P1-05 — 0f797fc
 
 validatePlanTexts adds a flight problem when docs/flights/<slug>/ exists, suggesting <slug>-<version digits> and <slug>-2 (Version digits from the first Version: line of docs/SPEC.md, tolerating a Status after it on the same line). Skill sentence, mcp-tools check row and CHANGELOG added. Tests in test/state.mjs (taken slug refused, nothing written; free slug passes) and the archive-time refusal pinned in test/review.mjs. Full npm test passed.
+
+### P1-06 — 5fbf2cb
+
+Push: done. Manual check: NOT VERIFIED (human): with the working tree as the plugin, a kukulu_verify whose extraVerify sleeps 40 minutes returns its result instead of an idle-timeout error; after a clean-room flight's archive, git checkout main succeeds from the build branch with no stash.
