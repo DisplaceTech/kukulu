@@ -522,7 +522,7 @@ Derived from docs/SPEC.md v0.8.1 on 2026-11-11. SPEC.md wins over this file.
 **Files touched:** docs/kukulu.json
 **Design constraints:** Change only that rule's exclude array: append "docs/kukulu.json". Do not touch its id, description, paths, pattern, shouldMatch or shouldNotMatch, or any other rule, command or key (SPEC principle 7: the carried rules stay unchanged). Keep the file ASCII-only with JSON escapes for non-ASCII characters, as it is now.
 **Acceptance tests:** kukulu_verify: the constraints result for no-hardcoded-mcp-timeout is ok: true with hits [] and fixture null (it reports 10 hits in docs/kukulu.json today, which is the finding), and constraints.ok is true. The rule's own self-test (shouldMatch and shouldNotMatch) still passes.
-**Out of scope:** Any change to .mcp.json, the server, the tests or the docs; changing how the constraint engine scans its own config (that is Kukulu tooling, logged as feedback).
+**Out of scope:** Any change to .mcp.json, the server, the tests or the docs; changing how the constraint engine scans its own config (that is Kūkulu tooling, logged as feedback).
 **Verification:** kukulu_verify with files ["docs/kukulu.json"]: ok true overall.
 **Depends on:** none
 
