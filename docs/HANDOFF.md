@@ -52,3 +52,13 @@ None were added or tuned in this flight. `policies.finalize`'s `"ready"` default
 - Server behavior changes: `kukulu_release` was rewritten to read `origin/<base>` (refusals before the tag, fast-forward last); `nextDecision` moved genesis and the gate below the halted, awaiting-signing and archived-done returns; `cfgFrom` takes a `limit` (the plugin's MCP limit) and refuses longer command timeouts.
 - `scripts/verify-attestation.mjs` duplicates `sameModel` and `normalizeModel` of `mcp/cleanroom.mjs` on purpose, and the `KNOWN_LIMITS` `indirect` text changed in both copies identically.
 - Tool count stays twenty-six.
+
+## Round 1
+
+Fix tasks R1-01 to R1-04, all done (25 of 25 tasks done, none blocked).
+
+- R1-01: `docs/kukulu.json` added to the exclude list of `no-hardcoded-mcp-timeout`; constraints are all ok.
+- R1-02: guard heredoc scan ignores `<<` in arithmetic and comments, removes quotes from the whole delimiter word; `sed` accepts abbreviated long options. Interpretation: an unclosed `((` is not arithmetic. 10 new fixtures, no existing fixture changed.
+- R1-03: three new `kukulu_release` tests (signed tag from origin's archived state, localState current, fastForward up to date); each mutant of the server line fails its test. No server change.
+- R1-04: profile policy errors read `profiles.<name>.policies.<key>`; every `cargo` word is checked for `cargo test` with `{filter}` before `--`; README finalize row states the auto-merge condition.
+- Known red: `check-names` fails on `docs/PLAN.md:525` (the plan's R1-01 text spells the display name in ASCII in prose). That breaks `npm run lint`, pre-commit and one `plugin` assertion. I cannot edit PLAN.md; logged as feedback. Every other suite passes.
