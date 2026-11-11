@@ -3,6 +3,7 @@
     "kukulu": {
       "command": "node",
       "args": ["${CLAUDE_PLUGIN_ROOT}/mcp/server.mjs"],
+      "timeout": 86400000,
       "env": {
         "KUKULU_PROJECT_DIR": "${CLAUDE_PROJECT_DIR}",
         "KUKULU_CONFIG": "${KUKULU_CONFIG:-}",

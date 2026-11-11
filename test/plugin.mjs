@@ -92,6 +92,11 @@ eq(server.env.KUKULU_PROJECT_DIR, "${CLAUDE_PROJECT_DIR}", "the server is told w
 eq(server.env.KUKULU_CONFIG, "${KUKULU_CONFIG:-}", "the global routing config path passes through, empty by default");
 eq(server.env.KUKULU_PROFILE, "${KUKULU_PROFILE:-}", "the routing profile passes through, empty by default");
 eq(server.env.KUKULU_CONTROLLER_SOCKET, "${KUKULU_CONTROLLER_SOCKET:-}", "the controller socket passes through, empty by default");
+ok(Number.isInteger(server.timeout) && server.timeout >= 3600000, "the kukulu server entry sets a timeout of at least an hour");
+{
+  const ops = read("docs/operations.md");
+  ok(/^## Long tool calls$/m.test(ops) && !ops.includes("MCP_TOOL_TIMEOUT") && !read("docs/mcp-tools.md").includes("MCP_TOOL_TIMEOUT"), "operations.md has a Long tool calls section and no longer names MCP_TOOL_TIMEOUT");
+}
 eq(server.env.FOUNDRY_CONFIG, undefined, ".mcp.json no longer passes FOUNDRY_CONFIG");
 eq(server.env.FOUNDRY_PROFILE, undefined, "...or FOUNDRY_PROFILE");
 

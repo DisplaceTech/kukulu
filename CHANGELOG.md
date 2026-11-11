@@ -6,6 +6,10 @@ All notable changes to this plugin. Format follows
 
 ## [Unreleased]
 
+### Added
+
+- The plugin sets its own MCP tool-call timeout of 24 hours in `.mcp.json`, so a long verify or mutate call is no longer cut off at Claude Code's 30-minute idle limit (project-g F-08, F-12, F-14, B-01).
+
 ### Fixed
 
 - A heredoc body is data unless a shell reads it, so prior-art paths in a heredoc no longer refuse the call, and an apostrophe in a body no longer hides the commands after it (project-g F-11, A-02).

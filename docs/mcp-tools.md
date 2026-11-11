@@ -36,7 +36,7 @@ Everything the pipeline knows from disk. It is read-only and safe to call at any
 | `reviewRound` | Always `round + 1`: the number the *next* review must stamp on `docs/REVIEW.md`'s `Round:` line |
 | `preexistingUntracked` | Paths that were already untracked before the current run started. Every dirty-tree check ignores them |
 | `policies`, `signing` | The run's resolved policies and signing outcome, from `kukulu_run_start`; see [operations.md](./operations.md#configuration) |
-| `longestCommandTimeoutMs` | The longest timeout of any `verify`, `extraVerify` or `parallel.setup` command (`null` with none). Tool calls are handled one at a time, so a parallel stream's bookkeeping call can wait behind another stream's longest verify; Claude Code's MCP tool-call timeout (`MCP_TOOL_TIMEOUT`) must exceed this plus headroom. See [operations.md](./operations.md#parallel-streams) |
+| `longestCommandTimeoutMs` | The longest timeout of any `verify`, `extraVerify` or `parallel.setup` command (`null` with none). Tool calls are handled one at a time, so a parallel stream's bookkeeping call can wait behind another stream's longest verify; the plugin's limit (`.mcp.json`'s `timeout`, 24 hours) must exceed this plus headroom. See [operations.md](./operations.md#long-tool-calls) |
 | `feedbackCount` | Number of entries in `.kukulu/feedback.jsonl` so far, so a human watching a transcript can see friction accumulate without opening the file |
 | `review` | `{ mutationFixRounds }`: the resolved `review.mutationFixRounds` (default in `docs/operations.md`), so the reviewer, who has no `kukulu_config_show`, can read it |
 | `reviewRoundsInPlan` | How many `## Review fixes (round N)` sections `PLAN.md` carries |
