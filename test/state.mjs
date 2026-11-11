@@ -751,6 +751,31 @@ for (const [slug, expectNote, label] of [
   });
 }
 
+// ---------------------------------------------------------------- plan_commit: a taken flight slug (C-03)
+
+{
+  const repo = specRepo();
+  const plan = plannedRepo({ config: { flight: "w1" } });
+  writeFile(repo, "docs/SPEC.md", readFile(repo, "docs/SPEC.md") + "\nVersion: 0.8.1 Status: draft\n");
+  writeFile(repo, "docs/PLAN.md", readFile(plan, "docs/PLAN.md"));
+  writeFile(repo, "docs/PROGRESS.md", readFile(plan, "docs/PROGRESS.md"));
+  writeFile(repo, "docs/kukulu.json", readFile(plan, "docs/kukulu.json"));
+  writeFile(repo, "CLAUDE.md", "# rules\n");
+  writeFile(repo, "docs/flights/w1/SPEC.md", "# old\n");
+  git(repo, ["add", "docs/SPEC.md", "docs/flights"]);
+  git(repo, ["commit", "-qm", "an earlier flight's archive"]);
+  const head = git(repo, ["rev-parse", "HEAD"]);
+  const before = git(repo, ["status", "--porcelain"]);
+  await withServer(repo, async ({ call }) => {
+    const e = await call("kukulu_plan_commit");
+    isError(e, /\[flight\] docs\/flights\/w1\/ already holds an archived flight; set docs\/kukulu\.json's flight to an unused slug \(for example w1-0-8-1 or w1-2\) and call kukulu_plan_commit again/, "a flight slug that an archive already uses is refused with nothing written");
+    eq(git(repo, ["rev-parse", "HEAD"]) + "|" + git(repo, ["status", "--porcelain"]), head + "|" + before, "...HEAD does not move and no file changes");
+    writeFile(repo, "docs/kukulu.json", readFile(plan, "docs/kukulu.json").replace('"flight": "w1"', '"flight": "w1-0-8-1"'));
+    const r = await call("kukulu_plan_commit");
+    ok(!r.error && Boolean(r.commit), "a free slug passes" + (r.error ? `: ${r.error}` : ""));
+  });
+}
+
 // ---------------------------------------------------------------- plan_commit (S-06)
 
 {

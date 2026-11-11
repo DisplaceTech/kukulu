@@ -958,7 +958,7 @@ const snapshot = (repo) => Object.fromEntries(ARCHIVE_FILES.map((f) => [f, hasFi
     writeFile(repo, "docs/flights/w1-share/x.txt", "x");
     git(repo, ["add", "-A"]);
     git(repo, ["commit", "-qm", "occupied"]);
-    isError(await call("kukulu_flight_archive"), /docs\/flights\/w1-share already exists/, "...and when the destination exists");
+    isError(await call("kukulu_flight_archive"), /^docs\/flights\/w1-share already exists; choose another slug, or remove the old archive$/, "the archive-time refusal names the taken directory and says to choose another slug");
     ok(hasFile(repo, "docs/PLAN.md"), "...nothing moved in any refusal");
   });
 }

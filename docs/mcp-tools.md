@@ -116,6 +116,7 @@ The checks, by the name each problem carries in `check`:
 | `progress` | `PROGRESS.md`'s task ids differ from `PLAN.md`'s as a set or in order |
 | `streams` | A malformed `**Stream:**` value, or any parallel wave judged invalid (`wave <n>: <reason>`) |
 | `config` | `docs/kukulu.json` is not valid JSON or fails the same validation `cfg()` applies |
+| `flight` | `docs/flights/<flight>/` already exists, so `kukulu_flight_archive` would refuse at the end of the flight; the message suggests `<flight>-<version digits of SPEC's Version: line>` or `<flight>-2` |
 | `from` | A `from` (on a constraint, `verify` or `extraVerify` entry) names an id with no heading |
 | `branch` | The current branch is neither the config's `baseBranch` nor a `branchPrefix*` branch: `on '<branch>', but docs/kukulu.json baseBranch is '<base>'; set baseBranch to '<branch>' (the branch the plan is committed on) or switch to it`. Skipped outside a git repository; a detached HEAD counts as `HEAD` |
 | `claude` | `CLAUDE.md` does not exist at the repository root |

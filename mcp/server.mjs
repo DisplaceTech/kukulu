@@ -4980,6 +4980,12 @@ function validatePlanTexts({ planText, progressText, configRaw, configError, cla
   if (configRaw == null && !configError) add("files", "docs/kukulu.json is missing");
   if (configError) add("config", configError);
   if (!claudeExists) add("claude", "CLAUDE.md does not exist at the repository root; the implementer reads it first");
+  // An archive already under this slug would make kukulu_flight_archive refuse at the very end of the flight.
+  const slug = configRaw?.flight;
+  if (typeof slug === "string" && FLIGHT_SLUG.test(slug) && exists(path.join(ROOT, "docs", "flights", slug))) {
+    const version = exists(P.spec) ? /^\s*(?:\*\*)?Version:?(?:\*\*)?:?\s*v?(\d+(?:\.\d+)*)/im.exec(read(P.spec))?.[1] : null;
+    add("flight", `docs/flights/${slug}/ already holds an archived flight; set docs/kukulu.json's flight to an unused slug (for example ${slug}-${version ? version.replaceAll(".", "-") : "2"} or ${slug}-2) and call kukulu_plan_commit again`);
+  }
 
   const planLines = planText == null ? null : planText.split("\n");
   const ids = []; // task ids with a well-formed heading, in document order
