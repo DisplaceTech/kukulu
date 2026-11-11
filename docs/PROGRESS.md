@@ -10,7 +10,7 @@ Started: 2026-11-11T18:32:19.610Z
 - [x] P0-03 Phase 0 end: push and record the manual check
 - [x] P1-01 The plugin sets its own MCP timeout
 - [x] P1-02 A command timeout the client would cut short is refused
-- [ ] P1-03 No clean-room genesis after the archive
+- [x] P1-03 No clean-room genesis after the archive
 - [ ] P1-04 kukulu_release reads the merged flight from origin
 - [ ] P1-05 A flight slug that collides with an archive is refused at plan time
 - [ ] P1-06 Phase 1 end: push and record the manual checks
@@ -50,3 +50,7 @@ Push: done (origin build/2026-11-11). Manual check: NOT VERIFIED (human): in a l
 ### P1-02 — bc56369
 
 mcpTimeoutMs() (cached, reads PLUGIN_ROOT/.mcp.json) and cfgFrom(c, planIds, limit) refusal for commandTimeoutMs and each verify/extraVerify/parallel.setup/mutation.targeted timeoutMs at or above the limit. status gains mcpTimeoutMs; longestCommandTimeoutMs counts mutation.targeted. Docs and CHANGELOG updated. Interpretation: test/plugin.mjs (not in Files touched) had a regex on cfgFrom's signature, widened for the new parameter. Tests: routing (refusals, below-limit, no-timeout plugin), state (status fields). Earlier full npm test run was green except that plugin crash, now fixed and plugin suite passes.
+
+### P1-03 — b9f9c48
+
+In nextDecision the genesis, gate and gate-failure halt moved below the halted, awaiting-signing and archived-done returns (mode-break halt unchanged). Tests in test/cleanroom.mjs, appended to the existing archive flight block plus a halted-no-genesis block. Docs (mcp-tools, architecture) and CHANGELOG updated. Interpretation: no log means no log.jsonl; the cleanroom directory itself remains after archive. Full npm test passed.
