@@ -29,7 +29,7 @@ Started: 2026-11-11T18:32:19.610Z
 - [x] R1-01 Exclude docs/kukulu.json from no-hardcoded-mcp-timeout
 - [x] R1-02 Guard: heredoc misdetection, abbreviated sed long options, and untested sed and heredoc mechanics
 - [x] R1-03 kukulu_release: test the signing outcome read from origin, localState current and fastForward up to date
-- [ ] R1-04 Profile policies messages, cargo test detection on any cargo, and README's finalize row
+- [x] R1-04 Profile policies messages, cargo test detection on any cargo, and README's finalize row
 
 ## Log
 
@@ -131,3 +131,7 @@ stripHeredocs: skips ((..)) with matching close, comments, quote removal across 
 ### R1-03 — e13894d
 
 Added 3 review tests (signed tag from origin's archived state.json with GIT_CONFIG_GLOBAL isolated; localState current; fastForward up to date). Mutating the three server lines makes exactly those assertions fail. review suite 497/497. No server, harness or fixture change was needed.
+
+### R1-04 — 135b775
+
+validatePolicies gains a joiner so profile messages read profiles.<name>.policies.<key>; validateMutation loops over every cargo word; README finalize row says auto-merge only under policies.finalize "auto". routing suite 302/302; full npm test all pass except plugin's check-names on docs/PLAN.md:525 (plan text from reviewer, not editable). Interpretation: profile non-object policies message uses the dotted form too.
