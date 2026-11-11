@@ -12,7 +12,7 @@ Started: 2026-11-11T18:32:19.610Z
 - [x] P1-02 A command timeout the client would cut short is refused
 - [x] P1-03 No clean-room genesis after the archive
 - [x] P1-04 kukulu_release reads the merged flight from origin
-- [ ] P1-05 A flight slug that collides with an archive is refused at plan time
+- [x] P1-05 A flight slug that collides with an archive is refused at plan time
 - [ ] P1-06 Phase 1 end: push and record the manual checks
 - [ ] P2-01 finalize defaults to ready
 - [ ] P2-02 Policies in the global file and in profiles
@@ -58,3 +58,7 @@ In nextDecision the genesis, gate and gate-failure halt moved below the halted, 
 ### P1-04 — 27f15a0
 
 release() rewritten to the plan order: fetch origin, read origin/<base>:.kukulu/state.json archived, Branch and signing from the archived dir on origin, gh pr view, CHANGELOG refusal with flight and PR, tag/push/release as before, then fastForward and localState last; the checkout, dirty-tree and ancestor refusals are removed. TOOLS description and docs/mcp-tools.md, CONTRIBUTING review row, CHANGELOG updated. releaseRepo in test/review.mjs now puts the archive commit on the merged build branch with local main behind; old pinned-refusal tests replaced. Interpretation: localState is judged before the fast-forward (stale even when fastForward is done). test/harness.mjs unchanged. Full npm test passed.
+
+### P1-05 — 0f797fc
+
+validatePlanTexts adds a flight problem when docs/flights/<slug>/ exists, suggesting <slug>-<version digits> and <slug>-2 (Version digits from the first Version: line of docs/SPEC.md, tolerating a Status after it on the same line). Skill sentence, mcp-tools check row and CHANGELOG added. Tests in test/state.mjs (taken slug refused, nothing written; free slug passes) and the archive-time refusal pinned in test/review.mjs. Full npm test passed.
