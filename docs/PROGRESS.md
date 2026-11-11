@@ -5,7 +5,7 @@ Started: 2026-11-11T18:32:19.610Z
 
 ## Tasks
 
-- [ ] P0-01 sed is a write only in place
+- [x] P0-01 sed is a write only in place
 - [ ] P0-02 Heredoc bodies are data unless a shell reads them
 - [ ] P0-03 Phase 0 end: push and record the manual check
 - [ ] P1-01 The plugin sets its own MCP timeout
@@ -30,3 +30,7 @@ Started: 2026-11-11T18:32:19.610Z
 ## Log
 
 (one entry per task, appended by implement)
+
+### P0-01 — c5fe324
+
+sedInPlace and internal sedScan added to mcp/cleanroom.mjs; rule 6d runs for sed only in place, targets are file operands only. KNOWN_LIMITS indirect text updated in both copies and the docs row. 12 fixtures (P0-01) added; no existing fixture changed. Tests added in test/cleanroom.mjs. Full npm test passed. Note: constraint no-hardcoded-mcp-timeout reports hits inside docs/kukulu.json itself (its own description and examples); that file may not be edited, so it is unrelated to this task.
