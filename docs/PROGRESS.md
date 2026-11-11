@@ -34,6 +34,7 @@ Started: 2026-11-11T18:32:19.610Z
 - [x] R2-02 Guard: a << inside ${...} or $[...] is not a heredoc operator
 - [x] R2-03 Guard tests: sed's attached long-option value and the (( subshell check
 - [x] R2-04 cargo test refusal: compare each cargo test with its own --
+- [ ] R3-01 Guard: a << in an array-subscript assignment, a compound array assignment or a backtick span is not a heredoc operator
 
 ## Log
 
