@@ -14,7 +14,7 @@ Started: 2026-11-11T18:32:19.610Z
 - [x] P1-04 kukulu_release reads the merged flight from origin
 - [x] P1-05 A flight slug that collides with an archive is refused at plan time
 - [x] P1-06 Phase 1 end: push and record the manual checks
-- [ ] P2-01 finalize defaults to ready
+- [x] P2-01 finalize defaults to ready
 - [ ] P2-02 Policies in the global file and in profiles
 - [ ] P2-03 Grouped similarity pairs
 - [ ] P2-04 compare-bundles keys its scores by group
@@ -66,3 +66,7 @@ validatePlanTexts adds a flight problem when docs/flights/<slug>/ exists, sugges
 ### P1-06 — 5fbf2cb
 
 Push: done. Manual check: NOT VERIFIED (human): with the working tree as the plugin, a kukulu_verify whose extraVerify sleeps 40 minutes returns its result instead of an idle-timeout error; after a clean-room flight's archive, git checkout main succeeds from the build branch with no stash.
+
+### P2-01 — 98508c7
+
+cfgFrom defaults finalize to ready (only place); DEFAULT_STATE.policies = cfgFrom({}, null).policies (eight keys); configShow returns policies. Docs, README step 4 and CHANGELOG updated. Interpretation: test/review.mjs finalizeRepo merges finalize auto into its policies (null means no block) so the existing auto-merge cases keep their meaning; new default case added. Tests: routing, review, state. All suites passed after the review fix (earlier run showed only review failing).
