@@ -1164,4 +1164,17 @@ const OLD_LAYOUT = /pre-0\.6\.0 Foundry layout, which 0\.7\.0 no longer reads/;
   }
 }
 
+// ---------------------------------------------------------------- the MCP limit and mutation.targeted in status (B-02)
+
+{
+  await withServer(plannedRepo({ config: { verify: ["true"] } }), async ({ call }) => {
+    const st = await call("kukulu_status");
+    ok(Number.isInteger(st.mcpTimeoutMs) && st.mcpTimeoutMs >= 3600000, "kukulu_status reports mcpTimeoutMs from the plugin's .mcp.json");
+  });
+  const config = { verify: [{ cmd: "true", timeoutMs: 1000 }], mutation: { targeted: { unit: { cmd: "true {filter}", timeoutMs: 1500000 } } } };
+  await withServer(plannedRepo({ config }), async ({ call }) => {
+    eq((await call("kukulu_status")).longestCommandTimeoutMs, 1500000, "longestCommandTimeoutMs counts mutation.targeted");
+  });
+}
+
 finish();

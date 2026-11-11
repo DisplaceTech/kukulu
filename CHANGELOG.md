@@ -9,6 +9,7 @@ All notable changes to this plugin. Format follows
 ### Added
 
 - The plugin sets its own MCP tool-call timeout of 24 hours in `.mcp.json`, so a long verify or mutate call is no longer cut off at Claude Code's 30-minute idle limit (project-g F-08, F-12, F-14, B-01).
+- A `verify`, `extraVerify`, `parallel.setup` or `mutation.targeted` timeout at or above the plugin's MCP limit is refused when the config loads, and `kukulu_status` reports `mcpTimeoutMs` (B-02).
 
 ### Fixed
 

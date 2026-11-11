@@ -1161,8 +1161,23 @@ function cfg() {
   return cfgFrom(loadConfig() || {}, exists(P.plan) ? planIdsOf(read(P.plan)) : null);
 }
 
-/** The resolved config for parsed `docs/kukulu.json` content; `planIds` (or null to skip the check) are the tasks a `from` may name. */
-function cfgFrom(c, planIds) {
+let mcpTimeoutCache;
+
+/** The per-server `timeout` of `.mcp.json`'s kukulu entry in the plugin, or null when the file, the entry or a positive integer value is missing. Read once per process. */
+function mcpTimeoutMs() {
+  if (mcpTimeoutCache !== undefined) return mcpTimeoutCache;
+  mcpTimeoutCache = null;
+  try {
+    const t = JSON.parse(fs.readFileSync(path.join(PLUGIN_ROOT, ".mcp.json"), "utf8"))?.mcpServers?.kukulu?.timeout;
+    if (Number.isInteger(t) && t > 0) mcpTimeoutCache = t;
+  } catch {
+    // No readable .mcp.json: the plugin sets no limit, so nothing is refused.
+  }
+  return mcpTimeoutCache;
+}
+
+/** The resolved config for parsed `docs/kukulu.json` content; `planIds` (or null to skip the check) are the tasks a `from` may name; `limit` is the plugin's MCP tool-call limit, or null. */
+function cfgFrom(c, planIds, limit = mcpTimeoutMs()) {
   validatePolicies(c.policies);
   if (c.flight !== undefined && (typeof c.flight !== "string" || !FLIGHT_SLUG.test(c.flight))) {
     throw new ToolError(`docs/kukulu.json flight must be a slug matching ${FLIGHT_SLUG} (lowercase letters, digits and -, at most 40 characters)`);
@@ -1188,7 +1203,7 @@ function cfgFrom(c, planIds) {
   );
   const norm = (entry, i, where, opts) => normalizeCommand(entry, commandTimeoutMs, `docs/kukulu.json ${where}[${i}]`, opts);
   const gated = { allowFrom: true, planIds };
-  return {
+  const resolved = {
     verify: (c.verify || []).map((e, i) => norm(e, i, "verify", gated)),
     extraVerify: Object.fromEntries(
       Object.entries(c.extraVerify || {}).map(([prefix, arr]) => [prefix, (arr || []).map((e, i) => norm(e, i, `extraVerify['${prefix}']`, gated))]),
@@ -1230,6 +1245,20 @@ function cfgFrom(c, planIds) {
       syncBase: c.policies?.syncBase ?? true,
     },
   };
+  if (limit !== null) {
+    const tail = `is not below the plugin's MCP tool-call limit of ${limit} ms (.mcp.json "timeout"); Claude Code would abort the call before the command ends. Lower it, or split the command.`;
+    if (commandTimeoutMs >= limit) throw new ToolError(`docs/kukulu.json commandTimeoutMs ${commandTimeoutMs} ${tail}`);
+    const timed = [
+      ...resolved.verify.map((e, i) => [`verify[${i}]`, e]),
+      ...Object.entries(resolved.extraVerify).flatMap(([prefix, arr]) => arr.map((e, i) => [`extraVerify['${prefix}'][${i}]`, e])),
+      ...resolved.parallel.setup.map((e, i) => [`parallel.setup[${i}]`, e]),
+      ...Object.entries(targeted).map(([name, e]) => [`mutation.targeted.${name}`, e]),
+    ];
+    for (const [where, e] of timed) {
+      if (e.timeoutMs >= limit) throw new ToolError(`docs/kukulu.json ${where}.timeoutMs ${e.timeoutMs} ${tail}`);
+    }
+  }
+  return resolved;
 }
 
 // ---------------------------------------------------------------- routing config
@@ -2258,14 +2287,14 @@ function gitFacts() {
 
 /**
  * The longest timeout any command Kūkulu runs on the model's behalf can
- * take (`verify`, `extraVerify`, `parallel.setup`), or null with none. Every
- * tool handler is synchronous, so a stream's bookkeeping call can wait
- * behind another stream's longest verify; Claude Code's MCP tool-call
- * timeout (`MCP_TOOL_TIMEOUT`) has to exceed this plus headroom.
+ * take (`verify`, `extraVerify`, `parallel.setup`, `mutation.targeted`), or
+ * null with none. Every tool handler is synchronous, so a stream's
+ * bookkeeping call can wait behind another stream's longest verify; the
+ * plugin's MCP limit (`mcpTimeoutMs`) has to exceed this plus headroom.
  */
 function longestCommandTimeoutMs() {
   const cc = cfg();
-  const all = [...cc.verify, ...Object.values(cc.extraVerify).flat(), ...cc.parallel.setup];
+  const all = [...cc.verify, ...Object.values(cc.extraVerify).flat(), ...cc.parallel.setup, ...Object.values(cc.mutation.targeted)];
   return all.length ? Math.max(...all.map((c) => c.timeoutMs)) : null;
 }
 
@@ -2293,6 +2322,7 @@ function status() {
     signing: st.signing,
     feedbackCount: countFeedback(),
     longestCommandTimeoutMs: longestCommandTimeoutMs(),
+    mcpTimeoutMs: mcpTimeoutMs(),
     review: { mutationFixRounds: cfg().review.mutationFixRounds },
     sandbox: envVar("SANDBOX") ?? null,
     reviewRoundsInPlan: reviewRoundCount(),

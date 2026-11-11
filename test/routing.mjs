@@ -8,9 +8,11 @@
 // templates/ccr/*.json) is added alongside the templates themselves, not
 // here.
 
+import fs from "node:fs";
+import path from "node:path";
 import {
   finish, ok, eq, like, isError,
-  ROOT, mkDir, plannedRepo, withServer,
+  ROOT, mkDir, plannedRepo, withServer, tempPlugin,
   readFile, writeFile, hasFile, git, writeGlobalConfig, splitFrontmatter,
 } from "./harness.mjs";
 
@@ -688,6 +690,41 @@ for (const [value, got, label] of [
     const after = await call("kukulu_config_show");
     eq(after.roles.implementer.model, "opus", "kukulu_config_show re-reads the global config on every call");
   }, { env });
+}
+
+// ---------------------------------------------------------------- a command timeout the client would cut short (B-02)
+
+{
+  const LIMIT = 2000000; // the temp plugin's own small limit; the real plugin's number is never written here
+  const withLimit = (timeout) => {
+    const plugin = tempPlugin();
+    const entry = { command: "node", args: ["${CLAUDE_PLUGIN_ROOT}/mcp/server.mjs"], ...(timeout === undefined ? {} : { timeout }) };
+    if (timeout !== null) fs.writeFileSync(path.join(plugin, ".mcp.json"), JSON.stringify({ mcpServers: { kukulu: entry } }));
+    return path.join(plugin, "mcp", "server.mjs");
+  };
+  const tail = (n) => ` is not below the plugin's MCP tool-call limit of ${LIMIT} ms \\(\\.mcp\\.json "timeout"\\); Claude Code would abort the call before the command ends\\. Lower it, or split the command\\.$`;
+  const refuses = async (config, head, label) => {
+    const server = withLimit(LIMIT);
+    await withServer(plannedRepo({ config }), async ({ call }) => {
+      isError(await call("kukulu_status"), new RegExp(`^docs/kukulu\\.json ${head}${tail()}`), label);
+    }, { server });
+  };
+  const base = { verify: ["true"], commandTimeoutMs: 1000000 };
+  await refuses({ ...base, commandTimeoutMs: LIMIT }, `commandTimeoutMs ${LIMIT}`, "commandTimeoutMs at the MCP limit is refused");
+  await refuses({ ...base, verify: [{ cmd: "true", timeoutMs: LIMIT }] }, `verify\\[0\\]\\.timeoutMs ${LIMIT}`, "a verify entry at the MCP limit is refused");
+  await refuses({ ...base, extraVerify: { "src/": ["true", { cmd: "true", timeoutMs: LIMIT }] } }, `extraVerify\\['src/'\\]\\[1\\]\\.timeoutMs ${LIMIT}`, "an extraVerify entry at the MCP limit is refused");
+  await refuses({ ...base, parallel: { setup: [{ cmd: "true", timeoutMs: LIMIT }] } }, `parallel\\.setup\\[0\\]\\.timeoutMs ${LIMIT}`, "a parallel.setup entry at the MCP limit is refused");
+  await refuses({ ...base, mutation: { targeted: { suite: { cmd: "true {filter}", timeoutMs: LIMIT } } } }, `mutation\\.targeted\\.suite\\.timeoutMs ${LIMIT}`, "a mutation.targeted entry at the MCP limit is refused");
+  await withServer(plannedRepo({ config: { ...base, verify: [{ cmd: "true", timeoutMs: LIMIT - 1 }] } }), async ({ call }) => {
+    const st = await call("kukulu_status");
+    ok(!st.error && st.mcpTimeoutMs === LIMIT && st.longestCommandTimeoutMs === LIMIT - 1, "a command one millisecond below the limit loads");
+  }, { server: withLimit(LIMIT) });
+  for (const [label, timeout] of [["a timeout field", undefined], ["an .mcp.json file", null]]) {
+    await withServer(plannedRepo({ config: { verify: [{ cmd: "true", timeoutMs: 999999999 }] } }), async ({ call }) => {
+      const st = await call("kukulu_status");
+      ok(!st.error && st.mcpTimeoutMs === null, `a plugin without ${label} refuses nothing and reports mcpTimeoutMs null`);
+    }, { server: withLimit(timeout) });
+  }
 }
 
 finish();
