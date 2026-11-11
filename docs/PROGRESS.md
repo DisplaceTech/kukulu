@@ -32,7 +32,7 @@ Started: 2026-11-11T18:32:19.610Z
 - [x] R1-04 Profile policies messages, cargo test detection on any cargo, and README's finalize row
 - [x] R2-01 Fix the ASCII display name at docs/PLAN.md:525 that turns lint and CI red
 - [x] R2-02 Guard: a << inside ${...} or $[...] is not a heredoc operator
-- [ ] R2-03 Guard tests: sed's attached long-option value and the (( subshell check
+- [x] R2-03 Guard tests: sed's attached long-option value and the (( subshell check
 - [ ] R2-04 cargo test refusal: compare each cargo test with its own --
 
 ## Log
@@ -147,3 +147,7 @@ Replaced the ASCII display name on docs/PLAN.md line 525 with the macron form (o
 ### R2-02 — 07e0992
 
 Added expansionEnd and a branch in stripHeredocs so << inside ${...} / $[...] is not an operator (unclosed is not special). Five fixtures (R2-02), one unit test; no existing fixture changed. docs/cleanroom.md and CHANGELOG line extended. verify ok.
+
+### R2-03 — d776945
+
+Tests only: three guard fixtures (R2-03) and a sedInPlace table row for --expression=s/a/b/ -i f. No guard change, no existing fixture changed. verify ok.
