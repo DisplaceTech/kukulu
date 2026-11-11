@@ -26,7 +26,7 @@ Started: 2026-11-11T18:32:19.610Z
 - [x] P3-04 A cargo test filter goes after --
 - [x] P3-05 CHANGELOG 0.8.1 and the version
 - [x] P3-06 Phase 3 end: push and record the manual checks
-- [ ] R1-01 Exclude docs/kukulu.json from no-hardcoded-mcp-timeout
+- [x] R1-01 Exclude docs/kukulu.json from no-hardcoded-mcp-timeout
 - [ ] R1-02 Guard: heredoc misdetection, abbreviated sed long options, and untested sed and heredoc mechanics
 - [ ] R1-03 kukulu_release: test the signing outcome read from origin, localState current and fastForward up to date
 - [ ] R1-04 Profile policies messages, cargo test detection on any cargo, and README's finalize row
@@ -118,3 +118,8 @@ Unreleased renamed to 0.8.1 dated 2026-11-11 (Added, Fixed, Changed only); every
 ### P3-06 — bcf4b65
 
 Push: done. Manual check: NOT VERIFIED (human): on the next flight, go-flight's first Agent call carries description and does not fail validation; cargo test --workspace -- a b runs both filters on a stable Rust toolchain.
+
+### R1-01 — 79aba45
+
+Appended docs/kukulu.json to no-hardcoded-mcp-timeout's exclude (commit ea1a1c9). kukulu_verify constraints.ok true, rule hits [].
+Remaining red: check-names on docs/PLAN.md:525 (ASCII display name in the plan's own R1-01 text); not editable by me, logged as feedback. Causes lint, pre-commit and one plugin assertion to fail.
