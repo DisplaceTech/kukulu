@@ -1006,16 +1006,23 @@ function validateSimilarity(sim) {
   }
   if (!Array.isArray(sim.pairs) || !sim.pairs.length) throw new ToolError(`${where}.pairs must be a non-empty array of { id, role, left, right }`);
   const seen = new Set();
-  const roles = { negative: 0, positive: 0, test: 0 };
+  const groups = new Map(); // group slug -> role counts, in first-appearance order
+  let grouped = false;
   sim.pairs.forEach((p, i) => {
     const at = `${where}.pairs[${i}]`;
     if (!isObj(p)) throw new ToolError(`${at} must be an object { id, role, left, right }`);
-    for (const k of Object.keys(p)) if (!["id", "role", "left", "right", "control"].includes(k)) throw new ToolError(`${at} has an unknown key '${k}'`);
+    for (const k of Object.keys(p)) if (!["id", "role", "left", "right", "control", "group"].includes(k)) throw new ToolError(`${at} has an unknown key '${k}'`);
     if (typeof p.id !== "string" || !PAIR_ID.test(p.id)) throw new ToolError(`${at}.id must be a slug (lowercase letters, digits and -, at most 40 characters)`);
     if (seen.has(p.id)) throw new ToolError(`${where}.pairs defines the id '${p.id}' more than once`);
     seen.add(p.id);
     if (!PAIR_ROLES.includes(p.role)) throw new ToolError(`${at}.role must be one of ${PAIR_ROLES.join(", ")} (got ${JSON.stringify(p.role)})`);
-    roles[p.role]++;
+    if (p.group !== undefined) {
+      if (typeof p.group !== "string" || !PAIR_ID.test(p.group)) throw new ToolError(`${at}.group must be a slug (letters, digits and -); got ${JSON.stringify(p.group)}`);
+      grouped = true;
+    }
+    const g = p.group ?? "default";
+    if (!groups.has(g)) groups.set(g, { negative: 0, positive: 0, test: 0 });
+    groups.get(g)[p.role]++;
     if (p.control !== undefined) {
       if (p.role !== "positive") throw new ToolError(`${at}.control is only legal on the pair with role "positive"`);
       if (!nonEmptyString(p.control)) throw new ToolError(`${at}.control must be a non-empty string: the directory of a verified control bundle`);
@@ -1025,9 +1032,12 @@ function validateSimilarity(sim) {
       if (p[side] === "subject" && sim.subject === undefined) throw new ToolError(`${at}.${side} is "subject", but ${where}.subject is not set`);
     }
   });
-  if (roles.negative !== 1) throw new ToolError(`${where}.pairs needs exactly one pair with role "negative" (found ${roles.negative})`);
-  if (roles.positive !== 1) throw new ToolError(`${where}.pairs needs exactly one pair with role "positive" (found ${roles.positive})`);
-  if (roles.test < 1) throw new ToolError(`${where}.pairs needs at least one pair with role "test"`);
+  for (const [g, roles] of groups) {
+    const named = grouped ? ` group ${JSON.stringify(g)}` : "";
+    if (roles.negative !== 1) throw new ToolError(`${where}.pairs${named} needs exactly one pair with role "negative" (found ${roles.negative})`);
+    if (roles.positive !== 1) throw new ToolError(`${where}.pairs${named} needs exactly one pair with role "positive" (found ${roles.positive})`);
+    if (roles.test < 1) throw new ToolError(`${where}.pairs${named} needs at least one pair with role "test"`);
+  }
   if (sim.languages !== undefined) {
     if (!isObj(sim.languages) || !Object.keys(sim.languages).length) throw new ToolError(`${where}.languages must be an object mapping an extension such as ".rs" to a language`);
     for (const [ext, lang] of Object.entries(sim.languages)) {
@@ -1053,7 +1063,7 @@ function normalizeSimilarity(sim) {
   if (sim === undefined) return null;
   return {
     subject: sim.subject ?? [],
-    pairs: sim.pairs.map((p) => ({ id: p.id, role: p.role, left: p.left, right: p.right, ...(p.role === "positive" ? { control: p.control ?? null } : {}) })),
+    pairs: sim.pairs.map((p) => ({ id: p.id, role: p.role, left: p.left, right: p.right, ...(p.group !== undefined ? { group: p.group } : {}), ...(p.role === "positive" ? { control: p.control ?? null } : {}) })),
     languages: sim.languages ?? DEFAULT_SIMILARITY_LANGUAGES,
     // ⚠️ ASSUMPTION: the n-gram sizes, identifier and comment bounds come from cleanflate-bench; the margin is strict "pos > neg" until measured.
     ngram: sim.ngram ?? [5, 10],
@@ -3811,39 +3821,42 @@ function walkFiles(dir) {
 }
 
 /**
- * Check the positive pair's control bundle (SPEC B-02): the bundle's own verifier, run with
+ * Check every positive pair's control bundle (SPEC B-02): the bundle's own verifier, run with
  * --expect control-positive, must pass, and the pair's left side must be at the commit the control
- * flight was made at. Returns what similarity.json records, or null when the pair names no bundle.
+ * flight was made at. Returns a map from pair id to what similarity.json records, or null when no
+ * positive pair names a bundle.
  */
 function verifyControlBundle(sim) {
-  const positive = sim.pairs.find((p) => p.role === "positive");
-  if (!positive?.control) return null;
-  const dir = similarityDirs(positive.control, sim)[0];
-  const refuse = (why) => new ToolError(`the positive pair's control bundle ${dir} does not verify as a positive control: ${why}`);
-  const verifier = path.join(dir, "verify.mjs");
-  if (!exists(verifier)) throw refuse("verify.mjs is missing from it");
-  // Behind the sandbox the bundle is a directory the box could have written, so its own verify.mjs would run on the host (SPEC C-04).
-  const script = envVar("SANDBOX") ? path.join(PLUGIN_ROOT, "scripts", "verify-attestation.mjs") : verifier;
-  const run = spawnSync(process.execPath, [script, dir, "--expect", "control-positive", "--json"], { encoding: "utf8", timeout: GATE_SELF_TEST_MS });
-  let verdict = null;
-  try {
-    verdict = JSON.parse(run.stdout);
-  } catch {
-    verdict = null;
+  const records = {};
+  for (const positive of sim.pairs.filter((p) => p.role === "positive" && p.control)) {
+    const dir = similarityDirs(positive.control, sim)[0];
+    const refuse = (why) => new ToolError(`the positive pair's control bundle ${dir} does not verify as a positive control: ${why}`);
+    const verifier = path.join(dir, "verify.mjs");
+    if (!exists(verifier)) throw refuse("verify.mjs is missing from it");
+    // Behind the sandbox the bundle is a directory the box could have written, so its own verify.mjs would run on the host (SPEC C-04).
+    const script = envVar("SANDBOX") ? path.join(PLUGIN_ROOT, "scripts", "verify-attestation.mjs") : verifier;
+    const run = spawnSync(process.execPath, [script, dir, "--expect", "control-positive", "--json"], { encoding: "utf8", timeout: GATE_SELF_TEST_MS });
+    let verdict = null;
+    try {
+      verdict = JSON.parse(run.stdout);
+    } catch {
+      verdict = null;
+    }
+    if (run.status !== 0 || !verdict?.ok) {
+      const first = verdict?.reasons?.[0];
+      throw refuse(first ? `${first.check}: ${first.reason}` : (run.stderr || "").trim().split("\n")[0] || `exit ${run.status}`);
+    }
+    const manifestBytes = fs.readFileSync(path.join(dir, "manifest.json"));
+    const manifest = JSON.parse(manifestBytes.toString("utf8"));
+    const left = positive.left === "subject" ? ROOT : similarityDirs(positive.left, sim)[0];
+    const at = spawnSync("git", gitArgv(["-C", left, "rev-parse", "HEAD"]), { encoding: "utf8" });
+    const head = at.status === 0 ? at.stdout.trim() : null;
+    if (head !== manifest.repo?.head) {
+      throw new ToolError(`the positive pair's left side ${left} is at ${head ?? "no commit"}, but the control bundle was made at ${manifest.repo?.head}; check out the control flight's result there`);
+    }
+    records[positive.id] = { manifest: sha256Hex(manifestBytes), head: manifest.repo.head, fingerprint: manifest.signer.fingerprint };
   }
-  if (run.status !== 0 || !verdict?.ok) {
-    const first = verdict?.reasons?.[0];
-    throw refuse(first ? `${first.check}: ${first.reason}` : (run.stderr || "").trim().split("\n")[0] || `exit ${run.status}`);
-  }
-  const manifestBytes = fs.readFileSync(path.join(dir, "manifest.json"));
-  const manifest = JSON.parse(manifestBytes.toString("utf8"));
-  const left = positive.left === "subject" ? ROOT : similarityDirs(positive.left, sim)[0];
-  const at = spawnSync("git", gitArgv(["-C", left, "rev-parse", "HEAD"]), { encoding: "utf8" });
-  const head = at.status === 0 ? at.stdout.trim() : null;
-  if (head !== manifest.repo?.head) {
-    throw new ToolError(`the positive pair's left side ${left} is at ${head ?? "no commit"}, but the control bundle was made at ${manifest.repo?.head}; check out the control flight's result there`);
-  }
-  return { manifest: sha256Hex(manifestBytes), head: manifest.repo.head, fingerprint: manifest.signer.fingerprint };
+  return Object.keys(records).length ? records : null;
 }
 
 /**
@@ -3861,7 +3874,7 @@ function similarity() {
   if (st.verdict !== "APPROVED") throw new ToolError("the flight is not reviewed APPROVED yet; score contamination after the review approves the build");
 
   // A positive pair that names a control bundle is checked before any file is read: the bundle must verify as a control flight, and the left side must be the tree it was made at.
-  const controlRecord = verifyControlBundle(sim);
+  const controlRecords = verifyControlBundle(sim);
 
   // Resolve and read every side once.
   const sides = new Map();
@@ -3907,15 +3920,19 @@ function similarity() {
   // Score every pair, then position each test pair against the controls, metric by metric.
   const opts = { ngram: sim.ngram, minIdentLen: sim.minIdentLen, commentNgram: sim.commentNgram, exclusions };
   const scores = new Map(sim.pairs.map((p) => [p.id, scorePair(readSide(p.left).files, readSide(p.right).files, opts)]));
-  const negative = sim.pairs.find((p) => p.role === "negative");
-  const positive = sim.pairs.find((p) => p.role === "positive");
-  const metrics = Object.keys(scores.get(negative.id));
+  // A pair without a group belongs to `default`; each test pair is positioned against its own group's controls.
+  const groupOf = (p) => p.group ?? "default";
+  const groupNames = [...new Set(sim.pairs.map(groupOf))];
+  const controls = new Map(groupNames.map((g) => [g, { negative: sim.pairs.find((p) => groupOf(p) === g && p.role === "negative"), positive: sim.pairs.find((p) => groupOf(p) === g && p.role === "positive") }]));
+  const grouped = sim.pairs.some((p) => p.group !== undefined);
+  const metrics = Object.keys(scores.get(controls.get(groupNames[0]).negative.id));
   const rows = [];
   for (const p of sim.pairs) {
+    const { negative, positive } = controls.get(groupOf(p));
     for (const metric of metrics) {
       const score = scores.get(p.id)[metric];
       const where = p.role === "test" ? position(score, scores.get(negative.id)[metric], scores.get(positive.id)[metric], sim) : { c: null, band: null };
-      rows.push({ pair: p.id, role: p.role, metric, score, c: where.c, band: where.band });
+      rows.push({ pair: p.id, group: groupOf(p), role: p.role, metric, score, c: where.c, band: where.band });
     }
   }
   const verdict = verdictOf(rows.filter((r) => r.role === "test"));
@@ -3933,7 +3950,7 @@ function similarity() {
     }
   }
   const skipped = unmapped.size;
-  const recorded = controlRecord ? { ...sim, pairs: sim.pairs.map((p) => (p.id === positive.id ? { ...p, control: controlRecord } : p)) } : sim;
+  const recorded = controlRecords ? { ...sim, pairs: sim.pairs.map((p) => (controlRecords[p.id] ? { ...p, control: controlRecords[p.id] } : p)) } : sim;
   const json = `${JSON.stringify({ config: recorded, files, rows, verdict, limits: LIMITS, at: new Date().toISOString() }, null, 2)}\n`;
   const jsonPath = path.join(P.stateDir, "cleanroom", "similarity.json");
 
@@ -3942,7 +3959,9 @@ function similarity() {
   const doc = [
     "# Contamination score",
     "",
-    `The subject (${sim.subject.length ? sim.subject.join(", ") : "none"}) was compared with ${testPairs.length} test pair${testPairs.length === 1 ? "" : "s"} (${testPairs.map((p) => p.id).join(", ")}) and placed between a negative control (${negative.id}) and a positive control (${positive.id}). A test pair at or below the negative control on a metric that separates the controls shows no similarity beyond independent work.`,
+    `The subject (${sim.subject.length ? sim.subject.join(", ") : "none"}) was compared with ${testPairs.length} test pair${testPairs.length === 1 ? "" : "s"} (${testPairs.map((p) => p.id).join(", ")}) and placed between each group's negative and positive controls (listed below). A test pair at or below the negative control on a metric that separates the controls shows no similarity beyond independent work.`,
+    "",
+    ...groupNames.map((g) => `- group ${g}: negative ${controls.get(g).negative.id}, positive ${controls.get(g).positive.id}`),
     "",
     "## Positioning",
     "",
@@ -3954,9 +3973,9 @@ function similarity() {
     "",
     "## Raw scores",
     "",
-    `| pair | role | ${metrics.join(" | ")} |`,
-    `|---|---|${metrics.map(() => "---:").join("|")}|`,
-    ...sim.pairs.map((p) => `| ${p.id} | ${p.role} | ${metrics.map((m) => fixed(scores.get(p.id)[m])).join(" | ")} |`),
+    `| pair | ${grouped ? "group | " : ""}role | ${metrics.join(" | ")} |`,
+    `|---|${grouped ? "---|" : ""}---|${metrics.map(() => "---:").join("|")}|`,
+    ...sim.pairs.map((p) => `| ${p.id} | ${grouped ? `${groupOf(p)} | ` : ""}${p.role} | ${metrics.map((m) => fixed(scores.get(p.id)[m])).join(" | ")} |`),
     "",
     "## Limits",
     "",

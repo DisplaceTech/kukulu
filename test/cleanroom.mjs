@@ -1779,6 +1779,20 @@ const gateCheck = (reason) => (reason.match(/^clean-room gate failed: ([\w-]+):/
     const r = await statusWith(bad);
     isError(r, re, label);
   }
+  const G = (g, extra = {}) => ({ group: g, ...extra });
+  const rustC = [G("rust-c", { ...PAIRS[0], id: "n2" }), G("rust-c", { ...PAIRS[1], id: "p2" }), G("rust-c", { ...PAIRS[2], id: "t2" })];
+  const grouped = (...pairs) => sim({ pairs: [...PAIRS.map((p) => G("lib", p)), ...pairs] });
+  ok(!(await statusWith(grouped(...rustC))).error, "two groups with a control pair of each role and a test resolve");
+  for (const [bad, re, label] of [
+    [sim({ pairs: [PAIRS[0], PAIRS[1], { ...PAIRS[2], group: "Bad Slug" }] }), /^docs\/kukulu\.json cleanroom\.similarity\.pairs\[2\]\.group must be a slug \(letters, digits and -\); got "Bad Slug"$/, "a bad group is refused"],
+    [sim({ pairs: [{ ...PAIRS[0], group: 3 }, PAIRS[1], PAIRS[2]] }), /pairs\[0\]\.group must be a slug .*; got 3$/, "...a group that is not a string"],
+    [grouped({ ...rustC[0] }, { ...rustC[0], id: "n3" }, rustC[1], rustC[2]), /^docs\/kukulu\.json cleanroom\.similarity\.pairs group "rust-c" needs exactly one pair with role "negative" \(found 2\)$/, "a group with two negatives is refused naming the group"],
+    [grouped(rustC[0], rustC[2]), /pairs group "rust-c" needs exactly one pair with role "positive" \(found 0\)$/, "a group with no positive is refused naming the group"],
+    [grouped(rustC[0], rustC[1]), /pairs group "rust-c" needs at least one pair with role "test"$/, "a group with no test pair is refused naming the group"],
+    [sim({ pairs: [PAIRS[0], { ...PAIRS[0], id: "again" }, PAIRS[1], PAIRS[2]] }), /^docs\/kukulu\.json cleanroom\.similarity\.pairs needs exactly one pair with role "negative" \(found 2\)$/, "no groups keeps the old refusal texts"],
+  ]) {
+    isError(await statusWith(bad), re, label);
+  }
 }
 
 // ---------------------------------------------------------------- lexers: Rust and the C family
@@ -2077,7 +2091,7 @@ eq(LANGUAGES.join(","), "rust,c,cpp,go,python,javascript,typescript,java,php", "
       const test = json.rows.filter((x) => x.role === "test");
       ok(test.length === 7 && test.every((x) => BANDS.includes(x.band)), "...and the test pair has a banded row for every metric");
       const doc = readFile(repo, "docs/SIMILARITY.md");
-      like(doc, /^# Contamination score\n\n.*negative control \(independent\).*positive control \(derived\)/s, "docs/SIMILARITY.md opens with the statement");
+      like(doc, /^# Contamination score\n\n.*each group's negative and positive controls.*\n- group default: negative independent, positive derived\n/s, "docs/SIMILARITY.md opens with the statement and one line per group");
       like(doc, /## Verdict\n\n(independence|no metric)/, "...then the verdict");
       ok(doc.includes("## Raw scores") && doc.includes("## Limits") && !/\d{4}-\d\d-\d\dT/.test(doc), "...the raw scores and the limits, with no timestamp");
       const again = await call("kukulu_similarity");
@@ -2108,6 +2122,39 @@ eq(LANGUAGES.join(","), "rust,c,cpp,go,python,javascript,typescript,java,php", "
       const neg = (res) => res.rows.find((x) => x.pair === "independent" && x.metric === "ident_jaccard").score;
       ok(neg(r) < neg(base), "an exclusion list removes the planted identifier from the scores");
     });
+  }
+
+  // groups (P2-03)
+  {
+    const GROUPED = SIM({
+      pairs: [
+        { id: "independent", role: "negative", left: FIX("a"), right: FIX("b") },
+        { id: "derived", role: "positive", left: FIX("b"), right: FIX("b-derived") },
+        { id: "vs-c", role: "test", left: "subject", right: FIX("c") },
+        { id: "n-rc", role: "negative", left: FIX("b"), right: FIX("c"), group: "rust-c" },
+        { id: "p-rc", role: "positive", left: FIX("c"), right: FIX("b-derived"), group: "rust-c" },
+        { id: "t-rc", role: "test", left: "subject", right: FIX("b-derived"), group: "rust-c" },
+      ],
+    });
+    const run = async (similarity) => {
+      const repo = generalRepo(similarity);
+      let res;
+      await withServer(repo, async ({ call }) => { res = await call("kukulu_similarity"); });
+      return { repo, res, json: JSON.parse(readFile(repo, ".kukulu/cleanroom/similarity.json")), doc: readFile(repo, "docs/SIMILARITY.md") };
+    };
+    const g = await run(GROUPED);
+    ok(!g.res.error, "a grouped config scores" + (g.res.error ? `: ${g.res.error}` : ""));
+    const at = (json, pair, metric) => json.rows.find((x) => x.pair === pair && x.metric === metric);
+    const metric = g.json.rows[0].metric;
+    const t = at(g.json, "t-rc", metric);
+    const own = position(t.score, at(g.json, "n-rc", metric).score, at(g.json, "p-rc", metric).score, g.json.config);
+    const other = position(t.score, at(g.json, "independent", metric).score, at(g.json, "derived", metric).score, g.json.config);
+    ok(t.group === "rust-c" && t.c === own.c && JSON.stringify(own) !== JSON.stringify(other), "a test pair in group rust-c is positioned against its own group's bands");
+    ok(g.json.rows.every((x) => ["default", "rust-c"].includes(x.group)) && g.json.config.pairs.filter((p) => p.group === "rust-c").length === 3, "a grouped config's similarity.json keeps the groups");
+    ok(g.doc.includes("- group default: negative independent, positive derived\n- group rust-c: negative n-rc, positive p-rc\n") && g.doc.includes("| pair | group | role |"), "docs/SIMILARITY.md lists each group and gains a group column");
+    const plain = await run(SIM());
+    ok(plain.json.rows.every((x) => x.group === "default") && plain.json.rows.length === 21, "an ungrouped config gives the old rows plus group default");
+    ok(plain.json.config.pairs.every((p) => !("group" in p)) && !plain.doc.includes("| group |"), "...and its similarity.json and table have no groups");
   }
 
   // clean-room mode: score entry, checkpoint, gate
