@@ -25,7 +25,7 @@ Started: 2026-11-11T18:32:19.610Z
 - [x] P3-03 An owner-only block halts for the owner
 - [x] P3-04 A cargo test filter goes after --
 - [x] P3-05 CHANGELOG 0.8.1 and the version
-- [ ] P3-06 Phase 3 end: push and record the manual checks
+- [x] P3-06 Phase 3 end: push and record the manual checks
 
 ## Log
 
@@ -110,3 +110,7 @@ validateMutation refuses cargo test (after any -/+ tokens) with {filter} before 
 ### P3-05 — bca723e
 
 Unreleased renamed to 0.8.1 dated 2026-11-11 (Added, Fixed, Changed only); every section 6 requirement already had a line. 0.8.1 in package.json, plugin.json, VERSION and the README badge. Gitignored feedback file got its Addressed in header (not staged). Full npm test passed.
+
+### P3-06 — bcf4b65
+
+Push: done. Manual check: NOT VERIFIED (human): on the next flight, go-flight's first Agent call carries description and does not fail validation; cargo test --workspace -- a b runs both filters on a stable Rust toolchain.
