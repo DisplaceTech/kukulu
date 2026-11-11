@@ -22,7 +22,7 @@ Started: 2026-11-11T18:32:19.610Z
 - [x] P2-06 Phase 2 end: push and record the manual check
 - [x] P3-01 kukulu_next supplies the Agent call's description
 - [x] P3-02 The implementer sees its own task's log
-- [ ] P3-03 An owner-only block halts for the owner
+- [x] P3-03 An owner-only block halts for the owner
 - [ ] P3-04 A cargo test filter goes after --
 - [ ] P3-05 CHANGELOG 0.8.1 and the version
 - [ ] P3-06 Phase 3 end: push and record the manual checks
@@ -98,3 +98,7 @@ stage() adds description for plan/implement/review/summarize (the display name w
 ### P3-02 — e7ff8f7
 
 taskNext result gains taskLog (pr.logs[id] ?? null, same shape as dependencyLogs entries); TOOLS description, implement skill step 2, review-build unblock sentence, mcp-tools row and CHANGELOG updated. Tests in test/implement.mjs for unblocked, fresh and reopened tasks. Full npm test passed.
+
+### P3-03 — 623fb25
+
+agents/reviewer.md tools line gains kukulu_run_halt; review-build skill gains the owner-action rule (without naming kukulu_run_resume, which the reviewer cannot call, per the existing plugin test); operations Halts section (now five) and mcp-tools run_halt updated; CHANGELOG. The resume-into-review behavior already worked, so no server change; test/state.mjs pins it. Full npm test passed.
