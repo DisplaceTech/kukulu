@@ -62,3 +62,12 @@ Fix tasks R1-01 to R1-04, all done (25 of 25 tasks done, none blocked).
 - R1-03: three new `kukulu_release` tests (signed tag from origin's archived state, localState current, fastForward up to date); each mutant of the server line fails its test. No server change.
 - R1-04: profile policy errors read `profiles.<name>.policies.<key>`; every `cargo` word is checked for `cargo test` with `{filter}` before `--`; README finalize row states the auto-merge condition.
 - Known red: `check-names` fails on `docs/PLAN.md:525` (the plan's R1-01 text spells the display name in ASCII in prose). That breaks `npm run lint`, pre-commit and one `plugin` assertion. I cannot edit PLAN.md; logged as feedback. Every other suite passes.
+
+## Round 2
+
+Fix tasks R2-01 to R2-04, all done (29 of 29 tasks done, none blocked). `kukulu_verify` is ok after each task: lint, pre-commit, npm test, both guard self-tests.
+
+- R2-01: the one-line fix of the ASCII display name at `docs/PLAN.md:525`; `check-names` is green again, so lint, pre-commit and the plugin suite pass (the Round 1 known red is closed).
+- R2-02: `stripHeredocs` skips `${...}` and `$[...]` (nesting-aware, quote-aware; an unclosed one is not special). Five fixtures (R2-02); `docs/cleanroom.md` and the CHANGELOG line name both forms. No existing fixture changed.
+- R2-03: tests only. Three fixtures (R2-03) and a `sedInPlace` row cover sed's attached long-option value and the `((` subshell check. No existing fixture changed.
+- R2-04: `validateMutation` compares each `cargo test` with the first `--` after it. Interpretation: a `{filter}` that sits before the cargo test is not judged against it; only a missing `--` refuses then. Two routing assertions.
