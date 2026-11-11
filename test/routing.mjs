@@ -12,7 +12,7 @@ import fs from "node:fs";
 import path from "node:path";
 import {
   finish, ok, eq, like, isError,
-  ROOT, mkDir, plannedRepo, withServer, tempPlugin,
+  ROOT, mkDir, plannedRepo, withServer, tempPlugin, mkFakeGhBin, mkBareRemote, mkFakeGpg, useFakeSigner, setState,
   readFile, writeFile, hasFile, git, writeGlobalConfig, splitFrontmatter,
 } from "./harness.mjs";
 
@@ -729,6 +729,71 @@ for (const [value, got, label] of [
       const st = await call("kukulu_status");
       ok(!st.error && st.mcpTimeoutMs === null, `a plugin without ${label} refuses nothing and reports mcpTimeoutMs null`);
     }, { server: withLimit(timeout) });
+  }
+}
+
+// ---------------------------------------------------------------- policies in the global file and profiles (D-02)
+
+{
+  const project = (policies) => plannedRepo({ config: policies === undefined ? {} : { policies } });
+  const withGlobal = async (obj, repo, fn, env = {}) => withServer(repo, fn, { env: { KUKULU_CONFIG: writeGlobalConfig(cfgDir(), obj), ...env } });
+  await withGlobal({ policies: { finalize: "draft", push: false } }, project(), async ({ call }) => {
+    const cs = await call("kukulu_config_show");
+    eq(cs.policies.finalize + "|" + cs.policies.push, "draft|false", "a global policy wins over the default");
+    eq(cs.policySources.finalize + "|" + cs.policySources.signing, "global|default", "policySources names where each key came from");
+  });
+  const layered = { policies: { finalize: "draft", mergeMethod: "squash" }, profiles: { fast: { policies: { finalize: "ready" } }, only: { policies: { push: false } } } };
+  await withGlobal(layered, project(), async ({ call }) => {
+    const cs = await call("kukulu_config_show");
+    eq(cs.policies.finalize + "|" + cs.policySources.finalize + "|" + cs.policySources.mergeMethod, "ready|profile:fast|global", "a profile policy wins over the global one");
+  }, { KUKULU_PROFILE: "fast" });
+  await withGlobal(layered, project({ finalize: "auto" }), async ({ call }) => {
+    const cs = await call("kukulu_config_show");
+    eq(cs.policies.finalize + "|" + cs.policySources.finalize, "auto|project", "a project policy wins over the profile");
+  }, { KUKULU_PROFILE: "fast" });
+  await withGlobal(layered, project(), async ({ call }) => {
+    const cs = await call("kukulu_config_show");
+    eq(cs.policies.push + "|" + cs.policySources.push, "false|profile:only", "a profile with only policies is accepted");
+  }, { KUKULU_PROFILE: "only" });
+  const gp = (obj) => writeGlobalConfig(cfgDir(), obj);
+  for (const [policies, re, label] of [
+    [{ nope: 1 }, /policies has an unknown key 'nope'$/, "an unknown key"],
+    [{ finalize: "x" }, /policies\.finalize must be one of auto, ready, draft; got "x"$/, "the enum form with ; got"],
+    [{ push: "yes" }, /policies\.push must be a boolean$/, "the boolean form"],
+  ]) {
+    const file = gp({ policies });
+    await withServer(project(), async ({ call }) => {
+      const e = await call("kukulu_config_show");
+      isError(e, new RegExp(`^${file.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} ${re.source}`), `a bad global policies shape refuses naming the global file: ${label}`);
+    }, { env: { KUKULU_CONFIG: file } });
+  }
+  {
+    const file = gp({ profiles: { fast: { policies: { push: "no" } } } });
+    await withServer(project(), async ({ call }) => {
+      isError(await call("kukulu_config_show"), /profiles\.fast policies\.push must be a boolean$/, "a bad profile policies shape refuses naming the profile");
+    }, { env: { KUKULU_CONFIG: file } });
+  }
+  await withGlobal({ policies: { finalize: "ready" } }, project({ signing: "off" }), async ({ call }) => {
+    const n = await call("kukulu_next");
+    like(n.prompt ?? "", /Run policies: signing=off, push=on, pr=draft, finalize=ready \(global\)\./, "the Run policies sentence names finalize and its source");
+  });
+  {
+    const repo = project({ signing: "off" });
+    git(repo, ["checkout", "-q", "-b", "build/x"]);
+    writeFile(repo, "docs/SUMMARY.md", "# summary\n");
+    git(repo, ["add", "-A"]);
+    git(repo, ["commit", "-qm", "P0-01: hello"]);
+    setState(repo, { summarized: true, verdict: "APPROVED" });
+    git(repo, ["add", "-A"]);
+    git(repo, ["commit", "-qm", "chore: build summary"]);
+    git(repo, ["remote", "add", "origin", mkBareRemote()]);
+    const ghDir = mkFakeGhBin();
+    writeFile(ghDir, "pr.json", fs.readFileSync(path.join(ROOT, "test", "fixtures", "gh", "pr-draft.json"), "utf8"));
+    await withGlobal({ policies: { finalize: "draft" } }, repo, async ({ call }) => {
+      const r = await call("kukulu_pr_finalize", { breaking: false });
+      const calls = fs.existsSync(path.join(ghDir, "calls.log")) ? readFile(ghDir, "calls.log").split("\n").filter((c) => c.startsWith("pr ready") || c.startsWith("pr merge")) : [];
+      ok(!r.error && calls.length === 0 && r.ready === false, "kukulu_pr_finalize honors a global finalize draft" + (r.error ? `: ${r.error}` : ""));
+    }, { PATH: `${ghDir}:${process.env.PATH}` });
   }
 }
 

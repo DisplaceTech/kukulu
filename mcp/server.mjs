@@ -856,39 +856,35 @@ const FINALIZE_POLICIES = ["auto", "ready", "draft"];
 const MERGE_METHODS = ["merge", "squash", "rebase"];
 const FLIGHT_SLUG = /^[a-z0-9][a-z0-9-]{0,39}$/;
 
-/** Validate `docs/kukulu.json`'s `policies` block; throws, never defaults a bad value away. */
-function validatePolicies(policies) {
+/**
+ * Validate a `policies` block; throws, never defaults a bad value away. The project file's messages are the
+ * original ones; any other `where` (the global file, a profile) starts every message with it, and the enum
+ * keys end with `; got <value>`, so the message names the file that is wrong.
+ */
+function validatePolicies(policies, where = "docs/kukulu.json") {
   if (policies === undefined) return;
+  const own = where === "docs/kukulu.json";
+  const got = (v) => (own ? "" : `; got ${JSON.stringify(v)}`);
   if (typeof policies !== "object" || policies === null || Array.isArray(policies)) {
-    throw new ToolError("docs/kukulu.json 'policies' must be an object");
+    throw new ToolError(own ? "docs/kukulu.json 'policies' must be an object" : `${where} 'policies' must be an object`);
   }
   for (const key of Object.keys(policies)) {
-    if (!POLICY_KEYS.includes(key)) throw new ToolError(`docs/kukulu.json policies has an unknown key '${key}'`);
+    if (!POLICY_KEYS.includes(key)) throw new ToolError(`${where} policies has an unknown key '${key}'`);
   }
-  if (policies.signing !== undefined && !SIGNING_POLICIES.includes(policies.signing)) {
-    throw new ToolError(`docs/kukulu.json policies.signing must be one of ${SIGNING_POLICIES.join(", ")}`);
-  }
-  if (policies.push !== undefined && typeof policies.push !== "boolean") {
-    throw new ToolError("docs/kukulu.json policies.push must be a boolean");
-  }
-  if (policies.pr !== undefined && !PR_POLICIES.includes(policies.pr)) {
-    throw new ToolError(`docs/kukulu.json policies.pr must be one of ${PR_POLICIES.join(", ")}`);
-  }
-  if (policies.feedback !== undefined && typeof policies.feedback !== "boolean") {
-    throw new ToolError("docs/kukulu.json policies.feedback must be a boolean");
-  }
-  if (policies.archive !== undefined && typeof policies.archive !== "boolean") {
-    throw new ToolError("docs/kukulu.json policies.archive must be a boolean");
-  }
-  if (policies.finalize !== undefined && !FINALIZE_POLICIES.includes(policies.finalize)) {
-    throw new ToolError(`docs/kukulu.json policies.finalize must be one of ${FINALIZE_POLICIES.join(", ")}`);
-  }
-  if (policies.mergeMethod !== undefined && !MERGE_METHODS.includes(policies.mergeMethod)) {
-    throw new ToolError(`docs/kukulu.json policies.mergeMethod must be one of ${MERGE_METHODS.join(", ")}`);
-  }
-  if (policies.syncBase !== undefined && typeof policies.syncBase !== "boolean") {
-    throw new ToolError("docs/kukulu.json policies.syncBase must be a boolean");
-  }
+  const bool = (key) => {
+    if (policies[key] !== undefined && typeof policies[key] !== "boolean") throw new ToolError(`${where} policies.${key} must be a boolean`);
+  };
+  const oneOf = (key, list) => {
+    if (policies[key] !== undefined && !list.includes(policies[key])) throw new ToolError(`${where} policies.${key} must be one of ${list.join(", ")}${got(policies[key])}`);
+  };
+  oneOf("signing", SIGNING_POLICIES);
+  bool("push");
+  oneOf("pr", PR_POLICIES);
+  bool("feedback");
+  bool("archive");
+  oneOf("finalize", FINALIZE_POLICIES);
+  oneOf("mergeMethod", MERGE_METHODS);
+  bool("syncBase");
 }
 
 /**
@@ -1158,7 +1154,8 @@ function validateConstraints(constraints, planIds = null) {
 }
 
 function cfg() {
-  return cfgFrom(loadConfig() || {}, exists(P.plan) ? planIdsOf(read(P.plan)) : null);
+  const raw = loadConfig() || {};
+  return { ...cfgFrom(raw, exists(P.plan) ? planIdsOf(read(P.plan)) : null), policies: resolvePolicies(raw).policies };
 }
 
 let mcpTimeoutCache;
@@ -1277,7 +1274,7 @@ const ROLE_KEYS = ["model", "effort"];
 const EFFORTS = ["low", "medium", "high", "xhigh", "max"];
 const ANTHROPIC_ALIASES = ["fable", "opus", "sonnet", "haiku", "inherit"];
 const PERMISSION_MODES = ["default", "acceptEdits", "auto", "dontAsk", "bypassPermissions", "plan", "manual"];
-const GLOBAL_KEYS = ["roles", "profiles", "profile", "permissionMode", "runners"];
+const GLOBAL_KEYS = ["roles", "profiles", "profile", "permissionMode", "runners", "policies"];
 
 const isAnthropicModel = (m) => ANTHROPIC_ALIASES.includes(m) || m.startsWith("claude-");
 
@@ -1354,12 +1351,13 @@ function loadGlobalConfig() {
 }
 
 /** `where` names the block itself, e.g. "global config <path> roles" or "docs/kukulu.json roles". */
-function validateRolesBlock(roles, where) {
+function validateRolesBlock(roles, where, { allowPolicies = false } = {}) {
   if (roles === undefined) return;
   if (typeof roles !== "object" || roles === null || Array.isArray(roles)) {
     throw new ToolError(`${where} must be an object`);
   }
   for (const [role, block] of Object.entries(roles)) {
+    if (allowPolicies && role === "policies") continue; // a profile's policies are validated by resolvePolicies
     if (!ROLES.includes(role)) throw new ToolError(`${where} names an unknown role '${role}'`);
     if (typeof block !== "object" || block === null || Array.isArray(block)) {
       throw new ToolError(`${where}.${role} must be an object`);
@@ -1468,6 +1466,41 @@ function validatePermissionMode(mode, where) {
 }
 
 /**
+ * Every policy key, layered per key: default < the global file's `policies` < the active profile's `policies`
+ * < the project's. `sources[key]` says which layer won. The active profile is the one resolveRouting selects
+ * (KUKULU_PROFILE, else the global `profile`); a profile that does not exist is resolveRouting's refusal, not
+ * this function's.
+ */
+function resolvePolicies(project = loadConfig() || {}) {
+  const global = loadGlobalConfig();
+  validatePolicies(global.data.policies, global.path);
+  const profiles = global.data.profiles;
+  if (profiles !== undefined && typeof profiles === "object" && profiles !== null && !Array.isArray(profiles)) {
+    for (const [name, block] of Object.entries(profiles)) {
+      if (typeof block === "object" && block !== null && !Array.isArray(block)) validatePolicies(block.policies, `${global.path} profiles.${name}`);
+    }
+  }
+  validatePolicies(project.policies);
+  const profile = envVar("PROFILE") || (typeof global.data.profile === "string" ? global.data.profile : null) || null;
+  const layers = [
+    ["global", global.data.policies],
+    [`profile:${profile}`, profile !== null && typeof profiles === "object" && profiles !== null ? profiles[profile]?.policies : undefined],
+    ["project", project.policies],
+  ];
+  const policies = { ...cfgFrom({}, null).policies };
+  const sources = Object.fromEntries(POLICY_KEYS.map((k) => [k, "default"]));
+  for (const [source, block] of layers) {
+    for (const key of POLICY_KEYS) {
+      if (block?.[key] !== undefined) {
+        policies[key] = block[key];
+        sources[key] = source;
+      }
+    }
+  }
+  return { policies, sources };
+}
+
+/**
  * Merge the plugin defaults, the global file, the selected profile and the
  * project override, per role, per key, tracking where each surviving value
  * came from. Never writes anything; throws on any malformed input.
@@ -1482,7 +1515,7 @@ function resolveRouting() {
       throw new ToolError(`global config ${global.path} 'profiles' must be an object`);
     }
     for (const [name, block] of Object.entries(global.data.profiles)) {
-      validateRolesBlock(block, `global config ${global.path} profiles.${name}`);
+      validateRolesBlock(block, `global config ${global.path} profiles.${name}`, { allowPolicies: true });
     }
   }
   if (global.data.profile !== undefined && (typeof global.data.profile !== "string" || !global.data.profile)) {
@@ -1669,7 +1702,8 @@ function configShow() {
     agentsStale: stale,
     permissionRule: mcpAllowRulePresent() ? "present" : "missing",
     archive: cfg().policies.archive,
-    policies: cfg().policies,
+    policies: resolvePolicies().policies,
+    policySources: resolvePolicies().sources,
     table: routingTable(r),
   };
 }
@@ -2482,7 +2516,7 @@ function nextDecision() {
   // accurate even before this round's kukulu_run_start has recorded
   // state.policies (round 0, before the implementer's first call).
   let gateResult = null;
-  const policySentence = `Run policies: signing=${c.policies.signing}, push=${c.policies.push ? "on" : "off"}, pr=${c.policies.pr}.${cleanroomOn(c) ? ` ${CLEANROOM_SENTENCE}` : ""}${signingNoteFor(st.signing) ? ` ${signingNoteFor(st.signing)}` : ""}`;
+  const policySentence = `Run policies: signing=${c.policies.signing}, push=${c.policies.push ? "on" : "off"}, pr=${c.policies.pr}, finalize=${c.policies.finalize} (${resolvePolicies().sources.finalize}).${cleanroomOn(c) ? ` ${CLEANROOM_SENTENCE}` : ""}${signingNoteFor(st.signing) ? ` ${signingNoteFor(st.signing)}` : ""}`;
   const stage = (name, reason, extra = {}) => {
     const info = agentInfo(name);
     return {
@@ -4675,7 +4709,7 @@ function finalizeConfig(st) {
       } catch (e) {
         throw new ToolError(`${rel(archived)} is not valid JSON: ${e.message}`);
       }
-      return cfgFrom(raw, null);
+      return { ...cfgFrom(raw, null), policies: resolvePolicies(raw).policies };
     }
   }
   return cfg();

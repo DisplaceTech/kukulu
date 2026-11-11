@@ -634,6 +634,7 @@ ok(read("skills/plan-build/SKILL.md").includes("templates/constraints.example.js
       ok(opsDoc.includes("`policies.finalize`"), "operations.md documents policies.finalize");
       ok(opsDoc.includes("`policies.mergeMethod`"), "operations.md documents policies.mergeMethod");
       ok(opsDoc.includes("`policies.syncBase`"), "operations.md documents policies.syncBase");
+      ok(opsDoc.includes("`profiles.<name>.policies`") && opsDoc.split("\n").some((l) => l.includes("global file") && l.includes("`policies`")), "operations.md documents the global and profile policies layers");
       continue;
     }
     if (key === "mutation") {

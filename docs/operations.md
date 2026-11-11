@@ -267,6 +267,12 @@ Environment variables:
 | `KUKULU_CONTROLLER_SOCKET` | unset | Inside the sandbox, the Unix socket the MCP relay connects to; set by `scripts/sandbox.mjs`, never by hand |
 | `KUKULU_LOG_SOCKET` | unset | Inside the sandbox, the Unix socket the two clean-room hooks send log entries to; set by `scripts/sandbox.mjs`, never by hand |
 
+**Policy layers.** Every key of `policies` may also be set in the global file (`~/.config/kukulu/config.json`) and in each profile, so an operator can set `finalize` once for every project. Per key, the layers are: the built-in default, then the global file's `policies`, then the active profile's `profiles.<name>.policies` (the profile `KUKULU_PROFILE` or the file's own `"profile"` selects), then the project's `docs/kukulu.json` `policies`; the last one that sets the key wins. `kukulu_config_show` reports the winner of each key in `policySources` as `default`, `global`, `profile:<name>` or `project`, and `kukulu_next`'s `Run policies:` sentence names the source of `finalize`. A bad value is refused with the file's own path (and the profile's name) in the message. A profile may hold only `policies`. For example, a global file that merges nothing automatically on every machine:
+
+```json
+{ "policies": { "finalize": "ready" }, "profiles": { "solo": { "policies": { "finalize": "auto" } } } }
+```
+
 Flights archived before 0.6.0 keep their configuration file under its old name, and finalizing one still reads it; an archive is a record and is never rewritten.
 
 ## Calibrating

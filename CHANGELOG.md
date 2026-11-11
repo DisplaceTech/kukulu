@@ -8,6 +8,7 @@ All notable changes to this plugin. Format follows
 
 ### Added
 
+- `policies` in the global file and in each profile, layered under the project file, with `policySources` in `kukulu_config_show` (project-g F-19, D-02).
 - `kukulu_plan_commit` refuses a flight slug an archive already uses (project-g F-10, C-03).
 - The plugin sets its own MCP tool-call timeout of 24 hours in `.mcp.json`, so a long verify or mutate call is no longer cut off at Claude Code's 30-minute idle limit (project-g F-08, F-12, F-14, B-01).
 - A `verify`, `extraVerify`, `parallel.setup` or `mutation.targeted` timeout at or above the plugin's MCP limit is refused when the config loads, and `kukulu_status` reports `mcpTimeoutMs` (B-02).

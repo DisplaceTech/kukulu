@@ -176,7 +176,7 @@ The spec is the input everything else depends on. [docs/writing-specs.md](./docs
 
 ## Model routing
 
-Each of the four roles can be pointed at a different model (an Anthropic alias or id, or a model reached through a local router such as claude-code-router) from a global config file, an optional profile inside it, and an optional per-project override. `/kukulu:go-flight` calls `kukulu_agents_sync` before its loop and prints the resolved table; `kukulu_config_show` shows the same table, with the source of every value, at any time. Full precedence, the config file shape, and a claude-code-router walkthrough: [docs/routing.md](./docs/routing.md).
+Each of the four roles can be pointed at a different model (an Anthropic alias or id, or a model reached through a local router such as claude-code-router) from a global config file, an optional profile inside it, and an optional per-project override. The global file and a profile may also carry `policies`, layered under the project's own. `/kukulu:go-flight` calls `kukulu_agents_sync` before its loop and prints the resolved table; `kukulu_config_show` shows the same table, with the source of every value, at any time. Full precedence, the config file shape, and a claude-code-router walkthrough: [docs/routing.md](./docs/routing.md).
 
 ## Files the pipeline owns
 
