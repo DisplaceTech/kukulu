@@ -731,6 +731,34 @@ async function genesisRepo(planOpts = {}) {
     eq(trailer(by("chore: build summary"), "Kukulu-Stage"), "summarize", "summary_commit's is filed under summarize");
     eq(trailer(by("chore: archive flight w1"), "Kukulu-Stage"), "summarize", "the archive commit, made after its state reset, still carries the trailers");
     eq(git(repo, ["log", "-1", "--format=%B", by("progress: P0-01 done")]).trim().split("\n").slice(-3).join("|"), "|Kukulu-Stage: implement|Kukulu-Task: P0-01", "the trailers sit after a blank line at the end of the message");
+
+    // P1-03: a finished flight never re-arms its clean-room log.
+    const headBefore = git(repo, ["rev-parse", "HEAD"]);
+    const stateBefore = fs.readFileSync(path.join(repo, ".kukulu", "state.json"));
+    const after = await call("kukulu_next");
+    eq(after.stage + "|" + after.gate, "done|null", "kukulu_next after the archive returns done and writes no genesis");
+    eq(git(repo, ["rev-parse", "HEAD"]), headBefore, "...HEAD does not move");
+    ok(!hasFile(repo, ".kukulu/cleanroom/log.jsonl"), "...there is no log");
+    ok(stateBefore.equals(fs.readFileSync(path.join(repo, ".kukulu", "state.json"))), "...and the state is byte-identical");
+    const hookRepo = repo;
+    const hr = runHook(LOGGER, { hook_event_name: "PostToolUse", tool_name: "Read", tool_input: { file_path: "/x/a" }, cwd: hookRepo, session_id: "s-9" }, { CLAUDE_PROJECT_DIR: hookRepo });
+    ok(hr.status === 0 && !fs.existsSync(LOG(hookRepo)), "the hooks append nothing after the archive");
+    writeFile(repo, "docs/SPEC.md", readFile(repo, "docs/SPEC.md") + "\nA second flight.\n");
+    git(repo, ["add", "docs/SPEC.md"]);
+    git(repo, ["commit", "-qm", "spec for the next flight"]);
+    const next = await call("kukulu_next");
+    ok(next.stage === "plan" && fs.existsSync(LOG(repo)) && readEntries(LOG(repo))[0].kind === "genesis", "an edited SPEC after the archive writes the genesis and returns plan");
+  });
+}
+
+{
+  // P1-03: a halted clean-room run with no genesis writes none.
+  const repo = cleanroomRepo();
+  setState(repo, { halted: "stopped by hand" });
+  const head = git(repo, ["rev-parse", "HEAD"]);
+  await withServer(repo, async ({ call }) => {
+    const n = await call("kukulu_next");
+    ok(n.stage === "halt" && n.gate === null && !hasFile(repo, ".kukulu/cleanroom") && git(repo, ["rev-parse", "HEAD"]) === head, "a halted clean-room run with no genesis writes none");
   });
 }
 

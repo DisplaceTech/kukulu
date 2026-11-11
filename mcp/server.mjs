@@ -2544,9 +2544,6 @@ function nextDecision() {
   const policyPresent = cleanroomOn(c);
   const broken = cleanroomModeBreak(st, policyPresent, s.planPresent);
   if (broken) return stage("halt", modeBreakText(broken));
-  if (policyPresent && !st.cleanroom) cleanroomGenesis(c, st);
-  gateResult = runGate("controller", st);
-  if (gateResult && !gateResult.ok) return stage("halt", `clean-room gate failed: ${gateResult.failed.check}: ${gateResult.failed.reason}`);
   if (st.halted) return stage("halt", st.haltCap || st.halted.includes("kukulu_run_resume") ? st.halted : `${st.halted} — ${RESUME_HINT}`);
   if (st.awaitingSigning) {
     const mb = git(["merge-base", c.baseBranch, "HEAD"], { allowFail: true }).out || "<merge-base>";
@@ -2555,6 +2552,10 @@ function nextDecision() {
   if (st.archived && !s.planPresent && exists(path.join(ROOT, st.archived.dir, "SPEC.md")) && read(P.spec) === read(path.join(ROOT, st.archived.dir, "SPEC.md"))) {
     return stage("done", `flight ${st.archived.slug} is archived in ${st.archived.dir}; edit docs/SPEC.md for the next flight, then run /kukulu:go-flight`);
   }
+  // Past the halted, awaiting-signing and archived-done returns: a finished or stopped flight never starts or re-checks its clean-room log (SPEC C-01).
+  if (policyPresent && !st.cleanroom) cleanroomGenesis(c, st);
+  gateResult = runGate("controller", st);
+  if (gateResult && !gateResult.ok) return stage("halt", `clean-room gate failed: ${gateResult.failed.check}: ${gateResult.failed.reason}`);
   if (!s.planPresent || !s.progressPresent || !s.configPresent) {
     const planReason = "no plan on disk (docs/PLAN.md, docs/PROGRESS.md and docs/kukulu.json are all required)";
     // Under `required` a broken signer would fail the planner's own commit, after all its work; say so now (SPEC B-04).
