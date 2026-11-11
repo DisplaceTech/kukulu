@@ -1624,4 +1624,27 @@ const remoteTag = (remote, tag) => spawnSync("git", ["-C", remote, "rev-parse", 
   }, opts);
 }
 
+{
+  const { repo, merge, opts } = releaseRepo({ signed: true });
+  const isolated = { env: { ...opts.env, GIT_CONFIG_GLOBAL: path.join(mkDir("kukulu-rel-gc-"), "gitconfig"), GIT_CONFIG_NOSYSTEM: "1" } };
+  await withServer(repo, async ({ call }) => {
+    const r = await call("kukulu_release");
+    ok(!r.error, "a tag is signed when origin's archived state.json records signing on" + (r.error ? `: ${r.error}` : ""));
+    like(git(repo, ["cat-file", "-p", "v1.2.3"]), /-----BEGIN PGP SIGNATURE-----/, "...git cat-file shows a signature although tag.gpgsign is unset");
+    eq(git(repo, ["rev-parse", "v1.2.3^{commit}"]), merge, "...on the merge commit");
+  }, isolated);
+}
+
+{
+  const { repo, opts } = releaseRepo();
+  git(repo, ["fetch", "-q", "origin"]);
+  git(repo, ["merge", "-q", "--ff-only", "origin/main"]);
+  await withServer(repo, async ({ call }) => {
+    const r = await call("kukulu_release");
+    ok(!r.error, "kukulu_release runs on a base that already equals origin" + (r.error ? `: ${r.error}` : ""));
+    eq(r.localState, "current", "localState is current when the local base names the same flight as origin");
+    eq(r.fastForward, "up to date", "fastForward is up to date when the checked-out base already equals origin");
+  }, opts);
+}
+
 finish();
