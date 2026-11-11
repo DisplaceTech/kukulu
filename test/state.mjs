@@ -1189,6 +1189,23 @@ const OLD_LAYOUT = /pre-0\.6\.0 Foundry layout, which 0\.7\.0 no longer reads/;
   }
 }
 
+// ---------------------------------------------------------------- an owner-action halt during review (F-03)
+
+{
+  const repo = plannedRepo();
+  git(repo, ["checkout", "-q", "-b", "build/x"]);
+  markTasks(repo, ALL_DONE);
+  setState(repo, { implemented: true, reviewed: false, halted: "owner action needed: P0-02: supply the corpus" });
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-qm", "chore: run halted"]);
+  await withServer(repo, async ({ call }) => {
+    eq((await call("kukulu_next")).stage, "halt", "(setup) the owner-action halt stops the flight");
+    const r = await call("kukulu_run_resume", { reason: "the corpus is in place" });
+    ok(!r.error, "...and resumes" + (r.error ? `: ${r.error}` : ""));
+    eq((await call("kukulu_next")).stage, "review", "a halt made during the review stage resumes into review");
+  });
+}
+
 // ---------------------------------------------------------------- the Agent call's description (F-01)
 
 {

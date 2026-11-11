@@ -403,6 +403,8 @@ like(goFlight, /notification/, "go-flight describes the loop as event-driven, no
 like(goFlight, /do not poll/, "go-flight says not to poll while a stage is running");
 // F-04: the reviewer mutation-tests through the MCP, never by hand-editing source.
 ok(String(frontmatter(read("agents/reviewer.md")).tools).includes("mcp__plugin_kukulu_kukulu__kukulu_mutate"), "agents/reviewer can call kukulu_mutate");
+ok(String(frontmatter(read("agents/reviewer.md")).tools).includes("mcp__plugin_kukulu_kukulu__kukulu_run_halt"), "agents/reviewer can call kukulu_run_halt");
+like(read("skills/review-build/SKILL.md"), /kukulu_run_halt` with `owner action needed: <task id>:/, "review-build tells the reviewer to halt with owner action needed");
 {
   const reviewSkill = read("skills/review-build/SKILL.md");
   like(reviewSkill, /kukulu_mutate/, "review-build tells the reviewer to mutation-test with kukulu_mutate");

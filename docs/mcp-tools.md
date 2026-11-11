@@ -345,7 +345,7 @@ End an implementation run and hand off to review.
 
 Stop the flight for an operator-level reason the implementer cannot resolve itself: a signing agent that died mid-run, a full disk, a `verify` command that cannot even run, a base branch that vanished. `kukulu_task_block` is for a single task the implementer cannot finish; this tool is for a run that cannot continue at all.
 
-**Arguments:** `{ reason }`: one sentence a human will read.
+**Arguments:** `{ reason }`: one sentence a human will read. The reviewer may also call it, for an owner-only block: when the only open item is a task whose blocker only the owner can clear, with `owner action needed: <task id>: <what the owner must do>`; a halt made during the review stage resumes into the review stage.
 
 **Does:** records `reason` as `state.halted`, deletes the lock, and commits `.kukulu/state.json` and `docs/PROGRESS.md` together as `chore: run halted` if either changed. It never resets or cleans the working tree; the tree is left as it was when the run stopped.
 

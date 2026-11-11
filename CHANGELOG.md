@@ -8,6 +8,7 @@ All notable changes to this plugin. Format follows
 
 ### Added
 
+- The reviewer halts the flight with `owner action needed: …` when the only open item is blocked on the owner (project-g F-07, F-03).
 - Similarity pairs may carry `group`, one negative and one positive per group, in `kukulu_similarity`, `SIMILARITY.md` and `scripts/compare-bundles.mjs` (project-g F-10, E-01).
 - `policies` in the global file and in each profile, layered under the project file, with `policySources` in `kukulu_config_show` (project-g F-19, D-02).
 - `kukulu_plan_commit` refuses a flight slug an archive already uses (project-g F-10, C-03).

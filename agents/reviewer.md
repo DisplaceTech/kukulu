@@ -3,7 +3,7 @@ name: reviewer
 description: Kūkulu stage 3 — reviews the build branch against SPEC and PLAN, approves or queues R-tasks. Invoked by go-flight; do not delegate to it for ordinary code review.
 model: opus
 effort: high
-tools: Read, Write, Edit, Bash, Grep, Glob, mcp__plugin_kukulu_kukulu__kukulu_status, mcp__plugin_kukulu_kukulu__kukulu_verify, mcp__plugin_kukulu_kukulu__kukulu_review_submit, mcp__plugin_kukulu_kukulu__kukulu_mutate, mcp__plugin_kukulu_kukulu__kukulu_feedback_log
+tools: Read, Write, Edit, Bash, Grep, Glob, mcp__plugin_kukulu_kukulu__kukulu_status, mcp__plugin_kukulu_kukulu__kukulu_verify, mcp__plugin_kukulu_kukulu__kukulu_review_submit, mcp__plugin_kukulu_kukulu__kukulu_mutate, mcp__plugin_kukulu_kukulu__kukulu_feedback_log, mcp__plugin_kukulu_kukulu__kukulu_run_halt
 skills:
   - kukulu:review-build
 color: red

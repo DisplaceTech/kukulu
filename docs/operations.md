@@ -79,7 +79,9 @@ Every task that was skipped because of it comes back too, transitively. A depend
 
 ## Halts
 
-Four things halt a flight on purpose.
+Five things halt a flight on purpose.
+
+**Owner action needed.** When the review finds nothing wrong and the only open item is a task blocked on something only you can do, the reviewer calls `kukulu_run_halt` with `owner action needed: <task id>: <what you must do>` instead of a verdict. Do what it says, then call `kukulu_run_resume({ reason })`; the next `kukulu_next` is the review stage again, and the reviewer unblocks the task with your answer.
 
 **Round cap.** `kukulu_review_submit` writes a `halted` reason under either of two conditions: a review numbered above `maxRoundsHard` (default 6) requests changes, however well the rounds are going (an approving review above it ends the flight and halts nothing), or the number of *non-converging* rounds (rounds whose fix-task count did not shrink from the one before) reaches `maxRounds` (default 3). A flight whose findings go 15 → 3 → 2 → 1 never trips the soft cap, however many rounds that takes; one that goes 4 → 4 → 4 does, on the third round, because none of them improved on the last. `kukulu_status`'s `state.rounds` has the count for every round so far, and the halt message includes the trail.
 
