@@ -797,4 +797,19 @@ for (const [value, got, label] of [
   }
 }
 
+// ---------------------------------------------------------------- a cargo test filter goes after -- (F-04)
+
+{
+  const statusWith = async (cmd) => {
+    let out;
+    await withServer(plannedRepo({ config: { mutation: { targeted: { rust: { cmd } } } } }), async ({ call }) => { out = await call("kukulu_status"); });
+    return out;
+  };
+  isError(await statusWith("cargo test --workspace {filter}"), /^docs\/kukulu\.json mutation\.targeted\.rust\.cmd runs cargo test with \{filter\} before --; cargo test takes one TESTNAME, so a list filter fails\. Write it as "cargo test <options> -- \{filter\}"$/, "a cargo test targeted command with {filter} before -- is refused");
+  isError(await statusWith("cargo test {filter} -- --nocapture"), /runs cargo test with \{filter\} before --/, "...also when -- comes after the filter");
+  ok(!(await statusWith("cargo test --workspace -- {filter}")).error, "cargo test --workspace -- {filter} loads");
+  ok(!(await statusWith("cargo +nightly test -- {filter}")).error, "cargo +nightly test -- {filter} loads");
+  ok(!(await statusWith("vendor/bin/phpunit --filter {filter}")).error, "a non-cargo command with {filter} and no -- still loads");
+}
+
 finish();

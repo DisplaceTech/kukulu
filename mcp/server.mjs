@@ -974,6 +974,19 @@ function validateMutation(mutation) {
     }
     if (typeof entry.cmd !== "string" || !entry.cmd) throw new ToolError(`${where}.cmd must be a non-empty string`);
     if (entry.cmd.split("{filter}").length - 1 !== 1) throw new ToolError(`${where}.cmd must contain {filter} exactly once`);
+    // `cargo test` takes one TESTNAME; libtest, behind `--`, takes several, so a list filter must go after it.
+    const words = entry.cmd.split(/\s+/).filter(Boolean);
+    const at = words.indexOf("cargo");
+    if (at !== -1) {
+      let k = at + 1;
+      while (k < words.length && /^[-+]/.test(words[k])) k++;
+      if (words[k] === "test") {
+        const dashes = words.indexOf("--");
+        if (dashes === -1 || words.findIndex((w) => w.includes("{filter}")) < dashes) {
+          throw new ToolError(`${where}.cmd runs cargo test with {filter} before --; cargo test takes one TESTNAME, so a list filter fails. Write it as "cargo test <options> -- {filter}"`);
+        }
+      }
+    }
     if (entry.timeoutMs !== undefined && (!Number.isInteger(entry.timeoutMs) || entry.timeoutMs <= 0)) {
       throw new ToolError(`${where}.timeoutMs must be a positive integer`);
     }
