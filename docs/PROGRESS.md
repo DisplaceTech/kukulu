@@ -21,7 +21,7 @@ Started: 2026-11-11T18:32:19.610Z
 - [x] P2-05 An alias is the model it resolves to
 - [x] P2-06 Phase 2 end: push and record the manual check
 - [x] P3-01 kukulu_next supplies the Agent call's description
-- [ ] P3-02 The implementer sees its own task's log
+- [x] P3-02 The implementer sees its own task's log
 - [ ] P3-03 An owner-only block halts for the owner
 - [ ] P3-04 A cargo test filter goes after --
 - [ ] P3-05 CHANGELOG 0.8.1 and the version
@@ -94,3 +94,7 @@ Push: done. Manual check: NOT VERIFIED (human): with policies.finalize "draft" i
 ### P3-01 — c6a0426
 
 stage() adds description for plan/implement/review/summarize (the display name with its macron as a Unicode escape, plus round n from round 1); streams entries get the stream form. go-flight skill passes description in step 4, the wave paragraph and the fallback retry. mcp-tools and CHANGELOG updated. Tests: state (every stage, round 1, none on done/halt, streams), plugin (go-flight text). Full npm test passed.
+
+### P3-02 — e7ff8f7
+
+taskNext result gains taskLog (pr.logs[id] ?? null, same shape as dependencyLogs entries); TOOLS description, implement skill step 2, review-build unblock sentence, mcp-tools row and CHANGELOG updated. Tests in test/implement.mjs for unblocked, fresh and reopened tasks. Full npm test passed.
