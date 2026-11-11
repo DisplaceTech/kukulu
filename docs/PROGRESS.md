@@ -26,6 +26,10 @@ Started: 2026-11-11T18:32:19.610Z
 - [x] P3-04 A cargo test filter goes after --
 - [x] P3-05 CHANGELOG 0.8.1 and the version
 - [x] P3-06 Phase 3 end: push and record the manual checks
+- [ ] R1-01 Exclude docs/kukulu.json from no-hardcoded-mcp-timeout
+- [ ] R1-02 Guard: heredoc misdetection, abbreviated sed long options, and untested sed and heredoc mechanics
+- [ ] R1-03 kukulu_release: test the signing outcome read from origin, localState current and fastForward up to date
+- [ ] R1-04 Profile policies messages, cargo test detection on any cargo, and README's finalize row
 
 ## Log
 
