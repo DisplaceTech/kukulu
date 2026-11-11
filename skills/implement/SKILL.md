@@ -25,7 +25,7 @@ Call `kukulu_run_start` once. It creates or reuses the `build/*` branch, arms th
 Repeat until `kukulu_task_next` returns `{ done: true }` — but see **Paused at a wave** just below: a `done` that carries `paused: true` is not the end of the plan.
 
 1. **Select.** Call `kukulu_task_next`. It marks the task `[~]` and returns the task text, the log entries of the tasks it depends on, and any tasks it auto-skipped because a dependency is blocked.
-2. **Read.** Read `CLAUDE.md`, then the SPEC sections the task cites, then the dependency log entries you were given. Do not read ahead to later tasks.
+2. **Read.** Read `CLAUDE.md`, then the SPEC sections the task cites, then the dependency log entries you were given, then `taskLog`, this task's own log entries (null for a fresh task). The newest `unblocked` or `REOPENED` entry's reason overrides the PLAN.md text where the two disagree. Do not read ahead to later tasks.
 3. **Tests first.** Write the acceptance tests named in the task and run them. Confirm they fail for the right reason.
 4. **Implement** the smallest change that makes them pass, within Files touched.
 5. **Verify.** Call `kukulu_verify` with the task's Files touched. It self-tests and runs every `docs/kukulu.json` constraint against the whole repo, then runs the project's verify commands plus any path-specific extras, returning each command's exit status and tail. All must pass: no skipped tests, no lint suppressions added. A constraint hit is a failing test — fix the code it flagged, not the rule, unless the task you are on explicitly changes the rule itself. Then do whatever the task's own Verification section asks that a command cannot cover, and describe what you verified.

@@ -16,6 +16,7 @@ All notable changes to this plugin. Format follows
 
 ### Fixed
 
+- `kukulu_task_next` returns the task's own log as `taskLog`, so an unblock reason reaches the implementer (project-g F-02, F-02).
 - `kukulu_next` supplies the `Agent` call's `description`, which go-flight passes on, so the first stage spawn no longer fails validation (project-g F-21, F-01).
 - The verifier no longer reports an alias-resolved model as a routing mismatch (project-g F-20, E-02).
 - After a flight is archived, `kukulu_next` no longer writes a new clean-room genesis on the finished branch, so `git checkout <base>` needs no stash (project-g F-16, F-17, C-01).

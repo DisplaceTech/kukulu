@@ -190,6 +190,7 @@ Without `stream`, when the next open task belongs to a wave that runs in paralle
 | `files` | The `**Files touched:**` line, for `kukulu_verify` |
 | `dependsOn` | Dependency ids |
 | `dependencyLogs` | Those dependencies' log entries from `PROGRESS.md`, the only context carried between tasks |
+| `taskLog` | The task's own log entries, in the same shape (`null` for a fresh task). An unblock or reopen reason (`unblocked (round N)`, `REOPENED: …`) arrives here verbatim, and overrides `PLAN.md` where the two disagree |
 | `skipped` | Tasks skipped on the way to this one |
 | `counts` | Task counts after the selection |
 | `resumed` | `true` if the task was already `[~]` (a previous attempt died mid-task) |
