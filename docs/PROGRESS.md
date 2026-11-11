@@ -1,7 +1,7 @@
 # Kūkulu 0.8.1 build progress
 
-Branch: (set by implement)
-Started: (set by implement)
+Branch: build/2026-11-11
+Started: 2026-11-11T18:32:19.610Z
 
 ## Tasks
 
