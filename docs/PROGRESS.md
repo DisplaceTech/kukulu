@@ -20,7 +20,7 @@ Started: 2026-11-11T18:32:19.610Z
 - [x] P2-04 compare-bundles keys its scores by group
 - [x] P2-05 An alias is the model it resolves to
 - [x] P2-06 Phase 2 end: push and record the manual check
-- [ ] P3-01 kukulu_next supplies the Agent call's description
+- [x] P3-01 kukulu_next supplies the Agent call's description
 - [ ] P3-02 The implementer sees its own task's log
 - [ ] P3-03 An owner-only block halts for the owner
 - [ ] P3-04 A cargo test filter goes after --
@@ -90,3 +90,7 @@ sameModel exported from mcp/cleanroom.mjs and duplicated (with a normalizeModel 
 ### P2-06 — e5bc294
 
 Push: done. Manual check: NOT VERIFIED (human): with policies.finalize "draft" in the owner's global file, kukulu_config_show in a project with no policies block reports finalize "draft" with policySources.finalize "global".
+
+### P3-01 — c6a0426
+
+stage() adds description for plan/implement/review/summarize (the display name with its macron as a Unicode escape, plus round n from round 1); streams entries get the stream form. go-flight skill passes description in step 4, the wave paragraph and the fallback retry. mcp-tools and CHANGELOG updated. Tests: state (every stage, round 1, none on done/halt, streams), plugin (go-flight text). Full npm test passed.
