@@ -6,7 +6,7 @@ Started: 2026-11-11T18:32:19.610Z
 ## Tasks
 
 - [x] P0-01 sed is a write only in place
-- [ ] P0-02 Heredoc bodies are data unless a shell reads them
+- [x] P0-02 Heredoc bodies are data unless a shell reads them
 - [ ] P0-03 Phase 0 end: push and record the manual check
 - [ ] P1-01 The plugin sets its own MCP timeout
 - [ ] P1-02 A command timeout the client would cut short is refused
@@ -34,3 +34,7 @@ Started: 2026-11-11T18:32:19.610Z
 ### P0-01 — c5fe324
 
 sedInPlace and internal sedScan added to mcp/cleanroom.mjs; rule 6d runs for sed only in place, targets are file operands only. KNOWN_LIMITS indirect text updated in both copies and the docs row. 12 fixtures (P0-01) added; no existing fixture changed. Tests added in test/cleanroom.mjs. Full npm test passed. Note: constraint no-hardcoded-mcp-timeout reports hits inside docs/kukulu.json itself (its own description and examples); that file may not be edited, so it is unrelated to this task.
+
+### P0-02 — d8622ce
+
+Work is in commit 2360d70 (a feedback commit landed after it, so d8622ce is an empty marker commit). stripHeredocs exported; splitSegments splits stripped text (internal splitRaw is the old splitter); bashVerdict judges shell-read bodies as commands, unquoted non-shell bodies' substitutions only, quoted bodies not at all. A delimiter of digits only is not a heredoc. 8 fixtures (P0-02), none existing changed. Docs and CHANGELOG added. Full npm test passed; only the no-hardcoded-mcp-timeout constraint hits (docs/kukulu.json itself, pre-existing). Lesson: call kukulu_feedback_log only after kukulu_task_done, since it moves HEAD.
