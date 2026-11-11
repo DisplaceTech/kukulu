@@ -912,8 +912,8 @@ async function genesisRepo(planOpts = {}) {
   const root = mkDir("kukulu-sed-root-");
   const home = mkDir("kukulu-sed-home-");
   const run = (command) => evaluate(policy, { tool_name: "Bash", tool_input: { command }, cwd: root }, { root, home, progressText: null, policyPath: path.join(root, "docs", "cleanroom.json"), pluginRoot: path.join(home, "plugin-root"), keyPath: path.join(home, "k.pem"), planExists: true });
-  const yes = [["-i"], ["-i.bak"], ["--in-place"], ["--in-place=.bak"], ["-Ei"], ["-ni"], ["-ie"], ["-e", "s/a/b/", "-i", "f"]];
-  const no = [["-n"], ["-e", "s/a/b/"], ["-n", "-e", "1p", "-e", "2p"], ["-l", "80", "-n"], ["--", "-i"], ["s/a/b/", "f", "--", "-i"]];
+  const yes = [["-i"], ["-i.bak"], ["--in-place"], ["--in-place=.bak"], ["-Ei"], ["-ni"], ["-ie"], ["-e", "s/a/b/", "-i", "f"], ["--in"], ["--in-pl=.bak"], ["--in-place"]];
+  const no = [["-n"], ["-e", "s/a/b/"], ["-n", "-e", "1p", "-e", "2p"], ["-l", "80", "-n"], ["--", "-i"], ["s/a/b/", "f", "--", "-i"], ["--follow-symlinks", "-n"]];
   ok(yes.every((a) => sedInPlace(a) === true) && no.every((a) => sedInPlace(a) === false), "sedInPlace reads -i, -i<suffix>, --in-place, --in-place=<suffix> and a cluster containing i");
   const r1 = run(`${SED} -n 480p .kukulu/cleanroom/log.jsonl`);
   eq(r1.decision, "allowed", "a read-only sed on the clean-room log is allowed");
@@ -934,6 +934,10 @@ async function genesisRepo(planOpts = {}) {
   eq(JSON.stringify(a.bodies), JSON.stringify([{ body: "hello", quoted: false, shell: false }]), "...a bare delimiter is unquoted");
   eq(strip("cat <<'EOF'\nx\nEOF").bodies[0].quoted + "|" + strip('cat <<"EOF"\nx\nEOF').bodies[0].quoted + "|" + strip("cat <<\\EOF\nx\nEOF").bodies[0].quoted, "true|true|true", "...'EOF', \"EOF\" and \\EOF are quoted");
   eq(strip(T("cat <<-EOF\n<TAB>x\n<TAB>EOF\necho y")).text + "|" + strip(T("cat <<-EOF\n<TAB>x\n<TAB>EOF\necho y")).bodies[0].body, "cat <<-EOF\necho y|<TAB>x".replace("<TAB>", "\t"), "...<<- strips leading tabs from the delimiter line");
+  const inert = "echo $((1<<n))\necho hi # see a<<b\n(( x = y << z ))";
+  eq(strip(inert).text + "|" + strip(inert).bodies.length, inert + "|0", "stripHeredocs ignores << in arithmetic and in a comment");
+  const q = strip("cat <<E'OF' > x.txt\nhi\nEOF\necho y");
+  eq(q.bodies[0].quoted + "|" + q.bodies[0].body + "|" + q.text, "true|hi|cat <<E'OF' > x.txt\necho y", "stripHeredocs removes quotes from the whole delimiter word");
   const two = strip("cat <<A <<B\none\nA\ntwo\nB\nz");
   eq(two.bodies.map((b) => b.body).join("|") + "|" + two.text, "one|two|cat <<A <<B\nz", "...two heredocs on one line read their bodies in order");
   eq(strip("cat <<EOF\nnever ends").bodies[0].body, "never ends", "...an unterminated body runs to the end");

@@ -620,6 +620,17 @@ export function stripHeredocs(command) {
       text += c;
     } else if (c === "\\" && i + 1 < n) {
       text += c + command[++i];
+    } else if (c === "(" && command[i + 1] === "(" && arithmeticEnd(command, i) !== -1) {
+      // `<<` inside `$((...))` or `((...))` shifts bits, whatever its operand.
+      const end = arithmeticEnd(command, i);
+      text += command.slice(i, end + 1);
+      i = end;
+    } else if (c === "#" && (i === 0 || /[\s;&|()]/.test(command[i - 1]))) {
+      // A comment runs to the end of the line; a `<<` in it is not an operator.
+      const eol = command.indexOf("\n", i);
+      const stop = eol === -1 ? n : eol;
+      text += command.slice(i, stop);
+      i = stop - 1;
     } else if (c === "<" && command[i + 1] === "<" && command[i + 2] === "<") {
       text += "<<<";
       i += 2;
@@ -630,20 +641,24 @@ export function stripHeredocs(command) {
       while (command[j] === " " || command[j] === "\t") j++;
       let word = "";
       let quoted = false;
-      if (command[j] === "'" || command[j] === '"') {
-        const end = command.indexOf(command[j], j + 1);
-        const stop = end === -1 ? n : end;
-        word = command.slice(j + 1, stop);
-        quoted = true;
-        j = Math.min(stop + 1, n);
-      } else {
-        if (command[j] === "\\") {
+      // Bash removes quotes from the whole delimiter word, and the body is
+      // quoted when any part of the word was.
+      while (j < n && !/[\s;&|<>()]/.test(command[j])) {
+        const d = command[j];
+        if (d === "'" || d === '"') {
+          const end = command.indexOf(d, j + 1);
+          const stop = end === -1 ? n : end;
+          word += command.slice(j + 1, stop);
           quoted = true;
+          j = Math.min(stop + 1, n);
+        } else if (d === "\\" && j + 1 < n) {
+          word += command[j + 1];
+          quoted = true;
+          j += 2;
+        } else {
+          word += d;
           j++;
         }
-        const from = j;
-        while (j < n && !/[\s;&|<>()]/.test(command[j])) j++;
-        word = command.slice(from, j);
       }
       // `$((1<<3))` shifts bits; a delimiter of digits only is never a heredoc.
       if (word === "" || /^\d+$/.test(word)) {
@@ -678,6 +693,16 @@ export function stripHeredocs(command) {
     } else text += c;
   }
   return { text, bodies };
+}
+
+/** The index of the `)` closing the `((` at `from`, or -1 when it never closes. */
+function arithmeticEnd(command, from) {
+  let depth = 0;
+  for (let i = from; i < command.length; i++) {
+    if (command[i] === "(") depth++;
+    else if (command[i] === ")" && --depth === 0) return command[i - 1] === ")" ? i : -1;
+  }
+  return -1;
 }
 
 function splitRaw(command) {
@@ -1498,6 +1523,14 @@ function destinationPathsFor(word, rest, spec) {
  * place, and the indexes that are not file operands (options, their values,
  * the script, and BSD sed's empty suffix after a bare -i).
  */
+function sedLongOption(name) {
+  // GNU getopt_long accepts an unambiguous prefix; --f alone also matches
+  // --follow-symlinks, so --file needs --fi.
+  const need = { "in-place": 1, expression: 1, file: 2, "line-length": 1 };
+  for (const [full, min] of Object.entries(need)) if (name.length >= min && full.startsWith(name)) return full;
+  return null;
+}
+
 function sedScan(args) {
   const skip = new Set();
   let inPlace = false;
@@ -1520,13 +1553,15 @@ function sedScan(args) {
       continue;
     }
     skip.add(i);
-    if (/^--(?:expression|file|line-length)$/.test(t)) {
-      if (t !== "--line-length") sawExplicit = true;
-      if (i + 1 < args.length) skip.add(++i);
-    } else if (/^--(?:expression|file|line-length)=/.test(t)) {
-      if (!t.startsWith("--line-length")) sawExplicit = true;
-    } else if (t === "--in-place" || t.startsWith("--in-place=")) {
+    const long = t.startsWith("--") ? sedLongOption(t.slice(2).split("=")[0]) : null;
+    const hasValue = t.includes("=");
+    if (long === "expression" || long === "file" || long === "line-length") {
+      if (long !== "line-length") sawExplicit = true;
+      if (!hasValue && i + 1 < args.length) skip.add(++i);
+    } else if (long === "in-place") {
       inPlace = true;
+    } else if (t.startsWith("--")) {
+      // any other long option takes no operand we model
     } else if (/^-[A-Za-z]/.test(t)) {
       for (let k = 1; k < t.length; k++) {
         const c = t[k];
