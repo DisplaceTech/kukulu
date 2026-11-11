@@ -26,6 +26,18 @@
       "stage": "plan",
       "round": 0,
       "at": "2026-11-11T18:15:46.294Z"
+    },
+    {
+      "event": "end",
+      "stage": "plan",
+      "round": 0,
+      "at": "2026-11-11T18:32:09.783Z"
+    },
+    {
+      "event": "start",
+      "stage": "implement",
+      "round": 0,
+      "at": "2026-11-11T18:32:09.783Z"
     }
   ]
 }
