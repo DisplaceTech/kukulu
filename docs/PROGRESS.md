@@ -23,7 +23,7 @@ Started: 2026-11-11T18:32:19.610Z
 - [x] P3-01 kukulu_next supplies the Agent call's description
 - [x] P3-02 The implementer sees its own task's log
 - [x] P3-03 An owner-only block halts for the owner
-- [ ] P3-04 A cargo test filter goes after --
+- [x] P3-04 A cargo test filter goes after --
 - [ ] P3-05 CHANGELOG 0.8.1 and the version
 - [ ] P3-06 Phase 3 end: push and record the manual checks
 
@@ -102,3 +102,7 @@ taskNext result gains taskLog (pr.logs[id] ?? null, same shape as dependencyLogs
 ### P3-03 — 623fb25
 
 agents/reviewer.md tools line gains kukulu_run_halt; review-build skill gains the owner-action rule (without naming kukulu_run_resume, which the reviewer cannot call, per the existing plugin test); operations Halts section (now five) and mcp-tools run_halt updated; CHANGELOG. The resume-into-review behavior already worked, so no server change; test/state.mjs pins it. Full npm test passed.
+
+### P3-04 — c0f9a07
+
+validateMutation refuses cargo test (after any -/+ tokens) with {filter} before a standalone -- or with no --; full message per plan. plan-build skill, templates/SPEC.md, operations row and CHANGELOG updated. Tests in routing. Interpretation: a cargo test with no -- is refused; only a token exactly cargo is recognized. Full npm test passed.
