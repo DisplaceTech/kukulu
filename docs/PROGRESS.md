@@ -19,7 +19,7 @@ Started: 2026-11-11T18:32:19.610Z
 - [x] P2-03 Grouped similarity pairs
 - [x] P2-04 compare-bundles keys its scores by group
 - [x] P2-05 An alias is the model it resolves to
-- [ ] P2-06 Phase 2 end: push and record the manual check
+- [x] P2-06 Phase 2 end: push and record the manual check
 - [ ] P3-01 kukulu_next supplies the Agent call's description
 - [ ] P3-02 The implementer sees its own task's log
 - [ ] P3-03 An owner-only block halts for the owner
@@ -86,3 +86,7 @@ compare-bundles: similarity item is { verdict, groups: { g: { negative, positive
 ### P2-05 — 1578ca5
 
 sameModel exported from mcp/cleanroom.mjs and duplicated (with a normalizeModel copy) in scripts/verify-attestation.mjs; check 12 notes only when a reported model is not sameModel with the declared one, text unchanged. Tests in test/attest.mjs (shared table of 14 pairs in both copies, alias no note, other family note). Docs and CHANGELOG updated. Full npm test and both guard self-tests passed.
+
+### P2-06 — e5bc294
+
+Push: done. Manual check: NOT VERIFIED (human): with policies.finalize "draft" in the owner's global file, kukulu_config_show in a project with no policies block reports finalize "draft" with policySources.finalize "global".
