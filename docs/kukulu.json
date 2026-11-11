@@ -792,7 +792,8 @@
         "docs/flights/",
         "docs/spikes/",
         "docs/site/",
-        "docs/plans/"
+        "docs/plans/",
+        "docs/kukulu.json"
       ],
       "pattern": "(?<![\\w.])(?:86_?400_?000|864e5|8\\.64e7|24\\s*\\*\\s*60\\s*\\*\\s*60\\s*\\*\\s*1000|86400\\s*\\*\\s*1000|1440\\s*\\*\\s*60\\s*\\*\\s*1000)(?![\\d_])",
       "shouldMatch": [
