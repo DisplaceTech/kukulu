@@ -571,6 +571,101 @@ export function verifyCheckpoint(entry, publicKey) {
  * that is part of a redirection (`2>&1`, `&>file`) does not end a segment.
  */
 export function splitSegments(command) {
+  return splitRaw(stripHeredocs(command).text);
+}
+
+/**
+ * A command with each heredoc body and its delimiter line removed, and the
+ * bodies. The operator (an unquoted `<<` that is not `<<<`, an optional `-`,
+ * the delimiter word bare or quoted) stays in the owning segment. `shell` is
+ * true when that segment runs sh, bash, zsh, dash or ksh without `-c`, so the
+ * shell reads the body as commands; any other body is data.
+ */
+export function stripHeredocs(command) {
+  let text = "";
+  const bodies = [];
+  const pending = [];
+  let quote = null;
+  const n = command.length;
+  for (let i = 0; i < n; i++) {
+    const c = command[i];
+    if (quote === "'") {
+      text += c;
+      if (c === "'") quote = null;
+      continue;
+    }
+    if (quote === '"') {
+      text += c;
+      if (c === "\\" && i + 1 < n) text += command[++i];
+      else if (c === '"') quote = null;
+      continue;
+    }
+    if (c === "'" || c === '"') {
+      quote = c;
+      text += c;
+    } else if (c === "\\" && i + 1 < n) {
+      text += c + command[++i];
+    } else if (c === "<" && command[i + 1] === "<" && command[i + 2] === "<") {
+      text += "<<<";
+      i += 2;
+    } else if (c === "<" && command[i + 1] === "<") {
+      let j = i + 2;
+      const dash = command[j] === "-";
+      if (dash) j++;
+      while (command[j] === " " || command[j] === "\t") j++;
+      let word = "";
+      let quoted = false;
+      if (command[j] === "'" || command[j] === '"') {
+        const end = command.indexOf(command[j], j + 1);
+        const stop = end === -1 ? n : end;
+        word = command.slice(j + 1, stop);
+        quoted = true;
+        j = Math.min(stop + 1, n);
+      } else {
+        if (command[j] === "\\") {
+          quoted = true;
+          j++;
+        }
+        const from = j;
+        while (j < n && !/[\s;&|<>()]/.test(command[j])) j++;
+        word = command.slice(from, j);
+      }
+      // `$((1<<3))` shifts bits; a delimiter of digits only is never a heredoc.
+      if (word === "" || /^\d+$/.test(word)) {
+        text += "<<";
+        i++;
+        continue;
+      }
+      const head = text;
+      const owner = splitRaw(head).at(-1) ?? "";
+      const tokens = shellWords(owner);
+      const shell = /^(?:ba|z|da|k)?sh$/.test(commandWord(tokens).word ?? "") && !tokens.some((t) => /^-[A-Za-z]*c[A-Za-z]*$/.test(t));
+      pending.push({ word, quoted, dash, shell });
+      text += command.slice(i, j);
+      i = j - 1;
+    } else if (c === "\n" && pending.length) {
+      text += c;
+      let at = i + 1;
+      for (const h of pending) {
+        const lines = [];
+        let found = false;
+        while (at <= n && !found && at < n) {
+          const eol = command.indexOf("\n", at);
+          const line = command.slice(at, eol === -1 ? n : eol);
+          at = eol === -1 ? n : eol + 1;
+          if ((h.dash ? line.replace(/^\t+/, "") : line) === h.word) found = true;
+          else lines.push(line);
+        }
+        bodies.push({ body: lines.join("\n"), quoted: h.quoted, shell: h.shell });
+      }
+      pending.length = 0;
+      i = at - 1;
+    } else text += c;
+  }
+  return { text, bodies };
+}
+
+function splitRaw(command) {
   const segments = [];
   let current = "";
   let quote = null;
@@ -989,15 +1084,23 @@ export function evaluate(policy, hookInput, env) {
   /** Rule 6 for one command string; substitutions, `sh -c` and `eval` strings are judged as further commands. */
   function bashVerdict(command, depth) {
     if (depth > 4) return NO_ISSUES;
-    const { text, inner } = extractSubstitutions(command);
+    const stripped = stripHeredocs(command);
+    const { text, inner } = extractSubstitutions(stripped.text);
     for (const sub of inner) {
       const v = bashVerdict(sub, depth + 1);
       if (v.decision === "denied") return v;
     }
+    // A body is commands only when a shell reads it; an unquoted delimiter still lets the shell expand substitutions inside it.
+    for (const b of stripped.bodies) {
+      for (const sub of b.shell ? [b.body] : b.quoted ? [] : extractSubstitutions(b.body).inner) {
+        const v = bashVerdict(sub, depth + 1);
+        if (v.decision === "denied") return v;
+      }
+    }
     const subshells = [];
     // Nesting of `case ... in`, inside which a leading `pattern)` is an arm and not a command.
     let caseDepth = 0;
-    for (const raw of splitSegments(text)) {
+    for (const raw of splitRaw(text)) {
       const { segment, opens, closes, entersCase, leavesCase } = stripGrouping(raw, caseDepth > 0);
       if (entersCase) caseDepth++;
       if (leavesCase && caseDepth > 0) caseDepth--;

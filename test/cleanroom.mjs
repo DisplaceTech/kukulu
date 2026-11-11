@@ -16,7 +16,7 @@ import {
   CleanroomError, loadPolicy, policyHash,
   ENTRY_KEYS, KINDS, ZERO_HASH, TARGET_MAX, truncateTarget, canonical, entryHash, appendEntry, readEntries, verifyChain, logPathFor, targetOf, projectContext, entryFields,
   tokenize, LANGUAGES, scorePair, position, verdictOf, LIMITS, BANDS,
-  splitSegments, shellWords, commandWord, isPathLike, tokenPath, canonicalPaths,
+  splitSegments, stripHeredocs, shellWords, commandWord, isPathLike, tokenPath, canonicalPaths,
   evaluate, sedInPlace, lockdownActive, NETWORK_COMMANDS, READ_FAMILY, WRITE_FAMILY, protectedPaths,
   coverageGaps, KNOWN_LIMITS, knownLimitsFor,
   normalizeModel, familyOf, controlPaths, LOG_SOCKET_TIMEOUT_MS,
@@ -896,6 +896,31 @@ async function genesisRepo(planOpts = {}) {
   eq(run(`${SED} -i '' s/a/b/ src/a.rs`).decision, "allowed", "...so the empty suffix and the script are not targets");
   const w = KNOWN_LIMITS.find((l) => l.id === "indirect");
   ok(w.text.includes("sed's w command") && KNOWN_LIMITS.length === 12, "KNOWN_LIMITS indirect names sed's w command");
+}
+
+{
+  const T = (s) => s.replaceAll("<TAB>", "\t");
+  const strip = (c) => stripHeredocs(c);
+  const a = strip("cat <<EOF > x.txt\nhello\nEOF\necho done");
+  eq(a.text, "cat <<EOF > x.txt\necho done", "stripHeredocs removes a body and keeps the operator");
+  eq(JSON.stringify(a.bodies), JSON.stringify([{ body: "hello", quoted: false, shell: false }]), "...a bare delimiter is unquoted");
+  eq(strip("cat <<'EOF'\nx\nEOF").bodies[0].quoted + "|" + strip('cat <<"EOF"\nx\nEOF').bodies[0].quoted + "|" + strip("cat <<\\EOF\nx\nEOF").bodies[0].quoted, "true|true|true", "...'EOF', \"EOF\" and \\EOF are quoted");
+  eq(strip(T("cat <<-EOF\n<TAB>x\n<TAB>EOF\necho y")).text + "|" + strip(T("cat <<-EOF\n<TAB>x\n<TAB>EOF\necho y")).bodies[0].body, "cat <<-EOF\necho y|<TAB>x".replace("<TAB>", "\t"), "...<<- strips leading tabs from the delimiter line");
+  const two = strip("cat <<A <<B\none\nA\ntwo\nB\nz");
+  eq(two.bodies.map((b) => b.body).join("|") + "|" + two.text, "one|two|cat <<A <<B\nz", "...two heredocs on one line read their bodies in order");
+  eq(strip("cat <<EOF\nnever ends").bodies[0].body, "never ends", "...an unterminated body runs to the end");
+  eq(strip("cat <<< word\nrm x").text, "cat <<< word\nrm x", "...a here-string is left alone");
+  eq(strip("bash <<EOF\nls\nEOF").bodies[0].shell + "|" + strip("bash -c x <<EOF\nls\nEOF").bodies[0].shell + "|" + strip("python3 - <<EOF\nls\nEOF").bodies[0].shell, "true|false|false", "...only a shell without -c reads its body");
+  eq(JSON.stringify(splitSegments("cat <<EOF > x.txt\nit's fine\nEOF\nrm -rf .kukulu/cleanroom")), JSON.stringify(["cat <<EOF > x.txt", "rm -rf .kukulu/cleanroom"]), "splitSegments does not cut inside a heredoc body");
+  const policy = loadPolicy(EXAMPLE);
+  const root = mkDir("kukulu-hd-root-");
+  const home = mkDir("kukulu-hd-home-");
+  const run = (command) => evaluate(policy, { tool_name: "Bash", tool_input: { command }, cwd: root }, { root, home, progressText: null, policyPath: path.join(root, "docs", "cleanroom.json"), pluginRoot: path.join(home, "plugin-root"), keyPath: path.join(home, "k.pem"), planExists: true });
+  eq(run("bash <<'EOF'\nrm -rf .kukulu/cleanroom\nEOF").decision, "denied", "a shell-read heredoc body is judged as commands");
+  eq(run("cat <<'EOF' > notes.txt\n$(rm -rf .kukulu)\nEOF").decision, "allowed", "a quoted-delimiter body is never scanned");
+  eq(run("cat <<EOF > out.txt\n$(cat ~/.cargo/registry/a.rs)\nEOF").decision, "denied", "an unquoted-delimiter body's substitutions are judged");
+  const cases = JSON.parse(fs.readFileSync(path.join(ROOT, "test", "fixtures", "guard-cases.json"), "utf8")).filter((c) => /^cleanflate false positive \d/.test(c.name) && /<</.test(c.input.tool_input.command ?? ""));
+  ok(cases.length > 0 && cases.every((c) => c.expect === "allowed"), "the cleanflate Python heredoc fixtures stay allowed (the guard cases test each)");
 }
 
 // ---------------------------------------------------------------- the guard hook

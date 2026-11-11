@@ -7748,5 +7748,113 @@
    "cwd": "__ROOT__"
   },
   "expect": "allowed"
+ },
+ {
+  "name": "cat <<EOF > x.txt ... it's fine (P0-02)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat <<EOF > x.txt\nit's fine\nEOF\nrm -rf .kukulu/cleanroom"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*\\.kukulu/cleanroom"
+ },
+ {
+  "name": "bash <<'EOF' ... rm -rf .kukulu/cleanroom (P0-02)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "bash <<'EOF'\nrm -rf .kukulu/cleanroom\nEOF"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*\\.kukulu/cleanroom"
+ },
+ {
+  "name": "cat <<EOF > docs/cleanroom.json ... {} (P0-02)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat <<EOF > docs/cleanroom.json\n{}\nEOF"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*docs/cleanroom\\.json"
+ },
+ {
+  "name": "cat <<EOF > out.txt ... $(cat ~/.cargo/registry/a.rs) (P0-02)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat <<EOF > out.txt\n$(cat ~/.cargo/registry/a.rs)\nEOF"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "denied path"
+ },
+ {
+  "name": "cat > build/k.json <<'EOF' ... {\"priorArt\": [\"~/.cargo/regist (P0-02)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat > build/k.json <<'EOF'\n{\"priorArt\": [\"~/.cargo/registry/\", \"~/.cargo/git/\"]}\nEOF"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "cat <<'EOF' > notes.txt ... $(rm -rf .kukulu) (P0-02)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat <<'EOF' > notes.txt\n$(rm -rf .kukulu)\nEOF"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "python3 - <<'EOF' ... print(\"~/.cargo/git/x\") (P0-02)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "python3 - <<'EOF'\nprint(\"~/.cargo/git/x\")\nEOF"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "cat <<-EOF > build/a.txt ... \tbody line (P0-02)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat <<-EOF > build/a.txt\n\tbody line\n\tEOF\necho done"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
  }
 ]

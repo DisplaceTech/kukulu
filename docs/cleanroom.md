@@ -58,6 +58,8 @@ Every path (`file_path`, `path`, `notebook_path`, a path-like Bash token) is exp
 
 A denial writes `kukulu clean-room guard: <reason>` to the model on stderr and appends a `denied` entry to the log. The guard fails closed: any exception ends in a denial with the reason `guard internal error: <message>`.
 
+A heredoc body is data unless a shell reads it. The operator is an unquoted `<<` (not `<<<`), an optional `-`, and a delimiter word written bare, `'word'`, `"word"` or `\word`; the body starts on the next line, ends at the first line equal to the word (leading tabs stripped for `<<-`), and runs to the end of the command when unterminated. Quotes inside a body never affect how the command is split, so an apostrophe in a body does not hide the commands after it. The segment that owns the operator is judged as usual, so `cat <<EOF > docs/cleanroom.json` is denied by its redirection. When the owning segment is `sh`, `bash`, `zsh`, `dash` or `ksh` without `-c`, the body is judged as commands; otherwise, with an unquoted delimiter only, the `$(...)` and backtick bodies inside it are judged, and a quoted-delimiter body is not scanned. A body handed to another interpreter (`python3 - <<'EOF'`) is data, under the `interpreter` known gap.
+
 ### What is always protected
 
 The policy file; `.kukulu/cleanroom/`; `.kukulu/state.json`; `docs/kukulu.json` from the moment `docs/PLAN.md` exists (the planner writes it before that); `.claude/settings.json`, `.claude/settings.local.json`, `.claude/hooks/`; `.mcp.json`; the installed plugin and `~/.claude/plugins/`; `~/.claude/settings.json`; the signing key and its `.pub`; and `.git/hooks/`, `.git/config` and `.git/info/`. The policy, the settings and `.mcp.json` can be read; the signing key cannot.
