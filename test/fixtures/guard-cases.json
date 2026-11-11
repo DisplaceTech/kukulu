@@ -7993,5 +7993,69 @@
    "cwd": "__ROOT__"
   },
   "expect": "allowed"
+ },
+ {
+  "name": "echo $[1<<n] NL rm -rf .kukulu/cleanroom (R2-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "echo $[1<<n]\nrm -rf .kukulu/cleanroom"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "echo ${x#<<y} NL rm -rf .kukulu/cleanroom (R2-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "echo ${x#<<y}\nrm -rf .kukulu/cleanroom"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "echo ${x:-<<y} NL rm -rf .kukulu/cleanroom (R2-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "echo ${x:-<<y}\nrm -rf .kukulu/cleanroom"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "y=${x/<</z} NL rm -rf .kukulu/cleanroom (R2-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "y=${x/<</z}\nrm -rf .kukulu/cleanroom"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "echo ${#x}<<y NL rm -rf .kukulu/cleanroom (R2-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "echo ${#x}<<y\nrm -rf .kukulu/cleanroom"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
  }
 ]

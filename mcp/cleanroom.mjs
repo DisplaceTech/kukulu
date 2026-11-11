@@ -620,6 +620,11 @@ export function stripHeredocs(command) {
       text += c;
     } else if (c === "\\" && i + 1 < n) {
       text += c + command[++i];
+    } else if (c === "$" && (command[i + 1] === "{" || command[i + 1] === "[") && expansionEnd(command, i + 1) !== -1) {
+      // `<<` inside `${...}` or `$[...]` is text or a shift, never a heredoc.
+      const end = expansionEnd(command, i + 1);
+      text += command.slice(i, end + 1);
+      i = end;
     } else if (c === "(" && command[i + 1] === "(" && arithmeticEnd(command, i) !== -1) {
       // `<<` inside `$((...))` or `((...))` shifts bits, whatever its operand.
       const end = arithmeticEnd(command, i);
@@ -693,6 +698,30 @@ export function stripHeredocs(command) {
     } else text += c;
   }
   return { text, bodies };
+}
+
+/**
+ * The index of the `}` or `]` closing the `{` or `[` at `from`, or -1 when it
+ * never closes. Inner braces nest; quotes and backslashes hide a closer.
+ */
+function expansionEnd(command, from) {
+  const open = command[from];
+  const close = open === "{" ? "}" : "]";
+  let depth = 0;
+  let quote = null;
+  for (let i = from; i < command.length; i++) {
+    const c = command[i];
+    if (quote === "'") {
+      if (c === "'") quote = null;
+    } else if (quote === '"') {
+      if (c === "\\") i++;
+      else if (c === '"') quote = null;
+    } else if (c === "\\") i++;
+    else if (c === "'" || c === '"') quote = c;
+    else if (c === open) depth++;
+    else if (c === close && --depth === 0) return i;
+  }
+  return -1;
 }
 
 /** The index of the `)` closing the `((` at `from`, or -1 when it never closes. */

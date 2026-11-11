@@ -936,6 +936,9 @@ async function genesisRepo(planOpts = {}) {
   eq(strip(T("cat <<-EOF\n<TAB>x\n<TAB>EOF\necho y")).text + "|" + strip(T("cat <<-EOF\n<TAB>x\n<TAB>EOF\necho y")).bodies[0].body, "cat <<-EOF\necho y|<TAB>x".replace("<TAB>", "\t"), "...<<- strips leading tabs from the delimiter line");
   const inert = "echo $((1<<n))\necho hi # see a<<b\n(( x = y << z ))";
   eq(strip(inert).text + "|" + strip(inert).bodies.length, inert + "|0", "stripHeredocs ignores << in arithmetic and in a comment");
+  const exp = ["echo $[1<<n]", "echo ${x#<<y}", "echo ${x:-<<y}", "y=${x/<</z}"].map((c) => c + "\nrm -rf x");
+  eq(exp.map((c) => strip(c).text === c && strip(c).bodies.length === 0).join(), "true,true,true,true", "stripHeredocs ignores << inside ${...} and $[...]");
+  eq(strip("echo ${#x}<<y\nrm x").bodies.length, 1, "...a << after the closing } is still an operator");
   const q = strip("cat <<E'OF' > x.txt\nhi\nEOF\necho y");
   eq(q.bodies[0].quoted + "|" + q.bodies[0].body + "|" + q.text, "true|hi|cat <<E'OF' > x.txt\necho y", "stripHeredocs removes quotes from the whole delimiter word");
   const two = strip("cat <<A <<B\none\nA\ntwo\nB\nz");
