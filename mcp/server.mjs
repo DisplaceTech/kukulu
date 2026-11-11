@@ -1240,7 +1240,8 @@ function cfgFrom(c, planIds, limit = mcpTimeoutMs()) {
       feedback: c.policies?.feedback ?? true,
       // An owner decision, not an assumption: two release flights needed the archive, so a finished flight archives itself unless this is false.
       archive: c.policies?.archive ?? true,
-      finalize: c.policies?.finalize ?? "auto",
+      // An owner decision, not an assumption: a flight's pull request is marked ready for a human to merge unless "auto" is set (SPEC D-01).
+      finalize: c.policies?.finalize ?? "ready",
       mergeMethod: c.policies?.mergeMethod ?? "merge",
       syncBase: c.policies?.syncBase ?? true,
     },
@@ -1668,6 +1669,7 @@ function configShow() {
     agentsStale: stale,
     permissionRule: mcpAllowRulePresent() ? "present" : "missing",
     archive: cfg().policies.archive,
+    policies: cfg().policies,
     table: routingTable(r),
   };
 }
@@ -1756,7 +1758,8 @@ const DEFAULT_STATE = {
   summarized: false,
   halted: null,
   preexistingUntracked: [],
-  policies: { signing: "auto", push: true, pr: "draft", feedback: true },
+  // Every policy with its default, from the one place that writes them.
+  policies: cfgFrom({}, null).policies,
   signing: null,
   rounds: [],
 };

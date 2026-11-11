@@ -1044,7 +1044,8 @@ const DRAFT_PR = ghFixture("pr-draft.json");
 
 /** A summarized build branch with a bare origin and a fake gh holding a draft PR. `signed` signs every commit on it. */
 function finalizeRepo({ signed = false, policies = {}, summarized = true } = {}) {
-  const repo = plannedRepo({ config: { policies } });
+  // These tests exercise auto-merge unless they say otherwise; `policies: null` writes no policies block at all, so the default applies.
+  const repo = plannedRepo({ config: { policies: policies === null ? undefined : { finalize: "auto", ...policies } } });
   git(repo, ["checkout", "-q", "-b", "build/x"]);
   if (signed) useFakeSigner(repo, mkFakeGpg());
   writeFile(repo, "docs/SUMMARY.md", "# summary\n");
@@ -1103,6 +1104,7 @@ const ghCalls = (ghDir) => readFile(ghDir, "calls.log").split("\n").filter(Boole
 }
 
 for (const [label, args, policies, expect, mergeFails] of [
+  ["no policies block", { breaking: false }, null, { calls: ["pr ready"], merge: "skipped: policy", ready: true }],
   ["auto, not breaking", { breaking: false }, {}, { calls: ["pr ready", "pr merge --auto --merge --subject Widget thing (#1)"], merge: "enabled", ready: true }],
   ["squash", { breaking: false }, { mergeMethod: "squash" }, { calls: ["pr ready", "pr merge --auto --squash --subject Widget thing (#1)"], merge: "enabled", ready: true }],
   ["breaking", { breaking: true }, {}, { calls: ["pr ready"], merge: "skipped: breaking", ready: true }],
@@ -1111,6 +1113,7 @@ for (const [label, args, policies, expect, mergeFails] of [
   ["merge unavailable", { breaking: false }, {}, { calls: ["pr ready", "pr merge --auto --merge --subject Widget thing (#1)"], merge: 'unavailable: auto-merge is not allowed; set policies.finalize to "ready" to stop asking', ready: true }, ghFixture("merge-not-allowed.txt")],
 ]) {
   const { repo, ghDir, opts } = finalizeRepo({ signed: true, policies });
+  if (label === "no policies block") ok(policies === null, "kukulu_pr_finalize with no policies block marks the PR ready and runs no gh pr merge");
   if (mergeFails) writeFile(ghDir, "merge-fails", mergeFails);
   await withServer(repo, async ({ call }) => {
     const r = await call("kukulu_pr_finalize", args);

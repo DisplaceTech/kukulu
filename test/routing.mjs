@@ -34,6 +34,11 @@ for (const [config, want, label] of [[{}, true, "config_show reports archive tru
   });
 }
 
+await withServer(plannedRepo({ config: {} }), async ({ call }) => {
+  const cs = await call("kukulu_config_show");
+  eq(cs.policies.finalize + "|" + Object.keys(cs.policies).length, "ready|8", "kukulu_config_show reports finalize ready with no policies block");
+});
+
 // ---------------------------------------------------------------- runners (A-01)
 
 const RUNNERS_OK = {

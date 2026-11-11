@@ -20,6 +20,7 @@ All notable changes to this plugin. Format follows
 
 ### Changed
 
+- `policies.finalize` defaults to `"ready"`: finalize marks the PR ready and enables auto-merge only when `"auto"` is set (project-g F-19, D-01).
 - `kukulu_release` reads the merged flight from `origin/<base>`, needs no checkout and reports `fastForward` and `localState`; a stale local base no longer hides behind "no numbered entry" (project-g F-16, F-17, F-18, C-02).
 - sed's `w` command is listed under the `indirect` known gap (A-01).
 

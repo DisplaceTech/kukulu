@@ -1189,6 +1189,16 @@ const OLD_LAYOUT = /pre-0\.6\.0 Foundry layout, which 0\.7\.0 no longer reads/;
   }
 }
 
+// ---------------------------------------------------------------- every policy default in status (D-01)
+
+{
+  const repo = specRepo();
+  await withServer(repo, async ({ call }) => {
+    const p = (await call("kukulu_status")).policies;
+    eq(Object.keys(p).sort().join(",") + "|" + p.finalize, "archive,feedback,finalize,mergeMethod,pr,push,signing,syncBase|ready", "kukulu_status.policies before a run lists every policy default");
+  });
+}
+
 // ---------------------------------------------------------------- the MCP limit and mutation.targeted in status (B-02)
 
 {
