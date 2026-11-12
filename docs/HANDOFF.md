@@ -77,3 +77,9 @@ Fix tasks R2-01 to R2-04, all done (29 of 29 tasks done, none blocked). `kukulu_
 Fix task R3-01, done (30 of 30 tasks done, none blocked). `kukulu_verify` is ok: lint, pre-commit, npm test, both guard self-tests.
 
 - R3-01: `stripHeredocs` copies through an array-subscript assignment (`a[1<<n]=3`), a compound array assignment (`a=([1<<n]=3)`) and a backtick span, so a `<<` inside is never an operator (unclosed is not special). 12 fixtures (R3-01): ten denied, two allowed. `docs/cleanroom.md` and the CHANGELOG line name them. No existing fixture changed.
+
+## Round 4
+
+- R4-01 (done, 0398316): `stripHeredocs` copies a `[[ ... ]]` conditional and a `?*+@!(...)` extglob group through unread, so a `<<` inside no longer hides later commands. The arithmetic branch still wins for `$((2*(1<<3)))`. No interpretation choices.
+- Tests: 12 new `(R4-01)` fixtures in `test/fixtures/guard-cases.json`, one `stripHeredocs` assertion in `test/cleanroom.mjs`. `docs/cleanroom.md` and the A-02 CHANGELOG line extended.
+- Counts: 31 done, 0 blocked, 0 skipped. `kukulu_verify` is green.
