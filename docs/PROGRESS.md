@@ -34,7 +34,7 @@ Started: 2026-11-11T18:32:19.610Z
 - [x] R2-02 Guard: a << inside ${...} or $[...] is not a heredoc operator
 - [x] R2-03 Guard tests: sed's attached long-option value and the (( subshell check
 - [x] R2-04 cargo test refusal: compare each cargo test with its own --
-- [ ] R3-01 Guard: a << in an array-subscript assignment, a compound array assignment or a backtick span is not a heredoc operator
+- [x] R3-01 Guard: a << in an array-subscript assignment, a compound array assignment or a backtick span is not a heredoc operator
 
 ## Log
 
@@ -156,3 +156,7 @@ Tests only: three guard fixtures (R2-03) and a sedInPlace table row for --expres
 ### R2-04 — 0fcd760
 
 validateMutation now computes the first -- and the first {filter} after each cargo test's own position. Interpretation: a filter before the cargo test (none after it) is not judged against it; only a missing -- refuses then. Two routing assertions added. verify ok.
+
+### R3-01 — dc0577b
+
+Added assignmentEnd and backtickEnd copy-through branches in stripHeredocs (subscript assignment, compound array assignment, backtick span; unclosed is not special). 12 new fixtures (10 denied, 2 allowed) ending (R3-01); stripHeredocs unit test; docs/cleanroom.md and CHANGELOG line extended. No existing fixture changed. Guard self-tests ok (604/600), verify green.
