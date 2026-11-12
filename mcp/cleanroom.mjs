@@ -630,6 +630,16 @@ export function stripHeredocs(command) {
       const end = arithmeticEnd(command, i);
       text += command.slice(i, end + 1);
       i = end;
+    } else if (c === "[" && command[i + 1] === "[" && /\s/.test(command[i + 2] ?? "") && (i === 0 || /[\s;&|(){}]/.test(command[i - 1])) && conditionalEnd(command, i) !== -1) {
+      // `[[ a =~ (x<<y) ]]` is a conditional: a `<<` inside is text, never a heredoc.
+      const end = conditionalEnd(command, i);
+      text += command.slice(i, end + 1);
+      i = end;
+    } else if (/[?*+@!]/.test(c) && command[i + 1] === "(" && groupEnd(command, i + 1) !== -1) {
+      // `@(x<<y)` and its kin are pattern groups: a `<<` inside is text.
+      const end = groupEnd(command, i + 1);
+      text += command.slice(i, end + 1);
+      i = end;
     } else if (/[A-Za-z_]/.test(c) && (i === 0 || /[\s;&|(){}]/.test(command[i - 1])) && assignmentEnd(command, i) !== -1) {
       // `a[1<<n]=3` and `a=([1<<n]=3 <<x)` are assignments: a `<<` inside is text.
       const end = assignmentEnd(command, i);
@@ -764,6 +774,49 @@ function assignmentEnd(command, from) {
     else if (c === "'" || c === '"') quote = c;
     else if (c === "(") depth++;
     else if (c === ")" && --depth === 0) return i;
+  }
+  return -1;
+}
+
+/**
+ * The index of the `)` closing the `(` at `from`, or -1 when it never closes.
+ * Inner parentheses nest; quotes and backslashes hide a closer.
+ */
+function groupEnd(command, from) {
+  let depth = 0;
+  let quote = null;
+  for (let i = from; i < command.length; i++) {
+    const c = command[i];
+    if (quote === "'") {
+      if (c === "'") quote = null;
+    } else if (quote === '"') {
+      if (c === "\\") i++;
+      else if (c === '"') quote = null;
+    } else if (c === "\\") i++;
+    else if (c === "'" || c === '"') quote = c;
+    else if (c === "(") depth++;
+    else if (c === ")" && --depth === 0) return i;
+  }
+  return -1;
+}
+
+/**
+ * The index of the last `]` of the `]]` closing the `[[` at `from`: a `]]` after
+ * a blank and before a blank, `;`, `&`, `|`, `)`, a newline or the end. -1 when
+ * it never closes. Quotes and backslashes hide a closer.
+ */
+function conditionalEnd(command, from) {
+  let quote = null;
+  for (let i = from + 2; i < command.length; i++) {
+    const c = command[i];
+    if (quote === "'") {
+      if (c === "'") quote = null;
+    } else if (quote === '"') {
+      if (c === "\\") i++;
+      else if (c === '"') quote = null;
+    } else if (c === "\\") i++;
+    else if (c === "'" || c === '"') quote = c;
+    else if (c === "]" && command[i + 1] === "]" && /\s/.test(command[i - 1]) && (i + 2 >= command.length || /[\s;&|)]/.test(command[i + 2]))) return i + 1;
   }
   return -1;
 }
