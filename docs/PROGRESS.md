@@ -35,7 +35,7 @@ Started: 2026-11-11T18:32:19.610Z
 - [x] R2-03 Guard tests: sed's attached long-option value and the (( subshell check
 - [x] R2-04 cargo test refusal: compare each cargo test with its own --
 - [x] R3-01 Guard: a << in an array-subscript assignment, a compound array assignment or a backtick span is not a heredoc operator
-- [ ] R4-01 Guard: a << inside a [[ ... ]] conditional or an extglob group is not a heredoc operator
+- [x] R4-01 Guard: a << inside a [[ ... ]] conditional or an extglob group is not a heredoc operator
 
 ## Log
 
@@ -161,3 +161,7 @@ validateMutation now computes the first -- and the first {filter} after each car
 ### R3-01 — dc0577b
 
 Added assignmentEnd and backtickEnd copy-through branches in stripHeredocs (subscript assignment, compound array assignment, backtick span; unclosed is not special). 12 new fixtures (10 denied, 2 allowed) ending (R3-01); stripHeredocs unit test; docs/cleanroom.md and CHANGELOG line extended. No existing fixture changed. Guard self-tests ok (604/600), verify green.
+
+### R4-01 — 0398316
+
+Added conditionalEnd and groupEnd copy-through branches in stripHeredocs ([[ ... ]] and ?*+@!( groups); arithmetic branch still wins. 12 fixtures (R4-01) added, one stripHeredocs assertion, docs/cleanroom.md and CHANGELOG A-02 line extended. Guard self-tests and full verify green. Interpretation: none.
