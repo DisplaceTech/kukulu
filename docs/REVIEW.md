@@ -1,58 +1,89 @@
 # Review: build/2026-11-11 (Kūkulu 0.8.1)
-Round: 3
+Round: 4
 
 **Verdict: CHANGES REQUESTED**
 
-I reviewed the round-2 fix commits from `bfe95b6` to `1069f19`: `e472f15` (R2-01), `07e0992` (R2-02), `d776945` (R2-03) and `0fcd760` (R2-04). I checked them against SPEC v0.8.1, PLAN.md's `## Review fixes (round 2)` and the round-2 findings.
+I reviewed the round-3 fix commit `dc0577b` (R3-01) against SPEC v0.8.1 A-02, principle 1, and PLAN.md's `## Review fixes (round 3)`. `git diff 26bc850..HEAD` touches only the R3-01 files plus the pipeline's own PROGRESS, HANDOFF and state files.
 
 I ran `kukulu_verify` myself and it returned `ok: true`:
 
 - All 33 constraints are `ok`, with no hits and no fixture failures.
-- `npm run lint`, `pre-commit run --all-files` and `npm test` pass: 4753 assertions in all 15 suites.
+- `npm run lint`, `pre-commit run --all-files` and `npm test` pass: 4766 assertions in all 15 suites.
+- The guard self-test passes on both templates, with 604 and 600 cases.
 
-I ran 4 mutants through `kukulu_mutate` on the round's code. I also ran each guard form below through HEAD's `evaluate`, through the merge base's (`git show 36df873:mcp/cleanroom.mjs` in a temp directory), and through the round-1 and round-2 review commits' copies. I checked every form against real bash 5.2.21.
+I ran 5 mutants of R3-01's mechanics through `kukulu_mutate`. I also ran about 60 guard forms through three copies of `evaluate`: HEAD's, the round-3 review commit's (`26bc850`) and the merge base's (`36df873`). Each copy came from `git show <rev>:mcp/cleanroom.mjs` and ran in a temp directory with the template policy. I checked every form that decides a finding against real bash 5.2.21, with `bash -c` and `echo RAN` in place of the write.
 
-`prChecks` is `pending`, with no failing check. The round-2 failures (`test (node 22/24/26)` and `pre-commit`) are no longer reported as failing. R2-01 fixed `check-names` locally, so I expect them to pass.
+`prChecks` is `pending`, with no failing check.
+
+Clean-room mode is off for this flight (`state.cleanroom.mode` is `general`), so there are no denials to read.
+
+## R3-01 verified
+
+- All 10 round-3 forms are now denied at HEAD, and they were allowed at `26bc850`. So are these variants: `a+=([1<<n]=3)`, `local a[1<<n]=3`, `a["]"<<n]=3`, `a=(")" <<n)`, a multi-line `a=(x` NL `<<n)`, `a=( $(echo) <<n)`, `` x=`echo \` <<n` ``, `` a[1]=`cat <<x` ``, `` a=(`cat <<x`) ``, `if a[1<<n]=3; then :; fi`, two assignments on one line, and `echo ok && a[1<<n]=3`.
+- A real heredoc after an assignment or a backtick span is still data: `a=(1 2) cat <<EOF > notes.txt`, `a[0]=1 cat <<EOF > notes.txt` and `` echo `date` <<EOF > notes.txt `` are allowed, each followed by an `rm` body line and `EOF`.
+- I tried to make the new copy-through regions hide an apostrophe body, using a heredoc inside `a=($(…))`, `a[$(…)]=1` and backticks, each closed later by a stray quote. All of them stay denied, because `extractSubstitutions` re-reads the substitution with `stripHeredocs`.
+- `git diff 36df873..HEAD -- test/fixtures/guard-cases.json` has no removed lines. Every new fixture name ends in `(R3-01)`. `docs/cleanroom.md` and the CHANGELOG line moved with the code.
+- Three mutants were killed by the guard self-test, each naming the expected R3-01 fixtures:
+  - disabling the assignment branch;
+  - dropping the `+=` step in `assignmentEnd`;
+  - disabling the backtick branch.
 
 ## Findings
 
-### 1. Guard regression: `<<` in an array-subscript assignment, a compound array assignment or a backtick span is read as a heredoc (`mcp/cleanroom.mjs:599-701`, `stripHeredocs`)
+### 1. Guard regression: `<<` inside a `[[ … ]]` conditional or an extglob group is read as a heredoc (`mcp/cleanroom.mjs:599-713`, `stripHeredocs`)
 
-This is the same class as round-1 finding 2 and round-2 finding 2. In each of these contexts bash does not treat `<<` as a heredoc operator for the outer command. `stripHeredocs` does, so its unterminated "body" swallows every later line. Bash runs those lines: I ran each form below in bash with `echo RAN` as the second line, and RAN was printed every time. Every form below was denied at the merge base `36df873` and is allowed at HEAD (`NL` is a newline). It was also allowed at both earlier review commits, so neither fix round caused or noticed it.
+This is category 1, a principle-1 regression of an always-protected write by `rm -rf`. It is the same class as the findings of rounds 1, 2 and 3.
+
+In bash, a `<<` inside a `[[ … ]]` conditional's pattern or regex operand is text, and so is one inside an extended-glob group (`?(…)`, `*(…)`, `+(…)`, `@(…)`, `!(…)`). Bash parses `[[` patterns as extglob without `shopt`; elsewhere it needs `shopt -s extglob` on an earlier line. `stripHeredocs` treats such a `<<` as an operator, and its "body" swallows the lines after it. The P0-02 heredoc code introduced this, and no fix round has covered it.
+
+For every form below, I replaced the write with `echo RAN`, and bash 5.2.21 (`bash -c`) printed RAN. Every form was denied at the merge base `36df873` and is allowed at both `26bc850` and HEAD. `NL` is a newline.
 
 | Command | merge base | HEAD |
 |---|---|---|
-| `a[1<<n]=3` NL `rm -rf .kukulu/cleanroom` | denied | allowed |
-| `a[1<<n]+=3` NL `rm -rf .kukulu/cleanroom` | denied | allowed |
-| `x=1 a[1<<n]=3` NL `rm -rf .kukulu/cleanroom` | denied | allowed |
-| `a[x[1<<n]]=3` NL `rm -rf .kukulu/cleanroom` | denied | allowed |
-| `f() { a[1<<n]=3; }` NL `rm -rf .kukulu/cleanroom` | denied | allowed |
-| `x=$(a[1<<n]=3)` NL `rm -rf .kukulu/cleanroom` | denied | allowed |
-| `a=([1<<n]=3)` NL `rm -rf .kukulu/cleanroom` | denied | allowed |
-| `declare -a a=([1<<n]=3)` NL `rm -rf .kukulu/cleanroom` | denied | allowed |
-| `a=(x <<n)` NL `rm -rf .kukulu/cleanroom` (bash reports a syntax error on line 1, then runs line 2) | denied | allowed |
-| `` echo `cat <<x` `` NL `rm -rf .kukulu/cleanroom` | denied | allowed |
+| `[[ a =~ (x<<y) ]]` NL `rm -rf .kukulu/cleanroom` | denied | allowed |
+| `[[ a =~ (x<<y) ]]` NL `rm -rf .kukulu/cleanroom` NL `y` | denied | allowed |
+| `[[ a =~ ^(<<y)$ ]]` NL `rm -rf .kukulu/cleanroom` | denied | allowed |
+| `[[ a =~ x(<<y) ]]` NL `echo x > docs/cleanroom.json` | denied | allowed |
+| `if [[ a =~ (<<y) ]]; then :; fi` NL `rm -rf .kukulu/cleanroom` | denied | allowed |
+| `[[ a == @(x<<y) ]]` NL `rm -rf .kukulu/cleanroom` (also `=`, `!=`, `?(`, `*(`, `+(`, `!(`) | denied | allowed |
+| `[[ a == +(<<y) ]] && echo ok` NL `rm -rf .kukulu/cleanroom` | denied | allowed |
+| `shopt -s extglob` NL `echo @(x<<y)` NL `rm -rf .kukulu/cleanroom` (also `ls *(…)`, `+(…)`, `!(…)`, `?(…)`) | denied | allowed |
+| `shopt -s extglob` NL `case a in @(x<<y)) ;; esac` NL `rm -rf .kukulu/cleanroom` | denied | allowed |
 
-These are principle 1's first case: a regression of an always-protected write by `rm -rf`, a command word the rules name. Round 2's R2-02 put backtick parsing out of scope. The backtick form is queued anyway because it is a regression against the merge base, not a new spelling.
+The guard agrees with bash on these forms, which stay allowed: `[[ -n a ]] <<y` NL `rm …` (a real, unterminated heredoc after the `]]`) and `cat x <<y` NL `rm …`. I also checked where bash reports a syntax error and runs nothing after it, so the guard's verdict does not matter:
 
-Bash agrees with the guard on these forms, which stay allowed: `echo a[1<<n]=3` and `declare a[1<<n]=3` (bash reads a heredoc, so the next line is its body), `echo {a,<<b}`, `let x=1<<n`, `a[1]<<n`, and `echo $(cat <<x)` NL `rm …` NL `x` (bash 5.2 reads the substitution's heredoc body from the lines that follow).
+- `[[ a <<b ]]` and `[[ a < <<b ]]`;
+- `[[ a =~ x<<y ]]` with no group;
+- `echo @(x<<y)` with extglob off;
+- `>#<<x`;
+- `for`, `select` and `case` word lists.
 
 - **What breaks:** an implementer in a clean-room flight can delete or overwrite the clean-room log, `docs/cleanroom.json` or `.kukulu/state.json` with no denial.
-- **Minimal fix:** in `stripHeredocs`, outside quotes, copy each of these regions through without looking for `<<`, the way the `${`, `$[` and `((` branches do:
-  - At a word start, an identifier followed by `[`, with its matching `]` (nesting-aware and quote-aware, as `expansionEnd` already is), where the `]` is followed by `=` or `+=`. The region runs through that `]`.
-  - At a word start, an identifier followed by `=(` or `+=(`, through its matching `)`.
-  - An unescaped backtick, through the next unescaped backtick.
-  - An unclosed region is not special.
-  - Matching a word start after a command word too (`echo a[1<<n]=3`) is acceptable. It only denies more, because the next lines are then judged as commands. (Task R3-01.)
+- **Minimal fix:** in `stripHeredocs`, outside quotes, copy each of these regions through without looking for `<<`, the way the `${`, `$[`, `((`, assignment and backtick branches do. An unclosed region is not special.
+  - A `[[` at a word start followed by a blank, through the next `]]` that a blank precedes and that a blank, `;`, `&`, `|`, `)`, a newline or the end of the command follows. The scan is quote-aware.
+  - One of `?`, `*`, `+`, `@`, `!` directly followed by `(`, through its matching `)`, nesting-aware and quote-aware. The `$((`/`((` branch must still win for `$((2*(1<<3)))`.
+  - Copy-through may only deny more: it hides an operator, never exposes one. So matching `[[` as an argument (`echo [[ <<x … ]]`) is acceptable. (Task R4-01.)
 
 ## Spec issues
 
-- **A-02's unterminated heredoc (third round of the same class).** Every misdetected heredoc found in three rounds is unterminated: its delimiter never appears as a line. When a heredoc really is unterminated, bash warns and runs nothing after it. So judging an unterminated body as commands as well as data costs nothing in a real command, and it would close this whole class for good. That includes contexts nobody has listed yet. Fix rounds keep finding one more bash context per round (`$((`, then `${`/`$[`, now subscripts, compound assignments and backticks), so the loop will not converge on its own. SPEC A-02 says an unterminated body "runs to the end of the command" and is data, so I queued only the narrow fix again. I recommend that the owner adopt the unterminated-body rule, in this release or the next.
+- **A-02's operator contexts (fourth round of the same class).** Round 3 recommended judging an unterminated body as commands too. That would not close this class: the second row of finding 1 is a misdetected heredoc whose "delimiter" line `y` follows the write. Bash runs the write and then fails on `y`, while the guard reads the write as a terminated body. The class closes only when A-02 names the complete set of bash contexts where `<<` is not an operator. After R4-01 these are:
+  - quotes;
+  - `#` comments;
+  - `$((…))` and `((…))`;
+  - `$[…]` and `${…}`;
+  - assignment subscripts;
+  - compound array assignments;
+  - backtick spans;
+  - `[[ … ]]`;
+  - extglob groups.
+
+  I found no other context in bash 5.2 where a `<<` is text and the next line still runs. I recommend that the owner write that list into A-02, so later rounds review against a closed set.
 - **Carried from earlier rounds, still open for the owner:**
   - A heredoc piped into a shell (`cat <<EOF | bash`) is judged as data.
   - A-01's "a cluster that contains `i`" wording is broader than the implementation's getopt reading of `-e`/`-f`/`-l` values.
 - **Known-gap candidates:**
   - A heredoc piped into a shell: `cat <<EOF | sh` reads its body as data.
+  - An escaped quote inside ANSI-C quoting: `echo $'\''; rm -rf .kukulu/cleanroom # '` is allowed at the merge base and at HEAD (not a regression, and outside A-01 and A-02). `splitRaw` ends `$'…'` at the `\'`, so the next `'` opens a quote that hides the write. Bash runs the write.
 
 ## Manual checks still owed
 
@@ -65,15 +96,13 @@ From HANDOFF.md, all NOT VERIFIED (human):
 
 ## Notes
 
-- **R2-01 to R2-04 verified:**
-  - R2-01 changes exactly one line of PLAN.md, the sanctioned one, and `check-names` passes.
-  - R2-02 closes all four round-2 forms. `expansionEnd` can only hide a `<<`, never expose one, so a mismatch with bash there can only deny more.
-  - R2-03 adds three fixtures that pin the forms the round-2 survivors changed. I did not re-run those two mutants this round.
-  - R2-04 kills the mutant that reverts to the command's first `--`.
-  - `git diff 36df873..HEAD -- test/fixtures/guard-cases.json` has no removed lines. Every new fixture name ends in its task id. The CHANGELOG and `docs/cleanroom.md` lines moved with R2-02.
-- **Mutation survivors.** Round 3 is past `review.mutationFixRounds` (2), so these are advisory and never tasks:
-  - `expansionEnd`'s nesting: replacing `else if (c === open) depth++; else if (c === close && --depth === 0) return i;` with `else if (c === close) return i;` survived the `cleanroom` suite. No fixture has an inner `${…}` before the `<<`. `echo ${x:-${y}<<z}` NL `rm -rf .kukulu/cleanroom` would pin it: it is denied at HEAD, and bash runs line 2.
-  - `expansionEnd`'s quote branch: deleting `else if (c === "'" || c === '"') quote = c;` survived. `echo ${x:-"}"<<y}` NL `rm -rf .kukulu/cleanroom` would pin it: it is denied at HEAD, and bash runs line 2.
-  - `validateMutation`'s `filterAt !== -1 &&`: deleting it survived the `routing` suite. A command whose `{filter}` comes before a `cargo test -- …` with no filter after it is not tested either way. That is the reading R2-04's interpretation chose.
-- Carried from round 1: `kukulu_next`'s `TOOLS` description still omits `description` from its result shape.
-- Carried from round 1: P1-05's suggestion reads `<slug>-2 or <slug>-2` when the SPEC has no `Version:` line.
+- **Mutation survivors (advisory).** Round 4 is past `review.mutationFixRounds` (2), so these are never tasks:
+  - `assignmentEnd`'s list nesting: replacing `else if (c === ")" && --depth === 0) return i;` with `else if (c === ")") return i;` survived the guard self-test. `a=( $(echo) <<n)` NL `rm -rf .kukulu/cleanroom` would pin it: it is denied at HEAD, and the mutant allows it.
+  - `backtickEnd`'s escape: dropping `if (command[i] === "\\") i++;` survived. `` x=`echo \` <<n` `` NL `rm -rf .kukulu/cleanroom` would pin it: it is denied at HEAD.
+- **Carried from round 3:**
+  - `expansionEnd`'s nesting and quote branches have no pinning fixture. `echo ${x:-${y}<<z}` and `echo ${x:-"}"<<y}`, each followed by NL `rm -rf .kukulu/cleanroom`, would pin them.
+  - `validateMutation`'s `filterAt !== -1 &&` is untested either way.
+- `stripHeredocs` calls `assignmentEnd` (like `expansionEnd`, `arithmeticEnd` and `backtickEnd`) twice per match, once in the condition and once in the body. Each call is linear, so this costs nothing that matters.
+- **Carried from round 1:**
+  - `kukulu_next`'s `TOOLS` description still omits `description` from its result shape.
+  - P1-05's suggestion reads `<slug>-2 or <slug>-2` when the SPEC has no `Version:` line.
