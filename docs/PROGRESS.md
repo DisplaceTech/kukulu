@@ -36,6 +36,7 @@ Started: 2026-11-11T18:32:19.610Z
 - [x] R2-04 cargo test refusal: compare each cargo test with its own --
 - [x] R3-01 Guard: a << in an array-subscript assignment, a compound array assignment or a backtick span is not a heredoc operator
 - [x] R4-01 Guard: a << inside a [[ ... ]] conditional or an extglob group is not a heredoc operator
+- [ ] R5-01 Guard: a !( subshell and an argument [[ do not hide a real heredoc
 
 ## Log
 
