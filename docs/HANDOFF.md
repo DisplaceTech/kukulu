@@ -71,3 +71,9 @@ Fix tasks R2-01 to R2-04, all done (29 of 29 tasks done, none blocked). `kukulu_
 - R2-02: `stripHeredocs` skips `${...}` and `$[...]` (nesting-aware, quote-aware; an unclosed one is not special). Five fixtures (R2-02); `docs/cleanroom.md` and the CHANGELOG line name both forms. No existing fixture changed.
 - R2-03: tests only. Three fixtures (R2-03) and a `sedInPlace` row cover sed's attached long-option value and the `((` subshell check. No existing fixture changed.
 - R2-04: `validateMutation` compares each `cargo test` with the first `--` after it. Interpretation: a `{filter}` that sits before the cargo test is not judged against it; only a missing `--` refuses then. Two routing assertions.
+
+## Round 3
+
+Fix task R3-01, done (30 of 30 tasks done, none blocked). `kukulu_verify` is ok: lint, pre-commit, npm test, both guard self-tests.
+
+- R3-01: `stripHeredocs` copies through an array-subscript assignment (`a[1<<n]=3`), a compound array assignment (`a=([1<<n]=3)`) and a backtick span, so a `<<` inside is never an operator (unclosed is not special). 12 fixtures (R3-01): ten denied, two allowed. `docs/cleanroom.md` and the CHANGELOG line name them. No existing fixture changed.
