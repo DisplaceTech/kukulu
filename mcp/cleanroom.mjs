@@ -630,6 +630,16 @@ export function stripHeredocs(command) {
       const end = arithmeticEnd(command, i);
       text += command.slice(i, end + 1);
       i = end;
+    } else if (/[A-Za-z_]/.test(c) && (i === 0 || /[\s;&|(){}]/.test(command[i - 1])) && assignmentEnd(command, i) !== -1) {
+      // `a[1<<n]=3` and `a=([1<<n]=3 <<x)` are assignments: a `<<` inside is text.
+      const end = assignmentEnd(command, i);
+      text += command.slice(i, end + 1);
+      i = end;
+    } else if (c === "`" && backtickEnd(command, i) !== -1) {
+      // A backtick span is read apart from the line around it.
+      const end = backtickEnd(command, i);
+      text += command.slice(i, end + 1);
+      i = end;
     } else if (c === "#" && (i === 0 || /[\s;&|()]/.test(command[i - 1]))) {
       // A comment runs to the end of the line; a `<<` in it is not an operator.
       const eol = command.indexOf("\n", i);
@@ -720,6 +730,49 @@ function expansionEnd(command, from) {
     else if (c === "'" || c === '"') quote = c;
     else if (c === open) depth++;
     else if (c === close && --depth === 0) return i;
+  }
+  return -1;
+}
+
+/**
+ * The index of the last character of the array assignment starting at `from`
+ * (`name[sub]=` or `name[sub]+=`, or `name=(...)` or `name+=(...)`), or -1 when
+ * `from` starts none or it never closes. Only the subscript or the list is
+ * covered, which is where a `<<` is text.
+ */
+function assignmentEnd(command, from) {
+  const m = /^[A-Za-z_][A-Za-z0-9_]*/.exec(command.slice(from));
+  let j = from + m[0].length;
+  if (command[j] === "[") {
+    const end = expansionEnd(command, j);
+    if (end === -1) return -1;
+    const next = command[end + 1] === "+" ? end + 2 : end + 1;
+    return command[next] === "=" ? end : -1;
+  }
+  if (command[j] === "+") j++;
+  if (command[j] !== "=" || command[j + 1] !== "(") return -1;
+  let depth = 0;
+  let quote = null;
+  for (let i = j + 1; i < command.length; i++) {
+    const c = command[i];
+    if (quote === "'") {
+      if (c === "'") quote = null;
+    } else if (quote === '"') {
+      if (c === "\\") i++;
+      else if (c === '"') quote = null;
+    } else if (c === "\\") i++;
+    else if (c === "'" || c === '"') quote = c;
+    else if (c === "(") depth++;
+    else if (c === ")" && --depth === 0) return i;
+  }
+  return -1;
+}
+
+/** The index of the backtick closing the one at `from`, or -1 when it never closes. */
+function backtickEnd(command, from) {
+  for (let i = from + 1; i < command.length; i++) {
+    if (command[i] === "\\") i++;
+    else if (command[i] === "`") return i;
   }
   return -1;
 }

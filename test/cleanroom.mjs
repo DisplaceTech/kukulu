@@ -938,6 +938,8 @@ async function genesisRepo(planOpts = {}) {
   eq(strip(inert).text + "|" + strip(inert).bodies.length, inert + "|0", "stripHeredocs ignores << in arithmetic and in a comment");
   const exp = ["echo $[1<<n]", "echo ${x#<<y}", "echo ${x:-<<y}", "y=${x/<</z}"].map((c) => c + "\nrm -rf x");
   eq(exp.map((c) => strip(c).text === c && strip(c).bodies.length === 0).join(), "true,true,true,true", "stripHeredocs ignores << inside ${...} and $[...]");
+  const asg = ["a[1<<n]=3", "a=([1<<n]=3)", "echo `cat <<x`"].map((c) => c + "\nrm -rf x");
+  eq(asg.map((c) => strip(c).text === c && strip(c).bodies.length === 0).join(), "true,true,true", "stripHeredocs ignores << inside an array-subscript assignment, a compound array assignment and a backtick span");
   eq(strip("echo ${#x}<<y\nrm x").bodies.length, 1, "...a << after the closing } is still an operator");
   const q = strip("cat <<E'OF' > x.txt\nhi\nEOF\necho y");
   eq(q.bodies[0].quoted + "|" + q.bodies[0].body + "|" + q.text, "true|hi|cat <<E'OF' > x.txt\necho y", "stripHeredocs removes quotes from the whole delimiter word");
