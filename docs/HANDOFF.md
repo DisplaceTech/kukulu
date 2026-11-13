@@ -116,3 +116,12 @@ Three fix tasks, all in the guard (SPEC A-02); no blocked or skipped tasks. Head
 - R8-03: `pipesIntoShell` is replaced by `pipesIntoShellLater`, a post-pass over the body-free text after each operator: the first unquoted `|`/`|&`, then any later segment that runs a shell after `stripGrouping`. Interpretation: an unrelated later `echo x | bash` over-denies (accepted per the task). Four (R8-03) fixtures, two assertions.
 - No existing fixture changed its expect or reason. `docs/cleanroom.md` and the A-02 CHANGELOG line are updated. Full verify green (cleanroom suite 1467 assertions; guard self-tests 664 and 660 cases).
 - Manual check: none.
+
+## Round 9
+
+Two fix tasks, both in the guard (SPEC A-02, owner edit 2892ee4); no blocked or skipped tasks. Head after the round's last task: 19bb970 (progress commit).
+
+- R9-01: a data heredoc body (quoted or not) is judged line by line for writes to protected paths, each line alone, in a body-local directory moved by `cd` lines and discarded after the body. A `writeOnly` flag in `evaluate` skips the package, network, read-path, glob, recursive and commandPatterns checks; only `protected path:` denials count, so a read cannot mask a write. Depth > 4 now denies with the SPEC reason. Ten fixtures named in the task flipped to denied (listed in the commit body); ten (R9-01) fixtures added.
+- R9-02: input U+E001/U+E002 are dropped at the top of `bashVerdict` (instead of refusing). Body markers carry their index (`BODY_TOKEN`), and `withBodies` gives a substitution its bodies back, so a heredoc inside a substitution is owned by the segment inside it (`openSubstitutionStart`) and judged where the substitution is. Operators only the second reading invents stay with the final pass at the same depth. Substitutions and `sh`/`bash` `-c` strings restore the cwd after judgment; `eval` still moves it. `stripHeredocs` returns an extra `extras` array (delimiter word, invented flag) so `bodies` keeps its shape. Eleven (R9-02) fixtures; no existing fixture changed.
+- `docs/cleanroom.md` and the A-02 CHANGELOG line are updated. Full verify green (cleanroom suite 1490 assertions; guard self-tests 685 and 681 cases).
+- Manual check: none.
