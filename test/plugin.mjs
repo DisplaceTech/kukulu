@@ -790,6 +790,8 @@ ok(glRev && glPin === glRev, "secret-scan.yml pins GITLEAKS_VERSION to the pre-c
 
   const bareLine = `{"message":"a bare ${U} here"}\n`;
   eq(run({ ".kukulu/feedback.jsonl": bareLine }).status, 0, "check-names exempts the feedback log from the bare-letter rule");
+  eq(run({ "docs/flights/v1/feedback.jsonl": bareLine }).status, 0, "check-names exempts an archived feedback log from the bare-letter rule");
+  eq(run({ "docs/flights/v1/notes/feedback.jsonl": bareLine }).status, 1, "...but only at docs/flights/<slug>/feedback.jsonl");
   eq(run({ "notes.md": bareLine }).status, 1, "check-names still refuses the same bare letter in another file");
 
   const history = run({ "docs/flights/old/SUMMARY.md": `${ascii} history.\n`, "docs/feedback/a.md": `${ascii} history.\n` });

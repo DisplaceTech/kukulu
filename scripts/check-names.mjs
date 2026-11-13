@@ -26,8 +26,10 @@ const DISPLAY = `K${U}kulu`;
 // the rules it describes, including a bare macron letter.
 const HISTORY = [/^docs\/flights\//, /^docs\/plans\//, /^docs\/feedback\//, /^docs\/SPEC\.md$/];
 // .kukulu/feedback.jsonl records agents' words verbatim and is never rewritten, so
-// only the bare-letter rule skips it; every other check still runs on it.
-const BARE_LETTER_EXEMPT = /^\.kukulu\/feedback\.jsonl$/;
+// only the bare-letter rule skips it; every other check still runs on it. The
+// archive moves it to docs/flights/<slug>/feedback.jsonl unchanged, so that copy
+// is exempt for the same reason.
+const BARE_LETTER_EXEMPT = /^(?:\.kukulu|docs\/flights\/[^/]+)\/feedback\.jsonl$/;
 const PLAN_EXEMPT = /^docs\/plans\/rename-kukulu\.md$/;
 
 const problems = [];
