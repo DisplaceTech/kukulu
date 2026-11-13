@@ -90,3 +90,12 @@ Fix task R3-01, done (30 of 30 tasks done, none blocked). `kukulu_verify` is ok:
 - 11 fixtures ending `(R5-01)` added (5 regressions, 5 pins, 1 allowed); no existing fixture changed. Guard self-tests pass on both templates.
 - Known red baseline, not from this round: `npm run lint` and the plugin suite's check-names fail at `docs/kukulu.json:655` (a literal macron u in a `progress-no-bare-macron` shouldMatch example). Logged as feedback.
 - HEAD of the task is a no-op marker commit `6a0975f` because the feedback commit landed after 80c02ca.
+
+## Round 6
+
+Tasks R6-01 to R6-03 are done (35 of 35 done, none blocked).
+
+- R6-01: `docs/kukulu.json` re-escaped (diff against d9b19ea is the two maxRounds lines); `scripts/check-names.mjs` skips only the bare-letter rule for `.kukulu/feedback.jsonl`; two plugin assertions.
+- R6-02: a heredoc body whose operator line pipes (`|` or `|&`) into a later sh, bash, zsh, dash or ksh stage without `-c` is judged as commands. Interpretation: only the operator's own line is scanned for the pipeline.
+- R6-03: two readings of every heredoc command (the second only when the first skipped a `<<`), denied when either denies; the negated-subshell marking is gone. Interpretation and SPEC conflict: the acceptance fixture `!(cat <<EOF` / `rm -rf .kukulu/cleanroom` / `EOF` / `)` cannot be allowed, because reading one copies the group through and judges the rm line. It is kept as a denied fixture; the owner should reconcile SPEC A-02 rule 6 with it.
+- Check by hand: after push, the four PR checks (test node 22/24/26, pre-commit) pass.
