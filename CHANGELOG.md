@@ -18,7 +18,7 @@ All notable changes to this plugin. Format follows
 
 ### Fixed
 
-- The guard no longer reads a `<<` in arithmetic, `${...}`, `$[...]`, an array-subscript assignment, a compound array assignment, a backtick span, a `[[ ... ]]` conditional, an extglob group or a comment as a heredoc, removes quotes from the whole delimiter word, and treats an abbreviated `sed --in-place` as in place; the sed empty-suffix and `-l` rules and the digits-only rule now have fixtures (A-01, A-02).
+- The guard no longer reads a `<<` in arithmetic, `${...}`, `$[...]`, an array-subscript assignment, a compound array assignment, a backtick span, a `[[ ... ]]` conditional, an extglob group or a comment as a heredoc (a `[[` only in command position, a `!(` in command position under both readings), removes quotes from the whole delimiter word, and treats an abbreviated `sed --in-place` as in place; the sed empty-suffix and `-l` rules and the digits-only rule now have fixtures (A-01, A-02).
 - `kukulu_task_next` returns the task's own log as `taskLog`, so an unblock reason reaches the implementer (project-g F-02, F-02).
 - `kukulu_next` supplies the `Agent` call's `description`, which go-flight passes on, so the first stage spawn no longer fails validation (project-g F-21, F-01).
 - The verifier no longer reports an alias-resolved model as a routing mismatch (project-g F-20, E-02).

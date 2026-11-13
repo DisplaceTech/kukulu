@@ -600,6 +600,7 @@ export function stripHeredocs(command) {
   let text = "";
   const bodies = [];
   const pending = [];
+  const negated = [];
   let quote = null;
   const n = command.length;
   for (let i = 0; i < n; i++) {
@@ -630,11 +631,17 @@ export function stripHeredocs(command) {
       const end = arithmeticEnd(command, i);
       text += command.slice(i, end + 1);
       i = end;
-    } else if (c === "[" && command[i + 1] === "[" && /\s/.test(command[i + 2] ?? "") && (i === 0 || /[\s;&|(){}]/.test(command[i - 1])) && conditionalEnd(command, i) !== -1) {
+    } else if (c === "[" && command[i + 1] === "[" && /\s/.test(command[i + 2] ?? "") && commandPosition(command, i) && conditionalEnd(command, i) !== -1) {
       // `[[ a =~ (x<<y) ]]` is a conditional: a `<<` inside is text, never a heredoc.
       const end = conditionalEnd(command, i);
       text += command.slice(i, end + 1);
       i = end;
+    } else if (c === "!" && command[i + 1] === "(" && commandPosition(command, i)) {
+      // Ambiguous: extglob off makes this a negated subshell (a heredoc inside is real),
+      // extglob on a pattern word (a `<<` inside is text). A heredoc in it is judged as commands.
+      const end = groupEnd(command, i + 1);
+      negated.push([i, end === -1 ? n : end]);
+      text += c;
     } else if (/[?*+@!]/.test(c) && command[i + 1] === "(" && groupEnd(command, i + 1) !== -1) {
       // `@(x<<y)` and its kin are pattern groups: a `<<` inside is text.
       const end = groupEnd(command, i + 1);
@@ -694,7 +701,7 @@ export function stripHeredocs(command) {
       const head = text;
       const owner = splitRaw(head).at(-1) ?? "";
       const tokens = shellWords(owner);
-      const shell = /^(?:ba|z|da|k)?sh$/.test(commandWord(tokens).word ?? "") && !tokens.some((t) => /^-[A-Za-z]*c[A-Za-z]*$/.test(t));
+      const shell = (/^(?:ba|z|da|k)?sh$/.test(commandWord(tokens).word ?? "") && !tokens.some((t) => /^-[A-Za-z]*c[A-Za-z]*$/.test(t))) || negated.some(([from, to]) => i > from && i < to);
       pending.push({ word, quoted, dash, shell });
       text += command.slice(i, j);
       i = j - 1;
@@ -718,6 +725,20 @@ export function stripHeredocs(command) {
     } else text += c;
   }
   return { text, bodies };
+}
+
+/**
+ * True when `at` starts a command: the start, after a newline, `;`, `&`, `|`,
+ * `(` or `{` (blanks skipped), or after a reserved word that takes a command.
+ */
+function commandPosition(command, at) {
+  let j = at - 1;
+  while (j >= 0 && (command[j] === " " || command[j] === "\t")) j--;
+  if (j < 0 || /[\n;&|({]/.test(command[j])) return true;
+  if (j === at - 1) return false;
+  let k = j;
+  while (k >= 0 && !/[\s;&|(){}]/.test(command[k])) k--;
+  return /^(?:if|then|else|elif|while|until|do|time|!)$/.test(command.slice(k + 1, j + 1));
 }
 
 /**
