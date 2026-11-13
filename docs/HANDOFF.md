@@ -125,3 +125,10 @@ Two fix tasks, both in the guard (SPEC A-02, owner edit 2892ee4); no blocked or 
 - R9-02: input U+E001/U+E002 are dropped at the top of `bashVerdict` (instead of refusing). Body markers carry their index (`BODY_TOKEN`), and `withBodies` gives a substitution its bodies back, so a heredoc inside a substitution is owned by the segment inside it (`openSubstitutionStart`) and judged where the substitution is. Operators only the second reading invents stay with the final pass at the same depth. Substitutions and `sh`/`bash` `-c` strings restore the cwd after judgment; `eval` still moves it. `stripHeredocs` returns an extra `extras` array (delimiter word, invented flag) so `bodies` keeps its shape. Eleven (R9-02) fixtures; no existing fixture changed.
 - `docs/cleanroom.md` and the A-02 CHANGELOG line are updated. Full verify green (cleanroom suite 1490 assertions; guard self-tests 685 and 681 cases).
 - Manual check: none.
+
+## Round 10
+
+- R10-01 (done, fdf5b5e): the depth denial (`command nested too deep:`) now counts on a data-body line in judgeBody, so a quoted body whose line reaches the depth limit is denied. `evaluate` refuses a Bash command holding U+E001 or U+E002 with `command contains U+E001 or U+E002, characters the guard reserves; remove them and retry`.
+- Interpretation: bashVerdict's internal marker drop is kept for recursive calls; the refusal sits at the Bash entry of evaluate.
+- Fixtures: eight `(R10-01)` cases added; only the reasons of `marker U+E002 in input then heredoc rm (R9-02)` and `marker U+E001 in input then substitution rm (R9-02)` changed.
+- Verify: kukulu_verify ok; both guard self-tests pass.
