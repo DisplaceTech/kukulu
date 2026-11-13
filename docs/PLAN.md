@@ -35,6 +35,8 @@ Derived from docs/SPEC.md v0.8.1 on 2026-11-11. SPEC.md wins over this file.
 - HANDOFF.md → no "do not merge" line (SPEC §6 G); the handoff lists the manual checks of all four phases.
 - 2026-11-13: maxRounds set to 5 (was 3) by the operator through kukulu_flight_options.
 - 2026-11-13: maxRoundsHard set to 8 (was 6) by the operator through kukulu_flight_options.
+- 2026-11-13: maxRounds set to 7 (was 5) by the operator through kukulu_flight_options.
+- 2026-11-13: maxRoundsHard set to 10 (was 8) by the operator through kukulu_flight_options.
 
 ## Conventions
 
