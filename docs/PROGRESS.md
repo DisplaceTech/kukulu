@@ -44,7 +44,7 @@ Started: 2026-11-11T18:32:19.610Z
 - [x] R8-01 Guard: in the second reading, an invented heredoc operator's body is judged as commands (SPEC A-02)
 - [x] R8-02 Guard: a heredoc body or substitution is judged in the directory its owning segment runs in
 - [x] R8-03 Guard: a heredoc body is shell-read when any later stage after a pipe runs a shell, at any grouping depth
-- [ ] R9-01 Guard: every heredoc body line is checked for protected-path writes, and the depth limit denies (SPEC A-02, owner edit 2892ee4)
+- [x] R9-01 Guard: every heredoc body line is checked for protected-path writes, and the depth limit denies (SPEC A-02, owner edit 2892ee4)
 - [ ] R9-02 Guard: a body's owner and directory are found by offset, a heredoc inside a substitution is owned inside it, and a substitution's or -c string's cd does not leak
 
 ## Log
@@ -208,3 +208,7 @@ Bodies/substitutions now judged inside the segment loop in their owning segment'
 ### R8-03 — cca6aae
 
 pipesIntoShell replaced by pipesIntoShellLater: a post-pass in stripHeredocs over the body-free text after each operator (first unquoted | or |& then any later segment owning a shell after stripGrouping, any depth). Over-denial of unrelated later `| bash` accepted. 4 (R8-03) fixtures (all fail at old code), 2 assertions, docs/CHANGELOG updated. Full verify green.
+
+### R9-01 — 705a752
+
+Data-body lines judged for writes via a writeOnly closure flag in evaluate (skips package, network, read-path, glob, recursive and commandPatterns checks; only protected path denials count; body-local cwd restored after). Depth > 4 now denies with the SPEC reason. Ten fixtures flipped to denied (listed in commit body), ten (R9-01) fixtures added; the substitution-owned heredoc forms deny with no ownership change. test/cleanroom.mjs quoted-body assertion updated. docs/cleanroom.md and CHANGELOG updated. Full verify green.
