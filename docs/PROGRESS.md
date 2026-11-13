@@ -45,7 +45,7 @@ Started: 2026-11-11T18:32:19.610Z
 - [x] R8-02 Guard: a heredoc body or substitution is judged in the directory its owning segment runs in
 - [x] R8-03 Guard: a heredoc body is shell-read when any later stage after a pipe runs a shell, at any grouping depth
 - [x] R9-01 Guard: every heredoc body line is checked for protected-path writes, and the depth limit denies (SPEC A-02, owner edit 2892ee4)
-- [ ] R9-02 Guard: a body's owner and directory are found by offset, a heredoc inside a substitution is owned inside it, and a substitution's or -c string's cd does not leak
+- [x] R9-02 Guard: a body's owner and directory are found by offset, a heredoc inside a substitution is owned inside it, and a substitution's or -c string's cd does not leak
 
 ## Log
 
@@ -212,3 +212,7 @@ pipesIntoShell replaced by pipesIntoShellLater: a post-pass in stripHeredocs ove
 ### R9-01 — 705a752
 
 Data-body lines judged for writes via a writeOnly closure flag in evaluate (skips package, network, read-path, glob, recursive and commandPatterns checks; only protected path denials count; body-local cwd restored after). Depth > 4 now denies with the SPEC reason. Ten fixtures flipped to denied (listed in commit body), ten (R9-01) fixtures added; the substitution-owned heredoc forms deny with no ownership change. test/cleanroom.mjs quoted-body assertion updated. docs/cleanroom.md and CHANGELOG updated. Full verify green.
+
+### R9-02 — c5451f8
+
+Input U+E001/U+E002 dropped at top of bashVerdict. Body markers now carry the body index (BODY_TOKEN); withBodies puts a substitution's heredoc bodies back so it is judged as its own command, owner via new openSubstitutionStart in stripHeredocs; invented (second-reading) bodies stay with the final pass at same depth. Substitutions and sh/bash -c strings save/restore shellCwd/previousCwd; eval still moves the parent. stripHeredocs gains an extras array (word, invented) beside bodies to keep its body shape. Eleven (R9-02) fixtures, one ownership assertion; no existing fixture changed. Full verify green.
