@@ -594,13 +594,16 @@ export function splitSegments(command) {
  * bodies. The operator (an unquoted `<<` that is not `<<<`, an optional `-`,
  * the delimiter word bare or quoted) stays in the owning segment. `shell` is
  * true when that segment runs sh, bash, zsh, dash or ksh without `-c`, so the
- * shell reads the body as commands; any other body is data.
+ * shell reads the body as commands; any other body is data. `loose` is the
+ * second reading: every unquoted `<<` with a delimiter word is an operator,
+ * none of the listed non-operator regions is skipped. `skipped` says the first
+ * reading passed over a `<<`, so the second reading can differ.
  */
-export function stripHeredocs(command) {
+export function stripHeredocs(command, loose = false) {
   let text = "";
+  let skipped = false;
   const bodies = [];
   const pending = [];
-  const negated = [];
   let quote = null;
   const n = command.length;
   for (let i = 0; i < n; i++) {
@@ -621,47 +624,48 @@ export function stripHeredocs(command) {
       text += c;
     } else if (c === "\\" && i + 1 < n) {
       text += c + command[++i];
-    } else if (c === "$" && (command[i + 1] === "{" || command[i + 1] === "[") && expansionEnd(command, i + 1) !== -1) {
+    } else if (!loose && c === "$" && (command[i + 1] === "{" || command[i + 1] === "[") && expansionEnd(command, i + 1) !== -1) {
       // `<<` inside `${...}` or `$[...]` is text or a shift, never a heredoc.
       const end = expansionEnd(command, i + 1);
       text += command.slice(i, end + 1);
+      if (command.slice(i, end + 1).includes("<<")) skipped = true;
       i = end;
-    } else if (c === "(" && command[i + 1] === "(" && arithmeticEnd(command, i) !== -1) {
+    } else if (!loose && c === "(" && command[i + 1] === "(" && arithmeticEnd(command, i) !== -1) {
       // `<<` inside `$((...))` or `((...))` shifts bits, whatever its operand.
       const end = arithmeticEnd(command, i);
       text += command.slice(i, end + 1);
+      if (command.slice(i, end + 1).includes("<<")) skipped = true;
       i = end;
-    } else if (c === "[" && command[i + 1] === "[" && /\s/.test(command[i + 2] ?? "") && commandPosition(command, i) && conditionalEnd(command, i) !== -1) {
+    } else if (!loose && c === "[" && command[i + 1] === "[" && /\s/.test(command[i + 2] ?? "") && commandPosition(command, i) && conditionalEnd(command, i) !== -1) {
       // `[[ a =~ (x<<y) ]]` is a conditional: a `<<` inside is text, never a heredoc.
       const end = conditionalEnd(command, i);
       text += command.slice(i, end + 1);
+      if (command.slice(i, end + 1).includes("<<")) skipped = true;
       i = end;
-    } else if (c === "!" && command[i + 1] === "(" && commandPosition(command, i)) {
-      // Ambiguous: extglob off makes this a negated subshell (a heredoc inside is real),
-      // extglob on a pattern word (a `<<` inside is text). A heredoc in it is judged as commands.
-      const end = groupEnd(command, i + 1);
-      negated.push([i, end === -1 ? n : end]);
-      text += c;
-    } else if (/[?*+@!]/.test(c) && command[i + 1] === "(" && groupEnd(command, i + 1) !== -1) {
+    } else if (!loose && /[?*+@!]/.test(c) && command[i + 1] === "(" && groupEnd(command, i + 1) !== -1) {
       // `@(x<<y)` and its kin are pattern groups: a `<<` inside is text.
       const end = groupEnd(command, i + 1);
       text += command.slice(i, end + 1);
+      if (command.slice(i, end + 1).includes("<<")) skipped = true;
       i = end;
-    } else if (/[A-Za-z_]/.test(c) && (i === 0 || /[\s;&|(){}]/.test(command[i - 1])) && assignmentEnd(command, i) !== -1) {
+    } else if (!loose && /[A-Za-z_]/.test(c) && (i === 0 || /[\s;&|(){}]/.test(command[i - 1])) && assignmentEnd(command, i) !== -1) {
       // `a[1<<n]=3` and `a=([1<<n]=3 <<x)` are assignments: a `<<` inside is text.
       const end = assignmentEnd(command, i);
       text += command.slice(i, end + 1);
+      if (command.slice(i, end + 1).includes("<<")) skipped = true;
       i = end;
-    } else if (c === "`" && backtickEnd(command, i) !== -1) {
+    } else if (!loose && c === "`" && backtickEnd(command, i) !== -1) {
       // A backtick span is read apart from the line around it.
       const end = backtickEnd(command, i);
       text += command.slice(i, end + 1);
+      if (command.slice(i, end + 1).includes("<<")) skipped = true;
       i = end;
-    } else if (c === "#" && (i === 0 || /[\s;&|()]/.test(command[i - 1]))) {
+    } else if (!loose && c === "#" && (i === 0 || /[\s;&|()]/.test(command[i - 1]))) {
       // A comment runs to the end of the line; a `<<` in it is not an operator.
       const eol = command.indexOf("\n", i);
       const stop = eol === -1 ? n : eol;
       text += command.slice(i, stop);
+      if (command.slice(i, stop).includes("<<")) skipped = true;
       i = stop - 1;
     } else if (c === "<" && command[i + 1] === "<" && command[i + 2] === "<") {
       text += "<<<";
@@ -693,7 +697,8 @@ export function stripHeredocs(command) {
         }
       }
       // `$((1<<3))` shifts bits; a delimiter of digits only is never a heredoc.
-      if (word === "" || /^\d+$/.test(word)) {
+      if (word === "" || (!loose && /^\d+$/.test(word))) {
+        if (word !== "") skipped = true;
         text += "<<";
         i++;
         continue;
@@ -701,7 +706,7 @@ export function stripHeredocs(command) {
       const head = text;
       const owner = splitRaw(head).at(-1) ?? "";
       const tokens = shellWords(owner);
-      const shell = ownsShell(tokens) || pipesIntoShell(command, j) || negated.some(([from, to]) => i > from && i < to);
+      const shell = ownsShell(tokens) || pipesIntoShell(command, j);
       pending.push({ word, quoted, dash, shell });
       text += command.slice(i, j);
       i = j - 1;
@@ -724,7 +729,7 @@ export function stripHeredocs(command) {
       i = at - 1;
     } else text += c;
   }
-  return { text, bodies };
+  return { text, bodies, skipped };
 }
 
 /** True when a segment's words run sh, bash, zsh, dash or ksh without `-c`, so it reads a script from stdin. */
@@ -1319,7 +1324,20 @@ export function evaluate(policy, hookInput, env) {
   /** Rule 6 for one command string; substitutions, `sh -c` and `eval` strings are judged as further commands. */
   function bashVerdict(command, depth) {
     if (depth > 4) return NO_ISSUES;
-    const stripped = stripHeredocs(command);
+    const startCwd = shellCwd;
+    const startPrevious = previousCwd;
+    const first = bashReading(command, depth, false);
+    if (first.decision === "denied") return first;
+    // The readings differ only where the first one skipped a `<<`; otherwise run once.
+    if (!stripHeredocs(command, false).skipped) return first;
+    shellCwd = startCwd;
+    previousCwd = startPrevious;
+    return bashReading(command, depth, true);
+  }
+
+  /** One reading of a command: `loose` is the second reading of stripHeredocs. */
+  function bashReading(command, depth, loose) {
+    const stripped = stripHeredocs(command, loose);
     const { text, inner } = extractSubstitutions(stripped.text);
     for (const sub of inner) {
       const v = bashVerdict(sub, depth + 1);
