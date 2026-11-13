@@ -937,6 +937,8 @@ async function genesisRepo(planOpts = {}) {
   eq(strip("cat <<EOF |\nrm x\nEOF\ngrep x").bodies.map((b) => b.shell).join(), "false", "stripHeredocs follows a trailing pipe past the body into grep as data (R7-01)");
   const shift = "echo $((1<<3))\nrm x";
   eq(stripHeredocs(shift, true).bodies.map((b) => b.shell).join() + "|" + strip(shift).bodies.length, "true|0", "the second reading marks a skipped operator's body shell-read; the first reading has none (R8-01)");
+  eq(strip("{ cat <<EOF; } | bash\nrm x\nEOF").bodies.map((b) => b.shell).join(), "true", "stripHeredocs marks a body shell-read when a grouped stage after a pipe runs a shell (R8-03)");
+  eq(strip("cat <<EOF | grep x; echo y\nrm x\nEOF").bodies.map((b) => b.shell).join(), "false", "stripHeredocs leaves a body piped into grep as data though a later segment exists (R8-03)");
   eq(strip("cd b\nbash <<EOF\nrm x\nEOF").marks.join(), "15", "stripHeredocs reports where each body's operator ends in its text (R8-02)");
   const digits = "cat <<1 > x.txt\nit's\n1\nrm x";
   eq(strip(digits).bodies.length + "|" + strip(digits).skipped, "0|true", "the first reading skips a digits-only delimiter and says so");

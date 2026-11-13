@@ -726,7 +726,7 @@ export function stripHeredocs(command, loose = false) {
       const owner = splitRaw(head).at(-1) ?? "";
       const tokens = shellWords(owner);
       const made = invented?.has(i) === true;
-      const shell = made || ownsShell(tokens) || pipesIntoShell(command, j, pending, { word, dash });
+      const shell = made || ownsShell(tokens);
       text += command.slice(i, j);
       pending.push({ word, quoted, dash, shell, at: text.length });
       i = j - 1;
@@ -750,6 +750,10 @@ export function stripHeredocs(command, loose = false) {
       i = at - 1;
     } else text += c;
   }
+  // A body no shell owns is still shell-read when a later pipe stage runs one.
+  bodies.forEach((b, k) => {
+    if (!b.shell && pipesIntoShellLater(text.slice(marks[k]))) b.shell = true;
+  });
   return { text, bodies, skipped, skippedAt, marks };
 }
 
@@ -759,87 +763,32 @@ function ownsShell(tokens) {
 }
 
 /**
- * True when the rest of the heredoc operator's pipeline pipes (`|` or `|&`)
- * into a later stage that reads a script from stdin. A backslash-newline is a
- * blank. A `|` that ends a line continues the pipeline on the first line after
- * the bodies that line opened (the `pending` ones, this operator's and any
- * later one's). Each stage is read after the grouping strip, so `(bash)` and
- * `{ bash; }` count. The pipeline ends at the first `;`, `&&`, `||` or `&`, or
- * at a newline that does not follow a `|`.
+ * True when the command text after a heredoc operator (every body already
+ * removed) has an unquoted `|` or `|&` (not `||`, not the `>|` redirection)
+ * and, anywhere after the first one, a segment that reads a script from
+ * stdin (`ownsShell` after the grouping strip, so `(bash)`, `{ bash; }` and
+ * `then bash` count). A deliberate over-approximation: a later unrelated
+ * `echo x | bash` also counts, and over-denying is the safe error.
  */
-function pipesIntoShell(command, from, pending = [], own = { word: "", dash: false }) {
-  const delims = [...pending.map((h) => ({ word: h.word, dash: h.dash })), own];
-  const stages = [];
-  let current = "";
-  let afterPipe = false;
+function pipesIntoShellLater(rest) {
   let quote = null;
-  const n = command.length;
-  for (let i = from; i < n; i++) {
-    const c = command[i];
+  const n = rest.length;
+  for (let i = 0; i < n; i++) {
+    const c = rest[i];
     if (quote) {
-      current += c;
-      if (quote === '"' && c === "\\" && i + 1 < n) current += command[++i];
+      if (quote === '"' && c === "\\") i++;
       else if (c === quote) quote = null;
-    } else if (c === "'" || c === '"') {
-      quote = c;
-      current += c;
-    } else if (c === "\\" && command[i + 1] === "\n") {
-      current += " ";
-      i++;
-    } else if (c === "\\" && i + 1 < n) {
-      current += c + command[++i];
-    } else if (c === "\n") {
-      if (!afterPipe || current.trim() !== "") break;
-      let at = i + 1;
-      for (const h of delims) {
-        let found = false;
-        while (!found && at < n) {
-          const eol = command.indexOf("\n", at);
-          const line = command.slice(at, eol === -1 ? n : eol);
-          at = eol === -1 ? n : eol + 1;
-          if ((h.dash ? line.replace(/^\t+/, "") : line) === h.word) found = true;
-        }
+    } else if (c === "'" || c === '"') quote = c;
+    else if (c === "\\") i++;
+    else if (c === "|") {
+      if (rest[i + 1] === "|") i++;
+      else if (rest[i - 1] !== ">") {
+        const after = rest.slice(i + 1).replace(/^&/, "");
+        return splitRaw(after).some((seg) => ownsShell(shellWords(stripGrouping(seg).segment)));
       }
-      delims.length = 0;
-      i = at - 1;
-    } else if (c === "<" && command[i + 1] === "<" && command[i + 2] !== "<") {
-      let j = i + 2;
-      const dash = command[j] === "-";
-      if (dash) j++;
-      while (command[j] === " " || command[j] === "\t") j++;
-      let word = "";
-      while (j < n && !/[\s;&|<>()]/.test(command[j])) {
-        const d = command[j];
-        if (d === "'" || d === '"') {
-          const end = command.indexOf(d, j + 1);
-          const stop = end === -1 ? n : end;
-          word += command.slice(j + 1, stop);
-          j = Math.min(stop + 1, n);
-        } else if (d === "\\" && j + 1 < n) {
-          word += command[j + 1];
-          j += 2;
-        } else {
-          word += d;
-          j++;
-        }
-      }
-      if (word !== "" && !/^\d+$/.test(word)) delims.push({ word, dash });
-      current += command.slice(i, j);
-      i = j - 1;
-    } else if (c === "|" && command[i + 1] !== "|" && !current.endsWith(">")) {
-      if (command[i + 1] === "&") i++;
-      stages.push(current);
-      current = "";
-      afterPipe = true;
-    } else if (c === ";" || c === "|" || (c === "&" && !/[<>]/.test(command[i - 1] ?? "") && command[i + 1] !== ">")) {
-      break;
-    } else {
-      current += c;
-      if (!/\s/.test(c)) afterPipe = false;
     }
   }
-  stages.push(current);
-  return stages.slice(1).some((stage) => ownsShell(shellWords(stripGrouping(stage).segment)));
+  return false;
 }
 
 /**
