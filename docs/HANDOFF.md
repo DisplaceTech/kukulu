@@ -106,3 +106,13 @@ Task R7-01 is done (36 of 36 done, none blocked).
 
 - R7-01: `pipesIntoShell` now decides pipeline membership over the whole pipeline: a backslash-newline is a blank, a trailing `|` continues on the first line after the bodies the line opened, and each stage is read after `stripGrouping` so `(bash)` and `{ bash; }` count. Five (R7-01) fixtures, two `stripHeredocs` assertions, `docs/cleanroom.md` and the A-02 CHANGELOG line updated. No Interpretation choices.
 - Check by hand: after push, the PR checks pass.
+
+## Round 8
+
+Three fix tasks, all in the guard (SPEC A-02); no blocked or skipped tasks. Head after the round's last task: 7907422 (progress commit).
+
+- R8-01: the second reading of `stripHeredocs` marks the body of an operator the first reading skipped as shell-read (`skippedAt` offsets); shell-read bodies are judged at the same depth, not depth + 1, so a chain of invented operators cannot reach the depth cap. Four (R8-01) fixtures, one assertion.
+- R8-02: bodies and substitutions are judged inside the segment loop, in the directory their owning segment runs in. Private-use markers (BODY, SUBST) ride through `splitRaw`; `stripHeredocs` returns `marks` (text offset of each operator's end). A shell-read body runs with `shellCwd`/`previousCwd` saved and restored. Items no segment claims are judged after the loop. Eleven (R8-02) fixtures. Interpretation: a substitution's own `cd` still leaks as before (not changed).
+- R8-03: `pipesIntoShell` is replaced by `pipesIntoShellLater`, a post-pass over the body-free text after each operator: the first unquoted `|`/`|&`, then any later segment that runs a shell after `stripGrouping`. Interpretation: an unrelated later `echo x | bash` over-denies (accepted per the task). Four (R8-03) fixtures, two assertions.
+- No existing fixture changed its expect or reason. `docs/cleanroom.md` and the A-02 CHANGELOG line are updated. Full verify green (cleanroom suite 1467 assertions; guard self-tests 664 and 660 cases).
+- Manual check: none.
