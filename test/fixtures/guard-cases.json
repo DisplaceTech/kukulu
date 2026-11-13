@@ -7829,7 +7829,8 @@
    },
    "cwd": "__ROOT__"
   },
-  "expect": "allowed"
+  "expect": "denied",
+  "reason": "protected path: .*"
  },
  {
   "name": "python3 - <<'EOF' ... print(\"~/.cargo/git/x\") (P0-02)",
@@ -7966,7 +7967,8 @@
    },
    "cwd": "__ROOT__"
   },
-  "expect": "allowed"
+  "expect": "denied",
+  "reason": "protected path: .*"
  },
  {
   "name": "sed empty BSD suffix keeps 1d out of targets (R1-02)",
@@ -8056,7 +8058,8 @@
    },
    "cwd": "__ROOT__"
   },
-  "expect": "allowed"
+  "expect": "denied",
+  "reason": "protected path: .*"
  },
  {
   "name": "sed --expression=s/a/b/ -i .mcp.json (R2-03)",
@@ -8094,7 +8097,8 @@
    },
    "cwd": "__ROOT__"
   },
-  "expect": "allowed"
+  "expect": "denied",
+  "reason": "protected path: .*"
  },
  {
   "name": "a[1<<n]=3 NL rm -rf .kukulu/cleanroom (R3-01)",
@@ -8236,7 +8240,8 @@
    },
    "cwd": "__ROOT__"
   },
-  "expect": "allowed"
+  "expect": "denied",
+  "reason": "protected path: .*"
  },
  {
   "name": "echo $(cat <<x) NL rm -rf .kukulu/cleanroom NL x (R3-01)",
@@ -8248,7 +8253,8 @@
    },
    "cwd": "__ROOT__"
   },
-  "expect": "allowed"
+  "expect": "denied",
+  "reason": "protected path: .*"
  },
  {
   "name": "[[ a =~ (x<<y) ]] NL rm -rf .kukulu/cleanroom (R4-01)",
@@ -8390,7 +8396,8 @@
    },
    "cwd": "__ROOT__"
   },
-  "expect": "allowed"
+  "expect": "denied",
+  "reason": "protected path: .*"
  },
  {
   "name": "[[ -n a ]] && cat <<EOF > notes.txt NL rm -rf .kukulu/cleanroom NL EOF (R4-01)",
@@ -8402,7 +8409,8 @@
    },
    "cwd": "__ROOT__"
   },
-  "expect": "allowed"
+  "expect": "denied",
+  "reason": "protected path: .*"
  },
  {
   "name": "!(cat <<EOF NL it's NL EOF NL rm -rf .kukulu/cleanroom NL echo ')' NL ) (R5-01)",
@@ -8544,7 +8552,8 @@
    },
    "cwd": "__ROOT__"
   },
-  "expect": "allowed"
+  "expect": "denied",
+  "reason": "protected path: .*"
  },
  {
   "name": "cat <<EOF | bash NL rm -rf .kukulu/cleanroom NL EOF (R6-02)",
@@ -8620,7 +8629,8 @@
    },
    "cwd": "__ROOT__"
   },
-  "expect": "allowed"
+  "expect": "denied",
+  "reason": "protected path: .*"
  },
  {
   "name": "cat <<1 > x.txt NL it's NL 1 NL rm -rf .kukulu/cleanroom (R6-03)",
@@ -9019,5 +9029,143 @@
   },
   "expect": "denied",
   "reason": "protected path: .*"
+ },
+ {
+  "name": "quoted heredoc body line rm protected (R9-01)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat <<'EOF' > notes.txt\nrm -rf .kukulu/cleanroom\nEOF"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "quoted heredoc apostrophe line then rm (R9-01)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat <<'EOF' > notes.txt\nit's\nrm -rf .kukulu/cleanroom\nEOF"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "unquoted heredoc cd line then rm (R9-01)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat <<EOF > notes.txt\ncd sub\nrm -rf ../.kukulu/cleanroom\nEOF"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "quoted heredoc read line does not mask write (R9-01)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat <<'EOF' > notes.txt\ncat ~/.cargo/registry/a.rs; rm -rf .kukulu/cleanroom\nEOF"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "substitution-owned bash heredoc rm (R9-01)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "echo $(bash <<EOF\nrm -rf .kukulu/cleanroom\nEOF\n)"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "process-substitution bash heredoc rm (R9-01)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "diff <(bash <<EOF\nrm -rf .kukulu/cleanroom\nEOF\n) /dev/null"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "shell-read body read of denied path (R9-01)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat <<'EOF' | ( set -e; bash )\ncat ~/.cargo/registry/a.rs\nEOF"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "denied path: .*"
+ },
+ {
+  "name": "five nested substitutions (R9-01)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "echo $(echo $(echo $(echo $(echo $(echo hi)))))"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "command nested too deep: .*"
+ },
+ {
+  "name": "four nested substitutions (R9-01)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "echo $(echo $(echo $(echo $(echo hi))))"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "quoted heredoc data read line (R9-01)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat <<'EOF' > notes.txt\ncat ~/.cargo/registry/a.rs\nEOF"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
  }
 ]

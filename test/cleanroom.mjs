@@ -970,7 +970,8 @@ async function genesisRepo(planOpts = {}) {
   const home = mkDir("kukulu-hd-home-");
   const run = (command) => evaluate(policy, { tool_name: "Bash", tool_input: { command }, cwd: root }, { root, home, progressText: null, policyPath: path.join(root, "docs", "cleanroom.json"), pluginRoot: path.join(home, "plugin-root"), keyPath: path.join(home, "k.pem"), planExists: true });
   eq(run("bash <<'EOF'\nrm -rf .kukulu/cleanroom\nEOF").decision, "denied", "a shell-read heredoc body is judged as commands");
-  eq(run("cat <<'EOF' > notes.txt\n$(rm -rf .kukulu)\nEOF").decision, "allowed", "a quoted-delimiter body is never scanned");
+  eq(run("cat <<'EOF' > notes.txt\n$(rm -rf .kukulu)\nEOF").decision, "denied", "a quoted-delimiter body's lines are judged for writes (R9-01)");
+  eq(run("cat <<'EOF' > notes.txt\ncat ~/.cargo/registry/a.rs\nEOF").decision, "allowed", "a quoted-delimiter body's reads are not judged (R9-01)");
   eq(run("cat <<EOF > out.txt\n$(cat ~/.cargo/registry/a.rs)\nEOF").decision, "denied", "an unquoted-delimiter body's substitutions are judged");
   const cases = JSON.parse(fs.readFileSync(path.join(ROOT, "test", "fixtures", "guard-cases.json"), "utf8")).filter((c) => /^cleanflate false positive \d/.test(c.name) && /<</.test(c.input.tool_input.command ?? ""));
   ok(cases.length > 0 && cases.every((c) => c.expect === "allowed"), "the cleanflate Python heredoc fixtures stay allowed (the guard cases test each)");

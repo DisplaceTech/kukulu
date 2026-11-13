@@ -1239,6 +1239,8 @@ export function evaluate(policy, hookInput, env) {
   let shellCwd = cwd;
   // `cd -` returns here: the directory before the last `cd`.
   let previousCwd = cwd;
+  // True while a heredoc data body's lines are judged: only the write rules apply to them (SPEC A-02).
+  let writeOnly = false;
   const writeForms = (p, base = shellCwd) => canonicalPaths(p, { cwd: base, home });
   const lockdown = lockdownActive(policy, env.progressText);
   const prefixes = (list) => list.map((e) => resolvePrefix(e, root, home));
@@ -1346,7 +1348,7 @@ export function evaluate(policy, hookInput, env) {
 
   /** Rule 6 for one command string; substitutions, `sh -c` and `eval` strings are judged as further commands. */
   function bashVerdict(command, depth) {
-    if (depth > 4) return NO_ISSUES;
+    if (depth > 4) return denied("command nested too deep: more than four levels of substitution, sh -c or eval; split it into separate commands");
     const startCwd = shellCwd;
     const startPrevious = previousCwd;
     const first = bashReading(command, depth, false);
@@ -1373,11 +1375,33 @@ export function evaluate(policy, hookInput, env) {
       // A shell-read body is strictly shorter than the command, so it is judged at the same depth: a chain of invented operators must not reach the cap.
       const savedCwd = shellCwd;
       const savedPrevious = previousCwd;
+      const savedMode = writeOnly;
+      // An unquoted body's substitutions run when the command does, so every rule judges them.
+      if (!b.shell) writeOnly = false;
       for (const sub of b.shell ? [b.body] : b.quoted ? [] : extractSubstitutions(b.body).inner) {
         const v = bashVerdict(sub, b.shell ? depth : depth + 1);
-        if (v.decision === "denied") return v;
+        if (v.decision === "denied") {
+          writeOnly = savedMode;
+          return v;
+        }
       }
+      writeOnly = savedMode;
       if (b.shell) {
+        shellCwd = savedCwd;
+        previousCwd = savedPrevious;
+        return null;
+      }
+      // A data body is never run, but its lines may be copied into a script: each line alone is judged for writes to protected paths, in a directory that starts where the owning segment runs and that a `cd` line moves for the lines after it (SPEC A-02).
+      const savedWriteOnly = writeOnly;
+      writeOnly = true;
+      try {
+        for (const line of b.body.split("\n")) {
+          if (!line.trim()) continue;
+          const v = bashVerdict(line, depth);
+          if (v.decision === "denied" && v.reason.startsWith("protected path:")) return v;
+        }
+      } finally {
+        writeOnly = savedWriteOnly;
         shellCwd = savedCwd;
         previousCwd = savedPrevious;
       }
@@ -1427,6 +1451,7 @@ export function evaluate(policy, hookInput, env) {
         const v = bashVerdict(shellString, depth + 1);
         if (v.decision === "denied") return v;
       }
+      if (!writeOnly) {
       // 6.0 adding a package the policy denies: judged before the network rule of the same segment, so the reason names the package (SPEC C-07).
       {
         const adds = { cargo: ["cargo", ["add"]], npm: ["npm", ["install", "i", "add"]], pip: ["pypi", ["install"]], uv: ["pypi", ["add"]] }[word];
@@ -1507,6 +1532,7 @@ export function evaluate(policy, hookInput, env) {
         if (controlRead(t)) continue;
         const v = reachVerdict(t, shellCwd, true);
         if (v) return v;
+      }
       }
       // 6d'. rsync and tar are not write-family as a whole: their sources and archives are only read, so each gets a rule of its own (SPEC A-04).
       if (word === "rsync") {
@@ -1645,7 +1671,7 @@ export function evaluate(policy, hookInput, env) {
         if (w) return denied(`protected path: ${w} (can be named by the wildcard ${t})`);
       }
       // 6e. command patterns
-      const hit = commandPatterns.find((x) => new RegExp(x.re.source, x.re.flags).test(segment));
+      const hit = writeOnly ? null : commandPatterns.find((x) => new RegExp(x.re.source, x.re.flags).test(segment));
       if (hit) return denied(`commandPatterns ${hit.id}`);
       // A `cd` or `pushd` moves every later relative operand (`cd docs && rm cleanroom.json`, `cd ~/.cargo && cat registry/x`).
       if (word === "cd" || word === "pushd") {
