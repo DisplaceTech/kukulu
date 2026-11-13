@@ -40,7 +40,7 @@ Started: 2026-11-11T18:32:19.610Z
 - [x] R6-01 Green the PR checks: restore docs/kukulu.json escapes and exempt the feedback log from check-names' bare-letter rule
 - [x] R6-02 Guard: a heredoc piped into a shell has its body judged as commands
 - [x] R6-03 Guard: read every heredoc command twice, denying when either reading denies (SPEC A-02 Two readings)
-- [ ] R7-01 Guard: a heredoc pipeline into a shell continues past the operator's line and through ( ) and { } grouping
+- [x] R7-01 Guard: a heredoc pipeline into a shell continues past the operator's line and through ( ) and { } grouping
 
 ## Log
 
@@ -187,3 +187,7 @@ Added ownsShell and pipesIntoShell in mcp/cleanroom.mjs; stripHeredocs marks a b
 
 stripHeredocs(command, loose) now has a second reading (no region skipped, digits-only delimiter counts) and returns skipped; bashVerdict runs reading two only when reading one skipped a double-less-than, restoring shellCwd/previousCwd between readings; denied if either denies. Negated marking removed; command-position !( is copied through by reading one. 8 fixtures (R6-03), 3 reading assertions, docs and CHANGELOG. Existing fixtures all keep verdicts.
 INTERPRETATION / SPEC CONFLICT: acceptance asked `!(cat <<EOF NL rm -rf .kukulu/cleanroom NL EOF NL )` allowed. Reading one copies the group through so the rm line is judged and denied; reading two (subshell) alone would allow. Kept as a denied fixture (safe side); owner should reconcile SPEC A-02 rule 6 with that fixture.
+
+### R7-01 — 4029e37
+
+pipesIntoShell now scans the whole pipeline: backslash-newline is a blank, a trailing | continues after the bodies opened by the line (pending, own and later operators), stages read through stripGrouping. Added 5 (R7-01) fixtures (4 denied, 1 allowed), 2 stripHeredocs assertions, docs/cleanroom.md and CHANGELOG A-02 line updated. Self-tests ok (645/641), full verify green. No Interpretation choices.
