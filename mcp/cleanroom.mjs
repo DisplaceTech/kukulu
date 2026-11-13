@@ -706,7 +706,7 @@ export function stripHeredocs(command, loose = false) {
       const head = text;
       const owner = splitRaw(head).at(-1) ?? "";
       const tokens = shellWords(owner);
-      const shell = ownsShell(tokens) || pipesIntoShell(command, j);
+      const shell = ownsShell(tokens) || pipesIntoShell(command, j, pending, { word, dash });
       pending.push({ word, quoted, dash, shell });
       text += command.slice(i, j);
       i = j - 1;
@@ -738,37 +738,87 @@ function ownsShell(tokens) {
 }
 
 /**
- * True when the rest of the heredoc operator's line pipes (`|` or `|&`) into a
- * later segment of the same pipeline that reads a script from stdin. The
- * pipeline ends at the first `;`, `&&`, `||` or `&`, or at the newline.
+ * True when the rest of the heredoc operator's pipeline pipes (`|` or `|&`)
+ * into a later stage that reads a script from stdin. A backslash-newline is a
+ * blank. A `|` that ends a line continues the pipeline on the first line after
+ * the bodies that line opened (the `pending` ones, this operator's and any
+ * later one's). Each stage is read after the grouping strip, so `(bash)` and
+ * `{ bash; }` count. The pipeline ends at the first `;`, `&&`, `||` or `&`, or
+ * at a newline that does not follow a `|`.
  */
-function pipesIntoShell(command, from) {
-  const eol = command.indexOf("\n", from);
-  const rest = command.slice(from, eol === -1 ? command.length : eol);
+function pipesIntoShell(command, from, pending = [], own = { word: "", dash: false }) {
+  const delims = [...pending.map((h) => ({ word: h.word, dash: h.dash })), own];
   const stages = [];
   let current = "";
+  let afterPipe = false;
   let quote = null;
-  for (let i = 0; i < rest.length; i++) {
-    const c = rest[i];
+  const n = command.length;
+  for (let i = from; i < n; i++) {
+    const c = command[i];
     if (quote) {
       current += c;
-      if (quote === '"' && c === "\\" && i + 1 < rest.length) current += rest[++i];
+      if (quote === '"' && c === "\\" && i + 1 < n) current += command[++i];
       else if (c === quote) quote = null;
     } else if (c === "'" || c === '"') {
       quote = c;
       current += c;
-    } else if (c === "\\" && i + 1 < rest.length) {
-      current += c + rest[++i];
-    } else if (c === "|" && rest[i + 1] !== "|" && !current.endsWith(">")) {
-      if (rest[i + 1] === "&") i++;
+    } else if (c === "\\" && command[i + 1] === "\n") {
+      current += " ";
+      i++;
+    } else if (c === "\\" && i + 1 < n) {
+      current += c + command[++i];
+    } else if (c === "\n") {
+      if (!afterPipe || current.trim() !== "") break;
+      let at = i + 1;
+      for (const h of delims) {
+        let found = false;
+        while (!found && at < n) {
+          const eol = command.indexOf("\n", at);
+          const line = command.slice(at, eol === -1 ? n : eol);
+          at = eol === -1 ? n : eol + 1;
+          if ((h.dash ? line.replace(/^\t+/, "") : line) === h.word) found = true;
+        }
+      }
+      delims.length = 0;
+      i = at - 1;
+    } else if (c === "<" && command[i + 1] === "<" && command[i + 2] !== "<") {
+      let j = i + 2;
+      const dash = command[j] === "-";
+      if (dash) j++;
+      while (command[j] === " " || command[j] === "\t") j++;
+      let word = "";
+      while (j < n && !/[\s;&|<>()]/.test(command[j])) {
+        const d = command[j];
+        if (d === "'" || d === '"') {
+          const end = command.indexOf(d, j + 1);
+          const stop = end === -1 ? n : end;
+          word += command.slice(j + 1, stop);
+          j = Math.min(stop + 1, n);
+        } else if (d === "\\" && j + 1 < n) {
+          word += command[j + 1];
+          j += 2;
+        } else {
+          word += d;
+          j++;
+        }
+      }
+      if (word !== "" && !/^\d+$/.test(word)) delims.push({ word, dash });
+      current += command.slice(i, j);
+      i = j - 1;
+    } else if (c === "|" && command[i + 1] !== "|" && !current.endsWith(">")) {
+      if (command[i + 1] === "&") i++;
       stages.push(current);
       current = "";
-    } else if (c === ";" || c === "|" || (c === "&" && !/[<>]/.test(rest[i - 1] ?? "") && rest[i + 1] !== ">")) {
+      afterPipe = true;
+    } else if (c === ";" || c === "|" || (c === "&" && !/[<>]/.test(command[i - 1] ?? "") && command[i + 1] !== ">")) {
       break;
-    } else current += c;
+    } else {
+      current += c;
+      if (!/\s/.test(c)) afterPipe = false;
+    }
   }
   stages.push(current);
-  return stages.slice(1).some((stage) => ownsShell(shellWords(stage.trim())));
+  return stages.slice(1).some((stage) => ownsShell(shellWords(stripGrouping(stage).segment)));
 }
 
 /**

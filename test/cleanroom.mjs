@@ -933,6 +933,8 @@ async function genesisRepo(planOpts = {}) {
   eq(a.text, "cat <<EOF > x.txt\necho done", "stripHeredocs removes a body and keeps the operator");
   eq(strip("cat <<EOF | bash\nrm x\nEOF").bodies.map((b) => b.shell).join(), "true", "stripHeredocs marks a body piped into a shell as shell-read");
   eq(strip("cat <<EOF | grep x\nrm x\nEOF").bodies.map((b) => b.shell).join(), "false", "stripHeredocs leaves a body piped into grep as data");
+  eq(strip("cat <<EOF |\nrm x\nEOF\nbash").bodies.map((b) => b.shell).join(), "true", "stripHeredocs follows a trailing pipe past the body into a shell (R7-01)");
+  eq(strip("cat <<EOF |\nrm x\nEOF\ngrep x").bodies.map((b) => b.shell).join(), "false", "stripHeredocs follows a trailing pipe past the body into grep as data (R7-01)");
   const digits = "cat <<1 > x.txt\nit's\n1\nrm x";
   eq(strip(digits).bodies.length + "|" + strip(digits).skipped, "0|true", "the first reading skips a digits-only delimiter and says so");
   eq(stripHeredocs(digits, true).bodies.map((b) => b.body).join(), "it's", "the second reading takes a digits-only delimiter as a heredoc");

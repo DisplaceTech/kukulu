@@ -8710,5 +8710,69 @@
   },
   "expect": "denied",
   "reason": "protected path: .*"
+ },
+ {
+  "name": "cat <<EOF | NL rm NL EOF NL bash (R7-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat <<EOF |\nrm -rf .kukulu/cleanroom\nEOF\nbash"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "cat <<EOF BS NL | bash NL rm NL EOF (R7-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat <<EOF \\\n| bash\nrm -rf .kukulu/cleanroom\nEOF"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "cat <<EOF | (bash) NL rm NL EOF (R7-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat <<EOF | (bash)\nrm -rf .kukulu/cleanroom\nEOF"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "cat <<EOF | { bash; } NL rm NL EOF (R7-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat <<EOF | { bash; }\nrm -rf .kukulu/cleanroom\nEOF"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "cat <<'EOF' | NL priorArt json NL EOF NL grep x (R7-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat <<'EOF' |\n{\"priorArt\": [\"~/.cargo/registry/\", \"~/.cargo/git/\"]}\nEOF\ngrep x"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
  }
 ]
