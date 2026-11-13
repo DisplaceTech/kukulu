@@ -41,7 +41,7 @@ Started: 2026-11-11T18:32:19.610Z
 - [x] R6-02 Guard: a heredoc piped into a shell has its body judged as commands
 - [x] R6-03 Guard: read every heredoc command twice, denying when either reading denies (SPEC A-02 Two readings)
 - [x] R7-01 Guard: a heredoc pipeline into a shell continues past the operator's line and through ( ) and { } grouping
-- [ ] R8-01 Guard: in the second reading, an invented heredoc operator's body is judged as commands (SPEC A-02)
+- [x] R8-01 Guard: in the second reading, an invented heredoc operator's body is judged as commands (SPEC A-02)
 - [ ] R8-02 Guard: a heredoc body or substitution is judged in the directory its owning segment runs in
 - [ ] R8-03 Guard: a heredoc body is shell-read when any later stage after a pipe runs a shell, at any grouping depth
 
@@ -194,3 +194,7 @@ INTERPRETATION / SPEC CONFLICT: acceptance asked `!(cat <<EOF NL rm -rf .kukulu/
 ### R7-01 — 4029e37
 
 pipesIntoShell now scans the whole pipeline: backslash-newline is a blank, a trailing | continues after the bodies opened by the line (pending, own and later operators), stages read through stripGrouping. Added 5 (R7-01) fixtures (4 denied, 1 allowed), 2 stripHeredocs assertions, docs/cleanroom.md and CHANGELOG A-02 line updated. Self-tests ok (645/641), full verify green. No Interpretation choices.
+
+### R8-01 — 82b9410
+
+Second reading marks operators at offsets the first reading skipped (skippedAt) shell: true; shell-read bodies are judged at the same depth (not depth+1) so a chain cannot reach the cap. Four (R8-01) fixtures, one stripHeredocs assertion. Docs and CHANGELOG updated. Guard self-tests ok; cleanroom suite 1449/1449.
