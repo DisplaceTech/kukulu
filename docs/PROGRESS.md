@@ -38,7 +38,7 @@ Started: 2026-11-11T18:32:19.610Z
 - [x] R4-01 Guard: a << inside a [[ ... ]] conditional or an extglob group is not a heredoc operator
 - [x] R5-01 Guard: a !( subshell and an argument [[ do not hide a real heredoc
 - [x] R6-01 Green the PR checks: restore docs/kukulu.json escapes and exempt the feedback log from check-names' bare-letter rule
-- [ ] R6-02 Guard: a heredoc piped into a shell has its body judged as commands
+- [x] R6-02 Guard: a heredoc piped into a shell has its body judged as commands
 - [ ] R6-03 Guard: read every heredoc command twice, denying when either reading denies (SPEC A-02 Two readings)
 
 ## Log
@@ -177,3 +177,7 @@ Work is in commit 80c02ca (HEAD is a no-op marker, because the feedback commit l
 ### R6-01 — c4a5867
 
 Re-escaped docs/kukulu.json via script (diff vs d9b19ea is only maxRounds lines). check-names: exact-path bare-letter exemption for .kukulu/feedback.jsonl; other checks still run. Two plugin assertions added. Verify ok.
+
+### R6-02 — 4a11151
+
+Added ownsShell and pipesIntoShell in mcp/cleanroom.mjs; stripHeredocs marks a body shell-read when the operator's line pipes (| or |&) into a later sh/bash/zsh/dash/ksh stage without -c; pipeline ends at ;, &&, ||, & or newline. 6 fixtures (R6-02), 2 stripHeredocs assertions, docs/cleanroom.md and CHANGELOG updated. Interpretation: only the same line as the operator is scanned. Both self-tests ok, verify ok.
