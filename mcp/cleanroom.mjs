@@ -603,6 +603,8 @@ export function stripHeredocs(command, loose = false) {
   let text = "";
   let skipped = false;
   const bodies = [];
+  // Each body's delimiter word and whether only the second reading made it an operator, beside `bodies` so its shape stays the one callers read.
+  const extras = [];
   // Where in `text` each body's operator ends, so a caller can tell which segment owns the body.
   const marks = [];
   const pending = [];
@@ -723,12 +725,12 @@ export function stripHeredocs(command, loose = false) {
         continue;
       }
       const head = text;
-      const owner = splitRaw(head).at(-1) ?? "";
+      const owner = splitRaw(head.slice(openSubstitutionStart(head))).at(-1) ?? "";
       const tokens = shellWords(owner);
       const made = invented?.has(i) === true;
       const shell = made || ownsShell(tokens);
       text += command.slice(i, j);
-      pending.push({ word, quoted, dash, shell, at: text.length });
+      pending.push({ word, quoted, dash, shell, at: text.length, invented: made });
       i = j - 1;
     } else if (c === "\n" && pending.length) {
       text += c;
@@ -744,6 +746,7 @@ export function stripHeredocs(command, loose = false) {
           else lines.push(line);
         }
         bodies.push({ body: lines.join("\n"), quoted: h.quoted, shell: h.shell });
+        extras.push({ word: h.word, invented: h.invented });
         marks.push(h.at);
       }
       pending.length = 0;
@@ -754,7 +757,41 @@ export function stripHeredocs(command, loose = false) {
   bodies.forEach((b, k) => {
     if (!b.shell && pipesIntoShellLater(text.slice(marks[k]))) b.shell = true;
   });
-  return { text, bodies, skipped, skippedAt, marks };
+  return { text, bodies, extras, skipped, skippedAt, marks };
+}
+
+/**
+ * The offset where the innermost still-open `$(`, backtick, `<(` or `>(` body
+ * of `head` begins, or 0 outside every substitution, so a heredoc operator
+ * inside one is owned by the segment inside it, not by the outer segment.
+ */
+function openSubstitutionStart(head) {
+  const stack = [];
+  let quote = null;
+  for (let i = 0; i < head.length; i++) {
+    const c = head[i];
+    if (quote === "'") {
+      if (c === "'") quote = null;
+      continue;
+    }
+    if (c === "\\") {
+      i++;
+      continue;
+    }
+    if (c === "'" && quote === null) quote = "'";
+    else if (c === '"') quote = quote === '"' ? null : '"';
+    else if (c === "`") {
+      if (stack.at(-1)?.tick) stack.pop();
+      else stack.push({ tick: true, start: i + 1 });
+    } else if (c === "(") {
+      const prev = head[i - 1];
+      stack.push({ tick: false, start: i + 1, sub: prev === "$" || (quote === null && (prev === "<" || prev === ">")) });
+    } else if (c === ")") {
+      if (stack.at(-1) && !stack.at(-1).tick) stack.pop();
+    }
+  }
+  for (let k = stack.length - 1; k >= 0; k--) if (stack[k].tick || stack[k].sub) return stack[k].start;
+  return 0;
 }
 
 /** True when a segment's words run sh, bash, zsh, dash or ksh without `-c`, so it reads a script from stdin. */
@@ -1168,6 +1205,8 @@ const PATH_TOOLS = new Set(["Read", "Glob", "Grep", ...WRITE_TOOLS]);
 // Private-use markers that ride in the command text through the segment split; never in real input.
 const SUBST = "\uE001";
 const BODY = "\uE002";
+// A body marker carries the body's index between two BODY characters, so a substitution that holds the marker can be given its body back.
+const BODY_TOKEN = /\uE002(\d+)\uE002/g;
 const NO_ISSUES = Object.freeze({ decision: "allowed", reason: null });
 const denied = (reason) => ({ decision: "denied", reason });
 
@@ -1348,6 +1387,8 @@ export function evaluate(policy, hookInput, env) {
 
   /** Rule 6 for one command string; substitutions, `sh -c` and `eval` strings are judged as further commands. */
   function bashVerdict(command, depth) {
+    // The markers below are private-use characters; one in the input would pass for a marker, so it is dropped first.
+    command = command.replace(/[\uE001\uE002]/g, "");
     if (depth > 4) return denied("command nested too deep: more than four levels of substitution, sh -c or eval; split it into separate commands");
     const startCwd = shellCwd;
     const startPrevious = previousCwd;
@@ -1365,11 +1406,37 @@ export function evaluate(policy, hookInput, env) {
     const stripped = stripHeredocs(command, loose);
     // A marker after each heredoc operator (BODY) and each substitution (SUBST) lets the segment loop judge them in the directory their segment runs in, after the earlier segments' `cd`.
     let marked = stripped.text;
-    for (const at of [...stripped.marks].reverse()) marked = marked.slice(0, at) + BODY + marked.slice(at);
+    for (let k = stripped.marks.length - 1; k >= 0; k--) marked = marked.slice(0, stripped.marks[k]) + BODY + k + BODY + marked.slice(stripped.marks[k]);
     const { text, inner } = extractSubstitutions(marked, SUBST);
     const owned = (arr, used, count) => arr.slice(used, used + count);
     let substUsed = 0;
-    let bodyUsed = 0;
+    // Indexes of the bodies already judged, alone or inside the substitution that holds them.
+    const judged = new Set();
+    // A substitution's text with the bodies of its heredocs put back, so it is judged as the command it is, owner and all.
+    const withBodies = (sub) => {
+      const tokens = [...sub.matchAll(BODY_TOKEN)];
+      if (!tokens.length) return sub;
+      let clean = sub.replace(BODY_TOKEN, "");
+      const places = [];
+      let removed = 0;
+      for (const t of tokens) {
+        const pos = t.index - removed;
+        removed += t[0].length;
+        const b = stripped.bodies[Number(t[1])];
+        const extra = stripped.extras[Number(t[1])];
+        // An operator only the second reading invents stays with the final pass, at this depth: a chain of them must not reach the cap.
+        if (extra.invented) continue;
+        judged.add(Number(t[1]));
+        places.push({ nl: clean.indexOf("\n", pos), text: (b.body === "" ? "" : b.body + "\n") + extra.word + "\n" });
+      }
+      // Insert from the last newline backwards so earlier offsets hold; bodies of one line stay in order.
+      const groups = [...new Set(places.map((x) => x.nl))].sort((a, b) => (b === -1 ? Infinity : b) - (a === -1 ? Infinity : a));
+      for (const nl of groups) {
+        const block = places.filter((x) => x.nl === nl).map((x) => x.text).join("");
+        clean = nl === -1 ? clean + "\n" + block : clean.slice(0, nl + 1) + block + clean.slice(nl + 1);
+      }
+      return clean;
+    };
     // One inner command line, judged at the current directory; a shell-read body runs in a child shell, so its `cd` never moves later segments.
     const judgeBody = (b) => {
       // A shell-read body is strictly shorter than the command, so it is judged at the same depth: a chain of invented operators must not reach the cap.
@@ -1407,13 +1474,20 @@ export function evaluate(policy, hookInput, env) {
       }
       return null;
     };
-    const judgeOwned = (substs, bodies) => {
+    const judgeOwned = (substs, ids) => {
       for (const sub of substs) {
-        const v = bashVerdict(sub, depth + 1);
+        // A substitution runs in a child shell: its `cd` ends with it.
+        const savedCwd = shellCwd;
+        const savedPrevious = previousCwd;
+        const v = bashVerdict(withBodies(sub), depth + 1);
+        shellCwd = savedCwd;
+        previousCwd = savedPrevious;
         if (v.decision === "denied") return v;
       }
-      for (const b of bodies) {
-        const v = judgeBody(b);
+      for (const id of ids) {
+        if (judged.has(id)) continue;
+        judged.add(id);
+        const v = judgeBody(stripped.bodies[id]);
         if (v) return v;
       }
       return null;
@@ -1423,8 +1497,8 @@ export function evaluate(policy, hookInput, env) {
     let caseDepth = 0;
     for (const rawMarked of splitRaw(text)) {
       const nSubst = rawMarked.split(SUBST).length - 1;
-      const nBody = rawMarked.split(BODY).length - 1;
-      const raw = rawMarked.replaceAll(SUBST, "").replaceAll(BODY, "");
+      const bodyIds = [...rawMarked.matchAll(BODY_TOKEN)].map((m) => Number(m[1]));
+      const raw = rawMarked.replaceAll(SUBST, "").replace(BODY_TOKEN, "");
       const { segment, opens, closes, entersCase, leavesCase } = stripGrouping(raw, caseDepth > 0);
       if (entersCase) caseDepth++;
       if (leavesCase && caseDepth > 0) caseDepth--;
@@ -1434,9 +1508,8 @@ export function evaluate(policy, hookInput, env) {
         for (let k = 0; k < closes && subshells.length; k++) shellCwd = subshells.pop();
       };
       {
-        const v = judgeOwned(owned(inner, substUsed, nSubst), owned(stripped.bodies, bodyUsed, nBody));
+        const v = judgeOwned(owned(inner, substUsed, nSubst), bodyIds);
         substUsed += nSubst;
-        bodyUsed += nBody;
         if (v) return v;
       }
       const tokens = shellWords(segment).map((t) => (home ? t.replaceAll("${HOME}", home).replace(/\$HOME(?![A-Za-z0-9_])/g, () => home) : t));
@@ -1448,7 +1521,14 @@ export function evaluate(policy, hookInput, env) {
       // A string handed to a shell or to eval is a command line of its own.
       const shellString = /^(?:ba|z|da|k)?sh$/.test(word) ? rest[rest.findIndex((t) => /^-[A-Za-z]*c[A-Za-z]*$/.test(t)) + 1] : word === "eval" ? rest.join(" ") : undefined;
       if (typeof shellString === "string" && (word === "eval" || rest.some((t) => /^-[A-Za-z]*c[A-Za-z]*$/.test(t)))) {
+        // A shell's -c string runs in a child shell, so its `cd` ends with it; eval's runs in this one and moves the later segments.
+        const savedCwd = shellCwd;
+        const savedPrevious = previousCwd;
         const v = bashVerdict(shellString, depth + 1);
+        if (word !== "eval") {
+          shellCwd = savedCwd;
+          previousCwd = savedPrevious;
+        }
         if (v.decision === "denied") return v;
       }
       if (!writeOnly) {
@@ -1686,7 +1766,7 @@ export function evaluate(policy, hookInput, env) {
       settle();
     }
     // Anything no segment claimed is judged at the final directory rather than skipped.
-    return judgeOwned(inner.slice(substUsed), stripped.bodies.slice(bodyUsed)) ?? NO_ISSUES;
+    return judgeOwned(inner.slice(substUsed), stripped.bodies.map((b, k) => k)) ?? NO_ISSUES;
   }
 }
 

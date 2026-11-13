@@ -947,6 +947,7 @@ async function genesisRepo(planOpts = {}) {
   eq(JSON.stringify(a.bodies), JSON.stringify([{ body: "hello", quoted: false, shell: false }]), "...a bare delimiter is unquoted");
   eq(strip("cat <<'EOF'\nx\nEOF").bodies[0].quoted + "|" + strip('cat <<"EOF"\nx\nEOF').bodies[0].quoted + "|" + strip("cat <<\\EOF\nx\nEOF").bodies[0].quoted, "true|true|true", "...'EOF', \"EOF\" and \\EOF are quoted");
   eq(strip(T("cat <<-EOF\n<TAB>x\n<TAB>EOF\necho y")).text + "|" + strip(T("cat <<-EOF\n<TAB>x\n<TAB>EOF\necho y")).bodies[0].body, "cat <<-EOF\necho y|<TAB>x".replace("<TAB>", "\t"), "...<<- strips leading tabs from the delimiter line");
+  eq(strip("echo $(bash <<EOF\nx\nEOF\n)").bodies.map((b) => b.shell).join() + "|" + strip("echo $(echo hi) <<EOF\nx\nEOF").bodies.map((b) => b.shell).join(), "true|false", "a heredoc inside a substitution is owned by the segment inside it (R9-02)");
   const inert = "echo $((1<<n))\necho hi # see a<<b\n(( x = y << z ))";
   eq(strip(inert).text + "|" + strip(inert).bodies.length, inert + "|0", "stripHeredocs ignores << in arithmetic and in a comment");
   const exp = ["echo $[1<<n]", "echo ${x#<<y}", "echo ${x:-<<y}", "y=${x/<</z}"].map((c) => c + "\nrm -rf x");
