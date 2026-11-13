@@ -39,7 +39,7 @@ Started: 2026-11-11T18:32:19.610Z
 - [x] R5-01 Guard: a !( subshell and an argument [[ do not hide a real heredoc
 - [x] R6-01 Green the PR checks: restore docs/kukulu.json escapes and exempt the feedback log from check-names' bare-letter rule
 - [x] R6-02 Guard: a heredoc piped into a shell has its body judged as commands
-- [ ] R6-03 Guard: read every heredoc command twice, denying when either reading denies (SPEC A-02 Two readings)
+- [x] R6-03 Guard: read every heredoc command twice, denying when either reading denies (SPEC A-02 Two readings)
 
 ## Log
 
@@ -181,3 +181,8 @@ Re-escaped docs/kukulu.json via script (diff vs d9b19ea is only maxRounds lines)
 ### R6-02 — 4a11151
 
 Added ownsShell and pipesIntoShell in mcp/cleanroom.mjs; stripHeredocs marks a body shell-read when the operator's line pipes (| or |&) into a later sh/bash/zsh/dash/ksh stage without -c; pipeline ends at ;, &&, ||, & or newline. 6 fixtures (R6-02), 2 stripHeredocs assertions, docs/cleanroom.md and CHANGELOG updated. Interpretation: only the same line as the operator is scanned. Both self-tests ok, verify ok.
+
+### R6-03 — b0d099f
+
+stripHeredocs(command, loose) now has a second reading (no region skipped, digits-only delimiter counts) and returns skipped; bashVerdict runs reading two only when reading one skipped a double-less-than, restoring shellCwd/previousCwd between readings; denied if either denies. Negated marking removed; command-position !( is copied through by reading one. 8 fixtures (R6-03), 3 reading assertions, docs and CHANGELOG. Existing fixtures all keep verdicts.
+INTERPRETATION / SPEC CONFLICT: acceptance asked `!(cat <<EOF NL rm -rf .kukulu/cleanroom NL EOF NL )` allowed. Reading one copies the group through so the rm line is judged and denied; reading two (subshell) alone would allow. Kept as a denied fixture (safe side); owner should reconcile SPEC A-02 rule 6 with that fixture.
