@@ -36,7 +36,7 @@ Started: 2026-11-11T18:32:19.610Z
 - [x] R2-04 cargo test refusal: compare each cargo test with its own --
 - [x] R3-01 Guard: a << in an array-subscript assignment, a compound array assignment or a backtick span is not a heredoc operator
 - [x] R4-01 Guard: a << inside a [[ ... ]] conditional or an extglob group is not a heredoc operator
-- [ ] R5-01 Guard: a !( subshell and an argument [[ do not hide a real heredoc
+- [x] R5-01 Guard: a !( subshell and an argument [[ do not hide a real heredoc
 
 ## Log
 
@@ -166,3 +166,7 @@ Added assignmentEnd and backtickEnd copy-through branches in stripHeredocs (subs
 ### R4-01 — 0398316
 
 Added conditionalEnd and groupEnd copy-through branches in stripHeredocs ([[ ... ]] and ?*+@!( groups); arithmetic branch still wins. 12 fixtures (R4-01) added, one stripHeredocs assertion, docs/cleanroom.md and CHANGELOG A-02 line extended. Guard self-tests and full verify green. Interpretation: none.
+
+### R5-01 — 6a0975f
+
+Work is in commit 80c02ca (HEAD is a no-op marker, because the feedback commit landed after it). Added commandPosition helper in mcp/cleanroom.mjs shared by the [[ branch and the new !( branch. !( in command position is not copied through: heredocs whose operator lies inside the group (unclosed group runs to end of command) are marked shell, so bodies are judged as commands under both extglob readings. 11 (R5-01) fixtures added (5 regression denials, 5 pinned denials, 1 allowed); no existing fixture changed. test/cleanroom.mjs stripHeredocs assertion added. docs/cleanroom.md and CHANGELOG A-02 line extended. Guard self-tests pass on both templates (627/623). Verify: npm test fails only plugin suite check-names at docs/kukulu.json:655 (literal macron u in a shouldMatch example, pre-existing at HEAD, outside this task); logged as feedback. Manual check: none.
