@@ -16,8 +16,8 @@ import {
   CleanroomError, loadPolicy, policyHash,
   ENTRY_KEYS, KINDS, ZERO_HASH, TARGET_MAX, truncateTarget, canonical, entryHash, appendEntry, readEntries, verifyChain, logPathFor, targetOf, projectContext, entryFields,
   tokenize, LANGUAGES, scorePair, position, verdictOf, LIMITS, BANDS,
-  splitSegments, shellWords, commandWord, isPathLike, tokenPath, canonicalPaths,
-  evaluate, lockdownActive, NETWORK_COMMANDS, READ_FAMILY, WRITE_FAMILY, protectedPaths,
+  splitSegments, stripHeredocs, shellWords, commandWord, isPathLike, tokenPath, canonicalPaths,
+  evaluate, sedInPlace, lockdownActive, NETWORK_COMMANDS, READ_FAMILY, WRITE_FAMILY, protectedPaths,
   coverageGaps, KNOWN_LIMITS, knownLimitsFor,
   normalizeModel, familyOf, controlPaths, LOG_SOCKET_TIMEOUT_MS,
   LOCKFILES, lockfileEcosystem, lockfilePackages, normalizePackageName, deniedPackage,
@@ -126,6 +126,8 @@ const pattern = (extra = {}) => ({ id: "p", pattern: "/build/", shouldMatch: ["/
   const plain = loadPolicy(JSON.stringify(base({ deny: { network: false, paths: ["prior/"], words: ["zlib"] } })));
   eq(read(plain, "/p/prior/zlib.c"), "denied", "...and denied in clean-room mode");
   eq(evaluate(loaded, { tool_name: "Write", tool_input: { file_path: "/p/prior/zlib.c", content: "x" }, cwd: "/p" }, env).decision, "denied", "a write to prior art is still denied in control mode");
+  const reserved = evaluate(loaded, { tool_name: "Bash", tool_input: { command: "c\uE001d build" }, cwd: "/p" }, env);
+  eq(reserved.decision + "|" + reserved.reason, "denied|command contains U+E001 or U+E002, characters the guard reserves; remove them and retry", "a Bash command holding U+E001 is refused with the exact reason (R10-01)");
 
   // a symlink inside the prior art that leaves it is read through, so the target's own rules apply
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "kukulu-control-link-")));
@@ -731,6 +733,34 @@ async function genesisRepo(planOpts = {}) {
     eq(trailer(by("chore: build summary"), "Kukulu-Stage"), "summarize", "summary_commit's is filed under summarize");
     eq(trailer(by("chore: archive flight w1"), "Kukulu-Stage"), "summarize", "the archive commit, made after its state reset, still carries the trailers");
     eq(git(repo, ["log", "-1", "--format=%B", by("progress: P0-01 done")]).trim().split("\n").slice(-3).join("|"), "|Kukulu-Stage: implement|Kukulu-Task: P0-01", "the trailers sit after a blank line at the end of the message");
+
+    // P1-03: a finished flight never re-arms its clean-room log.
+    const headBefore = git(repo, ["rev-parse", "HEAD"]);
+    const stateBefore = fs.readFileSync(path.join(repo, ".kukulu", "state.json"));
+    const after = await call("kukulu_next");
+    eq(after.stage + "|" + after.gate, "done|null", "kukulu_next after the archive returns done and writes no genesis");
+    eq(git(repo, ["rev-parse", "HEAD"]), headBefore, "...HEAD does not move");
+    ok(!hasFile(repo, ".kukulu/cleanroom/log.jsonl"), "...there is no log");
+    ok(stateBefore.equals(fs.readFileSync(path.join(repo, ".kukulu", "state.json"))), "...and the state is byte-identical");
+    const hookRepo = repo;
+    const hr = runHook(LOGGER, { hook_event_name: "PostToolUse", tool_name: "Read", tool_input: { file_path: "/x/a" }, cwd: hookRepo, session_id: "s-9" }, { CLAUDE_PROJECT_DIR: hookRepo });
+    ok(hr.status === 0 && !fs.existsSync(LOG(hookRepo)), "the hooks append nothing after the archive");
+    writeFile(repo, "docs/SPEC.md", readFile(repo, "docs/SPEC.md") + "\nA second flight.\n");
+    git(repo, ["add", "docs/SPEC.md"]);
+    git(repo, ["commit", "-qm", "spec for the next flight"]);
+    const next = await call("kukulu_next");
+    ok(next.stage === "plan" && fs.existsSync(LOG(repo)) && readEntries(LOG(repo))[0].kind === "genesis", "an edited SPEC after the archive writes the genesis and returns plan");
+  });
+}
+
+{
+  // P1-03: a halted clean-room run with no genesis writes none.
+  const repo = cleanroomRepo();
+  setState(repo, { halted: "stopped by hand" });
+  const head = git(repo, ["rev-parse", "HEAD"]);
+  await withServer(repo, async ({ call }) => {
+    const n = await call("kukulu_next");
+    ok(n.stage === "halt" && n.gate === null && !hasFile(repo, ".kukulu/cleanroom") && git(repo, ["rev-parse", "HEAD"]) === head, "a halted clean-room run with no genesis writes none");
   });
 }
 
@@ -875,6 +905,79 @@ async function genesisRepo(planOpts = {}) {
   eq(NETWORK_COMMANDS.join("|"), "curl|wget|gh|ssh|scp|nc|git clone|git fetch|git pull|pip download|cargo vendor|cargo download|npm install|npm i|npm ci|go get|composer install", "NETWORK_COMMANDS is the fixed list");
   eq([...READ_FAMILY].join(" "), "cat less more head tail grep egrep fgrep rg ag ack find fd locate ls tree sed awk bat strings xxd od hexdump file zcat zless zgrep view vi vim nano emacs", "READ_FAMILY is the fixed list");
   eq([...WRITE_FAMILY].join(" "), "cp mv rm tee sed truncate chmod chown ln install dd git", "WRITE_FAMILY is the fixed list");
+}
+
+{
+  // The command word is a variable so no line of this file reads as a GNU in-place sed (no-gnu-sed-inplace).
+  const SED = "sed";
+  const policy = loadPolicy(EXAMPLE);
+  const root = mkDir("kukulu-sed-root-");
+  const home = mkDir("kukulu-sed-home-");
+  const run = (command) => evaluate(policy, { tool_name: "Bash", tool_input: { command }, cwd: root }, { root, home, progressText: null, policyPath: path.join(root, "docs", "cleanroom.json"), pluginRoot: path.join(home, "plugin-root"), keyPath: path.join(home, "k.pem"), planExists: true });
+  const yes = [["-i"], ["-i.bak"], ["--in-place"], ["--in-place=.bak"], ["-Ei"], ["-ni"], ["-ie"], ["-e", "s/a/b/", "-i", "f"], ["--expression=s/a/b/", "-i", "f"], ["--in"], ["--in-pl=.bak"], ["--in-place"]];
+  const no = [["-n"], ["-e", "s/a/b/"], ["-n", "-e", "1p", "-e", "2p"], ["-l", "80", "-n"], ["--", "-i"], ["s/a/b/", "f", "--", "-i"], ["--follow-symlinks", "-n"]];
+  ok(yes.every((a) => sedInPlace(a) === true) && no.every((a) => sedInPlace(a) === false), "sedInPlace reads -i, -i<suffix>, --in-place, --in-place=<suffix> and a cluster containing i");
+  const r1 = run(`${SED} -n 480p .kukulu/cleanroom/log.jsonl`);
+  eq(r1.decision, "allowed", "a read-only sed on the clean-room log is allowed");
+  const r2 = run(`${SED} -e s/a/b/ -i .mcp.json`);
+  eq(r2.decision + "|" + r2.reason, `denied|protected path: ${path.join(root, ".mcp.json")}`, "an in-place sed with -e before -i writes only the file operands");
+  eq(run(`${SED} -e s/a/b/ -i src/a.rs`).decision, "allowed", "...and a plain file stays allowed");
+  eq(run(`${SED} -i '' s/a/b/ .mcp.json`).decision, "denied", "an in-place sed with an empty BSD suffix keeps the suffix out of the operands");
+  eq(run(`${SED} -i '' s/a/b/ src/a.rs`).decision, "allowed", "...so the empty suffix and the script are not targets");
+  const w = KNOWN_LIMITS.find((l) => l.id === "indirect");
+  ok(w.text.includes("sed's w command") && KNOWN_LIMITS.length === 12, "KNOWN_LIMITS indirect names sed's w command");
+}
+
+{
+  const T = (s) => s.replaceAll("<TAB>", "\t");
+  const strip = (c) => stripHeredocs(c);
+  const a = strip("cat <<EOF > x.txt\nhello\nEOF\necho done");
+  eq(a.text, "cat <<EOF > x.txt\necho done", "stripHeredocs removes a body and keeps the operator");
+  eq(strip("cat <<EOF | bash\nrm x\nEOF").bodies.map((b) => b.shell).join(), "true", "stripHeredocs marks a body piped into a shell as shell-read");
+  eq(strip("cat <<EOF | grep x\nrm x\nEOF").bodies.map((b) => b.shell).join(), "false", "stripHeredocs leaves a body piped into grep as data");
+  eq(strip("cat <<EOF |\nrm x\nEOF\nbash").bodies.map((b) => b.shell).join(), "true", "stripHeredocs follows a trailing pipe past the body into a shell (R7-01)");
+  eq(strip("cat <<EOF |\nrm x\nEOF\ngrep x").bodies.map((b) => b.shell).join(), "false", "stripHeredocs follows a trailing pipe past the body into grep as data (R7-01)");
+  const shift = "echo $((1<<3))\nrm x";
+  eq(stripHeredocs(shift, true).bodies.map((b) => b.shell).join() + "|" + strip(shift).bodies.length, "true|0", "the second reading marks a skipped operator's body shell-read; the first reading has none (R8-01)");
+  eq(strip("{ cat <<EOF; } | bash\nrm x\nEOF").bodies.map((b) => b.shell).join(), "true", "stripHeredocs marks a body shell-read when a grouped stage after a pipe runs a shell (R8-03)");
+  eq(strip("cat <<EOF | grep x; echo y\nrm x\nEOF").bodies.map((b) => b.shell).join(), "false", "stripHeredocs leaves a body piped into grep as data though a later segment exists (R8-03)");
+  eq(strip("cd b\nbash <<EOF\nrm x\nEOF").marks.join(), "15", "stripHeredocs reports where each body's operator ends in its text (R8-02)");
+  const digits = "cat <<1 > x.txt\nit's\n1\nrm x";
+  eq(strip(digits).bodies.length + "|" + strip(digits).skipped, "0|true", "the first reading skips a digits-only delimiter and says so");
+  eq(stripHeredocs(digits, true).bodies.map((b) => b.body).join(), "it's", "the second reading takes a digits-only delimiter as a heredoc");
+  eq(strip("cat <<EOF > x.txt\necho done\nEOF").skipped, false, "a command with no skipped << has one reading");
+  eq(JSON.stringify(a.bodies), JSON.stringify([{ body: "hello", quoted: false, shell: false }]), "...a bare delimiter is unquoted");
+  eq(strip("cat <<'EOF'\nx\nEOF").bodies[0].quoted + "|" + strip('cat <<"EOF"\nx\nEOF').bodies[0].quoted + "|" + strip("cat <<\\EOF\nx\nEOF").bodies[0].quoted, "true|true|true", "...'EOF', \"EOF\" and \\EOF are quoted");
+  eq(strip(T("cat <<-EOF\n<TAB>x\n<TAB>EOF\necho y")).text + "|" + strip(T("cat <<-EOF\n<TAB>x\n<TAB>EOF\necho y")).bodies[0].body, "cat <<-EOF\necho y|<TAB>x".replace("<TAB>", "\t"), "...<<- strips leading tabs from the delimiter line");
+  eq(strip("echo $(bash <<EOF\nx\nEOF\n)").bodies.map((b) => b.shell).join() + "|" + strip("echo $(echo hi) <<EOF\nx\nEOF").bodies.map((b) => b.shell).join(), "true|false", "a heredoc inside a substitution is owned by the segment inside it (R9-02)");
+  const inert = "echo $((1<<n))\necho hi # see a<<b\n(( x = y << z ))";
+  eq(strip(inert).text + "|" + strip(inert).bodies.length, inert + "|0", "stripHeredocs ignores << in arithmetic and in a comment");
+  const exp = ["echo $[1<<n]", "echo ${x#<<y}", "echo ${x:-<<y}", "y=${x/<</z}"].map((c) => c + "\nrm -rf x");
+  eq(exp.map((c) => strip(c).text === c && strip(c).bodies.length === 0).join(), "true,true,true,true", "stripHeredocs ignores << inside ${...} and $[...]");
+  const asg = ["a[1<<n]=3", "a=([1<<n]=3)", "echo `cat <<x`"].map((c) => c + "\nrm -rf x");
+  eq(asg.map((c) => strip(c).text === c && strip(c).bodies.length === 0).join(), "true,true,true", "stripHeredocs ignores << inside an array-subscript assignment, a compound array assignment and a backtick span");
+  const cond = ["[[ a =~ (x<<y) ]]", "[[ a == @(x<<y) ]]", "echo @(x<<y)"].map((c) => c + "\nrm -rf x");
+  eq(cond.map((c) => strip(c).text === c && strip(c).bodies.length === 0).join(), "true,true,true", "stripHeredocs ignores << inside a [[ ]] conditional and an extglob group (R4-01)");
+  eq(strip("echo [[ <<EOF\nit is\nEOF\nx ]]").bodies.map((b) => b.body).join("|") + "|" + strip("[[ a =~ (x<<y) ]]\nrm -rf x").bodies.length, "it is|0", "stripHeredocs reads [[ as a conditional only in command position (R5-01)");
+  eq(strip("echo ${#x}<<y\nrm x").bodies.length, 1, "...a << after the closing } is still an operator");
+  const q = strip("cat <<E'OF' > x.txt\nhi\nEOF\necho y");
+  eq(q.bodies[0].quoted + "|" + q.bodies[0].body + "|" + q.text, "true|hi|cat <<E'OF' > x.txt\necho y", "stripHeredocs removes quotes from the whole delimiter word");
+  const two = strip("cat <<A <<B\none\nA\ntwo\nB\nz");
+  eq(two.bodies.map((b) => b.body).join("|") + "|" + two.text, "one|two|cat <<A <<B\nz", "...two heredocs on one line read their bodies in order");
+  eq(strip("cat <<EOF\nnever ends").bodies[0].body, "never ends", "...an unterminated body runs to the end");
+  eq(strip("cat <<< word\nrm x").text, "cat <<< word\nrm x", "...a here-string is left alone");
+  eq(strip("bash <<EOF\nls\nEOF").bodies[0].shell + "|" + strip("bash -c x <<EOF\nls\nEOF").bodies[0].shell + "|" + strip("python3 - <<EOF\nls\nEOF").bodies[0].shell, "true|false|false", "...only a shell without -c reads its body");
+  eq(JSON.stringify(splitSegments("cat <<EOF > x.txt\nit's fine\nEOF\nrm -rf .kukulu/cleanroom")), JSON.stringify(["cat <<EOF > x.txt", "rm -rf .kukulu/cleanroom"]), "splitSegments does not cut inside a heredoc body");
+  const policy = loadPolicy(EXAMPLE);
+  const root = mkDir("kukulu-hd-root-");
+  const home = mkDir("kukulu-hd-home-");
+  const run = (command) => evaluate(policy, { tool_name: "Bash", tool_input: { command }, cwd: root }, { root, home, progressText: null, policyPath: path.join(root, "docs", "cleanroom.json"), pluginRoot: path.join(home, "plugin-root"), keyPath: path.join(home, "k.pem"), planExists: true });
+  eq(run("bash <<'EOF'\nrm -rf .kukulu/cleanroom\nEOF").decision, "denied", "a shell-read heredoc body is judged as commands");
+  eq(run("cat <<'EOF' > notes.txt\n$(rm -rf .kukulu)\nEOF").decision, "denied", "a quoted-delimiter body's lines are judged for writes (R9-01)");
+  eq(run("cat <<'EOF' > notes.txt\ncat ~/.cargo/registry/a.rs\nEOF").decision, "allowed", "a quoted-delimiter body's reads are not judged (R9-01)");
+  eq(run("cat <<EOF > out.txt\n$(cat ~/.cargo/registry/a.rs)\nEOF").decision, "denied", "an unquoted-delimiter body's substitutions are judged");
+  const cases = JSON.parse(fs.readFileSync(path.join(ROOT, "test", "fixtures", "guard-cases.json"), "utf8")).filter((c) => /^cleanflate false positive \d/.test(c.name) && /<</.test(c.input.tool_input.command ?? ""));
+  ok(cases.length > 0 && cases.every((c) => c.expect === "allowed"), "the cleanflate Python heredoc fixtures stay allowed (the guard cases test each)");
 }
 
 // ---------------------------------------------------------------- the guard hook
@@ -1705,6 +1808,20 @@ const gateCheck = (reason) => (reason.match(/^clean-room gate failed: ([\w-]+):/
     const r = await statusWith(bad);
     isError(r, re, label);
   }
+  const G = (g, extra = {}) => ({ group: g, ...extra });
+  const rustC = [G("rust-c", { ...PAIRS[0], id: "n2" }), G("rust-c", { ...PAIRS[1], id: "p2" }), G("rust-c", { ...PAIRS[2], id: "t2" })];
+  const grouped = (...pairs) => sim({ pairs: [...PAIRS.map((p) => G("lib", p)), ...pairs] });
+  ok(!(await statusWith(grouped(...rustC))).error, "two groups with a control pair of each role and a test resolve");
+  for (const [bad, re, label] of [
+    [sim({ pairs: [PAIRS[0], PAIRS[1], { ...PAIRS[2], group: "Bad Slug" }] }), /^docs\/kukulu\.json cleanroom\.similarity\.pairs\[2\]\.group must be a slug \(letters, digits and -\); got "Bad Slug"$/, "a bad group is refused"],
+    [sim({ pairs: [{ ...PAIRS[0], group: 3 }, PAIRS[1], PAIRS[2]] }), /pairs\[0\]\.group must be a slug .*; got 3$/, "...a group that is not a string"],
+    [grouped({ ...rustC[0] }, { ...rustC[0], id: "n3" }, rustC[1], rustC[2]), /^docs\/kukulu\.json cleanroom\.similarity\.pairs group "rust-c" needs exactly one pair with role "negative" \(found 2\)$/, "a group with two negatives is refused naming the group"],
+    [grouped(rustC[0], rustC[2]), /pairs group "rust-c" needs exactly one pair with role "positive" \(found 0\)$/, "a group with no positive is refused naming the group"],
+    [grouped(rustC[0], rustC[1]), /pairs group "rust-c" needs at least one pair with role "test"$/, "a group with no test pair is refused naming the group"],
+    [sim({ pairs: [PAIRS[0], { ...PAIRS[0], id: "again" }, PAIRS[1], PAIRS[2]] }), /^docs\/kukulu\.json cleanroom\.similarity\.pairs needs exactly one pair with role "negative" \(found 2\)$/, "no groups keeps the old refusal texts"],
+  ]) {
+    isError(await statusWith(bad), re, label);
+  }
 }
 
 // ---------------------------------------------------------------- lexers: Rust and the C family
@@ -2003,7 +2120,7 @@ eq(LANGUAGES.join(","), "rust,c,cpp,go,python,javascript,typescript,java,php", "
       const test = json.rows.filter((x) => x.role === "test");
       ok(test.length === 7 && test.every((x) => BANDS.includes(x.band)), "...and the test pair has a banded row for every metric");
       const doc = readFile(repo, "docs/SIMILARITY.md");
-      like(doc, /^# Contamination score\n\n.*negative control \(independent\).*positive control \(derived\)/s, "docs/SIMILARITY.md opens with the statement");
+      like(doc, /^# Contamination score\n\n.*each group's negative and positive controls.*\n- group default: negative independent, positive derived\n/s, "docs/SIMILARITY.md opens with the statement and one line per group");
       like(doc, /## Verdict\n\n(independence|no metric)/, "...then the verdict");
       ok(doc.includes("## Raw scores") && doc.includes("## Limits") && !/\d{4}-\d\d-\d\dT/.test(doc), "...the raw scores and the limits, with no timestamp");
       const again = await call("kukulu_similarity");
@@ -2034,6 +2151,39 @@ eq(LANGUAGES.join(","), "rust,c,cpp,go,python,javascript,typescript,java,php", "
       const neg = (res) => res.rows.find((x) => x.pair === "independent" && x.metric === "ident_jaccard").score;
       ok(neg(r) < neg(base), "an exclusion list removes the planted identifier from the scores");
     });
+  }
+
+  // groups (P2-03)
+  {
+    const GROUPED = SIM({
+      pairs: [
+        { id: "independent", role: "negative", left: FIX("a"), right: FIX("b") },
+        { id: "derived", role: "positive", left: FIX("b"), right: FIX("b-derived") },
+        { id: "vs-c", role: "test", left: "subject", right: FIX("c") },
+        { id: "n-rc", role: "negative", left: FIX("b"), right: FIX("c"), group: "rust-c" },
+        { id: "p-rc", role: "positive", left: FIX("c"), right: FIX("b-derived"), group: "rust-c" },
+        { id: "t-rc", role: "test", left: "subject", right: FIX("b-derived"), group: "rust-c" },
+      ],
+    });
+    const run = async (similarity) => {
+      const repo = generalRepo(similarity);
+      let res;
+      await withServer(repo, async ({ call }) => { res = await call("kukulu_similarity"); });
+      return { repo, res, json: JSON.parse(readFile(repo, ".kukulu/cleanroom/similarity.json")), doc: readFile(repo, "docs/SIMILARITY.md") };
+    };
+    const g = await run(GROUPED);
+    ok(!g.res.error, "a grouped config scores" + (g.res.error ? `: ${g.res.error}` : ""));
+    const at = (json, pair, metric) => json.rows.find((x) => x.pair === pair && x.metric === metric);
+    const metric = g.json.rows[0].metric;
+    const t = at(g.json, "t-rc", metric);
+    const own = position(t.score, at(g.json, "n-rc", metric).score, at(g.json, "p-rc", metric).score, g.json.config);
+    const other = position(t.score, at(g.json, "independent", metric).score, at(g.json, "derived", metric).score, g.json.config);
+    ok(t.group === "rust-c" && t.c === own.c && JSON.stringify(own) !== JSON.stringify(other), "a test pair in group rust-c is positioned against its own group's bands");
+    ok(g.json.rows.every((x) => ["default", "rust-c"].includes(x.group)) && g.json.config.pairs.filter((p) => p.group === "rust-c").length === 3, "a grouped config's similarity.json keeps the groups");
+    ok(g.doc.includes("- group default: negative independent, positive derived\n- group rust-c: negative n-rc, positive p-rc\n") && g.doc.includes("| pair | group | role |"), "docs/SIMILARITY.md lists each group and gains a group column");
+    const plain = await run(SIM());
+    ok(plain.json.rows.every((x) => x.group === "default") && plain.json.rows.length === 21, "an ungrouped config gives the old rows plus group default");
+    ok(plain.json.config.pairs.every((p) => !("group" in p)) && !plain.doc.includes("| group |"), "...and its similarity.json and table have no groups");
   }
 
   // clean-room mode: score entry, checkpoint, gate

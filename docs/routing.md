@@ -59,6 +59,14 @@ The generated files are excluded from git per clone, through `.git/info/exclude`
 }
 ```
 
+The global file and each profile may also carry `policies` (the keys of `docs/kukulu.json`'s `policies`, layered per key as default < global < profile < project; a profile may hold only `policies`):
+
+```json
+{ "policies": { "finalize": "ready" }, "profiles": { "solo": { "policies": { "finalize": "auto" } } } }
+```
+
+See [operations.md](./operations.md#configuration) for the layers and `kukulu_config_show`'s `policySources`.
+
 Copy it to `~/.config/kukulu/config.json` (or point `$KUKULU_CONFIG` somewhere else) and edit it there. It applies to every project on the machine unless a project's own `docs/kukulu.json` overrides a role.
 
 `"Ollama"` and `"OpenRouter"` above are the provider names you give claude-code-router when you add each provider (see below); Kūkulu attaches no meaning to them. The model string is whatever that router expects for "this provider, this model", and Kūkulu copies it into `model:` verbatim without parsing it.

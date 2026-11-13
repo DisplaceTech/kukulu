@@ -22,7 +22,7 @@ export const KNOWN_LIMITS = [
   { id: "interpreter", text: "Interpreter escapes (python3 -c, node -e) are not parsed, so a path or word inside the quoted program is not seen.", levels: ["hook"] },
   { id: "expansion", text: "Shell expansion beyond ~ and $HOME is not evaluated: other variables, and strings assembled at run time (a base64 decode, a variable holding a command), so a path or command built that way is not seen.", levels: ["hook"] },
   { id: "spellings", text: "Option and wrapper spellings the tables do not model are not recognized: the guard judges a command by its text, its wrapper and option parsing follows GNU coreutils, findutils and sudo (and BSD/macOS forms where their manual pages differ), and no table can be proved complete across tool versions.", levels: ["hook"] },
-  { id: "indirect", text: "Commands that run a command from their arguments (find -exec, watch, parallel, busybox) and programs outside the fixed network and write lists (unlink, shred, perl -i, cargo fetch) are not recognized.", levels: ["hook"] },
+  { id: "indirect", text: "Commands that run a command from their arguments (find -exec, watch, parallel, busybox) and programs outside the fixed network and write lists (unlink, shred, perl -i, sed's w command, cargo fetch) are not recognized.", levels: ["hook"] },
   { id: "patterns", text: "pathPatterns regexes are matched on the paths a call names, not on the files a recursive read or a glob reaches below a directory.", levels: ["hook"] },
   { id: "make", text: "Subprocesses of a make target are not individual tool calls, so what they read is not logged.", levels: ["hook"] },
   { id: "mcp", text: "MCP server internals are not tool calls, so what a server reads on its own is not logged.", levels: ["hook"] },
@@ -40,6 +40,27 @@ export function knownLimitsFor(level) {
 }
 
 // Duplicated from mcp/cleanroom.mjs on purpose (a bundle's verifier imports nothing); test/attest.mjs feeds both the same entries.
+/** A model string lowercased with every leading `<provider>/` or `<provider>,` segment removed (a copy of mcp/cleanroom.mjs's). */
+function normalizeModel(s) {
+  let out = String(s).toLowerCase();
+  while (/^[^/,]+[/,]/.test(out)) out = out.replace(/^[^/,]+[/,]/, "");
+  return out;
+}
+/**
+ * Whether the model an endpoint reported is the model routing declared: equal once normalized, an alias
+ * (`opus`, `sonnet`, `haiku`, `fable`) and an id it resolves to (`claude-<alias>-...`), `inherit` and any
+ * `claude-` id, or a model and its dated snapshot (`<model>-` and eight digits). Duplicated in
+ * scripts/verify-attestation.mjs on purpose, and test/attest.mjs feeds both the same pairs.
+ */
+export function sameModel(declared, reported) {
+  const d = normalizeModel(declared);
+  const r = normalizeModel(reported);
+  if (d === r) return true;
+  if (["opus", "sonnet", "haiku", "fable"].includes(d) && r.startsWith(`claude-${d}-`)) return true;
+  if (d === "inherit" && r.startsWith("claude-")) return true;
+  return r.startsWith(`${d}-`) && /^\d{8}$/.test(r.slice(d.length + 1));
+}
+
 /**
  * Per role, the models the endpoint reported and the token sums of the `usage` entries of that role's agents
  * (SPEC D-02): `{ reported: [sorted model names], usage: { requests, input, output, cacheRead, cacheWrite, cost } }`.
@@ -410,7 +431,7 @@ export function verifyBundle(dir, { key = null, expect = null, requireEnforcemen
         if (JSON.stringify(record[field]) !== JSON.stringify(recount[role][field])) fail("roles", `${role}.${field} differs from the log's: ${JSON.stringify(recount[role][field])}`);
       }
       const reported = recount[role].reported ?? [];
-      if (reported.some((m) => m !== record.model)) notes.push(`${role}: the endpoint reported ${reported.join(", ")}; routing declared ${record.model}`);
+      if (reported.some((m) => !sameModel(record.model, m))) notes.push(`${role}: the endpoint reported ${reported.join(", ")}; routing declared ${record.model}`);
     }
   }
 

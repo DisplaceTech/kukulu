@@ -92,6 +92,11 @@ eq(server.env.KUKULU_PROJECT_DIR, "${CLAUDE_PROJECT_DIR}", "the server is told w
 eq(server.env.KUKULU_CONFIG, "${KUKULU_CONFIG:-}", "the global routing config path passes through, empty by default");
 eq(server.env.KUKULU_PROFILE, "${KUKULU_PROFILE:-}", "the routing profile passes through, empty by default");
 eq(server.env.KUKULU_CONTROLLER_SOCKET, "${KUKULU_CONTROLLER_SOCKET:-}", "the controller socket passes through, empty by default");
+ok(Number.isInteger(server.timeout) && server.timeout >= 3600000, "the kukulu server entry sets a timeout of at least an hour");
+{
+  const ops = read("docs/operations.md");
+  ok(/^## Long tool calls$/m.test(ops) && !ops.includes("MCP_TOOL_TIMEOUT") && !read("docs/mcp-tools.md").includes("MCP_TOOL_TIMEOUT"), "operations.md has a Long tool calls section and no longer names MCP_TOOL_TIMEOUT");
+}
 eq(server.env.FOUNDRY_CONFIG, undefined, ".mcp.json no longer passes FOUNDRY_CONFIG");
 eq(server.env.FOUNDRY_PROFILE, undefined, "...or FOUNDRY_PROFILE");
 
@@ -310,6 +315,8 @@ eq((AGENT_MAP.match(/kukulu:/g) || []).length, agentNames.length, "the stage tab
 
 const goFlight = read("skills/go-flight/SKILL.md");
 like(goFlight, /policies\.signing is 'required' and the signing probe failed/, "go-flight stops on a required-signing probe failure");
+like(goFlight, /`subagent_type`, `description`, `prompt`, and optionally `model`/, "go-flight names description beside subagent_type and prompt");
+like(goFlight, /`description`: the `description` value, verbatim/, "...and passes it in step 4");
 const fmGo = frontmatter(goFlight);
 const allowed = String(fmGo["allowed-tools"]).split(",").map((s) => s.trim());
 const toolNames = Array.from(serverSrc.matchAll(/name: "(kukulu_[a-z_]+)"/g), (m) => m[1]);
@@ -396,6 +403,8 @@ like(goFlight, /notification/, "go-flight describes the loop as event-driven, no
 like(goFlight, /do not poll/, "go-flight says not to poll while a stage is running");
 // F-04: the reviewer mutation-tests through the MCP, never by hand-editing source.
 ok(String(frontmatter(read("agents/reviewer.md")).tools).includes("mcp__plugin_kukulu_kukulu__kukulu_mutate"), "agents/reviewer can call kukulu_mutate");
+ok(String(frontmatter(read("agents/reviewer.md")).tools).includes("mcp__plugin_kukulu_kukulu__kukulu_run_halt"), "agents/reviewer can call kukulu_run_halt");
+like(read("skills/review-build/SKILL.md"), /kukulu_run_halt` with `owner action needed: <task id>:/, "review-build tells the reviewer to halt with owner action needed");
 {
   const reviewSkill = read("skills/review-build/SKILL.md");
   like(reviewSkill, /kukulu_mutate/, "review-build tells the reviewer to mutation-test with kukulu_mutate");
@@ -615,7 +624,7 @@ ok(read("skills/plan-build/SKILL.md").includes("templates/constraints.example.js
 // Every key cfg() actually returns has a row in operations.md's config
 // table — a knob nobody wrote down is a knob nobody will find.
 {
-  const cfgSrc = serverSrc.match(/function cfgFrom\(c, planIds\) \{[\s\S]*?\n\}/)[0];
+  const cfgSrc = serverSrc.match(/function cfgFrom\(c, planIds(?:, limit = mcpTimeoutMs\(\))?\) \{[\s\S]*?\n\}/)[0];
   const cfgKeys = Array.from(cfgSrc.matchAll(/^ {4}(\w+):/gm), (m) => m[1]);
   ok(cfgKeys.length >= 9, "cfg()'s top-level keys were actually extracted from the source");
   const opsDoc = read("docs/operations.md");
@@ -629,6 +638,7 @@ ok(read("skills/plan-build/SKILL.md").includes("templates/constraints.example.js
       ok(opsDoc.includes("`policies.finalize`"), "operations.md documents policies.finalize");
       ok(opsDoc.includes("`policies.mergeMethod`"), "operations.md documents policies.mergeMethod");
       ok(opsDoc.includes("`policies.syncBase`"), "operations.md documents policies.syncBase");
+      ok(opsDoc.includes("`profiles.<name>.policies`") && opsDoc.split("\n").some((l) => l.includes("global file") && l.includes("`policies`")), "operations.md documents the global and profile policies layers");
       continue;
     }
     if (key === "mutation") {
@@ -777,6 +787,12 @@ ok(glRev && glPin === glRev, "secret-scan.yml pins GITLEAKS_VERSION to the pre-c
 
   const fenced = run({ "docs/guide.md": `Text.\n\n\`\`\`bash\n${ascii} --help\n\`\`\`\n\nInline \`${ascii}\` too.\n` });
   eq(fenced.status, 0, "check-names allows the ASCII spelling in fenced blocks and inline code");
+
+  const bareLine = `{"message":"a bare ${U} here"}\n`;
+  eq(run({ ".kukulu/feedback.jsonl": bareLine }).status, 0, "check-names exempts the feedback log from the bare-letter rule");
+  eq(run({ "docs/flights/v1/feedback.jsonl": bareLine }).status, 0, "check-names exempts an archived feedback log from the bare-letter rule");
+  eq(run({ "docs/flights/v1/notes/feedback.jsonl": bareLine }).status, 1, "...but only at docs/flights/<slug>/feedback.jsonl");
+  eq(run({ "notes.md": bareLine }).status, 1, "check-names still refuses the same bare letter in another file");
 
   const history = run({ "docs/flights/old/SUMMARY.md": `${ascii} history.\n`, "docs/feedback/a.md": `${ascii} history.\n` });
   eq(history.status, 0, "check-names leaves history paths alone");

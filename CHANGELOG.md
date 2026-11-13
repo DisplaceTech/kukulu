@@ -4,6 +4,34 @@ All notable changes to this plugin. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.1] — 2026-11-13
+
+### Added
+
+- A `cargo test` targeted command with `{filter}` before `--` is refused when the config loads (project-g F-05, F-13, F-04).
+- The reviewer halts the flight with `owner action needed: …` when the only open item is blocked on the owner (project-g F-07, F-03).
+- Similarity pairs may carry `group`, one negative and one positive per group, in `kukulu_similarity`, `SIMILARITY.md` and `scripts/compare-bundles.mjs` (project-g F-10, E-01).
+- `policies` in the global file and in each profile, layered under the project file, with `policySources` in `kukulu_config_show` (project-g F-19, D-02).
+- `kukulu_plan_commit` refuses a flight slug an archive already uses (project-g F-10, C-03).
+- The plugin sets its own MCP tool-call timeout of 24 hours in `.mcp.json`, so a long verify or mutate call is no longer cut off at Claude Code's 30-minute idle limit (project-g F-08, F-12, F-14, B-01).
+- A `verify`, `extraVerify`, `parallel.setup` or `mutation.targeted` timeout at or above the plugin's MCP limit is refused when the config loads, and `kukulu_status` reports `mcpTimeoutMs` (B-02).
+
+### Fixed
+
+- The guard no longer reads a `<<` in arithmetic, `${...}`, `$[...]`, an array-subscript assignment, a compound array assignment, a backtick span, a `[[ ... ]]` conditional, an extglob group or a comment as a heredoc (a `[[` only in command position, a `!(` in command position under both readings), removes quotes from the whole delimiter word, and treats an abbreviated `sed --in-place` as in place; the sed empty-suffix and `-l` rules and the digits-only rule now have fixtures (A-01, A-02).
+- `kukulu_task_next` returns the task's own log as `taskLog`, so an unblock reason reaches the implementer (project-g F-02, F-02).
+- `kukulu_next` supplies the `Agent` call's `description`, which go-flight passes on, so the first stage spawn no longer fails validation (project-g F-21, F-01).
+- The verifier no longer reports an alias-resolved model as a routing mismatch (project-g F-20, E-02).
+- After a flight is archived, `kukulu_next` no longer writes a new clean-room genesis on the finished branch, so `git checkout <base>` needs no stash (project-g F-16, F-17, C-01).
+- A heredoc body is data unless a shell reads it, so prior-art paths in a heredoc no longer refuse the call, and an apostrophe in a body no longer hides the commands after it (project-g F-11, A-02); a body piped into a shell (`cat <<EOF | bash`, also when the `|` ends the line, a backslash-newline precedes it, or the shell is grouped as `(bash)` or `{ bash; }`) is still judged as commands, and a command whose first reading skipped a `<<` is read a second time with every `<<` an operator, denied when either reading denies; in the second reading the body of an operator the first reading skipped is judged as commands (R8-01); a heredoc body or substitution is judged in the directory its owning segment runs in, after an earlier `cd`, and a shell-read body's own `cd` no longer leaks (R8-02); a body is shell-read when any later stage after a pipe runs a shell, at any grouping depth (R8-03); every line of a data body is judged for writes to protected paths, each line alone in a body-local directory, and a command nested more than four levels deep is denied instead of allowed (R9-01). A `cd` inside a substitution or a shell's `-c` string no longer moves the later segments (`eval`'s still does), a heredoc inside a substitution is owned by the segment inside it and judged where the substitution is, and a private-use marker character in a command no longer shifts which segment owns a body or substitution (A-02, principle 1, R9-02); the depth denial now counts on a data-body line too, and a Bash command holding U+E001 or U+E002 is refused instead of having them dropped (R10-01).
+- The guard judges `sed` as a write only in place, so a read-only `sed -n` of a protected file is allowed (project-g F-01, F-03, F-04, F-06, F-09, F-11, F-15).
+
+### Changed
+
+- `policies.finalize` defaults to `"ready"`: finalize marks the PR ready and enables auto-merge only when `"auto"` is set (project-g F-19, D-01).
+- `kukulu_release` reads the merged flight from `origin/<base>`, needs no checkout and reports `fastForward` and `localState`; a stale local base no longer hides behind "no numbered entry" (project-g F-16, F-17, F-18, C-02).
+- sed's `w` command is listed under the `indirect` known gap (A-01).
+
 ## [0.8.0] — 2026-10-27
 
 ### Added

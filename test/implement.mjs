@@ -1603,4 +1603,43 @@ async function baseAhead(repo, { onBuild = null, onBase = null } = {}) {
   });
 }
 
+// ---------------------------------------------------------------- taskLog (F-02)
+
+{
+  const repo = plannedRepo();
+  git(repo, ["checkout", "-q", "-b", `build/${TODAY}`]);
+  markTasks(repo, { "P0-01": "x", "P0-02": "!", "P0-03": "-" });
+  setState(repo, { round: 0, implemented: true });
+  writeFile(repo, "docs/REVIEW.md", "# Review\nRound: 1\n**Verdict**: CHANGES REQUESTED\n");
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-qm", "chore: round 0 implemented"]);
+  await withServer(repo, async ({ call }) => {
+    await call("kukulu_review_submit", { verdict: "CHANGES REQUESTED", unblock: [{ id: "P0-02", reason: "build it with the bundled parser instead" }] });
+    const n = await call("kukulu_task_next");
+    ok(n.id === "P0-02" && typeof n.taskLog === "string" && n.taskLog.includes("build it with the bundled parser instead"), "an unblocked task's taskLog carries the reviewer's reason");
+  });
+}
+
+{
+  const repo = plannedRepo();
+  await withServer(repo, async ({ call }) => {
+    const n = await call("kukulu_task_next");
+    eq(n.taskLog, null, "a fresh task's taskLog is null");
+  });
+}
+
+{
+  const repo = plannedRepo();
+  git(repo, ["checkout", "-q", "-b", `build/${TODAY}`]);
+  markTasks(repo, { "P0-01": "x", "P0-02": "!", "P0-03": "x" });
+  setState(repo, { round: 0, implemented: true });
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-qm", "chore: round 0 implemented"]);
+  await withServer(repo, async ({ call }) => {
+    await call("kukulu_task_reopen", { id: "P0-02", reason: "the output is wrong" });
+    const n = await call("kukulu_task_next");
+    ok(n.id === "P0-02" && typeof n.taskLog === "string" && /REOPENED: the output is wrong/.test(n.taskLog), "a reopened task's taskLog carries REOPENED");
+  });
+}
+
 finish();

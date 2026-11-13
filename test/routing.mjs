@@ -8,9 +8,11 @@
 // templates/ccr/*.json) is added alongside the templates themselves, not
 // here.
 
+import fs from "node:fs";
+import path from "node:path";
 import {
   finish, ok, eq, like, isError,
-  ROOT, mkDir, plannedRepo, withServer,
+  ROOT, mkDir, plannedRepo, withServer, tempPlugin, mkFakeGhBin, mkBareRemote, mkFakeGpg, useFakeSigner, setState,
   readFile, writeFile, hasFile, git, writeGlobalConfig, splitFrontmatter,
 } from "./harness.mjs";
 
@@ -31,6 +33,11 @@ for (const [config, want, label] of [[{}, true, "config_show reports archive tru
     eq((await call("kukulu_config_show")).archive, want, label);
   });
 }
+
+await withServer(plannedRepo({ config: {} }), async ({ call }) => {
+  const cs = await call("kukulu_config_show");
+  eq(cs.policies.finalize + "|" + Object.keys(cs.policies).length, "ready|8", "kukulu_config_show reports finalize ready with no policies block");
+});
 
 // ---------------------------------------------------------------- runners (A-01)
 
@@ -688,6 +695,131 @@ for (const [value, got, label] of [
     const after = await call("kukulu_config_show");
     eq(after.roles.implementer.model, "opus", "kukulu_config_show re-reads the global config on every call");
   }, { env });
+}
+
+// ---------------------------------------------------------------- a command timeout the client would cut short (B-02)
+
+{
+  const LIMIT = 2000000; // the temp plugin's own small limit; the real plugin's number is never written here
+  const withLimit = (timeout) => {
+    const plugin = tempPlugin();
+    const entry = { command: "node", args: ["${CLAUDE_PLUGIN_ROOT}/mcp/server.mjs"], ...(timeout === undefined ? {} : { timeout }) };
+    if (timeout !== null) fs.writeFileSync(path.join(plugin, ".mcp.json"), JSON.stringify({ mcpServers: { kukulu: entry } }));
+    return path.join(plugin, "mcp", "server.mjs");
+  };
+  const tail = (n) => ` is not below the plugin's MCP tool-call limit of ${LIMIT} ms \\(\\.mcp\\.json "timeout"\\); Claude Code would abort the call before the command ends\\. Lower it, or split the command\\.$`;
+  const refuses = async (config, head, label) => {
+    const server = withLimit(LIMIT);
+    await withServer(plannedRepo({ config }), async ({ call }) => {
+      isError(await call("kukulu_status"), new RegExp(`^docs/kukulu\\.json ${head}${tail()}`), label);
+    }, { server });
+  };
+  const base = { verify: ["true"], commandTimeoutMs: 1000000 };
+  await refuses({ ...base, commandTimeoutMs: LIMIT }, `commandTimeoutMs ${LIMIT}`, "commandTimeoutMs at the MCP limit is refused");
+  await refuses({ ...base, verify: [{ cmd: "true", timeoutMs: LIMIT }] }, `verify\\[0\\]\\.timeoutMs ${LIMIT}`, "a verify entry at the MCP limit is refused");
+  await refuses({ ...base, extraVerify: { "src/": ["true", { cmd: "true", timeoutMs: LIMIT }] } }, `extraVerify\\['src/'\\]\\[1\\]\\.timeoutMs ${LIMIT}`, "an extraVerify entry at the MCP limit is refused");
+  await refuses({ ...base, parallel: { setup: [{ cmd: "true", timeoutMs: LIMIT }] } }, `parallel\\.setup\\[0\\]\\.timeoutMs ${LIMIT}`, "a parallel.setup entry at the MCP limit is refused");
+  await refuses({ ...base, mutation: { targeted: { suite: { cmd: "true {filter}", timeoutMs: LIMIT } } } }, `mutation\\.targeted\\.suite\\.timeoutMs ${LIMIT}`, "a mutation.targeted entry at the MCP limit is refused");
+  await withServer(plannedRepo({ config: { ...base, verify: [{ cmd: "true", timeoutMs: LIMIT - 1 }] } }), async ({ call }) => {
+    const st = await call("kukulu_status");
+    ok(!st.error && st.mcpTimeoutMs === LIMIT && st.longestCommandTimeoutMs === LIMIT - 1, "a command one millisecond below the limit loads");
+  }, { server: withLimit(LIMIT) });
+  for (const [label, timeout] of [["a timeout field", undefined], ["an .mcp.json file", null]]) {
+    await withServer(plannedRepo({ config: { verify: [{ cmd: "true", timeoutMs: 999999999 }] } }), async ({ call }) => {
+      const st = await call("kukulu_status");
+      ok(!st.error && st.mcpTimeoutMs === null, `a plugin without ${label} refuses nothing and reports mcpTimeoutMs null`);
+    }, { server: withLimit(timeout) });
+  }
+}
+
+// ---------------------------------------------------------------- policies in the global file and profiles (D-02)
+
+{
+  const project = (policies) => plannedRepo({ config: policies === undefined ? {} : { policies } });
+  const withGlobal = async (obj, repo, fn, env = {}) => withServer(repo, fn, { env: { KUKULU_CONFIG: writeGlobalConfig(cfgDir(), obj), ...env } });
+  await withGlobal({ policies: { finalize: "draft", push: false } }, project(), async ({ call }) => {
+    const cs = await call("kukulu_config_show");
+    eq(cs.policies.finalize + "|" + cs.policies.push, "draft|false", "a global policy wins over the default");
+    eq(cs.policySources.finalize + "|" + cs.policySources.signing, "global|default", "policySources names where each key came from");
+  });
+  const layered = { policies: { finalize: "draft", mergeMethod: "squash" }, profiles: { fast: { policies: { finalize: "ready" } }, only: { policies: { push: false } } } };
+  await withGlobal(layered, project(), async ({ call }) => {
+    const cs = await call("kukulu_config_show");
+    eq(cs.policies.finalize + "|" + cs.policySources.finalize + "|" + cs.policySources.mergeMethod, "ready|profile:fast|global", "a profile policy wins over the global one");
+  }, { KUKULU_PROFILE: "fast" });
+  await withGlobal(layered, project({ finalize: "auto" }), async ({ call }) => {
+    const cs = await call("kukulu_config_show");
+    eq(cs.policies.finalize + "|" + cs.policySources.finalize, "auto|project", "a project policy wins over the profile");
+  }, { KUKULU_PROFILE: "fast" });
+  await withGlobal(layered, project(), async ({ call }) => {
+    const cs = await call("kukulu_config_show");
+    eq(cs.policies.push + "|" + cs.policySources.push, "false|profile:only", "a profile with only policies is accepted");
+  }, { KUKULU_PROFILE: "only" });
+  const gp = (obj) => writeGlobalConfig(cfgDir(), obj);
+  for (const [policies, re, label] of [
+    [{ nope: 1 }, /policies has an unknown key 'nope'$/, "an unknown key"],
+    [{ finalize: "x" }, /policies\.finalize must be one of auto, ready, draft; got "x"$/, "the enum form with ; got"],
+    [{ push: "yes" }, /policies\.push must be a boolean$/, "the boolean form"],
+  ]) {
+    const file = gp({ policies });
+    await withServer(project(), async ({ call }) => {
+      const e = await call("kukulu_config_show");
+      isError(e, new RegExp(`^${file.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} ${re.source}`), `a bad global policies shape refuses naming the global file: ${label}`);
+    }, { env: { KUKULU_CONFIG: file } });
+  }
+  {
+    const file = gp({ profiles: { fast: { policies: { push: "no" } } } });
+    await withServer(project(), async ({ call }) => {
+      isError(await call("kukulu_config_show"), /profiles\.fast\.policies\.push must be a boolean$/, "a bad profile policies shape refuses naming the profile");
+    }, { env: { KUKULU_CONFIG: file } });
+  }
+  {
+    const file = gp({ profiles: { fast: { policies: { nope: true } } } });
+    await withServer(project(), async ({ call }) => {
+      isError(await call("kukulu_config_show"), /profiles\.fast\.policies has an unknown key 'nope'$/, "a profile policies block with an unknown key names profiles.<name>.policies");
+    }, { env: { KUKULU_CONFIG: file } });
+  }
+  await withGlobal({ policies: { finalize: "ready" } }, project({ signing: "off" }), async ({ call }) => {
+    const n = await call("kukulu_next");
+    like(n.prompt ?? "", /Run policies: signing=off, push=on, pr=draft, finalize=ready \(global\)\./, "the Run policies sentence names finalize and its source");
+  });
+  {
+    const repo = project({ signing: "off" });
+    git(repo, ["checkout", "-q", "-b", "build/x"]);
+    writeFile(repo, "docs/SUMMARY.md", "# summary\n");
+    git(repo, ["add", "-A"]);
+    git(repo, ["commit", "-qm", "P0-01: hello"]);
+    setState(repo, { summarized: true, verdict: "APPROVED" });
+    git(repo, ["add", "-A"]);
+    git(repo, ["commit", "-qm", "chore: build summary"]);
+    git(repo, ["remote", "add", "origin", mkBareRemote()]);
+    const ghDir = mkFakeGhBin();
+    writeFile(ghDir, "pr.json", fs.readFileSync(path.join(ROOT, "test", "fixtures", "gh", "pr-draft.json"), "utf8"));
+    await withGlobal({ policies: { finalize: "draft" } }, repo, async ({ call }) => {
+      const r = await call("kukulu_pr_finalize", { breaking: false });
+      const calls = fs.existsSync(path.join(ghDir, "calls.log")) ? readFile(ghDir, "calls.log").split("\n").filter((c) => c.startsWith("pr ready") || c.startsWith("pr merge")) : [];
+      ok(!r.error && calls.length === 0 && r.ready === false, "kukulu_pr_finalize honors a global finalize draft" + (r.error ? `: ${r.error}` : ""));
+    }, { PATH: `${ghDir}:${process.env.PATH}` });
+  }
+}
+
+// ---------------------------------------------------------------- a cargo test filter goes after -- (F-04)
+
+{
+  const statusWith = async (cmd) => {
+    let out;
+    await withServer(plannedRepo({ config: { mutation: { targeted: { rust: { cmd } } } } }), async ({ call }) => { out = await call("kukulu_status"); });
+    return out;
+  };
+  isError(await statusWith("cargo test --workspace {filter}"), /^docs\/kukulu\.json mutation\.targeted\.rust\.cmd runs cargo test with \{filter\} before --; cargo test takes one TESTNAME, so a list filter fails\. Write it as "cargo test <options> -- \{filter\}"$/, "a cargo test targeted command with {filter} before -- is refused");
+  isError(await statusWith("cargo test {filter} -- --nocapture"), /runs cargo test with \{filter\} before --/, "...also when -- comes after the filter");
+  ok(!(await statusWith("cargo test --workspace -- {filter}")).error, "cargo test --workspace -- {filter} loads");
+  isError(await statusWith("cargo build --release && cargo test {filter}"), /^docs\/kukulu\.json mutation\.targeted\.rust\.cmd runs cargo test with \{filter\} before --; cargo test takes one TESTNAME, so a list filter fails\. Write it as "cargo test <options> -- \{filter\}"$/, "a cargo test after another cargo command with {filter} before -- is refused");
+  isError(await statusWith("cargo fmt -- --check && cargo test {filter}"), /^docs\/kukulu\.json mutation\.targeted\.rust\.cmd runs cargo test with \{filter\} before --; cargo test takes one TESTNAME, so a list filter fails\. Write it as "cargo test <options> -- \{filter\}"$/, "a cargo test whose only -- belongs to an earlier command is refused");
+  ok(!(await statusWith("cargo fmt -- --check && cargo test -- {filter}")).error, "cargo fmt -- --check && cargo test -- {filter} loads");
+  ok(!(await statusWith("cargo build && cargo test -- {filter}")).error, "cargo build && cargo test -- {filter} loads");
+  ok(!(await statusWith("cargo +nightly test -- {filter}")).error, "cargo +nightly test -- {filter} loads");
+  ok(!(await statusWith("vendor/bin/phpunit --filter {filter}")).error, "a non-cargo command with {filter} and no -- still loads");
 }
 
 finish();

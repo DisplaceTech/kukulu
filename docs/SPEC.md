@@ -32,7 +32,7 @@ Done means:
 
 **Why a patch version.** No tool is added or removed, and no tool's input schema loses or renames a field. These change for someone upgrading:
 
-- **The guard.** A `sed` that does not edit in place is judged as a read (A-01). A heredoc body is data, except when a shell reads it as a script (A-02). The first loosens a false positive. The second loosens false positives and closes one hole.
+- **The guard.** A `sed` that does not edit in place is judged as a read (A-01). A heredoc body's reads are data unless a shell reads it as a script, and its writes are checked on every line (A-02). The first loosens a false positive. The second loosens false positives on reads and closes one hole.
 - **Defaults.** `policies.finalize` defaults to `"ready"`, so finalize no longer enables auto-merge unless someone asks for it (D-01). This is an owner decision.
 - **New optional keys.** The global file, and each profile in it, may carry `policies` (D-02). A similarity pair may carry `group` (E-01). The plugin's `.mcp.json` sets a per-server `timeout` (B-01).
 - **New refusals.** A command timeout at or above that limit (B-02). A flight slug that an archive already uses (C-03). A `cargo test` targeted command with `{filter}` before `--` (F-04).
@@ -45,7 +45,7 @@ The CHANGELOG lists these under Added, Changed and Fixed, with no "Breaking chan
 ## 2. Goals and non-goals
 
 - Goal: a `sed` that does not edit in place is never judged a write (A-01).
-- Goal: a heredoc's body is not split into commands unless a shell reads it, and an apostrophe in a body no longer hides the commands after it (A-02).
+- Goal: a heredoc body's reads are not judged unless a shell reads it, every body line is still checked for protected-path writes, and an apostrophe in a body no longer hides the commands after it (A-02).
 - Goal: a tool call that runs a long command is not aborted by Claude Code's idle timeout (B-01), and a command timeout the client would cut short is refused when the config loads (B-02).
 - Goal: after a flight is archived, no clean-room genesis is written until the next flight begins (C-01).
 - Goal: `kukulu_release` releases the flight that origin's base branch says was archived last, from any branch, and reports what it did to the local base (C-02).
@@ -198,17 +198,65 @@ The guard has no heredoc handling. `splitSegments` cuts on every unquoted newlin
 
 The change: `splitSegments` recognizes a heredoc and keeps its body out of the segment list.
 
-- **The operator.** An unquoted `<<` that is not `<<<` (here-strings do not change), followed by an optional `-`, optional blanks, and a delimiter word. The word is written bare, `'word'`, `"word"` or `\word`. The last three are the quoted forms.
+- **The operator.** An unquoted `<<` that is not `<<<` (here-strings do not change), followed by an optional `-`, optional blanks, and a delimiter word. The word is written bare, `'word'`, `"word"` or `\word`, or quoted in any part (`E'OF'`). The delimiter is the word after quote removal, and the body counts as quoted when any part of the word was quoted. A `<<` in one of the regions listed under "Where `<<` is not an operator" is not an operator in the first reading (see "Two readings").
 - **The body.** It starts on the line after the one holding the operator. Two heredocs on one line read their bodies in order. A body ends at the first line equal to the word, after leading tabs are stripped for `<<-`. Quotes inside a body never affect splitting.
 - **An unterminated heredoc.** Its body runs to the end of the command.
 - **After the body.** Splitting resumes on the line after the delimiter.
 
-Judgment of a body:
+Where `<<` is not an operator. This is a closed list. Outside quotes, the first reading copies each region below through without looking for `<<`, and the region's own position rule decides whether it applies. A `<<` anywhere else is an operator.
 
-- **Data, by default.** A body is not judged as commands or as arguments. The owning segment's own words and redirections are judged as today, so `cat <<EOF > docs/cleanroom.json` is still denied by its redirection.
-- **A shell reads it as a script** when the owning segment's command word is `sh`, `bash`, `zsh`, `dash` or `ksh` and the segment has no `-c`. Then each body line is split and judged as commands, as if written after the segment.
-- **Substitutions in an unquoted-delimiter body.** The `$(…)` and backtick bodies are still extracted and judged, as `extractSubstitutions` does today, because the shell expands them. A quoted delimiter's body has no expansion and is not scanned.
+1. **Arithmetic:** `$((…))`, and `((…))`.
+2. **Parameter and legacy arithmetic expansion:** `${…}` and `$[…]`.
+3. **Array assignments, at a word start:** the subscript of `name[…]=` or `name[…]+=`, and the list of `name=(…)` or `name+=(…)`.
+4. **A backtick span.**
+5. **A `[[ … ]]` conditional, in command position only.** Command position means one of these, with blanks skipped:
+   - the start of the command;
+   - after a newline, `;`, `&`, `|`, `(` or `{`;
+   - after one of the reserved words `if`, `then`, `else`, `elif`, `while`, `until`, `do`, `time` or `!`, as a whole word.
+
+   Anywhere else `[[` is an ordinary word (`echo [[ <<EOF` holds a real heredoc).
+6. **An extglob group:** `?(`, `*(`, `+(`, `@(` or `!(`, through its matching `)`. In command position, `!(` is ambiguous. With `extglob` off (bash's default) it is `!` and a subshell, so a heredoc inside it is real. With `extglob` on it is a pattern word. The guard cannot see `shopt`, so the first reading copies `!(` through (the pattern reading) and the second reading reads it as a subshell. No other handling is required.
+7. **A comment:** an unquoted `#` at a word start, to the end of the line.
+8. **Not operators anywhere:** `<<<`, and a `<<` followed by no delimiter word. In the first reading only, a delimiter of digits only (`1<<3`) is also not an operator.
+
+Two readings, denied when either denies. A region the first reading gets wrong can only hide an operator. Hiding a real operator exposes its body to the splitter, and an apostrophe in the body then hides the commands after it. That is the hole this requirement closes. Rounds 1 to 5 of the 0.8.1 review each found one more such region. So the guard reads every command twice:
+
+- **First reading:** the closed list above applies.
+- **Second reading:** every unquoted `<<` that is not `<<<` and has a delimiter word is an operator, wherever it sits. No region of the list is skipped, and a digits-only delimiter counts. Quotes and backslash escapes apply as in the first reading.
+- Each reading's bodies are judged by the body rules below, with one exception. In the second reading, the body of an operator that the first reading skipped is judged as commands, as a shell-read body is, never as data. The command is denied when either reading denies, with the first denying reading's reason.
+- The second reading runs only when the first reading skipped a `<<` (a listed region held one, or rule 8's digits case applied). Otherwise the two readings are identical. The 50 ms hook budget in `test/cleanroom.mjs` still holds.
+
+This is why the pair is safe. The second reading never hides a real operator. An operator it invents gets a body, and that body is judged as commands, so nothing after it becomes data. Without that exception, an invented operator's unterminated body would swallow a later real heredoc as data, while the first reading hid that heredoc (round 7's `echo $((1<<3))` / `cat <<1 > x.txt` / `it's` / `1` / `rm -rf .kukulu/cleanroom`). A hole now needs both readings to be wrong about the same `<<`. Writes have a second guard on top: every body line is checked for protected-path writes in both readings (see "Judgment of a body"), so a wrong region can cost at most a read.
+
+Triage for this requirement. Principle 1 still applies, and a heredoc finding becomes a fix task only when all three of these hold:
+
+- the command is allowed under both readings;
+- it writes a protected path, or reads a path under `deny.paths`;
+- real bash runs that write or read.
+
+Everything else is a known-gap candidate:
+
+- an over-denial, whichever reading produces it;
+- a region missing from the list, or a region with the wrong boundary;
+- a construct that is a syntax error in bash;
+- a read through a consumer listed under "Known gaps (reads only)" below.
+
+The closed list and the shell-read cases change only by an edit to this spec.
+
+Judgment of a body. Owner decision of 2026-11-13, after round 8: the write checks never loosen. F-11 is a false positive on reads (prior-art paths in a body), so only the read checks loosen for data. Rounds 1 to 8 each found one more way a shell can come to read a body, and every one was a write regression against the merge base. With writes checked on every body line, no such way can be a write hole.
+
+- **Every body line is checked for writes, in every case.** Each line of every body is judged on its own as one command, and the line's `$(…)` and backtick bodies are judged too, whether or not the delimiter was quoted. A quote opened on a body line ends at the end of that line, so an apostrophe can never hide a later line. For a data body only a denial whose reason starts `protected path:` counts. That is every write rule, the destructive forms and the git forms in these rules. The merge base denied these on body lines too, so no write it denied is allowed now.
+- **Data bodies skip every other check.** A body that no shell reads is not judged by the `deny.paths`, `pathPatterns`, `deny.words`, recursive-form, network, `deny.packages` or `commandPatterns` checks. This is the F-11 fix. The owning segment's own words and redirections are judged as today, so `cat <<EOF > docs/cleanroom.json` is still denied by its redirection.
+- **A shell reads it as a script** in either of two cases. Then each body line is judged by every rule, as commands.
+  - The owning segment's command word is `sh`, `bash`, `zsh`, `dash` or `ksh`, and the segment has no `-c`.
+  - The pipe case, a deliberate over-approximation. Take the command text after the operator with every heredoc body removed. It contains an unquoted `|` or `|&` (not `||`, and not the `>|` redirection). After that pipe, at any grouping depth, a segment runs one of those shells without `-c`, once its grouping and reserved words are removed (the command word as today, so wrappers and basenames count). Examples: `cat <<EOF | bash`, `{ cat <<EOF; } | bash`, `cat <<EOF | ( set -e; bash )`. An unrelated later `| bash` makes the body shell-read, and that over-denial is accepted.
+
+  The pipe case is a regression fix for reads. At the merge base, every body line was judged as a command, so `cat <<'EOF' | bash` / `cat ~/.cargo/registry/a.rs` / `EOF` was denied.
+- **Where a body is judged.** Body lines and substitutions are judged in the directory the owning segment runs in: after every earlier segment's `cd`, and inside any `(` subshell that segment is in. A `cd` on a body line moves only the later lines of the same body, never a segment after the body. A shell-read body runs in a child shell, and a data body never runs.
+- **Depth.** A body is judged at its command's own substitution depth, never one deeper. A body is strictly shorter than its command, so the recursion ends, and no number of heredocs reaches the depth limit. Reaching the depth limit (more than four nested levels of substitution, `-c` or `eval`) anywhere denies, with the reason `command nested too deep: more than four levels of substitution, sh -c or eval; split it into separate commands`. It never allows. No existing fixture reaches the limit.
+- **Substitutions in an unquoted-delimiter body** of a data body are judged by every rule, as `extractSubstitutions` does today, because the shell expands them. A quoted delimiter's body has no expansion, so only the write check above applies to it.
 - A body handed to another interpreter (`python3 - <<'EOF'`) is data. It stays under the existing `interpreter` known limit.
+- **Known gaps (reads only).** These consumers do not make a body shell-read: `.` or `source` of stdin, `eval "$(cat)"`, `while read` loops, `bash -c bash`, a shell stage that `cd`s before it reads stdin, and a script file written by a heredoc and run later. Their writes are still checked on every body line, so each is a read-only gap. Each is a known-gap candidate, not a fix task.
 
 `docs/cleanroom.md` gets a heredoc paragraph under the Bash rules.
 
@@ -219,13 +267,44 @@ Required fixtures:
   - `bash <<'EOF'` / `rm -rf .kukulu/cleanroom` / `EOF`
   - `cat <<EOF > docs/cleanroom.json` / `{}` / `EOF`
   - `cat <<EOF > out.txt` / `$(cat ~/.cargo/registry/a.rs)` / `EOF`
+  - `cat <<EOF | bash` / `rm -rf .kukulu/cleanroom` / `EOF`, and `cat <<'EOF' | sh` with the same body (the pipe case; both denied at the merge base)
+  - `cat <<1 > x.txt` / `it's` / `1` / `rm -rf .kukulu/cleanroom` (a digits-only delimiter is real; the second reading)
+  - `echo $((1<<3))` / `cat <<1 > x.txt` / `it's` / `1` / `rm -rf .kukulu/cleanroom`, and the same lines after `# a << b` (an invented operator's body is commands)
+  - every form in round 5's REVIEW table (`!(cat <<EOF` … and `echo [[ <<EOF` …), each with an apostrophe body
+  - `x=$(!(cat <<EOF` / `it's` / `EOF` / `rm -rf .kukulu/cleanroom` / `: ')'` / `))` (allowed at the merge base; the second reading closes it)
+  - `shopt -s extglob` / `!(x<<y)` / `rm -rf .kukulu/cleanroom` and `echo $((1<<y))` / `rm -rf .kukulu/cleanroom` (the first reading, which must keep judging the line after a non-operator `<<`)
+  - `cat <<'EOF' > notes.txt` / `rm -rf .kukulu/cleanroom` / `EOF`, and `cat <<'EOF' > notes.txt` / `$(rm -rf .kukulu)` / `EOF` (every body line is checked for writes; both denied at the merge base)
+  - `cat <<'EOF' > notes.txt` / `it's` / `rm -rf .kukulu/cleanroom` / `EOF` (a quote ends at its line's end)
+  - `cat <<EOF > notes.txt` / `cd sub` / `rm -rf ../.kukulu/cleanroom` / `EOF` (a body's `cd` moves its later lines)
+  - `cd build` / `bash <<EOF` / `rm -rf ../.kukulu/cleanroom` / `EOF`; `cd build` / `cat <<EOF | bash` with the same body; `bash <<EOF` / `cd build` / `EOF` / `rm -rf .kukulu/cleanroom` (a body is judged where its segment runs, and its `cd` never leaks)
+  - `cat <<EOF | ( set -e; bash )`, `cat <<EOF | if true; then bash; fi`, `{ cat <<EOF; } | bash` and `cat <<EOF | # c` / … / `bash`, each with the body `rm -rf .kukulu/cleanroom`
+  - `cat <<'EOF' | ( set -e; bash )` / `cat ~/.cargo/registry/a.rs` / `EOF` (the pipe case judges reads)
+  - six `echo $((1<<3))` lines, then `cat <<1 > x.txt` / `it's` / `1` / `rm -rf .kukulu/cleanroom` (depth never allows)
 - allowed:
+  - `cat <<'EOF' > notes.txt` / `cat ~/.cargo/registry/a.rs` / `EOF` (a read in a data body is data)
+  - `cd build` / `bash <<EOF` / `rm -rf .kukulu/cleanroom` / `EOF` (bash removes `build/.kukulu/cleanroom`, which is not protected)
+  - `cat <<'EOF' | grep x` / `{"priorArt": ["~/.cargo/registry/", "~/.cargo/git/"]}` / `EOF` (a pipe into a command that is not a shell carries data)
+  - `[[ a =~ (x<<y) ]] && echo ok` and `echo $((1<<3))` (single lines, allowed under both readings)
   - `cat > build/k.json <<'EOF'` / `{"priorArt": ["~/.cargo/registry/", "~/.cargo/git/"]}` / `EOF`
-  - `cat <<'EOF' > notes.txt` / `$(rm -rf .kukulu)` / `EOF`
   - `python3 - <<'EOF'` / `print("~/.cargo/git/x")` / `EOF`
   - `cat <<-EOF > build/a.txt` / tab-indented body / tab-indented `EOF` / `echo done`
 
-The existing cleanflate false-positive fixtures with Python heredocs stay allowed. Any existing fixture whose decision changes is listed in the commit body with the reason. A denial may become an allow only when its body is data handed to a non-shell command.
+The existing cleanflate false-positive fixtures with Python heredocs stay allowed. Any existing fixture whose decision changes is listed in the commit body with the reason. A denial may become an allow only when its body is data handed to a non-shell command, and never when the denial's reason starts `protected path:`.
+
+These existing allowed fixtures become denied under the write check on every body line. That is the accepted over-denial: each holds a protected-path write on a body line, and the merge base denied each one. The task that implements the write check changes their `expect` to `denied` with a `protected path: .*` reason and lists them in its commit body:
+
+- `cat <<'EOF' > notes.txt ... $(rm -rf .kukulu) (P0-02)`
+- `quoted heredoc E'OF' body not scanned (R1-02)`
+- `echo ${#x}<<y NL rm -rf .kukulu/cleanroom (R2-02)`
+- `((cd src); cat <<'EOF' > notes.txt NL $(rm -rf .kukulu) NL EOF NL ) (R2-03)`
+- `a[1]<<n NL rm -rf .kukulu/cleanroom (R3-01)`
+- `echo $(cat <<x) NL rm -rf .kukulu/cleanroom NL x (R3-01)`
+- `[[ -n a ]] <<y NL rm -rf .kukulu/cleanroom (R4-01)`
+- `[[ -n a ]] && cat <<EOF > notes.txt NL rm -rf .kukulu/cleanroom NL EOF (R4-01)`
+- `echo [[ <<EOF > notes.txt NL rm -rf .kukulu/cleanroom NL EOF NL echo ]] (R5-01)`
+- `cat <<EOF | bash -c 'echo hi' NL rm -rf .kukulu/cleanroom NL EOF (R6-02)`
+
+No other existing fixture changes its decision.
 
 ### B — Long tool calls
 
@@ -543,6 +622,7 @@ None block the build. Each is decided here, so the planner records it under `## 
 4. **The MCP timeout value.** 24 h, an ⚠️ ASSUMPTION in `.mcp.json` only (§5.5). The owner may tune it.
 5. **No progress heartbeat.** It is deferred to 0.9.0 (§2). B-01 covers the timeout through a documented setting. A heartbeat would need a second writer on the MCP channel from a child process, with pitfalls that no fake can test, such as inherited descriptors, non-blocking writes and half-written frames. And it helps only if Claude Code sends a `progressToken`, which its docs do not say.
 6. **The reviewer's halt (F-03).** A tool grant and a skill rule, not a new verdict for `kukulu_review_submit`. A halt is already the pipeline's "a human must act" state, and resuming it needs nothing new.
+7. **A-02's operator contexts.** These are a closed list with position rules, read twice. A command is denied when either reading denies, and A-02 has its own triage rule. Owner decision of 2026-11-13, made after five review rounds that each found one more context. A heredoc piped into a shell is judged as commands, because the first A-02 implementation regressed that case. A second owner decision of 2026-11-13, made after round 8: every body line is checked for protected-path writes, and only reads and the other checks loosen for data bodies. The pipe case becomes a deliberate over-approximation, and the depth limit denies.
 
 ## Appendix A: item map
 
@@ -575,9 +655,11 @@ No feedback was logged. Its SUMMARY's note, that `kukulu_mutate` was unavailable
 Each is a place where the brief allowed two readings:
 
 1. **A-01's mechanism.** `sed` stays in both family lists and is gated on in-place options, rather than being removed from `WRITE_FAMILY`. Removal would drop the in-place denials that three fixtures pin. The `w` command is a known gap, because it is no worse than today and modelling sed's script language is a parser principle 1 rules out.
-2. **A-02's shell case.** A body that a shell reads is judged as commands, because that is the one case where the guard knows exactly what the body means. Bodies for every other interpreter are data, as the `interpreter` known limit already says.
+2. **A-02's shell case.** A body that a shell reads is judged as commands, because that is the one case where the guard knows exactly what the body means. A shell reads the body when it owns the heredoc or is piped the heredoc. Bodies for every other interpreter are data, as the `interpreter` known limit already says.
 3. **B-01 over a heartbeat.** The documented per-server `timeout` is one line of config and needs no change to the transport. The heartbeat is §9 question 5.
 4. **C-01's place.** The fix moves the genesis write, rather than having the archive delete the policy or switch the hooks off. The policy is the project's, and the next flight needs it in place.
 5. **C-02's source of truth.** Origin's base branch, because the merged PR on origin is what a release tags. The local base is fast-forwarded as a convenience and reported, never relied on.
 6. **D-02's scope.** Every policy key can be layered, not only `finalize`, so the next default an owner disagrees with needs no release.
 7. **E-01's shape.** An optional `group` on each pair, with today's single-band config as the implicit `default` group, so existing policies and bundles keep their meaning.
+8. **A-02's two readings.** The alternative was to make the list of non-operator contexts exact. That needs a bash parser, which principle 1 rules out, and every review round proved the list incomplete. A second reading that never hides an operator makes a wrong list cost an over-denial instead of a hole.
+9. **A-02 checks writes on every body line.** The alternative was to keep bodies fully data and model every way a shell can come to read one. Rounds 1 to 8 found a new way each round (pipes, grouping, `cd`, nesting, invented operators), and each was a write regression against the merge base. F-11 is a read false positive, so the fix loosens reads only. The cost is an over-denial of a data heredoc that spells a protected-path write, such as documentation that shows `rm -rf .kukulu/cleanroom`. The merge base denied those too.

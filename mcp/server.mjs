@@ -99,7 +99,7 @@ if (envVar("CONTROLLER_SOCKET")) {
 }
 
 // Keep in sync with .claude-plugin/plugin.json and package.json; test/plugin.mjs checks it.
-const VERSION = "0.8.0";
+const VERSION = "0.8.1";
 
 // ---------------------------------------------------------------- clean-room mode (SPEC D-06)
 
@@ -856,39 +856,37 @@ const FINALIZE_POLICIES = ["auto", "ready", "draft"];
 const MERGE_METHODS = ["merge", "squash", "rebase"];
 const FLIGHT_SLUG = /^[a-z0-9][a-z0-9-]{0,39}$/;
 
-/** Validate `docs/kukulu.json`'s `policies` block; throws, never defaults a bad value away. */
-function validatePolicies(policies) {
+/**
+ * Validate a `policies` block; throws, never defaults a bad value away. The project file's messages are the
+ * original ones; any other `where` (the global file, a profile) starts every message with it, and the enum
+ * keys end with `; got <value>`, so the message names the file that is wrong.
+ */
+function validatePolicies(policies, where = "docs/kukulu.json", joiner = " ") {
   if (policies === undefined) return;
+  const own = where === "docs/kukulu.json";
+  // A profile's block is named profiles.<name>.policies, with a dot (SPEC D-02).
+  const at = `${where}${joiner}policies`;
+  const got = (v) => (own ? "" : `; got ${JSON.stringify(v)}`);
   if (typeof policies !== "object" || policies === null || Array.isArray(policies)) {
-    throw new ToolError("docs/kukulu.json 'policies' must be an object");
+    throw new ToolError(own ? "docs/kukulu.json 'policies' must be an object" : joiner === "." ? `${at} must be an object` : `${where} 'policies' must be an object`);
   }
   for (const key of Object.keys(policies)) {
-    if (!POLICY_KEYS.includes(key)) throw new ToolError(`docs/kukulu.json policies has an unknown key '${key}'`);
+    if (!POLICY_KEYS.includes(key)) throw new ToolError(`${at} has an unknown key '${key}'`);
   }
-  if (policies.signing !== undefined && !SIGNING_POLICIES.includes(policies.signing)) {
-    throw new ToolError(`docs/kukulu.json policies.signing must be one of ${SIGNING_POLICIES.join(", ")}`);
-  }
-  if (policies.push !== undefined && typeof policies.push !== "boolean") {
-    throw new ToolError("docs/kukulu.json policies.push must be a boolean");
-  }
-  if (policies.pr !== undefined && !PR_POLICIES.includes(policies.pr)) {
-    throw new ToolError(`docs/kukulu.json policies.pr must be one of ${PR_POLICIES.join(", ")}`);
-  }
-  if (policies.feedback !== undefined && typeof policies.feedback !== "boolean") {
-    throw new ToolError("docs/kukulu.json policies.feedback must be a boolean");
-  }
-  if (policies.archive !== undefined && typeof policies.archive !== "boolean") {
-    throw new ToolError("docs/kukulu.json policies.archive must be a boolean");
-  }
-  if (policies.finalize !== undefined && !FINALIZE_POLICIES.includes(policies.finalize)) {
-    throw new ToolError(`docs/kukulu.json policies.finalize must be one of ${FINALIZE_POLICIES.join(", ")}`);
-  }
-  if (policies.mergeMethod !== undefined && !MERGE_METHODS.includes(policies.mergeMethod)) {
-    throw new ToolError(`docs/kukulu.json policies.mergeMethod must be one of ${MERGE_METHODS.join(", ")}`);
-  }
-  if (policies.syncBase !== undefined && typeof policies.syncBase !== "boolean") {
-    throw new ToolError("docs/kukulu.json policies.syncBase must be a boolean");
-  }
+  const bool = (key) => {
+    if (policies[key] !== undefined && typeof policies[key] !== "boolean") throw new ToolError(`${at}.${key} must be a boolean`);
+  };
+  const oneOf = (key, list) => {
+    if (policies[key] !== undefined && !list.includes(policies[key])) throw new ToolError(`${at}.${key} must be one of ${list.join(", ")}${got(policies[key])}`);
+  };
+  oneOf("signing", SIGNING_POLICIES);
+  bool("push");
+  oneOf("pr", PR_POLICIES);
+  bool("feedback");
+  bool("archive");
+  oneOf("finalize", FINALIZE_POLICIES);
+  oneOf("mergeMethod", MERGE_METHODS);
+  bool("syncBase");
 }
 
 /**
@@ -978,6 +976,19 @@ function validateMutation(mutation) {
     }
     if (typeof entry.cmd !== "string" || !entry.cmd) throw new ToolError(`${where}.cmd must be a non-empty string`);
     if (entry.cmd.split("{filter}").length - 1 !== 1) throw new ToolError(`${where}.cmd must contain {filter} exactly once`);
+    // `cargo test` takes one TESTNAME; libtest, behind `--`, takes several, so a list filter must go after it.
+    const words = entry.cmd.split(/\s+/).filter(Boolean);
+    // Every `cargo` in the command counts: `cargo build && cargo test {filter}` runs the second one too.
+    for (let at = words.indexOf("cargo"); at !== -1; at = words.indexOf("cargo", at + 1)) {
+      let k = at + 1;
+      while (k < words.length && /^[-+]/.test(words[k])) k++;
+      // Each cargo test is compared with its own `--`: one that belongs to an earlier command does not count.
+      const dashes = words.indexOf("--", k);
+      const filterAt = words.findIndex((w, j) => j > k && w.includes("{filter}"));
+      if (words[k] === "test" && (dashes === -1 || (filterAt !== -1 && filterAt < dashes))) {
+        throw new ToolError(`${where}.cmd runs cargo test with {filter} before --; cargo test takes one TESTNAME, so a list filter fails. Write it as "cargo test <options> -- {filter}"`);
+      }
+    }
     if (entry.timeoutMs !== undefined && (!Number.isInteger(entry.timeoutMs) || entry.timeoutMs <= 0)) {
       throw new ToolError(`${where}.timeoutMs must be a positive integer`);
     }
@@ -1010,16 +1021,23 @@ function validateSimilarity(sim) {
   }
   if (!Array.isArray(sim.pairs) || !sim.pairs.length) throw new ToolError(`${where}.pairs must be a non-empty array of { id, role, left, right }`);
   const seen = new Set();
-  const roles = { negative: 0, positive: 0, test: 0 };
+  const groups = new Map(); // group slug -> role counts, in first-appearance order
+  let grouped = false;
   sim.pairs.forEach((p, i) => {
     const at = `${where}.pairs[${i}]`;
     if (!isObj(p)) throw new ToolError(`${at} must be an object { id, role, left, right }`);
-    for (const k of Object.keys(p)) if (!["id", "role", "left", "right", "control"].includes(k)) throw new ToolError(`${at} has an unknown key '${k}'`);
+    for (const k of Object.keys(p)) if (!["id", "role", "left", "right", "control", "group"].includes(k)) throw new ToolError(`${at} has an unknown key '${k}'`);
     if (typeof p.id !== "string" || !PAIR_ID.test(p.id)) throw new ToolError(`${at}.id must be a slug (lowercase letters, digits and -, at most 40 characters)`);
     if (seen.has(p.id)) throw new ToolError(`${where}.pairs defines the id '${p.id}' more than once`);
     seen.add(p.id);
     if (!PAIR_ROLES.includes(p.role)) throw new ToolError(`${at}.role must be one of ${PAIR_ROLES.join(", ")} (got ${JSON.stringify(p.role)})`);
-    roles[p.role]++;
+    if (p.group !== undefined) {
+      if (typeof p.group !== "string" || !PAIR_ID.test(p.group)) throw new ToolError(`${at}.group must be a slug (letters, digits and -); got ${JSON.stringify(p.group)}`);
+      grouped = true;
+    }
+    const g = p.group ?? "default";
+    if (!groups.has(g)) groups.set(g, { negative: 0, positive: 0, test: 0 });
+    groups.get(g)[p.role]++;
     if (p.control !== undefined) {
       if (p.role !== "positive") throw new ToolError(`${at}.control is only legal on the pair with role "positive"`);
       if (!nonEmptyString(p.control)) throw new ToolError(`${at}.control must be a non-empty string: the directory of a verified control bundle`);
@@ -1029,9 +1047,12 @@ function validateSimilarity(sim) {
       if (p[side] === "subject" && sim.subject === undefined) throw new ToolError(`${at}.${side} is "subject", but ${where}.subject is not set`);
     }
   });
-  if (roles.negative !== 1) throw new ToolError(`${where}.pairs needs exactly one pair with role "negative" (found ${roles.negative})`);
-  if (roles.positive !== 1) throw new ToolError(`${where}.pairs needs exactly one pair with role "positive" (found ${roles.positive})`);
-  if (roles.test < 1) throw new ToolError(`${where}.pairs needs at least one pair with role "test"`);
+  for (const [g, roles] of groups) {
+    const named = grouped ? ` group ${JSON.stringify(g)}` : "";
+    if (roles.negative !== 1) throw new ToolError(`${where}.pairs${named} needs exactly one pair with role "negative" (found ${roles.negative})`);
+    if (roles.positive !== 1) throw new ToolError(`${where}.pairs${named} needs exactly one pair with role "positive" (found ${roles.positive})`);
+    if (roles.test < 1) throw new ToolError(`${where}.pairs${named} needs at least one pair with role "test"`);
+  }
   if (sim.languages !== undefined) {
     if (!isObj(sim.languages) || !Object.keys(sim.languages).length) throw new ToolError(`${where}.languages must be an object mapping an extension such as ".rs" to a language`);
     for (const [ext, lang] of Object.entries(sim.languages)) {
@@ -1057,7 +1078,7 @@ function normalizeSimilarity(sim) {
   if (sim === undefined) return null;
   return {
     subject: sim.subject ?? [],
-    pairs: sim.pairs.map((p) => ({ id: p.id, role: p.role, left: p.left, right: p.right, ...(p.role === "positive" ? { control: p.control ?? null } : {}) })),
+    pairs: sim.pairs.map((p) => ({ id: p.id, role: p.role, left: p.left, right: p.right, ...(p.group !== undefined ? { group: p.group } : {}), ...(p.role === "positive" ? { control: p.control ?? null } : {}) })),
     languages: sim.languages ?? DEFAULT_SIMILARITY_LANGUAGES,
     // ⚠️ ASSUMPTION: the n-gram sizes, identifier and comment bounds come from cleanflate-bench; the margin is strict "pos > neg" until measured.
     ngram: sim.ngram ?? [5, 10],
@@ -1158,11 +1179,27 @@ function validateConstraints(constraints, planIds = null) {
 }
 
 function cfg() {
-  return cfgFrom(loadConfig() || {}, exists(P.plan) ? planIdsOf(read(P.plan)) : null);
+  const raw = loadConfig() || {};
+  return { ...cfgFrom(raw, exists(P.plan) ? planIdsOf(read(P.plan)) : null), policies: resolvePolicies(raw).policies };
 }
 
-/** The resolved config for parsed `docs/kukulu.json` content; `planIds` (or null to skip the check) are the tasks a `from` may name. */
-function cfgFrom(c, planIds) {
+let mcpTimeoutCache;
+
+/** The per-server `timeout` of `.mcp.json`'s kukulu entry in the plugin, or null when the file, the entry or a positive integer value is missing. Read once per process. */
+function mcpTimeoutMs() {
+  if (mcpTimeoutCache !== undefined) return mcpTimeoutCache;
+  mcpTimeoutCache = null;
+  try {
+    const t = JSON.parse(fs.readFileSync(path.join(PLUGIN_ROOT, ".mcp.json"), "utf8"))?.mcpServers?.kukulu?.timeout;
+    if (Number.isInteger(t) && t > 0) mcpTimeoutCache = t;
+  } catch {
+    // No readable .mcp.json: the plugin sets no limit, so nothing is refused.
+  }
+  return mcpTimeoutCache;
+}
+
+/** The resolved config for parsed `docs/kukulu.json` content; `planIds` (or null to skip the check) are the tasks a `from` may name; `limit` is the plugin's MCP tool-call limit, or null. */
+function cfgFrom(c, planIds, limit = mcpTimeoutMs()) {
   validatePolicies(c.policies);
   if (c.flight !== undefined && (typeof c.flight !== "string" || !FLIGHT_SLUG.test(c.flight))) {
     throw new ToolError(`docs/kukulu.json flight must be a slug matching ${FLIGHT_SLUG} (lowercase letters, digits and -, at most 40 characters)`);
@@ -1188,7 +1225,7 @@ function cfgFrom(c, planIds) {
   );
   const norm = (entry, i, where, opts) => normalizeCommand(entry, commandTimeoutMs, `docs/kukulu.json ${where}[${i}]`, opts);
   const gated = { allowFrom: true, planIds };
-  return {
+  const resolved = {
     verify: (c.verify || []).map((e, i) => norm(e, i, "verify", gated)),
     extraVerify: Object.fromEntries(
       Object.entries(c.extraVerify || {}).map(([prefix, arr]) => [prefix, (arr || []).map((e, i) => norm(e, i, `extraVerify['${prefix}']`, gated))]),
@@ -1225,11 +1262,26 @@ function cfgFrom(c, planIds) {
       feedback: c.policies?.feedback ?? true,
       // An owner decision, not an assumption: two release flights needed the archive, so a finished flight archives itself unless this is false.
       archive: c.policies?.archive ?? true,
-      finalize: c.policies?.finalize ?? "auto",
+      // An owner decision, not an assumption: a flight's pull request is marked ready for a human to merge unless "auto" is set (SPEC D-01).
+      finalize: c.policies?.finalize ?? "ready",
       mergeMethod: c.policies?.mergeMethod ?? "merge",
       syncBase: c.policies?.syncBase ?? true,
     },
   };
+  if (limit !== null) {
+    const tail = `is not below the plugin's MCP tool-call limit of ${limit} ms (.mcp.json "timeout"); Claude Code would abort the call before the command ends. Lower it, or split the command.`;
+    if (commandTimeoutMs >= limit) throw new ToolError(`docs/kukulu.json commandTimeoutMs ${commandTimeoutMs} ${tail}`);
+    const timed = [
+      ...resolved.verify.map((e, i) => [`verify[${i}]`, e]),
+      ...Object.entries(resolved.extraVerify).flatMap(([prefix, arr]) => arr.map((e, i) => [`extraVerify['${prefix}'][${i}]`, e])),
+      ...resolved.parallel.setup.map((e, i) => [`parallel.setup[${i}]`, e]),
+      ...Object.entries(targeted).map(([name, e]) => [`mutation.targeted.${name}`, e]),
+    ];
+    for (const [where, e] of timed) {
+      if (e.timeoutMs >= limit) throw new ToolError(`docs/kukulu.json ${where}.timeoutMs ${e.timeoutMs} ${tail}`);
+    }
+  }
+  return resolved;
 }
 
 // ---------------------------------------------------------------- routing config
@@ -1247,7 +1299,7 @@ const ROLE_KEYS = ["model", "effort"];
 const EFFORTS = ["low", "medium", "high", "xhigh", "max"];
 const ANTHROPIC_ALIASES = ["fable", "opus", "sonnet", "haiku", "inherit"];
 const PERMISSION_MODES = ["default", "acceptEdits", "auto", "dontAsk", "bypassPermissions", "plan", "manual"];
-const GLOBAL_KEYS = ["roles", "profiles", "profile", "permissionMode", "runners"];
+const GLOBAL_KEYS = ["roles", "profiles", "profile", "permissionMode", "runners", "policies"];
 
 const isAnthropicModel = (m) => ANTHROPIC_ALIASES.includes(m) || m.startsWith("claude-");
 
@@ -1324,12 +1376,13 @@ function loadGlobalConfig() {
 }
 
 /** `where` names the block itself, e.g. "global config <path> roles" or "docs/kukulu.json roles". */
-function validateRolesBlock(roles, where) {
+function validateRolesBlock(roles, where, { allowPolicies = false } = {}) {
   if (roles === undefined) return;
   if (typeof roles !== "object" || roles === null || Array.isArray(roles)) {
     throw new ToolError(`${where} must be an object`);
   }
   for (const [role, block] of Object.entries(roles)) {
+    if (allowPolicies && role === "policies") continue; // a profile's policies are validated by resolvePolicies
     if (!ROLES.includes(role)) throw new ToolError(`${where} names an unknown role '${role}'`);
     if (typeof block !== "object" || block === null || Array.isArray(block)) {
       throw new ToolError(`${where}.${role} must be an object`);
@@ -1438,6 +1491,41 @@ function validatePermissionMode(mode, where) {
 }
 
 /**
+ * Every policy key, layered per key: default < the global file's `policies` < the active profile's `policies`
+ * < the project's. `sources[key]` says which layer won. The active profile is the one resolveRouting selects
+ * (KUKULU_PROFILE, else the global `profile`); a profile that does not exist is resolveRouting's refusal, not
+ * this function's.
+ */
+function resolvePolicies(project = loadConfig() || {}) {
+  const global = loadGlobalConfig();
+  validatePolicies(global.data.policies, global.path);
+  const profiles = global.data.profiles;
+  if (profiles !== undefined && typeof profiles === "object" && profiles !== null && !Array.isArray(profiles)) {
+    for (const [name, block] of Object.entries(profiles)) {
+      if (typeof block === "object" && block !== null && !Array.isArray(block)) validatePolicies(block.policies, `${global.path} profiles.${name}`, ".");
+    }
+  }
+  validatePolicies(project.policies);
+  const profile = envVar("PROFILE") || (typeof global.data.profile === "string" ? global.data.profile : null) || null;
+  const layers = [
+    ["global", global.data.policies],
+    [`profile:${profile}`, profile !== null && typeof profiles === "object" && profiles !== null ? profiles[profile]?.policies : undefined],
+    ["project", project.policies],
+  ];
+  const policies = { ...cfgFrom({}, null).policies };
+  const sources = Object.fromEntries(POLICY_KEYS.map((k) => [k, "default"]));
+  for (const [source, block] of layers) {
+    for (const key of POLICY_KEYS) {
+      if (block?.[key] !== undefined) {
+        policies[key] = block[key];
+        sources[key] = source;
+      }
+    }
+  }
+  return { policies, sources };
+}
+
+/**
  * Merge the plugin defaults, the global file, the selected profile and the
  * project override, per role, per key, tracking where each surviving value
  * came from. Never writes anything; throws on any malformed input.
@@ -1452,7 +1540,7 @@ function resolveRouting() {
       throw new ToolError(`global config ${global.path} 'profiles' must be an object`);
     }
     for (const [name, block] of Object.entries(global.data.profiles)) {
-      validateRolesBlock(block, `global config ${global.path} profiles.${name}`);
+      validateRolesBlock(block, `global config ${global.path} profiles.${name}`, { allowPolicies: true });
     }
   }
   if (global.data.profile !== undefined && (typeof global.data.profile !== "string" || !global.data.profile)) {
@@ -1639,6 +1727,8 @@ function configShow() {
     agentsStale: stale,
     permissionRule: mcpAllowRulePresent() ? "present" : "missing",
     archive: cfg().policies.archive,
+    policies: resolvePolicies().policies,
+    policySources: resolvePolicies().sources,
     table: routingTable(r),
   };
 }
@@ -1727,7 +1817,8 @@ const DEFAULT_STATE = {
   summarized: false,
   halted: null,
   preexistingUntracked: [],
-  policies: { signing: "auto", push: true, pr: "draft", feedback: true },
+  // Every policy with its default, from the one place that writes them.
+  policies: cfgFrom({}, null).policies,
   signing: null,
   rounds: [],
 };
@@ -2258,14 +2349,14 @@ function gitFacts() {
 
 /**
  * The longest timeout any command Kūkulu runs on the model's behalf can
- * take (`verify`, `extraVerify`, `parallel.setup`), or null with none. Every
- * tool handler is synchronous, so a stream's bookkeeping call can wait
- * behind another stream's longest verify; Claude Code's MCP tool-call
- * timeout (`MCP_TOOL_TIMEOUT`) has to exceed this plus headroom.
+ * take (`verify`, `extraVerify`, `parallel.setup`, `mutation.targeted`), or
+ * null with none. Every tool handler is synchronous, so a stream's
+ * bookkeeping call can wait behind another stream's longest verify; the
+ * plugin's MCP limit (`mcpTimeoutMs`) has to exceed this plus headroom.
  */
 function longestCommandTimeoutMs() {
   const cc = cfg();
-  const all = [...cc.verify, ...Object.values(cc.extraVerify).flat(), ...cc.parallel.setup];
+  const all = [...cc.verify, ...Object.values(cc.extraVerify).flat(), ...cc.parallel.setup, ...Object.values(cc.mutation.targeted)];
   return all.length ? Math.max(...all.map((c) => c.timeoutMs)) : null;
 }
 
@@ -2293,6 +2384,7 @@ function status() {
     signing: st.signing,
     feedbackCount: countFeedback(),
     longestCommandTimeoutMs: longestCommandTimeoutMs(),
+    mcpTimeoutMs: mcpTimeoutMs(),
     review: { mutationFixRounds: cfg().review.mutationFixRounds },
     sandbox: envVar("SANDBOX") ?? null,
     reviewRoundsInPlan: reviewRoundCount(),
@@ -2449,7 +2541,7 @@ function nextDecision() {
   // accurate even before this round's kukulu_run_start has recorded
   // state.policies (round 0, before the implementer's first call).
   let gateResult = null;
-  const policySentence = `Run policies: signing=${c.policies.signing}, push=${c.policies.push ? "on" : "off"}, pr=${c.policies.pr}.${cleanroomOn(c) ? ` ${CLEANROOM_SENTENCE}` : ""}${signingNoteFor(st.signing) ? ` ${signingNoteFor(st.signing)}` : ""}`;
+  const policySentence = `Run policies: signing=${c.policies.signing}, push=${c.policies.push ? "on" : "off"}, pr=${c.policies.pr}, finalize=${c.policies.finalize} (${resolvePolicies().sources.finalize}).${cleanroomOn(c) ? ` ${CLEANROOM_SENTENCE}` : ""}${signingNoteFor(st.signing) ? ` ${signingNoteFor(st.signing)}` : ""}`;
   const stage = (name, reason, extra = {}) => {
     const info = agentInfo(name);
     return {
@@ -2464,6 +2556,8 @@ function nextDecision() {
       round: st.round,
       reviewRound: st.round + 1,
       reason,
+      // The Agent tool requires a description; the display name carries its macron letter as an escape in source.
+      ...(PROMPTS[name] ? { description: `K\u016bkulu ${name}${st.round > 0 ? ` round ${st.round}` : ""}` } : {}),
       gate: gateResult ? { ok: gateResult.ok, checked: gateResult.checked } : null,
       prompt: PROMPTS[name] ? PROMPTS[name](st.round, s, policySentence, st.round + 1) : null,
       ...extra,
@@ -2500,6 +2594,7 @@ function nextDecision() {
       reason: `wave ${wave.index}: ${ordered.length} stream(s) to run in parallel (${ordered.join(", ")})`,
       streams: ordered.map((name) => ({
         stream: name,
+        description: `K\u016bkulu stream ${name}`,
         agent: info.agent,
         agentFallback: info.agentFallback,
         fallbackAgent: info.fallbackAgent,
@@ -2514,9 +2609,6 @@ function nextDecision() {
   const policyPresent = cleanroomOn(c);
   const broken = cleanroomModeBreak(st, policyPresent, s.planPresent);
   if (broken) return stage("halt", modeBreakText(broken));
-  if (policyPresent && !st.cleanroom) cleanroomGenesis(c, st);
-  gateResult = runGate("controller", st);
-  if (gateResult && !gateResult.ok) return stage("halt", `clean-room gate failed: ${gateResult.failed.check}: ${gateResult.failed.reason}`);
   if (st.halted) return stage("halt", st.haltCap || st.halted.includes("kukulu_run_resume") ? st.halted : `${st.halted} — ${RESUME_HINT}`);
   if (st.awaitingSigning) {
     const mb = git(["merge-base", c.baseBranch, "HEAD"], { allowFail: true }).out || "<merge-base>";
@@ -2525,6 +2617,10 @@ function nextDecision() {
   if (st.archived && !s.planPresent && exists(path.join(ROOT, st.archived.dir, "SPEC.md")) && read(P.spec) === read(path.join(ROOT, st.archived.dir, "SPEC.md"))) {
     return stage("done", `flight ${st.archived.slug} is archived in ${st.archived.dir}; edit docs/SPEC.md for the next flight, then run /kukulu:go-flight`);
   }
+  // Past the halted, awaiting-signing and archived-done returns: a finished or stopped flight never starts or re-checks its clean-room log (SPEC C-01).
+  if (policyPresent && !st.cleanroom) cleanroomGenesis(c, st);
+  gateResult = runGate("controller", st);
+  if (gateResult && !gateResult.ok) return stage("halt", `clean-room gate failed: ${gateResult.failed.check}: ${gateResult.failed.reason}`);
   if (!s.planPresent || !s.progressPresent || !s.configPresent) {
     const planReason = "no plan on disk (docs/PLAN.md, docs/PROGRESS.md and docs/kukulu.json are all required)";
     // Under `required` a broken signer would fail the planner's own commit, after all its work; say so now (SPEC B-04).
@@ -2988,6 +3084,8 @@ function taskNext({ stream } = {}) {
       files: task.files,
       dependsOn: task.depends,
       dependencyLogs,
+      // The task's own log: an unblock or reopen reason reaches the implementer through it.
+      taskLog: pr.logs[task.id] ?? null,
       skipped,
       counts: counts(pr.tasks),
       resumed,
@@ -3743,39 +3841,42 @@ function walkFiles(dir) {
 }
 
 /**
- * Check the positive pair's control bundle (SPEC B-02): the bundle's own verifier, run with
+ * Check every positive pair's control bundle (SPEC B-02): the bundle's own verifier, run with
  * --expect control-positive, must pass, and the pair's left side must be at the commit the control
- * flight was made at. Returns what similarity.json records, or null when the pair names no bundle.
+ * flight was made at. Returns a map from pair id to what similarity.json records, or null when no
+ * positive pair names a bundle.
  */
 function verifyControlBundle(sim) {
-  const positive = sim.pairs.find((p) => p.role === "positive");
-  if (!positive?.control) return null;
-  const dir = similarityDirs(positive.control, sim)[0];
-  const refuse = (why) => new ToolError(`the positive pair's control bundle ${dir} does not verify as a positive control: ${why}`);
-  const verifier = path.join(dir, "verify.mjs");
-  if (!exists(verifier)) throw refuse("verify.mjs is missing from it");
-  // Behind the sandbox the bundle is a directory the box could have written, so its own verify.mjs would run on the host (SPEC C-04).
-  const script = envVar("SANDBOX") ? path.join(PLUGIN_ROOT, "scripts", "verify-attestation.mjs") : verifier;
-  const run = spawnSync(process.execPath, [script, dir, "--expect", "control-positive", "--json"], { encoding: "utf8", timeout: GATE_SELF_TEST_MS });
-  let verdict = null;
-  try {
-    verdict = JSON.parse(run.stdout);
-  } catch {
-    verdict = null;
+  const records = {};
+  for (const positive of sim.pairs.filter((p) => p.role === "positive" && p.control)) {
+    const dir = similarityDirs(positive.control, sim)[0];
+    const refuse = (why) => new ToolError(`the positive pair's control bundle ${dir} does not verify as a positive control: ${why}`);
+    const verifier = path.join(dir, "verify.mjs");
+    if (!exists(verifier)) throw refuse("verify.mjs is missing from it");
+    // Behind the sandbox the bundle is a directory the box could have written, so its own verify.mjs would run on the host (SPEC C-04).
+    const script = envVar("SANDBOX") ? path.join(PLUGIN_ROOT, "scripts", "verify-attestation.mjs") : verifier;
+    const run = spawnSync(process.execPath, [script, dir, "--expect", "control-positive", "--json"], { encoding: "utf8", timeout: GATE_SELF_TEST_MS });
+    let verdict = null;
+    try {
+      verdict = JSON.parse(run.stdout);
+    } catch {
+      verdict = null;
+    }
+    if (run.status !== 0 || !verdict?.ok) {
+      const first = verdict?.reasons?.[0];
+      throw refuse(first ? `${first.check}: ${first.reason}` : (run.stderr || "").trim().split("\n")[0] || `exit ${run.status}`);
+    }
+    const manifestBytes = fs.readFileSync(path.join(dir, "manifest.json"));
+    const manifest = JSON.parse(manifestBytes.toString("utf8"));
+    const left = positive.left === "subject" ? ROOT : similarityDirs(positive.left, sim)[0];
+    const at = spawnSync("git", gitArgv(["-C", left, "rev-parse", "HEAD"]), { encoding: "utf8" });
+    const head = at.status === 0 ? at.stdout.trim() : null;
+    if (head !== manifest.repo?.head) {
+      throw new ToolError(`the positive pair's left side ${left} is at ${head ?? "no commit"}, but the control bundle was made at ${manifest.repo?.head}; check out the control flight's result there`);
+    }
+    records[positive.id] = { manifest: sha256Hex(manifestBytes), head: manifest.repo.head, fingerprint: manifest.signer.fingerprint };
   }
-  if (run.status !== 0 || !verdict?.ok) {
-    const first = verdict?.reasons?.[0];
-    throw refuse(first ? `${first.check}: ${first.reason}` : (run.stderr || "").trim().split("\n")[0] || `exit ${run.status}`);
-  }
-  const manifestBytes = fs.readFileSync(path.join(dir, "manifest.json"));
-  const manifest = JSON.parse(manifestBytes.toString("utf8"));
-  const left = positive.left === "subject" ? ROOT : similarityDirs(positive.left, sim)[0];
-  const at = spawnSync("git", gitArgv(["-C", left, "rev-parse", "HEAD"]), { encoding: "utf8" });
-  const head = at.status === 0 ? at.stdout.trim() : null;
-  if (head !== manifest.repo?.head) {
-    throw new ToolError(`the positive pair's left side ${left} is at ${head ?? "no commit"}, but the control bundle was made at ${manifest.repo?.head}; check out the control flight's result there`);
-  }
-  return { manifest: sha256Hex(manifestBytes), head: manifest.repo.head, fingerprint: manifest.signer.fingerprint };
+  return Object.keys(records).length ? records : null;
 }
 
 /**
@@ -3793,7 +3894,7 @@ function similarity() {
   if (st.verdict !== "APPROVED") throw new ToolError("the flight is not reviewed APPROVED yet; score contamination after the review approves the build");
 
   // A positive pair that names a control bundle is checked before any file is read: the bundle must verify as a control flight, and the left side must be the tree it was made at.
-  const controlRecord = verifyControlBundle(sim);
+  const controlRecords = verifyControlBundle(sim);
 
   // Resolve and read every side once.
   const sides = new Map();
@@ -3839,15 +3940,19 @@ function similarity() {
   // Score every pair, then position each test pair against the controls, metric by metric.
   const opts = { ngram: sim.ngram, minIdentLen: sim.minIdentLen, commentNgram: sim.commentNgram, exclusions };
   const scores = new Map(sim.pairs.map((p) => [p.id, scorePair(readSide(p.left).files, readSide(p.right).files, opts)]));
-  const negative = sim.pairs.find((p) => p.role === "negative");
-  const positive = sim.pairs.find((p) => p.role === "positive");
-  const metrics = Object.keys(scores.get(negative.id));
+  // A pair without a group belongs to `default`; each test pair is positioned against its own group's controls.
+  const groupOf = (p) => p.group ?? "default";
+  const groupNames = [...new Set(sim.pairs.map(groupOf))];
+  const controls = new Map(groupNames.map((g) => [g, { negative: sim.pairs.find((p) => groupOf(p) === g && p.role === "negative"), positive: sim.pairs.find((p) => groupOf(p) === g && p.role === "positive") }]));
+  const grouped = sim.pairs.some((p) => p.group !== undefined);
+  const metrics = Object.keys(scores.get(controls.get(groupNames[0]).negative.id));
   const rows = [];
   for (const p of sim.pairs) {
+    const { negative, positive } = controls.get(groupOf(p));
     for (const metric of metrics) {
       const score = scores.get(p.id)[metric];
       const where = p.role === "test" ? position(score, scores.get(negative.id)[metric], scores.get(positive.id)[metric], sim) : { c: null, band: null };
-      rows.push({ pair: p.id, role: p.role, metric, score, c: where.c, band: where.band });
+      rows.push({ pair: p.id, group: groupOf(p), role: p.role, metric, score, c: where.c, band: where.band });
     }
   }
   const verdict = verdictOf(rows.filter((r) => r.role === "test"));
@@ -3865,7 +3970,7 @@ function similarity() {
     }
   }
   const skipped = unmapped.size;
-  const recorded = controlRecord ? { ...sim, pairs: sim.pairs.map((p) => (p.id === positive.id ? { ...p, control: controlRecord } : p)) } : sim;
+  const recorded = controlRecords ? { ...sim, pairs: sim.pairs.map((p) => (controlRecords[p.id] ? { ...p, control: controlRecords[p.id] } : p)) } : sim;
   const json = `${JSON.stringify({ config: recorded, files, rows, verdict, limits: LIMITS, at: new Date().toISOString() }, null, 2)}\n`;
   const jsonPath = path.join(P.stateDir, "cleanroom", "similarity.json");
 
@@ -3874,7 +3979,9 @@ function similarity() {
   const doc = [
     "# Contamination score",
     "",
-    `The subject (${sim.subject.length ? sim.subject.join(", ") : "none"}) was compared with ${testPairs.length} test pair${testPairs.length === 1 ? "" : "s"} (${testPairs.map((p) => p.id).join(", ")}) and placed between a negative control (${negative.id}) and a positive control (${positive.id}). A test pair at or below the negative control on a metric that separates the controls shows no similarity beyond independent work.`,
+    `The subject (${sim.subject.length ? sim.subject.join(", ") : "none"}) was compared with ${testPairs.length} test pair${testPairs.length === 1 ? "" : "s"} (${testPairs.map((p) => p.id).join(", ")}) and placed between each group's negative and positive controls (listed below). A test pair at or below the negative control on a metric that separates the controls shows no similarity beyond independent work.`,
+    "",
+    ...groupNames.map((g) => `- group ${g}: negative ${controls.get(g).negative.id}, positive ${controls.get(g).positive.id}`),
     "",
     "## Positioning",
     "",
@@ -3886,9 +3993,9 @@ function similarity() {
     "",
     "## Raw scores",
     "",
-    `| pair | role | ${metrics.join(" | ")} |`,
-    `|---|---|${metrics.map(() => "---:").join("|")}|`,
-    ...sim.pairs.map((p) => `| ${p.id} | ${p.role} | ${metrics.map((m) => fixed(scores.get(p.id)[m])).join(" | ")} |`),
+    `| pair | ${grouped ? "group | " : ""}role | ${metrics.join(" | ")} |`,
+    `|---|${grouped ? "---|" : ""}---|${metrics.map(() => "---:").join("|")}|`,
+    ...sim.pairs.map((p) => `| ${p.id} | ${grouped ? `${groupOf(p)} | ` : ""}${p.role} | ${metrics.map((m) => fixed(scores.get(p.id)[m])).join(" | ")} |`),
     "",
     "## Limits",
     "",
@@ -4641,7 +4748,7 @@ function finalizeConfig(st) {
       } catch (e) {
         throw new ToolError(`${rel(archived)} is not valid JSON: ${e.message}`);
       }
-      return cfgFrom(raw, null);
+      return { ...cfgFrom(raw, null), policies: resolvePolicies(raw).policies };
     }
   }
   return cfg();
@@ -4949,6 +5056,12 @@ function validatePlanTexts({ planText, progressText, configRaw, configError, cla
   if (configRaw == null && !configError) add("files", "docs/kukulu.json is missing");
   if (configError) add("config", configError);
   if (!claudeExists) add("claude", "CLAUDE.md does not exist at the repository root; the implementer reads it first");
+  // An archive already under this slug would make kukulu_flight_archive refuse at the very end of the flight.
+  const slug = configRaw?.flight;
+  if (typeof slug === "string" && FLIGHT_SLUG.test(slug) && exists(path.join(ROOT, "docs", "flights", slug))) {
+    const version = exists(P.spec) ? /^\s*(?:\*\*)?Version:?(?:\*\*)?:?\s*v?(\d+(?:\.\d+)*)/im.exec(read(P.spec))?.[1] : null;
+    add("flight", `docs/flights/${slug}/ already holds an archived flight; set docs/kukulu.json's flight to an unused slug (for example ${slug}-${version ? version.replaceAll(".", "-") : "2"} or ${slug}-2) and call kukulu_plan_commit again`);
+  }
 
   const planLines = planText == null ? null : planText.split("\n");
   const ids = []; // task ids with a well-formed heading, in document order
@@ -5220,19 +5333,36 @@ function repoUrlFromOrigin() {
 }
 
 /**
- * Tag the newest archived flight's merged pull request, push the tag, and create a GitHub release from the
- * CHANGELOG entry (a draft unless `publish`). Every refusal comes before the first write; a repeated call
- * does only what is still missing.
+ * Tag the flight that `origin/<base>` says was archived last (read after a fetch, from any branch), push the
+ * tag, and create a GitHub release from the CHANGELOG entry (a draft unless `publish`). Every refusal comes
+ * before the tag; a repeated call does only what is still missing. The local base is fast-forwarded last, and
+ * only when it is checked out with no tracked changes.
  */
 function release({ publish } = {}) {
   if (publish !== undefined && typeof publish !== "boolean") throw new ToolError("publish must be a boolean");
-  const st = loadState();
-  if (!st.archived) throw new ToolError("kukulu_release releases the newest archived flight, and none is archived; archive it first");
-  const archiveDir = path.join(ROOT, st.archived.dir);
-  const archivedProgress = path.join(archiveDir, "PROGRESS.md");
-  const branch = exists(archivedProgress) ? /^Branch:\s*(.+)$/m.exec(read(archivedProgress))?.[1]?.trim() : null;
-  if (!branch || branch.startsWith("(")) throw new ToolError(`the archived ${st.archived.dir}/PROGRESS.md names no Branch:; kukulu_release cannot find the flight's pull request`);
-  const c = cfg();
+  const baseBranch = finalizeConfig(loadState()).baseBranch;
+  const origin = `origin/${baseBranch}`;
+  const fetched = git(["fetch", "origin"], { allowFail: true });
+  if (!fetched.ok) throw new ToolError(`git fetch origin failed: ${fetched.err.split("\n")[0]}; kukulu_release reads the merged flight from ${origin}, so it needs the remote`);
+  let archived = null;
+  const remoteState = git(["show", `${origin}:.kukulu/state.json`], { allowFail: true });
+  if (remoteState.ok) {
+    try {
+      archived = JSON.parse(remoteState.out).archived ?? null;
+    } catch {
+      archived = null;
+    }
+  }
+  if (!archived) throw new ToolError(`${origin} has no archived flight; merge the flight's pull request (it carries the archive) and call kukulu_release again`);
+  const archivedProgress = git(["show", `${origin}:${archived.dir}/PROGRESS.md`], { allowFail: true });
+  const branch = archivedProgress.ok ? /^Branch:\s*(.+)$/m.exec(archivedProgress.out)?.[1]?.trim() : null;
+  if (!branch || branch.startsWith("(")) throw new ToolError(`the archived ${origin}:${archived.dir}/PROGRESS.md names no Branch:; kukulu_release cannot find the flight's pull request`);
+  let archivedSigning = null;
+  try {
+    archivedSigning = JSON.parse(git(["show", `${origin}:${archived.dir}/state.json`], { allowFail: true }).out).signing ?? null;
+  } catch {
+    archivedSigning = null;
+  }
   const ghRun = (args) => {
     const r = spawnSync("gh", args, { cwd: ROOT, encoding: "utf8", timeout: CHECKS_TIMEOUT_MS });
     if (r.error) throw new ToolError(`gh ${args.slice(0, 2).join(" ")} failed: ${r.error.code === "ETIMEDOUT" ? `timed out after ${CHECKS_TIMEOUT_MS} ms` : r.error.message}`);
@@ -5248,15 +5378,12 @@ function release({ publish } = {}) {
   }
   if (pr.state !== "MERGED" || !pr.mergeCommit?.oid) throw new ToolError(`the flight's PR (${pr.url}) is ${pr.state}; kukulu_release runs after a human merges it`);
   const sha = pr.mergeCommit.oid;
-  // The merge was made on GitHub, so the commit may not be here yet.
-  const fetched = git(["fetch", "origin"], { allowFail: true });
   const changelog = git(["show", `${sha}:CHANGELOG.md`], { allowFail: true });
-  if (!changelog.ok && !fetched.ok) throw new ToolError(`git fetch origin failed: ${fetched.err.split("\n")[0]}`);
   const lines = changelog.ok ? changelog.out.split("\n") : [];
   const start = lines.findIndex((l) => /^## \[\d+\.\d+\.\d+[^\]]*\]/.test(l));
   const firstEntry = lines.findIndex((l) => l.startsWith("## ["));
   const version = start >= 0 && start === firstEntry ? /^## \[(\d+\.\d+\.\d+[^\]]*)\]/.exec(lines[start])[1] : null;
-  if (!version) throw new ToolError(`CHANGELOG.md at ${sha.slice(0, 7)} has no numbered entry; add ## [x.y.z] before releasing`);
+  if (!version) throw new ToolError(`CHANGELOG.md at ${sha.slice(0, 7)} (the merge of flight ${archived.slug}'s PR #${pr.number}) has no numbered entry; add ## [x.y.z] before releasing`);
   const tag = `v${version}`;
   let end = lines.findIndex((l, i) => i > start && l.startsWith("## "));
   if (end === -1) end = lines.length;
@@ -5273,22 +5400,10 @@ function release({ publish } = {}) {
     if (existing === sha && noRelease) skipTag = true;
     else throw new ToolError(`the tag ${tag} already exists (at ${existing.slice(0, 7)}); bump CHANGELOG.md's newest entry before releasing`);
   }
-  if (gitFacts().branch !== c.baseBranch) throw new ToolError(`${c.baseBranch} is not checked out; check it out (clean) and call kukulu_release again`);
-  if (trackedDirtyLines().length) throw new ToolError(`the working tree is not clean; commit or stash before calling kukulu_release:\n${trackedDirtyLines().join("\n")}`);
-  const ff = git(["merge", "--ff-only", `origin/${c.baseBranch}`], { allowFail: true });
-  if (!git(["merge-base", "--is-ancestor", sha, "HEAD"], { allowFail: true }).ok) {
-    throw new ToolError(`${c.baseBranch} does not contain the merge commit ${sha.slice(0, 7)} after a fast-forward pull${ff.ok ? "" : ` (${ff.err.split("\n")[0]})`}; merge or rebase by hand, then call kukulu_release again`);
-  }
 
   if (!skipTag) {
     let signed = git(["config", "--get", "tag.gpgsign"], { allowFail: true }).out === "true";
-    if (!signed) {
-      try {
-        signed = JSON.parse(read(path.join(archiveDir, "state.json"))).signing === "on";
-      } catch {
-        signed = false;
-      }
-    }
+    if (!signed) signed = archivedSigning === "on";
     const made = spawnSync("git", gitArgv(["tag", signed ? "-s" : "-a", tag, "-m", tag, sha]), { cwd: ROOT, encoding: "utf8", timeout: SIGNING_TIMEOUT_MS, env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } });
     if (made.status !== 0 || made.error) throw new ToolError(`git tag ${tag} failed: ${((made.stderr || made.stdout || made.error?.message || "").trim().split("\n")[0]) || "unknown error"}`);
   }
@@ -5306,7 +5421,19 @@ function release({ publish } = {}) {
   if (created.status !== 0) {
     throw new ToolError(`the tag ${tag} was pushed; create the release by hand with gh release create ${tag} --verify-tag, or call kukulu_release again: ${(created.stderr || created.stdout || "").trim().split("\n")[0] || `exit ${created.status}`}`);
   }
-  return { tag, sha, release: (created.stdout || "").trim().split("\n").filter(Boolean).at(-1) ?? null, draft: publish !== true };
+  // What the local base said before this call touched it; last, so a refusal or a failed fast-forward never undoes the release.
+  const localArchived = loadState().archived;
+  const localState = localArchived?.slug === archived.slug ? "current" : `stale: local ${baseBranch} names ${localArchived?.slug ?? "no archived flight"}; ${origin} names ${archived.slug}`;
+  let fastForward;
+  if (gitFacts().branch !== baseBranch) fastForward = `skipped: ${baseBranch} is not checked out`;
+  else if (trackedDirtyLines().length) fastForward = "skipped: the tree has tracked changes";
+  else {
+    const before = git(["rev-parse", "HEAD"]).out;
+    const ff = git(["merge", "--ff-only", origin], { allowFail: true });
+    if (!ff.ok) fastForward = `failed: ${(ff.err || ff.out).split("\n")[0]}`;
+    else fastForward = git(["rev-parse", "HEAD"]).out === before ? "up to date" : "done";
+  }
+  return { tag, sha, release: (created.stdout || "").trim().split("\n").filter(Boolean).at(-1) ?? null, draft: publish !== true, flight: { slug: archived.slug, dir: archived.dir, from: origin }, localState, fastForward };
 }
 
 // ---------------------------------------------------------------- MCP plumbing
@@ -5323,7 +5450,7 @@ const TOOLS = [
   { name: "kukulu_next", description: "Deterministic stage selection: returns { stage, agent, agentFallback, fallbackAgent, restartRequired, model, agentModel, agentModelExact, round, reason, prompt, streams? }. stage is plan | implement | review | summarize | done | halt. agentModel is the value to pass as the Agent tool's model when agentFallback is true (an alias, or null to pass none); agentModelExact is false when a full claude-* id was mapped to its family alias. restartRequired is true only when the routed model cannot be reached without relaunching the session. Writes only the stage timeline (state.timeline, and in clean-room mode a stage entry in the chain, committed as chore: stage <stage>) and, when a parallel wave's partition is invalid, a record (state, one feedback entry, one commit, only on a build branch) that the wave runs serially. When streams is present, spawn one implementer per entry, all at once, and wait for all of them.", inputSchema: S({}), fn: next },
   { name: "kukulu_plan_commit", description: "Validate the plan as a whole and commit it: docs/PLAN.md, docs/PROGRESS.md, docs/kukulu.json and CLAUDE.md must exist and agree (task headings, numbering, dependencies, streams, config, from references). Every problem is listed at once, as numbered lines and as structuredContent.problems [{ check, id?, message }]; nothing is committed while any remain. With renumber: true (only before any run has started) it first renumbers split ids everywhere. On success it commits 'plan: derive build plan from SPEC' and returns { commit, tasks, phases, waves, renumbered }. For the planner, as its last step.", inputSchema: S({ renumber: { type: "boolean", description: "rewrite split or out-of-sequence task ids (such as P1-02a) to a clean P<n>-01.. sequence everywhere they appear, then validate and commit; refused once a run has started" } }), fn: planCommit },
   { name: "kukulu_run_start", description: "Begin (or resume) an implementation run: create/reuse the build branch, arm the implement guard lock, stamp Branch/Started in PROGRESS.md, commit. Idempotent. The result carries signingNote when commits are or will be unsigned and says whether kukulu_pr_finalize will wait for signatures. With stream, also create (or resume) that stream's git worktree for a parallel wave, run parallel.setup in it, and return its cwd: do all of that stream's work inside cwd.", inputSchema: S({ stream: { type: "string", description: "a stream of the current parallel wave, when kukulu_next handed you one" } }), fn: runStart },
-  { name: "kukulu_task_next", description: "Select the next task (first [~], else first [ ]), auto-skip tasks whose dependencies are blocked, mark it [~], and return its PLAN.md text plus dependency log entries. Returns { done: true } when none remain.", inputSchema: S({ stream: { type: "string", description: "restrict to this stream's tasks (parallel waves only)" } }), fn: taskNext },
+  { name: "kukulu_task_next", description: "Select the next task (first [~], else first [ ]), auto-skip tasks whose dependencies are blocked, mark it [~], and return its PLAN.md text, its dependencies' log entries (dependencyLogs) and its own log entries (taskLog, null for a fresh task; an unblock or reopen reason is in it). Returns { done: true } when none remain.", inputSchema: S({ stream: { type: "string", description: "restrict to this stream's tasks (parallel waves only)" } }), fn: taskNext },
   { name: "kukulu_task_done", description: "Mark a task [x] and append its log entry stamped with HEAD's sha. Requires HEAD's commit subject to start with '<id>:' and a clean tree. Commits PROGRESS.md.", inputSchema: S({ stream: { type: "string", description: "the stream this task belongs to, when working in a parallel wave" }, id: { type: "string" }, log: { type: "string", description: "Log entry body, under 15 lines" } }, ["id", "log"]), fn: taskDone },
   { name: "kukulu_task_block", description: "Give up on a task: hard-reset uncommitted changes, mark it [!], log BLOCKED: <reason>, commit PROGRESS.md.", inputSchema: S({ stream: { type: "string", description: "the stream this task belongs to, when working in a parallel wave" }, id: { type: "string" }, reason: { type: "string", description: "what you tried / what fails / what you think the fix is" } }, ["id", "reason"]), fn: taskBlock },
   {
@@ -5432,7 +5559,7 @@ const TOOLS = [
   { name: "kukulu_pr_finalize", description: "End a flight. Checks that every commit since the merge base with baseBranch is signed (judged from the commits, not from state): if so, or if the policy does not expect signatures (policies.signing off, or auto with signing never configured; the result says so in signatures), marks the draft PR ready and, unless breaking is true, enables auto-merge (gh pr merge --auto, never an immediate merge), per policies.finalize and policies.mergeMethod. If any commit is unsigned and signatures are expected the PR stays a draft, state.awaitingSigning is recorded, the steps are appended to SUMMARY.md, and kukulu_next reports done until it is resolved. breaking is required on the first call unless CHANGELOG.md decides it. Returns { signed, unsigned, ready, merge, signatures, breaking, breakingSource, awaitingSigning, resigned, push, pr, next? }; signatures is required or not required: <why>; merge is enabled, skipped: breaking, skipped: policy, skipped: no pull request, skipped: awaiting signing or unavailable: <why>.", inputSchema: S({ breaking: { type: "boolean", description: "whether this flight is a breaking change, so its PR must not auto-merge; optional when CHANGELOG.md decides (its newest entry has or lacks a Breaking changes section; a disagreeing value is refused), required on the first call otherwise, remembered after" }, resign: { type: "boolean", description: "HUMAN-INITIATED ONLY: never pass this on your own. Re-sign every commit of the branch (git rebase -f --rebase-merges --gpg-sign), force-push with lease, then finalize. For an operator who has unlocked the signing agent after an awaiting-signing result" } }), fn: prFinalize },
   {
     name: "kukulu_release",
-    description: "Release the newest archived flight after a human has merged its pull request: tag the merge commit v<x.y.z> from CHANGELOG.md's newest numbered entry (signed when tag.gpgsign is true or the flight's commits were signed), push the tag, and create a GitHub release from that entry (a draft unless publish is true). Fast-forwards the checked-out base branch to origin first. Refuses before any write when no flight is archived, the PR is not MERGED, the CHANGELOG has no numbered entry at the merge commit, or the tag already exists (unless it is at the merge commit and has no release yet, when only the release is created). A repeated call creates only what is missing. For the flight controller, on the operator's request only. Returns { tag, sha, release, draft }.",
+    description: "Release the flight that origin/<base> says was archived last, after a human has merged its pull request: it fetches origin and reads the merged flight from origin/<base>, so it needs no checkout and works from any branch. Tags the merge commit v<x.y.z> from CHANGELOG.md's newest numbered entry (signed when tag.gpgsign is true or the flight's commits were signed), pushes the tag, and creates a GitHub release from that entry (a draft unless publish is true). Refuses before the tag when the fetch fails, origin/<base> has no archived flight, the PR is not MERGED, the CHANGELOG has no numbered entry at the merge commit, or the tag already exists (unless it is at the merge commit and has no release yet, when only the release is created). A repeated call creates only what is missing. Last, fast-forwards the local base only when it is checked out with no tracked changes. For the flight controller, on the operator's request only. Returns { tag, sha, release, draft, flight: { slug, dir, from }, localState, fastForward }.",
     inputSchema: S({ publish: { type: "boolean", description: "create the release as published instead of a draft; default false" } }),
     fn: release,
   },

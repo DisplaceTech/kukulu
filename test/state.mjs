@@ -751,6 +751,31 @@ for (const [slug, expectNote, label] of [
   });
 }
 
+// ---------------------------------------------------------------- plan_commit: a taken flight slug (C-03)
+
+{
+  const repo = specRepo();
+  const plan = plannedRepo({ config: { flight: "w1" } });
+  writeFile(repo, "docs/SPEC.md", readFile(repo, "docs/SPEC.md") + "\nVersion: 0.8.1 Status: draft\n");
+  writeFile(repo, "docs/PLAN.md", readFile(plan, "docs/PLAN.md"));
+  writeFile(repo, "docs/PROGRESS.md", readFile(plan, "docs/PROGRESS.md"));
+  writeFile(repo, "docs/kukulu.json", readFile(plan, "docs/kukulu.json"));
+  writeFile(repo, "CLAUDE.md", "# rules\n");
+  writeFile(repo, "docs/flights/w1/SPEC.md", "# old\n");
+  git(repo, ["add", "docs/SPEC.md", "docs/flights"]);
+  git(repo, ["commit", "-qm", "an earlier flight's archive"]);
+  const head = git(repo, ["rev-parse", "HEAD"]);
+  const before = git(repo, ["status", "--porcelain"]);
+  await withServer(repo, async ({ call }) => {
+    const e = await call("kukulu_plan_commit");
+    isError(e, /\[flight\] docs\/flights\/w1\/ already holds an archived flight; set docs\/kukulu\.json's flight to an unused slug \(for example w1-0-8-1 or w1-2\) and call kukulu_plan_commit again/, "a flight slug that an archive already uses is refused with nothing written");
+    eq(git(repo, ["rev-parse", "HEAD"]) + "|" + git(repo, ["status", "--porcelain"]), head + "|" + before, "...HEAD does not move and no file changes");
+    writeFile(repo, "docs/kukulu.json", readFile(plan, "docs/kukulu.json").replace('"flight": "w1"', '"flight": "w1-0-8-1"'));
+    const r = await call("kukulu_plan_commit");
+    ok(!r.error && Boolean(r.commit), "a free slug passes" + (r.error ? `: ${r.error}` : ""));
+  });
+}
+
 // ---------------------------------------------------------------- plan_commit (S-06)
 
 {
@@ -1162,6 +1187,89 @@ const OLD_LAYOUT = /pre-0\.6\.0 Foundry layout, which 0\.7\.0 no longer reads/;
       ok(!/base fails/.test((await call("kukulu_next")).prompt), "an unreadable archived config gives today's prompt");
     });
   }
+}
+
+// ---------------------------------------------------------------- an owner-action halt during review (F-03)
+
+{
+  const repo = plannedRepo();
+  git(repo, ["checkout", "-q", "-b", "build/x"]);
+  markTasks(repo, ALL_DONE);
+  setState(repo, { implemented: true, reviewed: false, halted: "owner action needed: P0-02: supply the corpus" });
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-qm", "chore: run halted"]);
+  await withServer(repo, async ({ call }) => {
+    eq((await call("kukulu_next")).stage, "halt", "(setup) the owner-action halt stops the flight");
+    const r = await call("kukulu_run_resume", { reason: "the corpus is in place" });
+    ok(!r.error, "...and resumes" + (r.error ? `: ${r.error}` : ""));
+    eq((await call("kukulu_next")).stage, "review", "a halt made during the review stage resumes into review");
+  });
+}
+
+// ---------------------------------------------------------------- the Agent call's description (F-01)
+
+{
+  const K = "K\u016bkulu";
+  const T = (id, files, extra = {}) => ({ id, title: `Task ${id}`, goal: `do ${id}`, files: files.map((f) => `\`${f}\``).join(", "), ...extra });
+  const seen = [];
+  await withServer(specRepo(), async ({ call }) => { seen.push(["plan", await call("kukulu_next")]); });
+  await withServer(plannedRepo(), async ({ call }) => { seen.push(["implement", await call("kukulu_next")]); });
+  const reviewRepo = plannedRepo();
+  markTasks(reviewRepo, ALL_DONE);
+  setState(reviewRepo, { implemented: true });
+  await withServer(reviewRepo, async ({ call }) => {
+    seen.push(["review", await call("kukulu_next")]);
+    setState(reviewRepo, { reviewed: true, verdict: "APPROVED" });
+    seen.push(["summarize", await call("kukulu_next")]);
+  });
+  ok(seen.every(([name, n]) => n.stage === name && n.description === `${K} ${name}` && n.description.length <= 60), `every spawnable stage carries a description: ${K} <stage> at round 0`);
+  const fix = plannedRepo();
+  setState(fix, { round: 1 });
+  await withServer(fix, async ({ call }) => {
+    eq((await call("kukulu_next")).description, `${K} implement round 1`, `...and ${K} implement round 1 after a fix round`);
+  });
+  const done = plannedRepo();
+  markTasks(done, ALL_DONE);
+  setState(done, { implemented: true, reviewed: true, verdict: "APPROVED", summarized: true });
+  await withServer(done, async ({ call }) => {
+    const n = await call("kukulu_next");
+    ok(n.stage === "done" && !("description" in n), "done and halt carry no description (done)");
+  });
+  await withServer(mkDir(), async ({ call }) => {
+    const n = await call("kukulu_next");
+    ok(n.stage === "halt" && !("description" in n), "...and halt");
+  });
+  const wave = plannedRepo({ tasks: [T("P0-01", ["package.json"]), T("P0-02", ["docs/"]), T("P1-01", ["src/api/a.txt"], { stream: "api" }), T("P1-02", ["src/ui/a.txt"], { stream: "ui" })] });
+  markTasks(wave, { "P0-01": "x", "P0-02": "x" });
+  git(wave, ["add", "-A"]);
+  git(wave, ["commit", "-qm", "chore: serial tasks done"]);
+  await withServer(wave, async ({ call }) => {
+    const n = await call("kukulu_next");
+    eq((n.streams ?? []).map((x) => x.description).join("|"), `${K} stream api|${K} stream ui`, `each streams entry carries ${K} stream <name>`);
+  });
+}
+
+// ---------------------------------------------------------------- every policy default in status (D-01)
+
+{
+  const repo = specRepo();
+  await withServer(repo, async ({ call }) => {
+    const p = (await call("kukulu_status")).policies;
+    eq(Object.keys(p).sort().join(",") + "|" + p.finalize, "archive,feedback,finalize,mergeMethod,pr,push,signing,syncBase|ready", "kukulu_status.policies before a run lists every policy default");
+  });
+}
+
+// ---------------------------------------------------------------- the MCP limit and mutation.targeted in status (B-02)
+
+{
+  await withServer(plannedRepo({ config: { verify: ["true"] } }), async ({ call }) => {
+    const st = await call("kukulu_status");
+    ok(Number.isInteger(st.mcpTimeoutMs) && st.mcpTimeoutMs >= 3600000, "kukulu_status reports mcpTimeoutMs from the plugin's .mcp.json");
+  });
+  const config = { verify: [{ cmd: "true", timeoutMs: 1000 }], mutation: { targeted: { unit: { cmd: "true {filter}", timeoutMs: 1500000 } } } };
+  await withServer(plannedRepo({ config }), async ({ call }) => {
+    eq((await call("kukulu_status")).longestCommandTimeoutMs, 1500000, "longestCommandTimeoutMs counts mutation.targeted");
+  });
 }
 
 finish();

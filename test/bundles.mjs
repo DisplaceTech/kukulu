@@ -191,6 +191,19 @@ const compareRun = (...args) => spawnSync(process.execPath, [COMPARE, ...args], 
   eq(compareRun(a.dir, b.dir, "--trees", "x").status, 2, "--trees with one directory is a usage error");
   like(compareRun(a.dir, b.dir, "--nope").stderr, /unknown option --nope/, "an unknown option is a usage error");
 
+  {
+    // P2-04: controls are keyed by group; a bundle without groups is the default group.
+    const g = buildComparePair(mkDir("kukulu-compare-grouped-"), { aGrouped: true });
+    const gj = JSON.parse(compareRun(g.a.dir, g.b.dir, "--json").stdout);
+    eq(Object.keys(gj.a.similarity.groups).join() + "|" + Object.keys(gj.b.similarity.groups).join(), "default,rust-c|default", "comparing a grouped and an ungrouped bundle keys the controls by group");
+    eq(gj.a.similarity.groups["rust-c"].negative["ident_jaccard"].toFixed(2) + "|" + gj.a.similarity.groups.default.negative["ident_jaccard"].toFixed(2), "0.34|0.14", "...each group with its own controls");
+    const gt = compareRun(g.a.dir, g.b.dir).stdout;
+    like(gt, /^ {4}default ident_jaccard: negative 0\.1400 positive 0\.9400$/m, "the text output prints one control line per group and metric");
+    like(gt, /^ {4}rust-c ident_jaccard: negative 0\.3400 positive 0\.7400$/m, "...including the second group's");
+    const gc = JSON.parse(compareRun(g.a.dir, g.b.dir, "--trees", path.join(ROOT, "test", "fixtures", "similarity", "a"), path.join(ROOT, "test", "fixtures", "similarity", "b"), "--json").stdout);
+    eq(gc.cross.ident_jaccard.aNegative, 0.14, "the cross score uses the default group's negative");
+  }
+
   const FIX = (d) => path.join(ROOT, "test", "fixtures", "similarity", d);
   const cross = compareRun(a.dir, b.dir, "--trees", FIX("a"), FIX("b"));
   eq(cross.status, 0, "--trees on two fixture trees exits 0");

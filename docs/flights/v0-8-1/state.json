@@ -1,0 +1,457 @@
+{
+  "round": 10,
+  "implemented": true,
+  "reviewed": true,
+  "verdict": "APPROVED",
+  "summarized": true,
+  "halted": null,
+  "preexistingUntracked": [],
+  "policies": {
+    "signing": "auto",
+    "push": true,
+    "pr": "draft",
+    "feedback": true,
+    "archive": true,
+    "finalize": "ready",
+    "mergeMethod": "merge",
+    "syncBase": true
+  },
+  "signing": "on",
+  "rounds": [
+    {
+      "round": 1,
+      "fixTasks": 4,
+      "unblocked": 0,
+      "verdict": "CHANGES REQUESTED",
+      "nonConverging": false,
+      "sources": {
+        "review": 4,
+        "mutation": 0,
+        "blocked": 0
+      },
+      "at": "2026-11-11T22:06:16.920Z"
+    },
+    {
+      "round": 2,
+      "fixTasks": 4,
+      "unblocked": 0,
+      "verdict": "CHANGES REQUESTED",
+      "nonConverging": true,
+      "sources": {
+        "review": 3,
+        "mutation": 1,
+        "blocked": 0
+      },
+      "at": "2026-11-11T22:54:57.048Z"
+    },
+    {
+      "round": 3,
+      "fixTasks": 1,
+      "unblocked": 0,
+      "verdict": "CHANGES REQUESTED",
+      "nonConverging": false,
+      "sources": {
+        "review": 1,
+        "mutation": 0,
+        "blocked": 0
+      },
+      "at": "2026-11-11T23:54:31.952Z"
+    },
+    {
+      "round": 4,
+      "fixTasks": 1,
+      "unblocked": 0,
+      "verdict": "CHANGES REQUESTED",
+      "nonConverging": true,
+      "sources": {
+        "review": 1,
+        "mutation": 0,
+        "blocked": 0
+      },
+      "at": "2026-11-12T00:23:21.208Z"
+    },
+    {
+      "round": 5,
+      "fixTasks": 1,
+      "unblocked": 0,
+      "verdict": "CHANGES REQUESTED",
+      "nonConverging": true,
+      "sources": {
+        "review": 1,
+        "mutation": 0,
+        "blocked": 0
+      },
+      "at": "2026-11-12T00:51:09.455Z"
+    },
+    {
+      "round": 6,
+      "fixTasks": 3,
+      "unblocked": 0,
+      "verdict": "CHANGES REQUESTED",
+      "nonConverging": true,
+      "sources": {
+        "review": 3,
+        "mutation": 0,
+        "blocked": 0
+      },
+      "at": "2026-11-13T14:58:05.033Z"
+    },
+    {
+      "round": 7,
+      "fixTasks": 1,
+      "unblocked": 0,
+      "verdict": "CHANGES REQUESTED",
+      "nonConverging": false,
+      "sources": {
+        "review": 1,
+        "mutation": 0,
+        "blocked": 0
+      },
+      "at": "2026-11-13T15:41:30.784Z"
+    },
+    {
+      "round": 8,
+      "fixTasks": 3,
+      "unblocked": 0,
+      "verdict": "CHANGES REQUESTED",
+      "nonConverging": true,
+      "sources": {
+        "review": 3,
+        "mutation": 0,
+        "blocked": 0
+      },
+      "at": "2026-11-13T16:08:51.039Z"
+    },
+    {
+      "round": 9,
+      "fixTasks": 2,
+      "unblocked": 0,
+      "verdict": "CHANGES REQUESTED",
+      "nonConverging": false,
+      "sources": {
+        "review": 2,
+        "mutation": 0,
+        "blocked": 0
+      },
+      "at": "2026-11-13T18:51:53.374Z"
+    },
+    {
+      "round": 10,
+      "fixTasks": 1,
+      "unblocked": 0,
+      "verdict": "CHANGES REQUESTED",
+      "nonConverging": false,
+      "sources": {
+        "review": 1,
+        "mutation": 0,
+        "blocked": 0
+      },
+      "at": "2026-11-13T19:43:53.358Z"
+    },
+    {
+      "round": 11,
+      "fixTasks": 0,
+      "unblocked": 0,
+      "verdict": "APPROVED",
+      "sources": {
+        "review": 0,
+        "mutation": 0,
+        "blocked": 0
+      },
+      "at": "2026-11-13T20:06:43.365Z"
+    }
+  ],
+  "archived": {
+    "slug": "v0-8-0",
+    "dir": "docs/flights/v0-8-0",
+    "at": "2026-10-27T05:20:04.258Z"
+  },
+  "breaking": false,
+  "timeline": [
+    {
+      "event": "start",
+      "stage": "plan",
+      "round": 0,
+      "at": "2026-11-11T18:15:46.294Z"
+    },
+    {
+      "event": "end",
+      "stage": "plan",
+      "round": 0,
+      "at": "2026-11-11T18:32:09.783Z"
+    },
+    {
+      "event": "start",
+      "stage": "implement",
+      "round": 0,
+      "at": "2026-11-11T18:32:09.783Z"
+    },
+    {
+      "event": "end",
+      "stage": "implement",
+      "round": 0,
+      "at": "2026-11-11T21:39:49.850Z"
+    },
+    {
+      "event": "start",
+      "stage": "review",
+      "round": 0,
+      "at": "2026-11-11T21:39:49.850Z"
+    },
+    {
+      "event": "end",
+      "stage": "review",
+      "round": 0,
+      "at": "2026-11-11T22:06:38.513Z"
+    },
+    {
+      "event": "start",
+      "stage": "implement",
+      "round": 1,
+      "at": "2026-11-11T22:06:38.513Z"
+    },
+    {
+      "event": "end",
+      "stage": "implement",
+      "round": 1,
+      "at": "2026-11-11T22:30:59.932Z"
+    },
+    {
+      "event": "start",
+      "stage": "review",
+      "round": 1,
+      "at": "2026-11-11T22:30:59.932Z"
+    },
+    {
+      "event": "end",
+      "stage": "review",
+      "round": 1,
+      "at": "2026-11-11T22:55:39.235Z"
+    },
+    {
+      "event": "start",
+      "stage": "implement",
+      "round": 2,
+      "at": "2026-11-11T22:55:39.235Z"
+    },
+    {
+      "event": "end",
+      "stage": "implement",
+      "round": 2,
+      "at": "2026-11-11T23:34:51.020Z"
+    },
+    {
+      "event": "start",
+      "stage": "review",
+      "round": 2,
+      "at": "2026-11-11T23:34:51.020Z"
+    },
+    {
+      "event": "end",
+      "stage": "review",
+      "round": 2,
+      "at": "2026-11-11T23:54:57.638Z"
+    },
+    {
+      "event": "start",
+      "stage": "implement",
+      "round": 3,
+      "at": "2026-11-11T23:54:57.638Z"
+    },
+    {
+      "event": "end",
+      "stage": "implement",
+      "round": 3,
+      "at": "2026-11-12T00:06:44.832Z"
+    },
+    {
+      "event": "start",
+      "stage": "review",
+      "round": 3,
+      "at": "2026-11-12T00:06:44.832Z"
+    },
+    {
+      "event": "end",
+      "stage": "review",
+      "round": 3,
+      "at": "2026-11-12T00:23:42.639Z"
+    },
+    {
+      "event": "start",
+      "stage": "implement",
+      "round": 4,
+      "at": "2026-11-12T00:23:42.639Z"
+    },
+    {
+      "event": "end",
+      "stage": "implement",
+      "round": 4,
+      "at": "2026-11-12T00:37:46.331Z"
+    },
+    {
+      "event": "start",
+      "stage": "review",
+      "round": 4,
+      "at": "2026-11-12T00:37:46.331Z"
+    },
+    {
+      "event": "end",
+      "stage": "review",
+      "round": 4,
+      "at": "2026-11-12T00:51:44.317Z"
+    },
+    {
+      "event": "start",
+      "stage": "implement",
+      "round": 5,
+      "at": "2026-11-13T14:33:43.520Z"
+    },
+    {
+      "event": "end",
+      "stage": "implement",
+      "round": 5,
+      "at": "2026-11-13T14:43:57.002Z"
+    },
+    {
+      "event": "start",
+      "stage": "review",
+      "round": 5,
+      "at": "2026-11-13T14:43:57.002Z"
+    },
+    {
+      "event": "end",
+      "stage": "review",
+      "round": 5,
+      "at": "2026-11-13T14:58:30.041Z"
+    },
+    {
+      "event": "start",
+      "stage": "implement",
+      "round": 6,
+      "at": "2026-11-13T14:58:30.041Z"
+    },
+    {
+      "event": "end",
+      "stage": "implement",
+      "round": 6,
+      "at": "2026-11-13T15:26:50.971Z"
+    },
+    {
+      "event": "start",
+      "stage": "review",
+      "round": 6,
+      "at": "2026-11-13T15:26:50.971Z"
+    },
+    {
+      "event": "end",
+      "stage": "review",
+      "round": 6,
+      "at": "2026-11-13T15:41:52.096Z"
+    },
+    {
+      "event": "start",
+      "stage": "implement",
+      "round": 7,
+      "at": "2026-11-13T15:41:52.096Z"
+    },
+    {
+      "event": "end",
+      "stage": "implement",
+      "round": 7,
+      "at": "2026-11-13T15:52:29.256Z"
+    },
+    {
+      "event": "start",
+      "stage": "review",
+      "round": 7,
+      "at": "2026-11-13T15:52:29.256Z"
+    },
+    {
+      "event": "end",
+      "stage": "review",
+      "round": 7,
+      "at": "2026-11-13T16:09:18.913Z"
+    },
+    {
+      "event": "start",
+      "stage": "implement",
+      "round": 8,
+      "at": "2026-11-13T17:53:52.055Z"
+    },
+    {
+      "event": "end",
+      "stage": "implement",
+      "round": 8,
+      "at": "2026-11-13T18:36:01.589Z"
+    },
+    {
+      "event": "start",
+      "stage": "review",
+      "round": 8,
+      "at": "2026-11-13T18:36:01.589Z"
+    },
+    {
+      "event": "end",
+      "stage": "review",
+      "round": 8,
+      "at": "2026-11-13T18:52:15.556Z"
+    },
+    {
+      "event": "start",
+      "stage": "implement",
+      "round": 9,
+      "at": "2026-11-13T18:52:15.556Z"
+    },
+    {
+      "event": "end",
+      "stage": "implement",
+      "round": 9,
+      "at": "2026-11-13T19:24:09.428Z"
+    },
+    {
+      "event": "start",
+      "stage": "review",
+      "round": 9,
+      "at": "2026-11-13T19:24:09.428Z"
+    },
+    {
+      "event": "end",
+      "stage": "review",
+      "round": 9,
+      "at": "2026-11-13T19:44:17.490Z"
+    },
+    {
+      "event": "start",
+      "stage": "implement",
+      "round": 10,
+      "at": "2026-11-13T19:44:17.490Z"
+    },
+    {
+      "event": "end",
+      "stage": "implement",
+      "round": 10,
+      "at": "2026-11-13T19:54:35.429Z"
+    },
+    {
+      "event": "start",
+      "stage": "review",
+      "round": 10,
+      "at": "2026-11-13T19:54:35.429Z"
+    },
+    {
+      "event": "end",
+      "stage": "review",
+      "round": 10,
+      "at": "2026-11-13T20:07:03.294Z"
+    },
+    {
+      "event": "start",
+      "stage": "summarize",
+      "round": 10,
+      "at": "2026-11-13T20:07:03.294Z"
+    }
+  ],
+  "cleanroom": {
+    "mode": "general"
+  }
+}

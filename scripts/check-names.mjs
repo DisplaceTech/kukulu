@@ -25,6 +25,11 @@ const DISPLAY = `K${U}kulu`;
 // below its newest entry. The rename plan itself quotes
 // the rules it describes, including a bare macron letter.
 const HISTORY = [/^docs\/flights\//, /^docs\/plans\//, /^docs\/feedback\//, /^docs\/SPEC\.md$/];
+// .kukulu/feedback.jsonl records agents' words verbatim and is never rewritten, so
+// only the bare-letter rule skips it; every other check still runs on it. The
+// archive moves it to docs/flights/<slug>/feedback.jsonl unchanged, so that copy
+// is exempt for the same reason.
+const BARE_LETTER_EXEMPT = /^(?:\.kukulu|docs\/flights\/[^/]+)\/feedback\.jsonl$/;
 const PLAN_EXEMPT = /^docs\/plans\/rename-kukulu\.md$/;
 
 const problems = [];
@@ -103,7 +108,7 @@ for (const file of listFiles()) {
   if (NFD.test(text)) fail(file, 0, "contains a decomposed u + U+0304; store the macron letter as the single NFC character U+016B");
 
   const spans = [...text.matchAll(STANDALONE)].map((m) => [m.index, m.index + m[0].length]);
-  for (const m of text.matchAll(new RegExp(U, "g"))) {
+  for (const m of BARE_LETTER_EXEMPT.test(file) ? [] : text.matchAll(new RegExp(U, "g"))) {
     if (spans.some(([from, to]) => m.index >= from && m.index < to)) continue;
     fail(file, lineOf(text, m.index), `a ${U} outside the standalone word ${DISPLAY}; identifiers, paths, keys, env vars and URLs are ASCII (kukulu, KUKULU_)`);
     break;

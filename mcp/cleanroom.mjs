@@ -223,6 +223,21 @@ export function normalizeModel(s) {
   return out;
 }
 
+/**
+ * Whether the model an endpoint reported is the model routing declared: equal once normalized, an alias
+ * (`opus`, `sonnet`, `haiku`, `fable`) and an id it resolves to (`claude-<alias>-...`), `inherit` and any
+ * `claude-` id, or a model and its dated snapshot (`<model>-` and eight digits). Duplicated in
+ * scripts/verify-attestation.mjs on purpose, and test/attest.mjs feeds both the same pairs.
+ */
+export function sameModel(declared, reported) {
+  const d = normalizeModel(declared);
+  const r = normalizeModel(reported);
+  if (d === r) return true;
+  if (["opus", "sonnet", "haiku", "fable"].includes(d) && r.startsWith(`claude-${d}-`)) return true;
+  if (d === "inherit" && r.startsWith("claude-")) return true;
+  return r.startsWith(`${d}-`) && /^\d{8}$/.test(r.slice(d.length + 1));
+}
+
 // ⚠️ ASSUMPTION: a table of family patterns, measured against the routing
 // strings real flights use. Each pattern runs on the normalized string; the
 // first match names the family. Written only here.
@@ -571,6 +586,383 @@ export function verifyCheckpoint(entry, publicKey) {
  * that is part of a redirection (`2>&1`, `&>file`) does not end a segment.
  */
 export function splitSegments(command) {
+  return splitRaw(stripHeredocs(command).text);
+}
+
+/**
+ * A command with each heredoc body and its delimiter line removed, and the
+ * bodies. The operator (an unquoted `<<` that is not `<<<`, an optional `-`,
+ * the delimiter word bare or quoted) stays in the owning segment. `shell` is
+ * true when that segment runs sh, bash, zsh, dash or ksh without `-c`, so the
+ * shell reads the body as commands; any other body is data. `loose` is the
+ * second reading: every unquoted `<<` with a delimiter word is an operator,
+ * none of the listed non-operator regions is skipped. `skipped` says the first
+ * reading passed over a `<<`, so the second reading can differ.
+ */
+export function stripHeredocs(command, loose = false) {
+  let text = "";
+  let skipped = false;
+  const bodies = [];
+  // Each body's delimiter word and whether only the second reading made it an operator, beside `bodies` so its shape stays the one callers read.
+  const extras = [];
+  // Where in `text` each body's operator ends, so a caller can tell which segment owns the body.
+  const marks = [];
+  const pending = [];
+  // Offsets of every `<<` the first reading passed over; the second reading treats an operator there as a shell-read body.
+  const skippedAt = [];
+  const note = (from, to) => {
+    const span = command.slice(from, to);
+    for (let k = span.indexOf("<<"); k !== -1; k = span.indexOf("<<", k + 1)) skippedAt.push(from + k);
+  };
+  const invented = loose ? new Set(stripHeredocs(command, false).skippedAt) : null;
+  let quote = null;
+  const n = command.length;
+  for (let i = 0; i < n; i++) {
+    const c = command[i];
+    if (quote === "'") {
+      text += c;
+      if (c === "'") quote = null;
+      continue;
+    }
+    if (quote === '"') {
+      text += c;
+      if (c === "\\" && i + 1 < n) text += command[++i];
+      else if (c === '"') quote = null;
+      continue;
+    }
+    if (c === "'" || c === '"') {
+      quote = c;
+      text += c;
+    } else if (c === "\\" && i + 1 < n) {
+      text += c + command[++i];
+    } else if (!loose && c === "$" && (command[i + 1] === "{" || command[i + 1] === "[") && expansionEnd(command, i + 1) !== -1) {
+      // `<<` inside `${...}` or `$[...]` is text or a shift, never a heredoc.
+      const end = expansionEnd(command, i + 1);
+      text += command.slice(i, end + 1);
+      if (command.slice(i, end + 1).includes("<<")) skipped = true;
+      note(i, end + 1);
+      i = end;
+    } else if (!loose && c === "(" && command[i + 1] === "(" && arithmeticEnd(command, i) !== -1) {
+      // `<<` inside `$((...))` or `((...))` shifts bits, whatever its operand.
+      const end = arithmeticEnd(command, i);
+      text += command.slice(i, end + 1);
+      if (command.slice(i, end + 1).includes("<<")) skipped = true;
+      note(i, end + 1);
+      i = end;
+    } else if (!loose && c === "[" && command[i + 1] === "[" && /\s/.test(command[i + 2] ?? "") && commandPosition(command, i) && conditionalEnd(command, i) !== -1) {
+      // `[[ a =~ (x<<y) ]]` is a conditional: a `<<` inside is text, never a heredoc.
+      const end = conditionalEnd(command, i);
+      text += command.slice(i, end + 1);
+      if (command.slice(i, end + 1).includes("<<")) skipped = true;
+      note(i, end + 1);
+      i = end;
+    } else if (!loose && /[?*+@!]/.test(c) && command[i + 1] === "(" && groupEnd(command, i + 1) !== -1) {
+      // `@(x<<y)` and its kin are pattern groups: a `<<` inside is text.
+      const end = groupEnd(command, i + 1);
+      text += command.slice(i, end + 1);
+      if (command.slice(i, end + 1).includes("<<")) skipped = true;
+      note(i, end + 1);
+      i = end;
+    } else if (!loose && /[A-Za-z_]/.test(c) && (i === 0 || /[\s;&|(){}]/.test(command[i - 1])) && assignmentEnd(command, i) !== -1) {
+      // `a[1<<n]=3` and `a=([1<<n]=3 <<x)` are assignments: a `<<` inside is text.
+      const end = assignmentEnd(command, i);
+      text += command.slice(i, end + 1);
+      if (command.slice(i, end + 1).includes("<<")) skipped = true;
+      note(i, end + 1);
+      i = end;
+    } else if (!loose && c === "`" && backtickEnd(command, i) !== -1) {
+      // A backtick span is read apart from the line around it.
+      const end = backtickEnd(command, i);
+      text += command.slice(i, end + 1);
+      if (command.slice(i, end + 1).includes("<<")) skipped = true;
+      note(i, end + 1);
+      i = end;
+    } else if (!loose && c === "#" && (i === 0 || /[\s;&|()]/.test(command[i - 1]))) {
+      // A comment runs to the end of the line; a `<<` in it is not an operator.
+      const eol = command.indexOf("\n", i);
+      const stop = eol === -1 ? n : eol;
+      text += command.slice(i, stop);
+      if (command.slice(i, stop).includes("<<")) skipped = true;
+      note(i, stop);
+      i = stop - 1;
+    } else if (c === "<" && command[i + 1] === "<" && command[i + 2] === "<") {
+      text += "<<<";
+      i += 2;
+    } else if (c === "<" && command[i + 1] === "<") {
+      let j = i + 2;
+      const dash = command[j] === "-";
+      if (dash) j++;
+      while (command[j] === " " || command[j] === "\t") j++;
+      let word = "";
+      let quoted = false;
+      // Bash removes quotes from the whole delimiter word, and the body is
+      // quoted when any part of the word was.
+      while (j < n && !/[\s;&|<>()]/.test(command[j])) {
+        const d = command[j];
+        if (d === "'" || d === '"') {
+          const end = command.indexOf(d, j + 1);
+          const stop = end === -1 ? n : end;
+          word += command.slice(j + 1, stop);
+          quoted = true;
+          j = Math.min(stop + 1, n);
+        } else if (d === "\\" && j + 1 < n) {
+          word += command[j + 1];
+          quoted = true;
+          j += 2;
+        } else {
+          word += d;
+          j++;
+        }
+      }
+      // `$((1<<3))` shifts bits; a delimiter of digits only is never a heredoc.
+      if (word === "" || (!loose && /^\d+$/.test(word))) {
+        if (word !== "") {
+          skipped = true;
+          skippedAt.push(i);
+        }
+        text += "<<";
+        i++;
+        continue;
+      }
+      const head = text;
+      const owner = splitRaw(head.slice(openSubstitutionStart(head))).at(-1) ?? "";
+      const tokens = shellWords(owner);
+      const made = invented?.has(i) === true;
+      const shell = made || ownsShell(tokens);
+      text += command.slice(i, j);
+      pending.push({ word, quoted, dash, shell, at: text.length, invented: made });
+      i = j - 1;
+    } else if (c === "\n" && pending.length) {
+      text += c;
+      let at = i + 1;
+      for (const h of pending) {
+        const lines = [];
+        let found = false;
+        while (at <= n && !found && at < n) {
+          const eol = command.indexOf("\n", at);
+          const line = command.slice(at, eol === -1 ? n : eol);
+          at = eol === -1 ? n : eol + 1;
+          if ((h.dash ? line.replace(/^\t+/, "") : line) === h.word) found = true;
+          else lines.push(line);
+        }
+        bodies.push({ body: lines.join("\n"), quoted: h.quoted, shell: h.shell });
+        extras.push({ word: h.word, invented: h.invented });
+        marks.push(h.at);
+      }
+      pending.length = 0;
+      i = at - 1;
+    } else text += c;
+  }
+  // A body no shell owns is still shell-read when a later pipe stage runs one.
+  bodies.forEach((b, k) => {
+    if (!b.shell && pipesIntoShellLater(text.slice(marks[k]))) b.shell = true;
+  });
+  return { text, bodies, extras, skipped, skippedAt, marks };
+}
+
+/**
+ * The offset where the innermost still-open `$(`, backtick, `<(` or `>(` body
+ * of `head` begins, or 0 outside every substitution, so a heredoc operator
+ * inside one is owned by the segment inside it, not by the outer segment.
+ */
+function openSubstitutionStart(head) {
+  const stack = [];
+  let quote = null;
+  for (let i = 0; i < head.length; i++) {
+    const c = head[i];
+    if (quote === "'") {
+      if (c === "'") quote = null;
+      continue;
+    }
+    if (c === "\\") {
+      i++;
+      continue;
+    }
+    if (c === "'" && quote === null) quote = "'";
+    else if (c === '"') quote = quote === '"' ? null : '"';
+    else if (c === "`") {
+      if (stack.at(-1)?.tick) stack.pop();
+      else stack.push({ tick: true, start: i + 1 });
+    } else if (c === "(") {
+      const prev = head[i - 1];
+      stack.push({ tick: false, start: i + 1, sub: prev === "$" || (quote === null && (prev === "<" || prev === ">")) });
+    } else if (c === ")") {
+      if (stack.at(-1) && !stack.at(-1).tick) stack.pop();
+    }
+  }
+  for (let k = stack.length - 1; k >= 0; k--) if (stack[k].tick || stack[k].sub) return stack[k].start;
+  return 0;
+}
+
+/** True when a segment's words run sh, bash, zsh, dash or ksh without `-c`, so it reads a script from stdin. */
+function ownsShell(tokens) {
+  return /^(?:ba|z|da|k)?sh$/.test(commandWord(tokens).word ?? "") && !tokens.some((t) => /^-[A-Za-z]*c[A-Za-z]*$/.test(t));
+}
+
+/**
+ * True when the command text after a heredoc operator (every body already
+ * removed) has an unquoted `|` or `|&` (not `||`, not the `>|` redirection)
+ * and, anywhere after the first one, a segment that reads a script from
+ * stdin (`ownsShell` after the grouping strip, so `(bash)`, `{ bash; }` and
+ * `then bash` count). A deliberate over-approximation: a later unrelated
+ * `echo x | bash` also counts, and over-denying is the safe error.
+ */
+function pipesIntoShellLater(rest) {
+  let quote = null;
+  const n = rest.length;
+  for (let i = 0; i < n; i++) {
+    const c = rest[i];
+    if (quote) {
+      if (quote === '"' && c === "\\") i++;
+      else if (c === quote) quote = null;
+    } else if (c === "'" || c === '"') quote = c;
+    else if (c === "\\") i++;
+    else if (c === "|") {
+      if (rest[i + 1] === "|") i++;
+      else if (rest[i - 1] !== ">") {
+        const after = rest.slice(i + 1).replace(/^&/, "");
+        return splitRaw(after).some((seg) => ownsShell(shellWords(stripGrouping(seg).segment)));
+      }
+    }
+  }
+  return false;
+}
+
+/**
+ * True when `at` starts a command: the start, after a newline, `;`, `&`, `|`,
+ * `(` or `{` (blanks skipped), or after a reserved word that takes a command.
+ */
+function commandPosition(command, at) {
+  let j = at - 1;
+  while (j >= 0 && (command[j] === " " || command[j] === "\t")) j--;
+  if (j < 0 || /[\n;&|({]/.test(command[j])) return true;
+  if (j === at - 1) return false;
+  let k = j;
+  while (k >= 0 && !/[\s;&|(){}]/.test(command[k])) k--;
+  return /^(?:if|then|else|elif|while|until|do|time|!)$/.test(command.slice(k + 1, j + 1));
+}
+
+/**
+ * The index of the `}` or `]` closing the `{` or `[` at `from`, or -1 when it
+ * never closes. Inner braces nest; quotes and backslashes hide a closer.
+ */
+function expansionEnd(command, from) {
+  const open = command[from];
+  const close = open === "{" ? "}" : "]";
+  let depth = 0;
+  let quote = null;
+  for (let i = from; i < command.length; i++) {
+    const c = command[i];
+    if (quote === "'") {
+      if (c === "'") quote = null;
+    } else if (quote === '"') {
+      if (c === "\\") i++;
+      else if (c === '"') quote = null;
+    } else if (c === "\\") i++;
+    else if (c === "'" || c === '"') quote = c;
+    else if (c === open) depth++;
+    else if (c === close && --depth === 0) return i;
+  }
+  return -1;
+}
+
+/**
+ * The index of the last character of the array assignment starting at `from`
+ * (`name[sub]=` or `name[sub]+=`, or `name=(...)` or `name+=(...)`), or -1 when
+ * `from` starts none or it never closes. Only the subscript or the list is
+ * covered, which is where a `<<` is text.
+ */
+function assignmentEnd(command, from) {
+  const m = /^[A-Za-z_][A-Za-z0-9_]*/.exec(command.slice(from));
+  let j = from + m[0].length;
+  if (command[j] === "[") {
+    const end = expansionEnd(command, j);
+    if (end === -1) return -1;
+    const next = command[end + 1] === "+" ? end + 2 : end + 1;
+    return command[next] === "=" ? end : -1;
+  }
+  if (command[j] === "+") j++;
+  if (command[j] !== "=" || command[j + 1] !== "(") return -1;
+  let depth = 0;
+  let quote = null;
+  for (let i = j + 1; i < command.length; i++) {
+    const c = command[i];
+    if (quote === "'") {
+      if (c === "'") quote = null;
+    } else if (quote === '"') {
+      if (c === "\\") i++;
+      else if (c === '"') quote = null;
+    } else if (c === "\\") i++;
+    else if (c === "'" || c === '"') quote = c;
+    else if (c === "(") depth++;
+    else if (c === ")" && --depth === 0) return i;
+  }
+  return -1;
+}
+
+/**
+ * The index of the `)` closing the `(` at `from`, or -1 when it never closes.
+ * Inner parentheses nest; quotes and backslashes hide a closer.
+ */
+function groupEnd(command, from) {
+  let depth = 0;
+  let quote = null;
+  for (let i = from; i < command.length; i++) {
+    const c = command[i];
+    if (quote === "'") {
+      if (c === "'") quote = null;
+    } else if (quote === '"') {
+      if (c === "\\") i++;
+      else if (c === '"') quote = null;
+    } else if (c === "\\") i++;
+    else if (c === "'" || c === '"') quote = c;
+    else if (c === "(") depth++;
+    else if (c === ")" && --depth === 0) return i;
+  }
+  return -1;
+}
+
+/**
+ * The index of the last `]` of the `]]` closing the `[[` at `from`: a `]]` after
+ * a blank and before a blank, `;`, `&`, `|`, `)`, a newline or the end. -1 when
+ * it never closes. Quotes and backslashes hide a closer.
+ */
+function conditionalEnd(command, from) {
+  let quote = null;
+  for (let i = from + 2; i < command.length; i++) {
+    const c = command[i];
+    if (quote === "'") {
+      if (c === "'") quote = null;
+    } else if (quote === '"') {
+      if (c === "\\") i++;
+      else if (c === '"') quote = null;
+    } else if (c === "\\") i++;
+    else if (c === "'" || c === '"') quote = c;
+    else if (c === "]" && command[i + 1] === "]" && /\s/.test(command[i - 1]) && (i + 2 >= command.length || /[\s;&|)]/.test(command[i + 2]))) return i + 1;
+  }
+  return -1;
+}
+
+/** The index of the backtick closing the one at `from`, or -1 when it never closes. */
+function backtickEnd(command, from) {
+  for (let i = from + 1; i < command.length; i++) {
+    if (command[i] === "\\") i++;
+    else if (command[i] === "`") return i;
+  }
+  return -1;
+}
+
+/** The index of the `)` closing the `((` at `from`, or -1 when it never closes. */
+function arithmeticEnd(command, from) {
+  let depth = 0;
+  for (let i = from; i < command.length; i++) {
+    if (command[i] === "(") depth++;
+    else if (command[i] === ")" && --depth === 0) return command[i - 1] === ")" ? i : -1;
+  }
+  return -1;
+}
+
+function splitRaw(command) {
   const segments = [];
   let current = "";
   let quote = null;
@@ -810,6 +1202,11 @@ export const READ_FAMILY = new Set(
 export const WRITE_FAMILY = new Set("cp mv rm tee sed truncate chmod chown ln install dd git".split(" "));
 const WRITE_TOOLS = new Set(["Write", "Edit", "MultiEdit", "NotebookEdit"]);
 const PATH_TOOLS = new Set(["Read", "Glob", "Grep", ...WRITE_TOOLS]);
+// Private-use markers that ride in the command text through the segment split; never in real input.
+const SUBST = "\uE001";
+const BODY = "\uE002";
+// A body marker carries the body's index between two BODY characters, so a substitution that holds the marker can be given its body back.
+const BODY_TOKEN = /\uE002(\d+)\uE002/g;
 const NO_ISSUES = Object.freeze({ decision: "allowed", reason: null });
 const denied = (reason) => ({ decision: "denied", reason });
 
@@ -881,6 +1278,8 @@ export function evaluate(policy, hookInput, env) {
   let shellCwd = cwd;
   // `cd -` returns here: the directory before the last `cd`.
   let previousCwd = cwd;
+  // True while a heredoc data body's lines are judged: only the write rules apply to them (SPEC A-02).
+  let writeOnly = false;
   const writeForms = (p, base = shellCwd) => canonicalPaths(p, { cwd: base, home });
   const lockdown = lockdownActive(policy, env.progressText);
   const prefixes = (list) => list.map((e) => resolvePrefix(e, root, home));
@@ -981,23 +1380,130 @@ export function evaluate(policy, hookInput, env) {
     return NO_ISSUES;
   }
 
-  if (tool === "Bash") return bashVerdict(String(args.command ?? ""), 0);
+  if (tool === "Bash") {
+    const text = String(args.command ?? "");
+    // The guard's internal markers are these two private-use characters; dropping them from the input would let `c<marker>d` be read as `cd` while the shell runs something else, so such a command is refused.
+    if (/[\uE001\uE002]/.test(text)) return denied("command contains U+E001 or U+E002, characters the guard reserves; remove them and retry");
+    return bashVerdict(text, 0);
+  }
 
   // 7. everything else, Agent, Task, Skill and every mcp__ tool included
   return NO_ISSUES;
 
   /** Rule 6 for one command string; substitutions, `sh -c` and `eval` strings are judged as further commands. */
   function bashVerdict(command, depth) {
-    if (depth > 4) return NO_ISSUES;
-    const { text, inner } = extractSubstitutions(command);
-    for (const sub of inner) {
-      const v = bashVerdict(sub, depth + 1);
-      if (v.decision === "denied") return v;
-    }
+    // The markers below are private-use characters; one in the input would pass for a marker, so it is dropped first.
+    command = command.replace(/[\uE001\uE002]/g, "");
+    if (depth > 4) return denied("command nested too deep: more than four levels of substitution, sh -c or eval; split it into separate commands");
+    const startCwd = shellCwd;
+    const startPrevious = previousCwd;
+    const first = bashReading(command, depth, false);
+    if (first.decision === "denied") return first;
+    // The readings differ only where the first one skipped a `<<`; otherwise run once.
+    if (!stripHeredocs(command, false).skipped) return first;
+    shellCwd = startCwd;
+    previousCwd = startPrevious;
+    return bashReading(command, depth, true);
+  }
+
+  /** One reading of a command: `loose` is the second reading of stripHeredocs. */
+  function bashReading(command, depth, loose) {
+    const stripped = stripHeredocs(command, loose);
+    // A marker after each heredoc operator (BODY) and each substitution (SUBST) lets the segment loop judge them in the directory their segment runs in, after the earlier segments' `cd`.
+    let marked = stripped.text;
+    for (let k = stripped.marks.length - 1; k >= 0; k--) marked = marked.slice(0, stripped.marks[k]) + BODY + k + BODY + marked.slice(stripped.marks[k]);
+    const { text, inner } = extractSubstitutions(marked, SUBST);
+    const owned = (arr, used, count) => arr.slice(used, used + count);
+    let substUsed = 0;
+    // Indexes of the bodies already judged, alone or inside the substitution that holds them.
+    const judged = new Set();
+    // A substitution's text with the bodies of its heredocs put back, so it is judged as the command it is, owner and all.
+    const withBodies = (sub) => {
+      const tokens = [...sub.matchAll(BODY_TOKEN)];
+      if (!tokens.length) return sub;
+      let clean = sub.replace(BODY_TOKEN, "");
+      const places = [];
+      let removed = 0;
+      for (const t of tokens) {
+        const pos = t.index - removed;
+        removed += t[0].length;
+        const b = stripped.bodies[Number(t[1])];
+        const extra = stripped.extras[Number(t[1])];
+        // An operator only the second reading invents stays with the final pass, at this depth: a chain of them must not reach the cap.
+        if (extra.invented) continue;
+        judged.add(Number(t[1]));
+        places.push({ nl: clean.indexOf("\n", pos), text: (b.body === "" ? "" : b.body + "\n") + extra.word + "\n" });
+      }
+      // Insert from the last newline backwards so earlier offsets hold; bodies of one line stay in order.
+      const groups = [...new Set(places.map((x) => x.nl))].sort((a, b) => (b === -1 ? Infinity : b) - (a === -1 ? Infinity : a));
+      for (const nl of groups) {
+        const block = places.filter((x) => x.nl === nl).map((x) => x.text).join("");
+        clean = nl === -1 ? clean + "\n" + block : clean.slice(0, nl + 1) + block + clean.slice(nl + 1);
+      }
+      return clean;
+    };
+    // One inner command line, judged at the current directory; a shell-read body runs in a child shell, so its `cd` never moves later segments.
+    const judgeBody = (b) => {
+      // A shell-read body is strictly shorter than the command, so it is judged at the same depth: a chain of invented operators must not reach the cap.
+      const savedCwd = shellCwd;
+      const savedPrevious = previousCwd;
+      const savedMode = writeOnly;
+      // An unquoted body's substitutions run when the command does, so every rule judges them.
+      if (!b.shell) writeOnly = false;
+      for (const sub of b.shell ? [b.body] : b.quoted ? [] : extractSubstitutions(b.body).inner) {
+        const v = bashVerdict(sub, b.shell ? depth : depth + 1);
+        if (v.decision === "denied") {
+          writeOnly = savedMode;
+          return v;
+        }
+      }
+      writeOnly = savedMode;
+      if (b.shell) {
+        shellCwd = savedCwd;
+        previousCwd = savedPrevious;
+        return null;
+      }
+      // A data body is never run, but its lines may be copied into a script: each line alone is judged for writes to protected paths, in a directory that starts where the owning segment runs and that a `cd` line moves for the lines after it (SPEC A-02).
+      const savedWriteOnly = writeOnly;
+      writeOnly = true;
+      try {
+        for (const line of b.body.split("\n")) {
+          if (!line.trim()) continue;
+          const v = bashVerdict(line, depth);
+          if (v.decision === "denied" && (v.reason.startsWith("protected path:") || v.reason.startsWith("command nested too deep:"))) return v;
+        }
+      } finally {
+        writeOnly = savedWriteOnly;
+        shellCwd = savedCwd;
+        previousCwd = savedPrevious;
+      }
+      return null;
+    };
+    const judgeOwned = (substs, ids) => {
+      for (const sub of substs) {
+        // A substitution runs in a child shell: its `cd` ends with it.
+        const savedCwd = shellCwd;
+        const savedPrevious = previousCwd;
+        const v = bashVerdict(withBodies(sub), depth + 1);
+        shellCwd = savedCwd;
+        previousCwd = savedPrevious;
+        if (v.decision === "denied") return v;
+      }
+      for (const id of ids) {
+        if (judged.has(id)) continue;
+        judged.add(id);
+        const v = judgeBody(stripped.bodies[id]);
+        if (v) return v;
+      }
+      return null;
+    };
     const subshells = [];
     // Nesting of `case ... in`, inside which a leading `pattern)` is an arm and not a command.
     let caseDepth = 0;
-    for (const raw of splitSegments(text)) {
+    for (const rawMarked of splitRaw(text)) {
+      const nSubst = rawMarked.split(SUBST).length - 1;
+      const bodyIds = [...rawMarked.matchAll(BODY_TOKEN)].map((m) => Number(m[1]));
+      const raw = rawMarked.replaceAll(SUBST, "").replace(BODY_TOKEN, "");
       const { segment, opens, closes, entersCase, leavesCase } = stripGrouping(raw, caseDepth > 0);
       if (entersCase) caseDepth++;
       if (leavesCase && caseDepth > 0) caseDepth--;
@@ -1006,6 +1512,11 @@ export function evaluate(policy, hookInput, env) {
       const settle = () => {
         for (let k = 0; k < closes && subshells.length; k++) shellCwd = subshells.pop();
       };
+      {
+        const v = judgeOwned(owned(inner, substUsed, nSubst), bodyIds);
+        substUsed += nSubst;
+        if (v) return v;
+      }
       const tokens = shellWords(segment).map((t) => (home ? t.replaceAll("${HOME}", home).replace(/\$HOME(?![A-Za-z0-9_])/g, () => home) : t));
       const { word, args: rest } = commandWord(tokens);
       if (word === null) {
@@ -1015,9 +1526,17 @@ export function evaluate(policy, hookInput, env) {
       // A string handed to a shell or to eval is a command line of its own.
       const shellString = /^(?:ba|z|da|k)?sh$/.test(word) ? rest[rest.findIndex((t) => /^-[A-Za-z]*c[A-Za-z]*$/.test(t)) + 1] : word === "eval" ? rest.join(" ") : undefined;
       if (typeof shellString === "string" && (word === "eval" || rest.some((t) => /^-[A-Za-z]*c[A-Za-z]*$/.test(t)))) {
+        // A shell's -c string runs in a child shell, so its `cd` ends with it; eval's runs in this one and moves the later segments.
+        const savedCwd = shellCwd;
+        const savedPrevious = previousCwd;
         const v = bashVerdict(shellString, depth + 1);
+        if (word !== "eval") {
+          shellCwd = savedCwd;
+          previousCwd = savedPrevious;
+        }
         if (v.decision === "denied") return v;
       }
+      if (!writeOnly) {
       // 6.0 adding a package the policy denies: judged before the network rule of the same segment, so the reason names the package (SPEC C-07).
       {
         const adds = { cargo: ["cargo", ["add"]], npm: ["npm", ["install", "i", "add"]], pip: ["pypi", ["install"]], uv: ["pypi", ["add"]] }[word];
@@ -1099,6 +1618,7 @@ export function evaluate(policy, hookInput, env) {
         const v = reachVerdict(t, shellCwd, true);
         if (v) return v;
       }
+      }
       // 6d'. rsync and tar are not write-family as a whole: their sources and archives are only read, so each gets a rule of its own (SPEC A-04).
       if (word === "rsync") {
         const { operands, recursive, deletes, removesSources } = rsyncParts(rest);
@@ -1175,7 +1695,7 @@ export function evaluate(policy, hookInput, env) {
       const redirects = redirectTargets(segment).flatMap((t) => braceExpand(t));
       const allArgs = rest;
       let writeDenied = null;
-      if (WRITE_FAMILY.has(word)) {
+      if (WRITE_FAMILY.has(word) && (word !== "sed" || sedInPlace(allArgs.flatMap((t) => braceExpand(t))))) {
         // The shell expands braces before the command runs, so `rm -rf {docs,src}` is `rm -rf docs src`.
         const rest = allArgs.flatMap((t) => braceExpand(t));
         if (word === "git" && rest[0] === "config" && rest.some((t) => /core\.hookspath/i.test(t))) return denied("protected path: git config core.hooksPath");
@@ -1185,8 +1705,11 @@ export function evaluate(policy, hookInput, env) {
         const gitCwd = git ? git.dirs.reduce((base, d) => canonicalPaths(tokenPath(d), { cwd: base, home })[0], shellCwd) : shellCwd;
         // These git forms write only .git/ or nothing, so their pathspecs are not write targets; `--output` of diff, log and show still names a file they write (SPEC A-03).
         const indexOnly = git && INDEX_ONLY_GIT.has(git.sub) ? gitOutputValues(git.sub, rest, git.subIndex) : null;
+        // A sed that edits in place writes only its file operands, never its script or an option's value.
+        const sedSkip = word === "sed" ? sedScan(rest).skip : null;
         rest.forEach((t, i) => {
           if (writeDenied) return;
+          if (sedSkip && sedSkip.has(i)) return;
           if (indexOnly && i > git.subIndex && !indexOnly.has(i)) return;
           if (!(!t.startsWith("-") || isPathLike(t))) return;
           const f = writeForms(tokenPath(t), git && i > git.subIndex ? gitCwd : shellCwd).find((x) => protectedList.some((p) => underPrefix(x, p)));
@@ -1233,7 +1756,7 @@ export function evaluate(policy, hookInput, env) {
         if (w) return denied(`protected path: ${w} (can be named by the wildcard ${t})`);
       }
       // 6e. command patterns
-      const hit = commandPatterns.find((x) => new RegExp(x.re.source, x.re.flags).test(segment));
+      const hit = writeOnly ? null : commandPatterns.find((x) => new RegExp(x.re.source, x.re.flags).test(segment));
       if (hit) return denied(`commandPatterns ${hit.id}`);
       // A `cd` or `pushd` moves every later relative operand (`cd docs && rm cleanroom.json`, `cd ~/.cargo && cat registry/x`).
       if (word === "cd" || word === "pushd") {
@@ -1247,7 +1770,8 @@ export function evaluate(policy, hookInput, env) {
       }
       settle();
     }
-    return NO_ISSUES;
+    // Anything no segment claimed is judged at the final directory rather than skipped.
+    return judgeOwned(inner.slice(substUsed), stripped.bodies.map((b, k) => k)) ?? NO_ISSUES;
   }
 }
 
@@ -1373,6 +1897,75 @@ function destinationPathsFor(word, rest, spec) {
 }
 
 /**
+ * Reads sed's arguments (the tokens after the word `sed`): whether it edits in
+ * place, and the indexes that are not file operands (options, their values,
+ * the script, and BSD sed's empty suffix after a bare -i).
+ */
+function sedLongOption(name) {
+  // GNU getopt_long accepts an unambiguous prefix; --f alone also matches
+  // --follow-symlinks, so --file needs --fi.
+  const need = { "in-place": 1, expression: 1, file: 2, "line-length": 1 };
+  for (const [full, min] of Object.entries(need)) if (name.length >= min && full.startsWith(name)) return full;
+  return null;
+}
+
+function sedScan(args) {
+  const skip = new Set();
+  let inPlace = false;
+  let sawExplicit = false;
+  let script = -1;
+  let ended = false;
+  for (let i = 0; i < args.length; i++) {
+    const t = args[i];
+    if (ended) {
+      if (script === -1 && !sawExplicit) script = i;
+      continue;
+    }
+    if (t === "--") {
+      skip.add(i);
+      ended = true;
+      continue;
+    }
+    if (!(t.startsWith("-") && t.length > 1)) {
+      if (script === -1) script = i;
+      continue;
+    }
+    skip.add(i);
+    const long = t.startsWith("--") ? sedLongOption(t.slice(2).split("=")[0]) : null;
+    const hasValue = t.includes("=");
+    if (long === "expression" || long === "file" || long === "line-length") {
+      if (long !== "line-length") sawExplicit = true;
+      if (!hasValue && i + 1 < args.length) skip.add(++i);
+    } else if (long === "in-place") {
+      inPlace = true;
+    } else if (t.startsWith("--")) {
+      // any other long option takes no operand we model
+    } else if (/^-[A-Za-z]/.test(t)) {
+      for (let k = 1; k < t.length; k++) {
+        const c = t[k];
+        if (c === "i") {
+          inPlace = true;
+          if (t === "-i" && args[i + 1] === "") skip.add(++i);
+          break;
+        }
+        if (c === "e" || c === "f" || c === "l") {
+          if (c !== "l") sawExplicit = true;
+          if (k === t.length - 1 && i + 1 < args.length) skip.add(++i);
+          break;
+        }
+      }
+    }
+  }
+  if (script !== -1 && !sawExplicit) skip.add(script);
+  return { inPlace, skip };
+}
+
+/** True when a sed invocation edits its files in place: -i, -i<suffix>, --in-place[=<suffix>] or a short cluster holding i. */
+export function sedInPlace(args) {
+  return sedScan(args).inPlace;
+}
+
+/**
  * The indexes of `rest` that are a pattern, script or program rather than a
  * path: the pattern of grep/rg/ag/ack, the script of sed, the program of awk,
  * and the value of find's -name/-path/-regex tests.
@@ -1413,7 +2006,7 @@ function patternOperands(word, rest) {
 }
 
 /** The text of a command with each `$(...)`, backtick and `<(...)` / `>(...)` body cut out, and those bodies; single quotes hide a body. */
-function extractSubstitutions(command) {
+function extractSubstitutions(command, marker = "") {
   const inner = [];
   let text = "";
   let quote = null;
@@ -1439,7 +2032,7 @@ function extractSubstitutions(command) {
       const end = command.indexOf("`", i + 1);
       const stop = end === -1 ? command.length : end;
       inner.push(command.slice(i + 1, stop));
-      text += "SUBST";
+      text += "SUBST" + marker;
       i = stop;
     } else if (command[i + 1] === "(" && (c === "$" || (quote === null && (c === "<" || c === ">")))) {
       let depth = 1;
@@ -1449,7 +2042,7 @@ function extractSubstitutions(command) {
         else if (command[j] === ")") depth--;
       }
       inner.push(command.slice(i + 2, depth === 0 ? j - 1 : j));
-      text += "SUBST";
+      text += "SUBST" + marker;
       i = j - 1;
     } else text += c;
   }
@@ -1940,7 +2533,7 @@ export const KNOWN_LIMITS = [
   { id: "interpreter", text: "Interpreter escapes (python3 -c, node -e) are not parsed, so a path or word inside the quoted program is not seen.", levels: ["hook"] },
   { id: "expansion", text: "Shell expansion beyond ~ and $HOME is not evaluated: other variables, and strings assembled at run time (a base64 decode, a variable holding a command), so a path or command built that way is not seen.", levels: ["hook"] },
   { id: "spellings", text: "Option and wrapper spellings the tables do not model are not recognized: the guard judges a command by its text, its wrapper and option parsing follows GNU coreutils, findutils and sudo (and BSD/macOS forms where their manual pages differ), and no table can be proved complete across tool versions.", levels: ["hook"] },
-  { id: "indirect", text: "Commands that run a command from their arguments (find -exec, watch, parallel, busybox) and programs outside the fixed network and write lists (unlink, shred, perl -i, cargo fetch) are not recognized.", levels: ["hook"] },
+  { id: "indirect", text: "Commands that run a command from their arguments (find -exec, watch, parallel, busybox) and programs outside the fixed network and write lists (unlink, shred, perl -i, sed's w command, cargo fetch) are not recognized.", levels: ["hook"] },
   { id: "patterns", text: "pathPatterns regexes are matched on the paths a call names, not on the files a recursive read or a glob reaches below a directory.", levels: ["hook"] },
   { id: "make", text: "Subprocesses of a make target are not individual tool calls, so what they read is not logged.", levels: ["hook"] },
   { id: "mcp", text: "MCP server internals are not tool calls, so what a server reads on its own is not logged.", levels: ["hook"] },

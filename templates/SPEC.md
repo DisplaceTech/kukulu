@@ -31,7 +31,7 @@ APIs, message types, file formats, CLI surface: whatever the pieces use to talk 
 
 ## 7. Commands
 
-The exact commands for typecheck, lint, test, build, and any headless or smoke run. The planner copies these into `docs/kukulu.json`; every one must exit non-zero on failure. If the test runner can run one class or file, give that command too with an unquoted `{filter}` placeholder where the class or path goes (for example `php artisan test --filter={filter}`), so the planner can fill `mutation.targeted` and the reviewer can mutation-test a file in seconds.
+The exact commands for typecheck, lint, test, build, and any headless or smoke run. The planner copies these into `docs/kukulu.json`; every one must exit non-zero on failure. If the test runner can run one class or file, give that command too with an unquoted `{filter}` placeholder where the class or path goes (for example `php artisan test --filter={filter}`, or `cargo test --workspace -- {filter}`: `cargo test` takes one TESTNAME and libtest, behind `--`, takes several), so the planner can fill `mutation.targeted` and the reviewer can mutation-test a file in seconds.
 
 ## 8. Phases
 

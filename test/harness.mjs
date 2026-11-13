@@ -599,12 +599,19 @@ export function buildBundle(dir, opts = {}) {
 export function buildComparePair(dir, opts = {}) {
   const metrics = ["ngram_jaccard@5", "ngram_containment@5", "ngram_jaccard@10", "ngram_containment@10", "ident_jaccard", "ident_match_rate_left", "comment_jaccard"];
   const config = { ngram: [5, 10], minIdentLen: 6, commentNgram: 5, languages: { ".rs": "rust", ".c": "c", ".h": "c" } };
-  const similarity = (verdict, config2, neg, pos) => JSON.stringify({
+  // `grouped` adds a second group, rust-c, whose controls score differently; the rows without a group are the default group's.
+  const similarity = (verdict, config2, neg, pos, grouped = false) => JSON.stringify({
     config: config2,
-    rows: metrics.flatMap((m, i) => [
-      { pair: "independent", role: "negative", metric: m, score: neg + i / 100, c: null, band: null },
-      { pair: "derived", role: "positive", metric: m, score: pos + i / 100, c: null, band: null },
-    ]),
+    rows: [
+      ...metrics.flatMap((m, i) => [
+        { pair: "independent", role: "negative", metric: m, score: neg + i / 100, c: null, band: null },
+        { pair: "derived", role: "positive", metric: m, score: pos + i / 100, c: null, band: null },
+      ]),
+      ...(grouped ? metrics.flatMap((m, i) => [
+        { pair: "n-rc", group: "rust-c", role: "negative", metric: m, score: 0.3 + i / 100, c: null, band: null },
+        { pair: "p-rc", group: "rust-c", role: "positive", metric: m, score: 0.7 + i / 100, c: null, band: null },
+      ]) : []),
+    ],
     verdict,
   });
   const routed = (model, runner, source, family) => ({ model, runner, endpoint: runner ? "http://spark.test:8000" : null, locality: runner ? "local" : "unknown", identity: { source }, family });
@@ -615,7 +622,7 @@ export function buildComparePair(dir, opts = {}) {
   const a = buildBundle(path.join(dir, "a"), {
     clock: clock("2026-02-01T00:00:00.000Z"),
     roles: roles(routed("opus", "anthropic", "vendor-asserted", "claude")),
-    similarity: opts.noSimilarity ? undefined : similarity("shows no similarity beyond independent work", config, 0.1, 0.9),
+    similarity: opts.noSimilarity ? undefined : similarity("shows no similarity beyond independent work", config, 0.1, 0.9, opts.aGrouped === true),
     extra: (log) => {
       stage(log, "start", "plan"); stage(log, "end", "plan"); stage(log, "start", "implement"); stage(log, "end", "implement");
       usage(log, "kukulu-implementer", "opus", 1200, 300, 0.5);

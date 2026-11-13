@@ -7585,5 +7585,1851 @@
    "cwd": "__ROOT__"
   },
   "expect": "allowed"
+ },
+ {
+  "name": "sed -i 1d .kukulu/cleanroom/log.jsonl (P0-01)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "sed -i 1d .kukulu/cleanroom/log.jsonl"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "sed -ni 1p docs/cleanroom.json (P0-01)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "sed -ni 1p docs/cleanroom.json"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "sed --in-place=.bak s/a/b/ .mcp.json (P0-01)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "sed --in-place=.bak s/a/b/ .mcp.json"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "sed -i.bak s/a/b/ .mcp.json (P0-01)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "sed -i.bak s/a/b/ .mcp.json"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "sed -Ei s/a/b/ .mcp.json (P0-01)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "sed -Ei s/a/b/ .mcp.json"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "sed -e s/a/b/ -i .mcp.json (P0-01)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "sed -e s/a/b/ -i .mcp.json"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "sed -i '' s/a/b/ .mcp.json (P0-01)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "sed -i '' s/a/b/ .mcp.json"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path"
+ },
+ {
+  "name": "sed -n 480p .kukulu/cleanroom/log.jsonl (P0-01)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "sed -n 480p .kukulu/cleanroom/log.jsonl"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "sed -n 1p .mcp.json (P0-01)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "sed -n 1p .mcp.json"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "cd __HOME__/plugin-root; sed -n 2910,2990p mcp/server.mjs (P0-01)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd __HOME__/plugin-root; sed -n 2910,2990p mcp/server.mjs"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "sed -n -e 1p -e 2p docs/cleanroom.json (P0-01)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "sed -n -e 1p -e 2p docs/cleanroom.json"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "sed -i s/a/b/ src/a.rs (P0-01)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "sed -i s/a/b/ src/a.rs"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "cat <<EOF > x.txt ... it's fine (P0-02)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat <<EOF > x.txt\nit's fine\nEOF\nrm -rf .kukulu/cleanroom"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*\\.kukulu/cleanroom"
+ },
+ {
+  "name": "bash <<'EOF' ... rm -rf .kukulu/cleanroom (P0-02)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "bash <<'EOF'\nrm -rf .kukulu/cleanroom\nEOF"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*\\.kukulu/cleanroom"
+ },
+ {
+  "name": "cat <<EOF > docs/cleanroom.json ... {} (P0-02)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat <<EOF > docs/cleanroom.json\n{}\nEOF"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*docs/cleanroom\\.json"
+ },
+ {
+  "name": "cat <<EOF > out.txt ... $(cat ~/.cargo/registry/a.rs) (P0-02)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat <<EOF > out.txt\n$(cat ~/.cargo/registry/a.rs)\nEOF"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "denied path"
+ },
+ {
+  "name": "cat > build/k.json <<'EOF' ... {\"priorArt\": [\"~/.cargo/regist (P0-02)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat > build/k.json <<'EOF'\n{\"priorArt\": [\"~/.cargo/registry/\", \"~/.cargo/git/\"]}\nEOF"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "cat <<'EOF' > notes.txt ... $(rm -rf .kukulu) (P0-02)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat <<'EOF' > notes.txt\n$(rm -rf .kukulu)\nEOF"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "python3 - <<'EOF' ... print(\"~/.cargo/git/x\") (P0-02)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "python3 - <<'EOF'\nprint(\"~/.cargo/git/x\")\nEOF"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "cat <<-EOF > build/a.txt ... \tbody line (P0-02)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat <<-EOF > build/a.txt\n\tbody line\n\tEOF\necho done"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "echo $((1<<n)) newline rm (R1-02)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "echo $((1<<n))\nrm -rf .kukulu/cleanroom"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "(( x = y << z )) newline rm (R1-02)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "(( x = y << z ))\nrm -rf .kukulu/cleanroom"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "comment with a<<b newline rm (R1-02)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "echo hi # see a<<b\nrm -rf .kukulu/cleanroom"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "heredoc delimiter E'OF' ends at EOF newline rm (R1-02)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat <<E'OF' > x.txt\nhi\nEOF\nrm -rf .kukulu/cleanroom"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "echo $((1<<3)) newline rm (R1-02)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "echo $((1<<3))\nrm -rf .kukulu/cleanroom"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "sed --in abbreviation (R1-02)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "sed --in s/a/b/ .mcp.json"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "sed --in-pl=.bak abbreviation (R1-02)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "sed --in-pl=.bak s/a/b/ .mcp.json"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "quoted heredoc E'OF' body not scanned (R1-02)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat <<E'OF' > notes.txt\n$(rm -rf .kukulu)\nEOF"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "sed empty BSD suffix keeps 1d out of targets (R1-02)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd .kukulu/cleanroom; sed -i '' 1d ../../src/a.rs"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "sed -l 80 value is not a target (R1-02)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd .kukulu/cleanroom; sed -i -l 80 1d ../../src/a.rs"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "echo $[1<<n] NL rm -rf .kukulu/cleanroom (R2-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "echo $[1<<n]\nrm -rf .kukulu/cleanroom"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "echo ${x#<<y} NL rm -rf .kukulu/cleanroom (R2-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "echo ${x#<<y}\nrm -rf .kukulu/cleanroom"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "echo ${x:-<<y} NL rm -rf .kukulu/cleanroom (R2-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "echo ${x:-<<y}\nrm -rf .kukulu/cleanroom"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "y=${x/<</z} NL rm -rf .kukulu/cleanroom (R2-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "y=${x/<</z}\nrm -rf .kukulu/cleanroom"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "echo ${#x}<<y NL rm -rf .kukulu/cleanroom (R2-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "echo ${#x}<<y\nrm -rf .kukulu/cleanroom"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "sed --expression=s/a/b/ -i .mcp.json (R2-03)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "sed --expression=s/a/b/ -i .mcp.json"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "sed --e=s/a/b/ -i .mcp.json (R2-03)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "sed --e=s/a/b/ -i .mcp.json"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "((cd src); cat <<'EOF' > notes.txt NL $(rm -rf .kukulu) NL EOF NL ) (R2-03)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "((cd src); cat <<'EOF' > notes.txt\n$(rm -rf .kukulu)\nEOF\n)"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "a[1<<n]=3 NL rm -rf .kukulu/cleanroom (R3-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "a[1<<n]=3\nrm -rf .kukulu/cleanroom"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "a[1<<n]+=3 NL rm -rf .kukulu/cleanroom (R3-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "a[1<<n]+=3\nrm -rf .kukulu/cleanroom"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "x=1 a[1<<n]=3 NL rm -rf .kukulu/cleanroom (R3-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "x=1 a[1<<n]=3\nrm -rf .kukulu/cleanroom"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "a[x[1<<n]]=3 NL rm -rf .kukulu/cleanroom (R3-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "a[x[1<<n]]=3\nrm -rf .kukulu/cleanroom"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "f() { a[1<<n]=3; } NL rm -rf .kukulu/cleanroom (R3-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "f() { a[1<<n]=3; }\nrm -rf .kukulu/cleanroom"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "x=$(a[1<<n]=3) NL rm -rf .kukulu/cleanroom (R3-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "x=$(a[1<<n]=3)\nrm -rf .kukulu/cleanroom"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "a=([1<<n]=3) NL rm -rf .kukulu/cleanroom (R3-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "a=([1<<n]=3)\nrm -rf .kukulu/cleanroom"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "declare -a a=([1<<n]=3) NL rm -rf .kukulu/cleanroom (R3-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "declare -a a=([1<<n]=3)\nrm -rf .kukulu/cleanroom"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "a=(x <<n) NL rm -rf .kukulu/cleanroom (R3-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "a=(x <<n)\nrm -rf .kukulu/cleanroom"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "echo `cat <<x` NL rm -rf .kukulu/cleanroom (R3-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "echo `cat <<x`\nrm -rf .kukulu/cleanroom"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "a[1]<<n NL rm -rf .kukulu/cleanroom (R3-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "a[1]<<n\nrm -rf .kukulu/cleanroom"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "echo $(cat <<x) NL rm -rf .kukulu/cleanroom NL x (R3-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "echo $(cat <<x)\nrm -rf .kukulu/cleanroom\nx"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "[[ a =~ (x<<y) ]] NL rm -rf .kukulu/cleanroom (R4-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "[[ a =~ (x<<y) ]]\nrm -rf .kukulu/cleanroom"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "[[ a =~ (x<<y) ]] NL rm -rf .kukulu/cleanroom NL y (R4-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "[[ a =~ (x<<y) ]]\nrm -rf .kukulu/cleanroom\ny"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "[[ a =~ ^(<<y)$ ]] NL rm -rf .kukulu/cleanroom (R4-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "[[ a =~ ^(<<y)$ ]]\nrm -rf .kukulu/cleanroom"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "[[ a =~ x(<<y) ]] NL echo x > docs/cleanroom.json (R4-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "[[ a =~ x(<<y) ]]\necho x > docs/cleanroom.json"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "if [[ a =~ (<<y) ]]; then :; fi NL rm -rf .kukulu/cleanroom (R4-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "if [[ a =~ (<<y) ]]; then :; fi\nrm -rf .kukulu/cleanroom"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "[[ a == @(x<<y) ]] NL rm -rf .kukulu/cleanroom (R4-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "[[ a == @(x<<y) ]]\nrm -rf .kukulu/cleanroom"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "[[ a == +(<<y) ]] && echo ok NL rm -rf .kukulu/cleanroom (R4-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "[[ a == +(<<y) ]] && echo ok\nrm -rf .kukulu/cleanroom"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "shopt -s extglob NL echo @(x<<y) NL rm -rf .kukulu/cleanroom (R4-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "shopt -s extglob\necho @(x<<y)\nrm -rf .kukulu/cleanroom"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "shopt -s extglob NL ls !(x<<y) NL rm -rf .kukulu/cleanroom (R4-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "shopt -s extglob\nls !(x<<y)\nrm -rf .kukulu/cleanroom"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "shopt -s extglob NL case a in @(x<<y)) ;; esac NL rm -rf .kukulu/cleanroom (R4-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "shopt -s extglob\ncase a in @(x<<y)) ;; esac\nrm -rf .kukulu/cleanroom"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "[[ -n a ]] <<y NL rm -rf .kukulu/cleanroom (R4-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "[[ -n a ]] <<y\nrm -rf .kukulu/cleanroom"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "[[ -n a ]] && cat <<EOF > notes.txt NL rm -rf .kukulu/cleanroom NL EOF (R4-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "[[ -n a ]] && cat <<EOF > notes.txt\nrm -rf .kukulu/cleanroom\nEOF"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "!(cat <<EOF NL it's NL EOF NL rm -rf .kukulu/cleanroom NL echo ')' NL ) (R5-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "!(cat <<EOF\nit's\nEOF\nrm -rf .kukulu/cleanroom\necho ')'\n)"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "echo ok && !(cat <<EOF NL it's NL EOF NL rm -rf .kukulu/cleanroom NL : ')' NL ) (R5-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "echo ok && !(cat <<EOF\nit's\nEOF\nrm -rf .kukulu/cleanroom\n: ')'\n)"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "!(cat <<EOF > x.txt NL it's NL EOF NL ) ; rm -rf .kukulu/cleanroom ; : ')' (R5-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "!(cat <<EOF > x.txt\nit's\nEOF\n) ; rm -rf .kukulu/cleanroom ; : ')'"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "echo [[ <<EOF NL it's NL EOF NL rm -rf .kukulu/cleanroom NL : ' x ]] ' (R5-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "echo [[ <<EOF\nit's\nEOF\nrm -rf .kukulu/cleanroom\n: ' x ]] '"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "cat a [[ <<EOF NL it's NL EOF NL echo x > docs/cleanroom.json NL : ' ]] ' (R5-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat a [[ <<EOF\nit's\nEOF\necho x > docs/cleanroom.json\n: ' ]] '"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "shopt -s extglob NL !(x<<y) NL rm -rf .kukulu/cleanroom (R5-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "shopt -s extglob\n!(x<<y)\nrm -rf .kukulu/cleanroom"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "while [[ a =~ (<<y) ]]; do :; done NL rm -rf .kukulu/cleanroom (R5-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "while [[ a =~ (<<y) ]]; do :; done\nrm -rf .kukulu/cleanroom"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "! [[ a =~ (<<y) ]] NL rm -rf .kukulu/cleanroom (R5-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "! [[ a =~ (<<y) ]]\nrm -rf .kukulu/cleanroom"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "echo ok && [[ a =~ (<<y) ]] NL rm -rf .kukulu/cleanroom (R5-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "echo ok && [[ a =~ (<<y) ]]\nrm -rf .kukulu/cleanroom"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "shopt -s extglob NL echo @(a|(x)<<y) NL rm -rf .kukulu/cleanroom (R5-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "shopt -s extglob\necho @(a|(x)<<y)\nrm -rf .kukulu/cleanroom"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "echo [[ <<EOF > notes.txt NL rm -rf .kukulu/cleanroom NL EOF NL echo ]] (R5-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "echo [[ <<EOF > notes.txt\nrm -rf .kukulu/cleanroom\nEOF\necho ]]"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "cat <<EOF | bash NL rm -rf .kukulu/cleanroom NL EOF (R6-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat <<EOF | bash\nrm -rf .kukulu/cleanroom\nEOF"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "cat <<'EOF' | sh NL rm -rf .kukulu/cleanroom NL EOF (R6-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat <<'EOF' | sh\nrm -rf .kukulu/cleanroom\nEOF"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "cat <<EOF |& bash NL rm -rf .kukulu/cleanroom NL EOF (R6-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat <<EOF |& bash\nrm -rf .kukulu/cleanroom\nEOF"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "cat <<EOF | tee x | bash NL rm -rf .kukulu/cleanroom NL EOF (R6-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat <<EOF | tee x | bash\nrm -rf .kukulu/cleanroom\nEOF"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "cat <<'EOF' | grep x NL priorArt json NL EOF (R6-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat <<'EOF' | grep x\n{\"priorArt\": [\"~/.cargo/registry/\", \"~/.cargo/git/\"]}\nEOF"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "cat <<EOF | bash -c 'echo hi' NL rm -rf .kukulu/cleanroom NL EOF (R6-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat <<EOF | bash -c 'echo hi'\nrm -rf .kukulu/cleanroom\nEOF"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "cat <<1 > x.txt NL it's NL 1 NL rm -rf .kukulu/cleanroom (R6-03)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat <<1 > x.txt\nit's\n1\nrm -rf .kukulu/cleanroom"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "x=$(!(cat <<EOF NL it's NL EOF NL rm -rf .kukulu/cleanroom NL : ')' NL )) (R6-03)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "x=$(!(cat <<EOF\nit's\nEOF\nrm -rf .kukulu/cleanroom\n: ')'\n))"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "echo $((1<<y)) NL rm -rf .kukulu/cleanroom (R6-03)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "echo $((1<<y))\nrm -rf .kukulu/cleanroom"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "[[ a =~ (x<<y) ]] && echo ok (R6-03)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "[[ a =~ (x<<y) ]] && echo ok"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "echo $((1<<3)) (R6-03)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "echo $((1<<3))"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "!(cat <<EOF NL rm -rf .kukulu/cleanroom NL EOF NL ) first reading judges the line (R6-03)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "!(cat <<EOF\nrm -rf .kukulu/cleanroom\nEOF\n)"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "shopt -s extglob NL !(x<<y) NL rm -rf .kukulu/cleanroom (R6-03)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "shopt -s extglob\n!(x<<y)\nrm -rf .kukulu/cleanroom"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "cat <<EOF | NL rm NL EOF NL bash (R7-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat <<EOF |\nrm -rf .kukulu/cleanroom\nEOF\nbash"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "cat <<EOF BS NL | bash NL rm NL EOF (R7-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat <<EOF \\\n| bash\nrm -rf .kukulu/cleanroom\nEOF"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "cat <<EOF | (bash) NL rm NL EOF (R7-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat <<EOF | (bash)\nrm -rf .kukulu/cleanroom\nEOF"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "cat <<EOF | { bash; } NL rm NL EOF (R7-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat <<EOF | { bash; }\nrm -rf .kukulu/cleanroom\nEOF"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "cat <<'EOF' | NL priorArt json NL EOF NL grep x (R7-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat <<'EOF' |\n{\"priorArt\": [\"~/.cargo/registry/\", \"~/.cargo/git/\"]}\nEOF\ngrep x"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "echo $((1<<3)) NL cat <<1 > x.txt NL it's NL 1 NL rm -rf .kukulu/cleanroom (R8-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "echo $((1<<3))\ncat <<1 > x.txt\nit's\n1\nrm -rf .kukulu/cleanroom"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "# a << b NL cat <<1 > x.txt NL it's NL 1 NL rm -rf .kukulu/cleanroom (R8-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "# a << b\ncat <<1 > x.txt\nit's\n1\nrm -rf .kukulu/cleanroom"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "six echo $((1<<3)) lines then cat <<1 > x.txt NL it's NL 1 NL rm -rf .kukulu/cleanroom (R8-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "echo $((1<<3))\necho $((1<<3))\necho $((1<<3))\necho $((1<<3))\necho $((1<<3))\necho $((1<<3))\ncat <<1 > x.txt\nit's\n1\nrm -rf .kukulu/cleanroom"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "echo $((1<<3)) > a.txt NL cat > build/k.json <<'EOF' with priorArt (R8-01)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "echo $((1<<3)) > a.txt\ncat > build/k.json <<'EOF'\n{\"priorArt\": [\"~/.cargo/registry/\", \"~/.cargo/git/\"]}\nEOF"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "cd build NL bash <<EOF NL rm ../.kukulu NL EOF (R8-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd build\nbash <<EOF\nrm -rf ../.kukulu/cleanroom\nEOF"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "cd build NL cat <<EOF | bash NL rm ../.kukulu NL EOF (R8-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd build\ncat <<EOF | bash\nrm -rf ../.kukulu/cleanroom\nEOF"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "cd build && sh <<'EOF' NL rm ../.kukulu NL EOF (R8-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd build && sh <<'EOF'\nrm -rf ../.kukulu/cleanroom\nEOF"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "(cd build; bash <<EOF NL rm ../.kukulu NL EOF NL ) (R8-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "(cd build; bash <<EOF\nrm -rf ../.kukulu/cleanroom\nEOF\n)"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "bash <<EOF NL cd build NL EOF NL rm -rf .kukulu/cleanroom (R8-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "bash <<EOF\ncd build\nEOF\nrm -rf .kukulu/cleanroom"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "cd build NL cat <<EOF > out.txt NL $(rm ../.kukulu) NL EOF (R8-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd build\ncat <<EOF > out.txt\n$(rm -rf ../.kukulu/cleanroom)\nEOF"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "cd build; echo $(rm ../.kukulu) (R8-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd build; echo $(rm -rf ../.kukulu/cleanroom)"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "cd build; echo `rm ../.kukulu` (R8-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd build; echo `rm -rf ../.kukulu/cleanroom`"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "cd build NL echo $((1<<3)) NL cat <<1 > x NL it's NL 1 NL rm ../.kukulu (R8-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd build\necho $((1<<3))\ncat <<1 > x\nit's\n1\nrm -rf ../.kukulu/cleanroom"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "cd build NL cat <<1 > x NL it's NL 1 NL rm ../.kukulu (R8-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd build\ncat <<1 > x\nit's\n1\nrm -rf ../.kukulu/cleanroom"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "cd build NL bash <<EOF NL rm -rf .kukulu/cleanroom NL EOF (R8-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd build\nbash <<EOF\nrm -rf .kukulu/cleanroom\nEOF"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "cat <<EOF | # c NL rm NL EOF NL bash (R8-03)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat <<EOF | # c\nrm -rf .kukulu/cleanroom\nEOF\nbash"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "cat <<EOF | ( set -e; bash ) NL rm NL EOF (R8-03)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat <<EOF | ( set -e; bash )\nrm -rf .kukulu/cleanroom\nEOF"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "cat <<EOF | if true; then bash; fi NL rm NL EOF (R8-03)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat <<EOF | if true; then bash; fi\nrm -rf .kukulu/cleanroom\nEOF"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "{ cat <<EOF; } | bash NL rm NL EOF (R8-03)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "{ cat <<EOF; } | bash\nrm -rf .kukulu/cleanroom\nEOF"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "quoted heredoc body line rm protected (R9-01)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat <<'EOF' > notes.txt\nrm -rf .kukulu/cleanroom\nEOF"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "quoted heredoc apostrophe line then rm (R9-01)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat <<'EOF' > notes.txt\nit's\nrm -rf .kukulu/cleanroom\nEOF"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "unquoted heredoc cd line then rm (R9-01)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat <<EOF > notes.txt\ncd sub\nrm -rf ../.kukulu/cleanroom\nEOF"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "quoted heredoc read line does not mask write (R9-01)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat <<'EOF' > notes.txt\ncat ~/.cargo/registry/a.rs; rm -rf .kukulu/cleanroom\nEOF"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "substitution-owned bash heredoc rm (R9-01)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "echo $(bash <<EOF\nrm -rf .kukulu/cleanroom\nEOF\n)"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "process-substitution bash heredoc rm (R9-01)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "diff <(bash <<EOF\nrm -rf .kukulu/cleanroom\nEOF\n) /dev/null"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "shell-read body read of denied path (R9-01)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat <<'EOF' | ( set -e; bash )\ncat ~/.cargo/registry/a.rs\nEOF"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "denied path: .*"
+ },
+ {
+  "name": "five nested substitutions (R9-01)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "echo $(echo $(echo $(echo $(echo $(echo hi)))))"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "command nested too deep: .*"
+ },
+ {
+  "name": "four nested substitutions (R9-01)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "echo $(echo $(echo $(echo $(echo hi))))"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "quoted heredoc data read line (R9-01)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat <<'EOF' > notes.txt\ncat ~/.cargo/registry/a.rs\nEOF"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "marker U+E002 in input then heredoc rm (R9-02)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd build; echo x; cd ..; bash <<EOF\nrm -rf .kukulu/cleanroom\nEOF"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "command contains U\\+E00[12].*"
+ },
+ {
+  "name": "marker U+E001 in input then substitution rm (R9-02)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd build; echo x; cd ..; echo $(rm -rf .kukulu/cleanroom)"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "command contains U\\+E00[12].*"
+ },
+ {
+  "name": "heredoc in substitution judged at outer cd (R9-02)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd build; echo $(bash <<EOF\nrm -rf ../.kukulu/cleanroom\nEOF\n); cd .."
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "substitution cd does not leak (assignment) (R9-02)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "x=$(cd build; pwd); rm -rf .kukulu/cleanroom"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "substitution cd does not leak (backticks) (R9-02)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "echo `cd build`; rm -rf .kukulu/cleanroom"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "substitution cd does not leak (process substitution) (R9-02)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat <(cd build); rm -rf .kukulu/cleanroom"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "bash -c cd does not leak (R9-02)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "bash -c 'cd build'; rm -rf .kukulu/cleanroom"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "sh -c cd does not leak (R9-02)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "sh -c 'cd build'; rm -rf .kukulu/cleanroom"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "eval cd still moves the parent (R9-02)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "eval 'cd build'; rm -rf ../.kukulu/cleanroom"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "bash heredoc in substitution reads denied path (R9-02)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "echo $(bash <<'EOF'\ncat ~/.cargo/registry/a.rs\nEOF\n)"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "denied path: .*"
+ },
+ {
+  "name": "substitution cd stays inside it (R9-02)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd build; x=$(cd ..); rm -rf .kukulu/cleanroom"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "data body depth then rm (R10-01)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat <<'EOF' > notes.txt\necho $(echo $(echo $(echo $(echo $(echo hi))))); rm -rf .kukulu/cleanroom\nEOF"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "command nested too deep: .*"
+ },
+ {
+  "name": "data body depth then and rm (R10-01)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat <<'EOF' > notes.txt\necho $(echo $(echo $(echo $(echo $(echo hi))))) && rm -rf .kukulu/cleanroom\nEOF"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "command nested too deep: .*"
+ },
+ {
+  "name": "data body eval depth then rm (R10-01)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat <<'EOF' > notes.txt\neval eval eval eval eval echo; rm -rf .kukulu/cleanroom\nEOF"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "command nested too deep: .*"
+ },
+ {
+  "name": "data body depth alone (R10-01)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat <<'EOF' > notes.txt\necho $(echo $(echo $(echo $(echo $(echo hi)))))\nEOF"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "command nested too deep: .*"
+ },
+ {
+  "name": "data body four levels allowed (R10-01)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat <<'EOF' > notes.txt\necho $(echo $(echo $(echo $(echo hi))))\nEOF"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "marker E002 in cd word (R10-01)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd build; rm -rf .kukulu/cleanroom"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "command contains U\\+E00[12].*"
+ },
+ {
+  "name": "marker E001 in cd word (R10-01)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd build; rm -rf .kukulu/cleanroom"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "command contains U\\+E00[12].*"
+ },
+ {
+  "name": "marker E002 in eval word (R10-01)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "eval 'cd build'; rm -rf .kukulu/cleanroom"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "command contains U\\+E00[12].*"
  }
 ]

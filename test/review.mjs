@@ -958,7 +958,7 @@ const snapshot = (repo) => Object.fromEntries(ARCHIVE_FILES.map((f) => [f, hasFi
     writeFile(repo, "docs/flights/w1-share/x.txt", "x");
     git(repo, ["add", "-A"]);
     git(repo, ["commit", "-qm", "occupied"]);
-    isError(await call("kukulu_flight_archive"), /docs\/flights\/w1-share already exists/, "...and when the destination exists");
+    isError(await call("kukulu_flight_archive"), /^docs\/flights\/w1-share already exists; choose another slug, or remove the old archive$/, "the archive-time refusal names the taken directory and says to choose another slug");
     ok(hasFile(repo, "docs/PLAN.md"), "...nothing moved in any refusal");
   });
 }
@@ -1044,7 +1044,8 @@ const DRAFT_PR = ghFixture("pr-draft.json");
 
 /** A summarized build branch with a bare origin and a fake gh holding a draft PR. `signed` signs every commit on it. */
 function finalizeRepo({ signed = false, policies = {}, summarized = true } = {}) {
-  const repo = plannedRepo({ config: { policies } });
+  // These tests exercise auto-merge unless they say otherwise; `policies: null` writes no policies block at all, so the default applies.
+  const repo = plannedRepo({ config: { policies: policies === null ? undefined : { finalize: "auto", ...policies } } });
   git(repo, ["checkout", "-q", "-b", "build/x"]);
   if (signed) useFakeSigner(repo, mkFakeGpg());
   writeFile(repo, "docs/SUMMARY.md", "# summary\n");
@@ -1103,6 +1104,7 @@ const ghCalls = (ghDir) => readFile(ghDir, "calls.log").split("\n").filter(Boole
 }
 
 for (const [label, args, policies, expect, mergeFails] of [
+  ["no policies block", { breaking: false }, null, { calls: ["pr ready"], merge: "skipped: policy", ready: true }],
   ["auto, not breaking", { breaking: false }, {}, { calls: ["pr ready", "pr merge --auto --merge --subject Widget thing (#1)"], merge: "enabled", ready: true }],
   ["squash", { breaking: false }, { mergeMethod: "squash" }, { calls: ["pr ready", "pr merge --auto --squash --subject Widget thing (#1)"], merge: "enabled", ready: true }],
   ["breaking", { breaking: true }, {}, { calls: ["pr ready"], merge: "skipped: breaking", ready: true }],
@@ -1111,6 +1113,7 @@ for (const [label, args, policies, expect, mergeFails] of [
   ["merge unavailable", { breaking: false }, {}, { calls: ["pr ready", "pr merge --auto --merge --subject Widget thing (#1)"], merge: 'unavailable: auto-merge is not allowed; set policies.finalize to "ready" to stop asking', ready: true }, ghFixture("merge-not-allowed.txt")],
 ]) {
   const { repo, ghDir, opts } = finalizeRepo({ signed: true, policies });
+  if (label === "no policies block") ok(policies === null, "kukulu_pr_finalize with no policies block marks the PR ready and runs no gh pr merge");
   if (mergeFails) writeFile(ghDir, "merge-fails", mergeFails);
   await withServer(repo, async ({ call }) => {
     const r = await call("kukulu_pr_finalize", args);
@@ -1464,24 +1467,21 @@ function resignRepo({ extraState = {} } = {}) {
 const RELEASE_ENTRY = "## [1.2.3] - 2026-10-26\n\n### Added\n\n- the thing\n\n### Fixed\n\n- the other thing\n";
 const releaseChangelog = (entry = RELEASE_ENTRY) => `# Changelog\n\n${entry === null ? "## [Unreleased]\n\n- not released yet\n" : `${entry}\n## [1.2.2] - 2026-01-01\n\n- old\n`}`;
 
-/** A merged, archived flight: main is one merge commit behind origin, and the fake gh knows the PR is MERGED. */
+/** A merged, archived flight: the archive commit lives on build/x, which origin's main merged; local main is one merge commit behind, and the fake gh knows the PR is MERGED. */
 function releaseRepo({ changelog = releaseChangelog(), prState = "MERGED", archived = true, signed = false } = {}) {
   const repo = plannedRepo();
   if (signed) useFakeSigner(repo, mkFakeGpg());
   const remote = mkBareRemote();
-  if (archived) {
-    writeFile(repo, "docs/flights/x/PROGRESS.md", "# Progress\n\nBranch: build/x\nStarted: 2026-10-20T00:00:00.000Z\n");
-    writeFile(repo, "docs/flights/x/state.json", JSON.stringify({ signing: signed ? "on" : "none" }) + "\n");
-    setState(repo, { archived: { slug: "x", dir: "docs/flights/x", at: "2026-10-26T00:00:00.000Z" } });
-  }
-  git(repo, ["add", "-A"]);
-  git(repo, ["commit", "-qm", "chore: archive flight x"]);
   git(repo, ["remote", "add", "origin", remote]);
   git(repo, ["push", "-q", "origin", "main"]);
   git(repo, ["checkout", "-q", "-b", "build/x"]);
+  writeFile(repo, "docs/flights/x/PROGRESS.md", "# Progress\n\nBranch: build/x\nStarted: 2026-10-20T00:00:00.000Z\n");
+  writeFile(repo, "docs/flights/x/state.json", JSON.stringify({ signing: signed ? "on" : "none" }) + "\n");
+  if (archived) setState(repo, { archived: { slug: "x", dir: "docs/flights/x", at: "2026-10-26T00:00:00.000Z" } });
   writeFile(repo, "CHANGELOG.md", changelog);
   git(repo, ["add", "-A"]);
-  git(repo, ["commit", "-qm", "docs: changelog"]);
+  if (archived) git(repo, ["add", "-f", ".kukulu/state.json"]);
+  git(repo, ["commit", "-qm", "chore: archive flight x"]);
   git(repo, ["checkout", "-q", "main"]);
   git(repo, ["merge", "-q", "--no-ff", "build/x", "-m", "Merge pull request #7 from build/x"]);
   const merge = git(repo, ["rev-parse", "HEAD"]);
@@ -1503,6 +1503,7 @@ const remoteTag = (remote, tag) => spawnSync("git", ["-C", remote, "rev-parse", 
     like(readFile(ghDir, "calls.log"), /^release create v1\.2\.3 --verify-tag --title v1\.2\.3 --notes-file \S+ --draft$/m, "...with the documented gh arguments");
     eq(remoteTag(remote, "v1.2.3"), merge, "...the tag is on origin at the merge commit");
     eq(git(repo, ["rev-parse", "main"]), merge, "a base behind the merge commit is fast-forwarded");
+    eq(JSON.stringify(r.flight) + "|" + r.fastForward + "|" + r.localState, `${JSON.stringify({ slug: "x", dir: "docs/flights/x", from: "origin/main" })}|done|stale: local main names no archived flight; origin/main names x`, "a local base behind origin releases the flight origin archived last, and localState is stale");
     eq(git(repo, ["cat-file", "-t", "v1.2.3"]), "tag", "...and the tag is annotated when nothing asks for a signature");
     eq(readFile(ghDir, "release-notes.txt"), `### Added\n\n- the thing\n\n### Fixed\n\n- the other thing\n\nSee [CHANGELOG.md](${remote}/blob/v1.2.3/CHANGELOG.md) for the full list.\n`, "the notes file holds the CHANGELOG entry body and the See line");
     const tagBefore = git(repo, ["rev-parse", "v1.2.3"]);
@@ -1526,10 +1527,11 @@ const remoteTag = (remote, tag) => spawnSync("git", ["-C", remote, "rev-parse", 
 }
 
 {
-  const repo = plannedRepo();
+  const { repo, remote, opts } = releaseRepo({ archived: false });
   await withServer(repo, async ({ call }) => {
-    isError(await call("kukulu_release"), /^kukulu_release releases the newest archived flight, and none is archived; archive it first$/, "no archived flight refuses");
-  });
+    isError(await call("kukulu_release"), /^origin\/main has no archived flight; merge the flight's pull request \(it carries the archive\) and call kukulu_release again$/, "origin with no archived flight refuses");
+    eq(remoteTag(remote, "v1.2.3"), "", "...and nothing is tagged");
+  }, opts);
 }
 
 {
@@ -1543,7 +1545,7 @@ const remoteTag = (remote, tag) => spawnSync("git", ["-C", remote, "rev-parse", 
 {
   const { repo, remote, merge, opts } = releaseRepo({ changelog: releaseChangelog(null) });
   await withServer(repo, async ({ call }) => {
-    isError(await call("kukulu_release"), new RegExp(`^CHANGELOG\\.md at ${merge.slice(0, 7)} has no numbered entry; add ## \\[x\\.y\\.z\\] before releasing$`), "no numbered CHANGELOG entry at the merge commit refuses");
+    isError(await call("kukulu_release"), new RegExp(`^CHANGELOG\\.md at ${merge.slice(0, 7)} \\(the merge of flight x's PR #7\\) has no numbered entry; add ## \\[x\\.y\\.z\\] before releasing$`), "no numbered CHANGELOG entry names the merge, the flight and its PR");
     eq(remoteTag(remote, "v1.2.3"), "", "...and no tag is pushed");
   }, opts);
 }
@@ -1573,16 +1575,42 @@ const remoteTag = (remote, tag) => spawnSync("git", ["-C", remote, "rev-parse", 
 }
 
 {
-  const { repo, opts } = releaseRepo();
+  const { repo, merge, opts } = releaseRepo();
   writeFile(repo, "docs/PLAN.md", readFile(repo, "docs/PLAN.md") + "\nedit\n");
   await withServer(repo, async ({ call }) => {
-    isError(await call("kukulu_release"), /the working tree is not clean/, "a dirty tracked tree refuses");
+    const r = await call("kukulu_release");
+    ok(!r.error && r.sha === merge && r.fastForward === "skipped: the tree has tracked changes", "a dirty tracked tree no longer refuses: the release is made and the fast-forward is skipped" + (r.error ? `: ${r.error}` : ""));
   }, opts);
-  const other = releaseRepo();
-  git(other.repo, ["checkout", "-q", "-b", "elsewhere"]);
-  await withServer(other.repo, async ({ call }) => {
-    isError(await call("kukulu_release"), /main is not checked out/, "a base branch that is not checked out refuses");
-  }, other.opts);
+}
+
+{
+  const { repo, remote, merge, opts } = releaseRepo();
+  git(repo, ["checkout", "-q", "build/x"]);
+  await withServer(repo, async ({ call }) => {
+    const r = await call("kukulu_release");
+    ok(!r.error && r.sha === merge && remoteTag(remote, "v1.2.3") === merge, "kukulu_release from the build branch releases" + (r.error ? `: ${r.error}` : ""));
+    eq(r.fastForward, "skipped: main is not checked out", "...with fastForward skipped");
+  }, opts);
+}
+
+{
+  const { repo, remote, opts } = releaseRepo();
+  git(repo, ["remote", "set-url", "origin", path.join(remote, "missing-directory")]);
+  await withServer(repo, async ({ call }) => {
+    isError(await call("kukulu_release"), /^git fetch origin failed: .*; kukulu_release reads the merged flight from origin\/main, so it needs the remote$/, "a fetch failure refuses and nothing is tagged");
+    eq(git(repo, ["tag", "--list"]) + spawnSync("git", ["-C", remote, "tag", "--list"], { encoding: "utf8" }).stdout.trim(), "", "...no local or remote tag afterwards");
+  }, opts);
+}
+
+{
+  const { repo, merge, opts } = releaseRepo();
+  writeFile(repo, "local-only.txt", "x\n");
+  git(repo, ["add", "local-only.txt"]);
+  git(repo, ["commit", "-qm", "local commit origin lacks"]);
+  await withServer(repo, async ({ call }) => {
+    const r = await call("kukulu_release");
+    ok(!r.error && r.sha === merge && /^failed: /.test(r.fastForward), "a fast-forward that fails is reported, not ignored, and the release was still made" + (r.error ? `: ${r.error}` : ""));
+  }, opts);
 }
 
 {
@@ -1593,6 +1621,29 @@ const remoteTag = (remote, tag) => spawnSync("git", ["-C", remote, "rev-parse", 
     ok(!r.error, "a signed tag is made when tag.gpgsign is true" + (r.error ? `: ${r.error}` : ""));
     like(git(repo, ["cat-file", "-p", "v1.2.3"]), /-----BEGIN PGP SIGNATURE-----/, "...git cat-file shows a signature");
     eq(git(repo, ["rev-parse", "v1.2.3^{commit}"]), merge, "...on the merge commit");
+  }, opts);
+}
+
+{
+  const { repo, merge, opts } = releaseRepo({ signed: true });
+  const isolated = { env: { ...opts.env, GIT_CONFIG_GLOBAL: path.join(mkDir("kukulu-rel-gc-"), "gitconfig"), GIT_CONFIG_NOSYSTEM: "1" } };
+  await withServer(repo, async ({ call }) => {
+    const r = await call("kukulu_release");
+    ok(!r.error, "a tag is signed when origin's archived state.json records signing on" + (r.error ? `: ${r.error}` : ""));
+    like(git(repo, ["cat-file", "-p", "v1.2.3"]), /-----BEGIN PGP SIGNATURE-----/, "...git cat-file shows a signature although tag.gpgsign is unset");
+    eq(git(repo, ["rev-parse", "v1.2.3^{commit}"]), merge, "...on the merge commit");
+  }, isolated);
+}
+
+{
+  const { repo, opts } = releaseRepo();
+  git(repo, ["fetch", "-q", "origin"]);
+  git(repo, ["merge", "-q", "--ff-only", "origin/main"]);
+  await withServer(repo, async ({ call }) => {
+    const r = await call("kukulu_release");
+    ok(!r.error, "kukulu_release runs on a base that already equals origin" + (r.error ? `: ${r.error}` : ""));
+    eq(r.localState, "current", "localState is current when the local base names the same flight as origin");
+    eq(r.fastForward, "up to date", "fastForward is up to date when the checked-out base already equals origin");
   }, opts);
 }
 

@@ -79,13 +79,13 @@ npm install --no-save mermaid jsdom && node scripts/check-diagrams.mjs
 | `protocol` | JSON-RPC framing, handshake, tool discovery, error mapping |
 | `state` | `kukulu_status` and every branch of the `kukulu_next` decision table; `kukulu_plan_commit` (every check, `renumber`); `kukulu_flight_options` (the Decisions line, rollback) |
 | `implement` | `run_start`, `task_next`, `task_done`, `task_block`, `verify`, `run_finish`; the commit helper's signing fallback |
-| `review` | `review_submit` and `summary_commit`, including every refusal and rollback on a failed commit; `kukulu_flight_archive`; `kukulu_pr_finalize`; `kukulu_mutate` |
+| `review` | `review_submit` and `summary_commit`, including every refusal and rollback on a failed commit; `kukulu_flight_archive`; `kukulu_pr_finalize`; `kukulu_release`; `kukulu_mutate` |
 | `routing` | Config merge and precedence, `kukulu_agents_sync`, `kukulu_config_show`, every refusal |
 | `constraints` | `docs/kukulu.json` constraints, fixture self-tests, the scan, every refusal |
 | `feedback` | `kukulu_feedback_log`, `.kukulu/feedback.jsonl`, and the `policies.feedback` opt-out |
 | `streams` | Parallel workstreams: stream tags, waves, partition validation, stream-scoped tools, worktrees, `kukulu_stream_finish`, `kukulu_next`'s `streams`, pausing at a wave |
 | `guard` | The Stop / SubagentStop hook: scoping, blocking, counting, giving up, environment handling |
-| `cleanroom` | Clean-room mode: the policy loader and its refusals, the guard, the hash chain, checkpoints, the gate and scoring |
+| `cleanroom` | Clean-room mode: the policy loader and its refusals, the guard, the hash chain, checkpoints, the gate and scoring (`kukulu_similarity`) |
 | `attest` | The offline verifier (`scripts/verify-attestation.mjs`), attestation bundles, tamper detection, and pre-0.6.0 logs |
 | `sandbox` | The sandbox: the relay and controller socket, the log socket, the proxy, the container launcher and gate checks 9 and 10; no container engine needed |
 | `bundles` | The bundle scripts: `scripts/model-identity.mjs`, and `publish-bundle.mjs` and `compare-bundles.mjs` once they exist |
