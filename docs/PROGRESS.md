@@ -46,6 +46,7 @@ Started: 2026-11-11T18:32:19.610Z
 - [x] R8-03 Guard: a heredoc body is shell-read when any later stage after a pipe runs a shell, at any grouping depth
 - [x] R9-01 Guard: every heredoc body line is checked for protected-path writes, and the depth limit denies (SPEC A-02, owner edit 2892ee4)
 - [x] R9-02 Guard: a body's owner and directory are found by offset, a heredoc inside a substitution is owned inside it, and a substitution's or -c string's cd does not leak
+- [ ] R10-01 Guard: the depth denial counts on a data-body line, and a command holding U+E001 or U+E002 is refused instead of having them dropped
 
 ## Log
 
