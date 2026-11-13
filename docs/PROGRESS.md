@@ -37,6 +37,9 @@ Started: 2026-11-11T18:32:19.610Z
 - [x] R3-01 Guard: a << in an array-subscript assignment, a compound array assignment or a backtick span is not a heredoc operator
 - [x] R4-01 Guard: a << inside a [[ ... ]] conditional or an extglob group is not a heredoc operator
 - [x] R5-01 Guard: a !( subshell and an argument [[ do not hide a real heredoc
+- [ ] R6-01 Green the PR checks: restore docs/kukulu.json escapes and exempt the feedback log from check-names' bare-letter rule
+- [ ] R6-02 Guard: a heredoc piped into a shell has its body judged as commands
+- [ ] R6-03 Guard: read every heredoc command twice, denying when either reading denies (SPEC A-02 Two readings)
 
 ## Log
 
