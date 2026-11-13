@@ -9180,7 +9180,7 @@
    "cwd": "__ROOT__"
   },
   "expect": "denied",
-  "reason": "protected path: .*"
+  "reason": "command contains U\\+E00[12].*"
  },
  {
   "name": "marker U+E001 in input then substitution rm (R9-02)",
@@ -9194,7 +9194,7 @@
    "cwd": "__ROOT__"
   },
   "expect": "denied",
-  "reason": "protected path: .*"
+  "reason": "command contains U\\+E00[12].*"
  },
  {
   "name": "heredoc in substitution judged at outer cd (R9-02)",
@@ -9320,5 +9320,116 @@
    "cwd": "__ROOT__"
   },
   "expect": "allowed"
+ },
+ {
+  "name": "data body depth then rm (R10-01)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat <<'EOF' > notes.txt\necho $(echo $(echo $(echo $(echo $(echo hi))))); rm -rf .kukulu/cleanroom\nEOF"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "command nested too deep: .*"
+ },
+ {
+  "name": "data body depth then and rm (R10-01)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat <<'EOF' > notes.txt\necho $(echo $(echo $(echo $(echo $(echo hi))))) && rm -rf .kukulu/cleanroom\nEOF"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "command nested too deep: .*"
+ },
+ {
+  "name": "data body eval depth then rm (R10-01)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat <<'EOF' > notes.txt\neval eval eval eval eval echo; rm -rf .kukulu/cleanroom\nEOF"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "command nested too deep: .*"
+ },
+ {
+  "name": "data body depth alone (R10-01)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat <<'EOF' > notes.txt\necho $(echo $(echo $(echo $(echo $(echo hi)))))\nEOF"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "command nested too deep: .*"
+ },
+ {
+  "name": "data body four levels allowed (R10-01)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat <<'EOF' > notes.txt\necho $(echo $(echo $(echo $(echo hi))))\nEOF"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "marker E002 in cd word (R10-01)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd build; rm -rf .kukulu/cleanroom"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "command contains U\\+E00[12].*"
+ },
+ {
+  "name": "marker E001 in cd word (R10-01)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd build; rm -rf .kukulu/cleanroom"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "command contains U\\+E00[12].*"
+ },
+ {
+  "name": "marker E002 in eval word (R10-01)",
+  "policy": "template",
+  "planExists": true,
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "eval 'cd build'; rm -rf .kukulu/cleanroom"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "command contains U\\+E00[12].*"
  }
 ]

@@ -126,6 +126,8 @@ const pattern = (extra = {}) => ({ id: "p", pattern: "/build/", shouldMatch: ["/
   const plain = loadPolicy(JSON.stringify(base({ deny: { network: false, paths: ["prior/"], words: ["zlib"] } })));
   eq(read(plain, "/p/prior/zlib.c"), "denied", "...and denied in clean-room mode");
   eq(evaluate(loaded, { tool_name: "Write", tool_input: { file_path: "/p/prior/zlib.c", content: "x" }, cwd: "/p" }, env).decision, "denied", "a write to prior art is still denied in control mode");
+  const reserved = evaluate(loaded, { tool_name: "Bash", tool_input: { command: "c\uE001d build" }, cwd: "/p" }, env);
+  eq(reserved.decision + "|" + reserved.reason, "denied|command contains U+E001 or U+E002, characters the guard reserves; remove them and retry", "a Bash command holding U+E001 is refused with the exact reason (R10-01)");
 
   // a symlink inside the prior art that leaves it is read through, so the target's own rules apply
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "kukulu-control-link-")));

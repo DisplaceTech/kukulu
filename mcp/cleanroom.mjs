@@ -1380,7 +1380,12 @@ export function evaluate(policy, hookInput, env) {
     return NO_ISSUES;
   }
 
-  if (tool === "Bash") return bashVerdict(String(args.command ?? ""), 0);
+  if (tool === "Bash") {
+    const text = String(args.command ?? "");
+    // The guard's internal markers are these two private-use characters; dropping them from the input would let `c<marker>d` be read as `cd` while the shell runs something else, so such a command is refused.
+    if (/[\uE001\uE002]/.test(text)) return denied("command contains U+E001 or U+E002, characters the guard reserves; remove them and retry");
+    return bashVerdict(text, 0);
+  }
 
   // 7. everything else, Agent, Task, Skill and every mcp__ tool included
   return NO_ISSUES;
@@ -1465,7 +1470,7 @@ export function evaluate(policy, hookInput, env) {
         for (const line of b.body.split("\n")) {
           if (!line.trim()) continue;
           const v = bashVerdict(line, depth);
-          if (v.decision === "denied" && v.reason.startsWith("protected path:")) return v;
+          if (v.decision === "denied" && (v.reason.startsWith("protected path:") || v.reason.startsWith("command nested too deep:"))) return v;
         }
       } finally {
         writeOnly = savedWriteOnly;
