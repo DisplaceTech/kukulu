@@ -603,6 +603,8 @@ export function stripHeredocs(command, loose = false) {
   let text = "";
   let skipped = false;
   const bodies = [];
+  // Where in `text` each body's operator ends, so a caller can tell which segment owns the body.
+  const marks = [];
   const pending = [];
   // Offsets of every `<<` the first reading passed over; the second reading treats an operator there as a shell-read body.
   const skippedAt = [];
@@ -725,8 +727,8 @@ export function stripHeredocs(command, loose = false) {
       const tokens = shellWords(owner);
       const made = invented?.has(i) === true;
       const shell = made || ownsShell(tokens) || pipesIntoShell(command, j, pending, { word, dash });
-      pending.push({ word, quoted, dash, shell });
       text += command.slice(i, j);
+      pending.push({ word, quoted, dash, shell, at: text.length });
       i = j - 1;
     } else if (c === "\n" && pending.length) {
       text += c;
@@ -742,12 +744,13 @@ export function stripHeredocs(command, loose = false) {
           else lines.push(line);
         }
         bodies.push({ body: lines.join("\n"), quoted: h.quoted, shell: h.shell });
+        marks.push(h.at);
       }
       pending.length = 0;
       i = at - 1;
     } else text += c;
   }
-  return { text, bodies, skipped, skippedAt };
+  return { text, bodies, skipped, skippedAt, marks };
 }
 
 /** True when a segment's words run sh, bash, zsh, dash or ksh without `-c`, so it reads a script from stdin. */
@@ -1213,6 +1216,9 @@ export const READ_FAMILY = new Set(
 export const WRITE_FAMILY = new Set("cp mv rm tee sed truncate chmod chown ln install dd git".split(" "));
 const WRITE_TOOLS = new Set(["Write", "Edit", "MultiEdit", "NotebookEdit"]);
 const PATH_TOOLS = new Set(["Read", "Glob", "Grep", ...WRITE_TOOLS]);
+// Private-use markers that ride in the command text through the segment split; never in real input.
+const SUBST = "\uE001";
+const BODY = "\uE002";
 const NO_ISSUES = Object.freeze({ decision: "allowed", reason: null });
 const denied = (reason) => ({ decision: "denied", reason });
 
@@ -1406,23 +1412,46 @@ export function evaluate(policy, hookInput, env) {
   /** One reading of a command: `loose` is the second reading of stripHeredocs. */
   function bashReading(command, depth, loose) {
     const stripped = stripHeredocs(command, loose);
-    const { text, inner } = extractSubstitutions(stripped.text);
-    for (const sub of inner) {
-      const v = bashVerdict(sub, depth + 1);
-      if (v.decision === "denied") return v;
-    }
-    // A body is commands only when a shell reads it; an unquoted delimiter still lets the shell expand substitutions inside it.
-    for (const b of stripped.bodies) {
+    // A marker after each heredoc operator (BODY) and each substitution (SUBST) lets the segment loop judge them in the directory their segment runs in, after the earlier segments' `cd`.
+    let marked = stripped.text;
+    for (const at of [...stripped.marks].reverse()) marked = marked.slice(0, at) + BODY + marked.slice(at);
+    const { text, inner } = extractSubstitutions(marked, SUBST);
+    const owned = (arr, used, count) => arr.slice(used, used + count);
+    let substUsed = 0;
+    let bodyUsed = 0;
+    // One inner command line, judged at the current directory; a shell-read body runs in a child shell, so its `cd` never moves later segments.
+    const judgeBody = (b) => {
       // A shell-read body is strictly shorter than the command, so it is judged at the same depth: a chain of invented operators must not reach the cap.
+      const savedCwd = shellCwd;
+      const savedPrevious = previousCwd;
       for (const sub of b.shell ? [b.body] : b.quoted ? [] : extractSubstitutions(b.body).inner) {
         const v = bashVerdict(sub, b.shell ? depth : depth + 1);
         if (v.decision === "denied") return v;
       }
-    }
+      if (b.shell) {
+        shellCwd = savedCwd;
+        previousCwd = savedPrevious;
+      }
+      return null;
+    };
+    const judgeOwned = (substs, bodies) => {
+      for (const sub of substs) {
+        const v = bashVerdict(sub, depth + 1);
+        if (v.decision === "denied") return v;
+      }
+      for (const b of bodies) {
+        const v = judgeBody(b);
+        if (v) return v;
+      }
+      return null;
+    };
     const subshells = [];
     // Nesting of `case ... in`, inside which a leading `pattern)` is an arm and not a command.
     let caseDepth = 0;
-    for (const raw of splitRaw(text)) {
+    for (const rawMarked of splitRaw(text)) {
+      const nSubst = rawMarked.split(SUBST).length - 1;
+      const nBody = rawMarked.split(BODY).length - 1;
+      const raw = rawMarked.replaceAll(SUBST, "").replaceAll(BODY, "");
       const { segment, opens, closes, entersCase, leavesCase } = stripGrouping(raw, caseDepth > 0);
       if (entersCase) caseDepth++;
       if (leavesCase && caseDepth > 0) caseDepth--;
@@ -1431,6 +1460,12 @@ export function evaluate(policy, hookInput, env) {
       const settle = () => {
         for (let k = 0; k < closes && subshells.length; k++) shellCwd = subshells.pop();
       };
+      {
+        const v = judgeOwned(owned(inner, substUsed, nSubst), owned(stripped.bodies, bodyUsed, nBody));
+        substUsed += nSubst;
+        bodyUsed += nBody;
+        if (v) return v;
+      }
       const tokens = shellWords(segment).map((t) => (home ? t.replaceAll("${HOME}", home).replace(/\$HOME(?![A-Za-z0-9_])/g, () => home) : t));
       const { word, args: rest } = commandWord(tokens);
       if (word === null) {
@@ -1675,7 +1710,8 @@ export function evaluate(policy, hookInput, env) {
       }
       settle();
     }
-    return NO_ISSUES;
+    // Anything no segment claimed is judged at the final directory rather than skipped.
+    return judgeOwned(inner.slice(substUsed), stripped.bodies.slice(bodyUsed)) ?? NO_ISSUES;
   }
 }
 
@@ -1910,7 +1946,7 @@ function patternOperands(word, rest) {
 }
 
 /** The text of a command with each `$(...)`, backtick and `<(...)` / `>(...)` body cut out, and those bodies; single quotes hide a body. */
-function extractSubstitutions(command) {
+function extractSubstitutions(command, marker = "") {
   const inner = [];
   let text = "";
   let quote = null;
@@ -1936,7 +1972,7 @@ function extractSubstitutions(command) {
       const end = command.indexOf("`", i + 1);
       const stop = end === -1 ? command.length : end;
       inner.push(command.slice(i + 1, stop));
-      text += "SUBST";
+      text += "SUBST" + marker;
       i = stop;
     } else if (command[i + 1] === "(" && (c === "$" || (quote === null && (c === "<" || c === ">")))) {
       let depth = 1;
@@ -1946,7 +1982,7 @@ function extractSubstitutions(command) {
         else if (command[j] === ")") depth--;
       }
       inner.push(command.slice(i + 2, depth === 0 ? j - 1 : j));
-      text += "SUBST";
+      text += "SUBST" + marker;
       i = j - 1;
     } else text += c;
   }

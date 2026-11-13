@@ -8825,5 +8825,147 @@
    "cwd": "__ROOT__"
   },
   "expect": "allowed"
+ },
+ {
+  "name": "cd build NL bash <<EOF NL rm ../.kukulu NL EOF (R8-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd build\nbash <<EOF\nrm -rf ../.kukulu/cleanroom\nEOF"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "cd build NL cat <<EOF | bash NL rm ../.kukulu NL EOF (R8-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd build\ncat <<EOF | bash\nrm -rf ../.kukulu/cleanroom\nEOF"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "cd build && sh <<'EOF' NL rm ../.kukulu NL EOF (R8-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd build && sh <<'EOF'\nrm -rf ../.kukulu/cleanroom\nEOF"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "(cd build; bash <<EOF NL rm ../.kukulu NL EOF NL ) (R8-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "(cd build; bash <<EOF\nrm -rf ../.kukulu/cleanroom\nEOF\n)"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "bash <<EOF NL cd build NL EOF NL rm -rf .kukulu/cleanroom (R8-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "bash <<EOF\ncd build\nEOF\nrm -rf .kukulu/cleanroom"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "cd build NL cat <<EOF > out.txt NL $(rm ../.kukulu) NL EOF (R8-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd build\ncat <<EOF > out.txt\n$(rm -rf ../.kukulu/cleanroom)\nEOF"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "cd build; echo $(rm ../.kukulu) (R8-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd build; echo $(rm -rf ../.kukulu/cleanroom)"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "cd build; echo `rm ../.kukulu` (R8-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd build; echo `rm -rf ../.kukulu/cleanroom`"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "cd build NL echo $((1<<3)) NL cat <<1 > x NL it's NL 1 NL rm ../.kukulu (R8-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd build\necho $((1<<3))\ncat <<1 > x\nit's\n1\nrm -rf ../.kukulu/cleanroom"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "cd build NL cat <<1 > x NL it's NL 1 NL rm ../.kukulu (R8-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd build\ncat <<1 > x\nit's\n1\nrm -rf ../.kukulu/cleanroom"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "cd build NL bash <<EOF NL rm -rf .kukulu/cleanroom NL EOF (R8-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cd build\nbash <<EOF\nrm -rf .kukulu/cleanroom\nEOF"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
  }
 ]
