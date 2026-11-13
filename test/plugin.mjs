@@ -788,6 +788,10 @@ ok(glRev && glPin === glRev, "secret-scan.yml pins GITLEAKS_VERSION to the pre-c
   const fenced = run({ "docs/guide.md": `Text.\n\n\`\`\`bash\n${ascii} --help\n\`\`\`\n\nInline \`${ascii}\` too.\n` });
   eq(fenced.status, 0, "check-names allows the ASCII spelling in fenced blocks and inline code");
 
+  const bareLine = `{"message":"a bare ${U} here"}\n`;
+  eq(run({ ".kukulu/feedback.jsonl": bareLine }).status, 0, "check-names exempts the feedback log from the bare-letter rule");
+  eq(run({ "notes.md": bareLine }).status, 1, "check-names still refuses the same bare letter in another file");
+
   const history = run({ "docs/flights/old/SUMMARY.md": `${ascii} history.\n`, "docs/feedback/a.md": `${ascii} history.\n` });
   eq(history.status, 0, "check-names leaves history paths alone");
 
