@@ -223,10 +223,10 @@ Two readings, denied when either denies. A region the first reading gets wrong c
 
 - **First reading:** the closed list above applies.
 - **Second reading:** every unquoted `<<` that is not `<<<` and has a delimiter word is an operator, wherever it sits. No region of the list is skipped, and a digits-only delimiter counts. Quotes and backslash escapes apply as in the first reading.
-- Each reading's bodies are judged by the body rules below. The command is denied when either reading denies, with the first denying reading's reason.
+- Each reading's bodies are judged by the body rules below, with one exception. In the second reading, the body of an operator that the first reading skipped is judged as commands, as a shell-read body is, never as data. The command is denied when either reading denies, with the first denying reading's reason.
 - The second reading runs only when the first reading skipped a `<<` (a listed region held one, or rule 8's digits case applied). Otherwise the two readings are identical. The 50 ms hook budget in `test/cleanroom.mjs` still holds.
 
-This is why the pair is safe. The second reading never hides a real operator. An operator it invents can only turn lines into data that the first reading still judges as commands. A hole now needs both readings to be wrong about the same `<<`.
+This is why the pair is safe. The second reading never hides a real operator. An operator it invents gets a body, and that body is judged as commands, so nothing after it becomes data. Without that exception, an invented operator's unterminated body would swallow a later real heredoc as data, while the first reading hid that heredoc (round 7's `echo $((1<<3))` / `cat <<1 > x.txt` / `it's` / `1` / `rm -rf .kukulu/cleanroom`). A hole now needs both readings to be wrong about the same `<<`.
 
 Triage for this requirement. Principle 1 still applies, and a heredoc finding becomes a fix task only when all three of these hold:
 
@@ -264,6 +264,7 @@ Required fixtures:
   - `cat <<EOF > out.txt` / `$(cat ~/.cargo/registry/a.rs)` / `EOF`
   - `cat <<EOF | bash` / `rm -rf .kukulu/cleanroom` / `EOF`, and `cat <<'EOF' | sh` with the same body (the pipe case; both denied at the merge base)
   - `cat <<1 > x.txt` / `it's` / `1` / `rm -rf .kukulu/cleanroom` (a digits-only delimiter is real; the second reading)
+  - `echo $((1<<3))` / `cat <<1 > x.txt` / `it's` / `1` / `rm -rf .kukulu/cleanroom`, and the same lines after `# a << b` (an invented operator's body is commands)
   - every form in round 5's REVIEW table (`!(cat <<EOF` … and `echo [[ <<EOF` …), each with an apostrophe body
   - `x=$(!(cat <<EOF` / `it's` / `EOF` / `rm -rf .kukulu/cleanroom` / `: ')'` / `))` (allowed at the merge base; the second reading closes it)
   - `shopt -s extglob` / `!(x<<y)` / `rm -rf .kukulu/cleanroom` and `echo $((1<<y))` / `rm -rf .kukulu/cleanroom` (the first reading, which must keep judging the line after a non-operator `<<`)
