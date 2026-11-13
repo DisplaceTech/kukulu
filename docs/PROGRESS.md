@@ -43,7 +43,7 @@ Started: 2026-11-11T18:32:19.610Z
 - [x] R7-01 Guard: a heredoc pipeline into a shell continues past the operator's line and through ( ) and { } grouping
 - [x] R8-01 Guard: in the second reading, an invented heredoc operator's body is judged as commands (SPEC A-02)
 - [x] R8-02 Guard: a heredoc body or substitution is judged in the directory its owning segment runs in
-- [ ] R8-03 Guard: a heredoc body is shell-read when any later stage after a pipe runs a shell, at any grouping depth
+- [x] R8-03 Guard: a heredoc body is shell-read when any later stage after a pipe runs a shell, at any grouping depth
 
 ## Log
 
@@ -202,3 +202,7 @@ Second reading marks operators at offsets the first reading skipped (skippedAt) 
 ### R8-02 — fb45f7d
 
 Bodies/substitutions now judged inside the segment loop in their owning segment's cwd via private-use markers (BODY/SUBST) and stripHeredocs' new marks array; shell-read body judged with cwd save/restore. Leftovers judged after the loop. 11 (R8-02) fixtures (10 fail at old code), marks assertion. Docs/CHANGELOG updated. Full verify green.
+
+### R8-03 — cca6aae
+
+pipesIntoShell replaced by pipesIntoShellLater: a post-pass in stripHeredocs over the body-free text after each operator (first unquoted | or |& then any later segment owning a shell after stripGrouping, any depth). Over-denial of unrelated later `| bash` accepted. 4 (R8-03) fixtures (all fail at old code), 2 assertions, docs/CHANGELOG updated. Full verify green.
