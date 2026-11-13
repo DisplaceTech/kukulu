@@ -8545,5 +8545,81 @@
    "cwd": "__ROOT__"
   },
   "expect": "allowed"
+ },
+ {
+  "name": "cat <<EOF | bash NL rm -rf .kukulu/cleanroom NL EOF (R6-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat <<EOF | bash\nrm -rf .kukulu/cleanroom\nEOF"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "cat <<'EOF' | sh NL rm -rf .kukulu/cleanroom NL EOF (R6-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat <<'EOF' | sh\nrm -rf .kukulu/cleanroom\nEOF"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "cat <<EOF |& bash NL rm -rf .kukulu/cleanroom NL EOF (R6-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat <<EOF |& bash\nrm -rf .kukulu/cleanroom\nEOF"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "cat <<EOF | tee x | bash NL rm -rf .kukulu/cleanroom NL EOF (R6-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat <<EOF | tee x | bash\nrm -rf .kukulu/cleanroom\nEOF"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "denied",
+  "reason": "protected path: .*"
+ },
+ {
+  "name": "cat <<'EOF' | grep x NL priorArt json NL EOF (R6-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat <<'EOF' | grep x\n{\"priorArt\": [\"~/.cargo/registry/\", \"~/.cargo/git/\"]}\nEOF"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
+ },
+ {
+  "name": "cat <<EOF | bash -c 'echo hi' NL rm -rf .kukulu/cleanroom NL EOF (R6-02)",
+  "policy": "template",
+  "input": {
+   "tool_name": "Bash",
+   "tool_input": {
+    "command": "cat <<EOF | bash -c 'echo hi'\nrm -rf .kukulu/cleanroom\nEOF"
+   },
+   "cwd": "__ROOT__"
+  },
+  "expect": "allowed"
  }
 ]

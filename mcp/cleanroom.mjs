@@ -701,7 +701,7 @@ export function stripHeredocs(command) {
       const head = text;
       const owner = splitRaw(head).at(-1) ?? "";
       const tokens = shellWords(owner);
-      const shell = (/^(?:ba|z|da|k)?sh$/.test(commandWord(tokens).word ?? "") && !tokens.some((t) => /^-[A-Za-z]*c[A-Za-z]*$/.test(t))) || negated.some(([from, to]) => i > from && i < to);
+      const shell = ownsShell(tokens) || pipesIntoShell(command, j) || negated.some(([from, to]) => i > from && i < to);
       pending.push({ word, quoted, dash, shell });
       text += command.slice(i, j);
       i = j - 1;
@@ -725,6 +725,45 @@ export function stripHeredocs(command) {
     } else text += c;
   }
   return { text, bodies };
+}
+
+/** True when a segment's words run sh, bash, zsh, dash or ksh without `-c`, so it reads a script from stdin. */
+function ownsShell(tokens) {
+  return /^(?:ba|z|da|k)?sh$/.test(commandWord(tokens).word ?? "") && !tokens.some((t) => /^-[A-Za-z]*c[A-Za-z]*$/.test(t));
+}
+
+/**
+ * True when the rest of the heredoc operator's line pipes (`|` or `|&`) into a
+ * later segment of the same pipeline that reads a script from stdin. The
+ * pipeline ends at the first `;`, `&&`, `||` or `&`, or at the newline.
+ */
+function pipesIntoShell(command, from) {
+  const eol = command.indexOf("\n", from);
+  const rest = command.slice(from, eol === -1 ? command.length : eol);
+  const stages = [];
+  let current = "";
+  let quote = null;
+  for (let i = 0; i < rest.length; i++) {
+    const c = rest[i];
+    if (quote) {
+      current += c;
+      if (quote === '"' && c === "\\" && i + 1 < rest.length) current += rest[++i];
+      else if (c === quote) quote = null;
+    } else if (c === "'" || c === '"') {
+      quote = c;
+      current += c;
+    } else if (c === "\\" && i + 1 < rest.length) {
+      current += c + rest[++i];
+    } else if (c === "|" && rest[i + 1] !== "|" && !current.endsWith(">")) {
+      if (rest[i + 1] === "&") i++;
+      stages.push(current);
+      current = "";
+    } else if (c === ";" || c === "|" || (c === "&" && !/[<>]/.test(rest[i - 1] ?? "") && rest[i + 1] !== ">")) {
+      break;
+    } else current += c;
+  }
+  stages.push(current);
+  return stages.slice(1).some((stage) => ownsShell(shellWords(stage.trim())));
 }
 
 /**

@@ -931,6 +931,8 @@ async function genesisRepo(planOpts = {}) {
   const strip = (c) => stripHeredocs(c);
   const a = strip("cat <<EOF > x.txt\nhello\nEOF\necho done");
   eq(a.text, "cat <<EOF > x.txt\necho done", "stripHeredocs removes a body and keeps the operator");
+  eq(strip("cat <<EOF | bash\nrm x\nEOF").bodies.map((b) => b.shell).join(), "true", "stripHeredocs marks a body piped into a shell as shell-read");
+  eq(strip("cat <<EOF | grep x\nrm x\nEOF").bodies.map((b) => b.shell).join(), "false", "stripHeredocs leaves a body piped into grep as data");
   eq(JSON.stringify(a.bodies), JSON.stringify([{ body: "hello", quoted: false, shell: false }]), "...a bare delimiter is unquoted");
   eq(strip("cat <<'EOF'\nx\nEOF").bodies[0].quoted + "|" + strip('cat <<"EOF"\nx\nEOF').bodies[0].quoted + "|" + strip("cat <<\\EOF\nx\nEOF").bodies[0].quoted, "true|true|true", "...'EOF', \"EOF\" and \\EOF are quoted");
   eq(strip(T("cat <<-EOF\n<TAB>x\n<TAB>EOF\necho y")).text + "|" + strip(T("cat <<-EOF\n<TAB>x\n<TAB>EOF\necho y")).bodies[0].body, "cat <<-EOF\necho y|<TAB>x".replace("<TAB>", "\t"), "...<<- strips leading tabs from the delimiter line");

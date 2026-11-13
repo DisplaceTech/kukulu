@@ -23,7 +23,7 @@ All notable changes to this plugin. Format follows
 - `kukulu_next` supplies the `Agent` call's `description`, which go-flight passes on, so the first stage spawn no longer fails validation (project-g F-21, F-01).
 - The verifier no longer reports an alias-resolved model as a routing mismatch (project-g F-20, E-02).
 - After a flight is archived, `kukulu_next` no longer writes a new clean-room genesis on the finished branch, so `git checkout <base>` needs no stash (project-g F-16, F-17, C-01).
-- A heredoc body is data unless a shell reads it, so prior-art paths in a heredoc no longer refuse the call, and an apostrophe in a body no longer hides the commands after it (project-g F-11, A-02).
+- A heredoc body is data unless a shell reads it, so prior-art paths in a heredoc no longer refuse the call, and an apostrophe in a body no longer hides the commands after it (project-g F-11, A-02); a body piped into a shell (`cat <<EOF | bash`) is still judged as commands.
 - The guard judges `sed` as a write only in place, so a read-only `sed -n` of a protected file is allowed (project-g F-01, F-03, F-04, F-06, F-09, F-11, F-15).
 
 ### Changed
