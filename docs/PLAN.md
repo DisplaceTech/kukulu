@@ -33,6 +33,8 @@ Derived from docs/SPEC.md v0.8.1 on 2026-11-11. SPEC.md wins over this file.
 - B-01's Claude Code version → the implementer cannot browse, so `docs/operations.md` names the per-server `timeout` field and points at Claude Code's MCP documentation for the version that introduced it; the owner may fill the number in (see Spec issues).
 - Changelog → P0-01 creates `## [Unreleased]` above `## [0.8.0] — 2026-10-27`; every task adds its lines under `### Added`, `### Changed` or `### Fixed`, each citing its feedback item (`project-g F-19`) or requirement; there is no Breaking changes heading. P3-05 renames the heading to `## [0.8.1] — <date>`.
 - HANDOFF.md → no "do not merge" line (SPEC §6 G); the handoff lists the manual checks of all four phases.
+- 2026-11-13: maxRounds set to 5 (was 3) by the operator through kukulu_flight_options.
+- 2026-11-13: maxRoundsHard set to 8 (was 6) by the operator through kukulu_flight_options.
 
 ## Conventions
 

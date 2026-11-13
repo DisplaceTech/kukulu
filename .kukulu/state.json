@@ -4,7 +4,7 @@
   "reviewed": true,
   "verdict": "CHANGES REQUESTED",
   "summarized": false,
-  "halted": "round 5 is non-converging (findings per round: 4 → 4 → 1 → 1 → 1), the 3rd non-converging round, reaching maxRounds=3; a human must decide whether to continue: call kukulu_flight_options({ maxRounds: 4, resume: true })",
+  "halted": null,
   "preexistingUntracked": [],
   "policies": {
     "signing": "auto",
@@ -226,10 +226,5 @@
   ],
   "cleanroom": {
     "mode": "general"
-  },
-  "haltCap": {
-    "cap": "maxRounds",
-    "round": 5,
-    "nonConverging": 3
   }
 }
