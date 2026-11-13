@@ -40,6 +40,7 @@ Started: 2026-11-11T18:32:19.610Z
 - [x] R6-01 Green the PR checks: restore docs/kukulu.json escapes and exempt the feedback log from check-names' bare-letter rule
 - [x] R6-02 Guard: a heredoc piped into a shell has its body judged as commands
 - [x] R6-03 Guard: read every heredoc command twice, denying when either reading denies (SPEC A-02 Two readings)
+- [ ] R7-01 Guard: a heredoc pipeline into a shell continues past the operator's line and through ( ) and { } grouping
 
 ## Log
 

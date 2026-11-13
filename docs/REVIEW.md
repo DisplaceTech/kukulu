@@ -1,116 +1,98 @@
 # Review: build/2026-11-11 (Kūkulu 0.8.1)
-Round: 6
+Round: 7
 
 **Verdict: CHANGES REQUESTED**
 
-This round reviews the R5-01 fix commit `80c02ca` and its no-op marker `6a0975f`. It also reviews the two operator commits that landed since round 5: `4937aa4`, the owner's edit of SPEC A-02 on 2026-11-13, and `9d2f86b`, from `kukulu_flight_options`. Because SPEC wins over PLAN, I reviewed the guard against the edited A-02, not only against R5-01's plan text, which predates the edit.
+This round reviews the round-6 fix commits:
 
-R5-01 does what its task asked:
+- `c4a5867` (R6-01): restores the `docs/kukulu.json` escapes and exempts the feedback log from check-names' bare-letter rule.
+- `4a11151` (R6-02): judges a heredoc body as commands when it is piped into a shell.
+- `b0d099f` (R6-03): the two readings.
 
-- `git diff 36df873..HEAD -- test/fixtures/guard-cases.json` has no removed lines.
-- All 11 new fixture names end in `(R5-01)`, and the commit touches only the task's five files.
-- I ran four mutants against the guard self-test, and all were killed:
-  - `commandPosition` always true: R5-01's `[[`-argument fixtures failed.
-  - `commandPosition` always false: the R4-01 and R5-01 command-position fixtures failed.
-  - The `negated` shell clause deleted: `shopt -s extglob` NL `!(x<<y)` NL rm failed.
-  - `while` and `!` dropped from the reserved words: the `while [[` and `! [[` fixtures failed.
+It also covers their progress and handoff commits. R6-01 is clean. `git diff d9b19ea c4a5867 -- docs/kukulu.json` shows only the `maxRounds` and `maxRoundsHard` lines, and the file has no non-ASCII byte left. R6-03 matches SPEC A-02's "Two readings":
 
-The edited SPEC adds requirements that no task has built yet. One of them is a regression from the merge base.
+- the second reading runs only when the first skipped a `<<`;
+- the `negated` marking is gone;
+- the first reading copies a command-position `!(` through;
+- every SPEC A-02 required fixture now exists.
 
-**`kukulu_verify` returned `ok: false`.**
+R6-02 builds the pipe case only for a pipe on the operator's own line. SPEC's wording covers more than that, and the forms it misses are regressions from the merge base (finding 1).
+
+**`kukulu_verify` returned `ok: true`.**
 
 - All 33 constraints are `ok`, with no hits and no fixture failures.
-- `npm run lint` and `pre-commit run --all-files` fail on `check-names`.
-- `npm test` fails 1 assertion in `plugin`, the same check-names run. The other 14 suites pass, including `cleanroom` (1419 assertions).
+- `npm run lint` and `pre-commit run --all-files` pass.
+- `npm test` passes all 15 suites, 4811 assertions, including `cleanroom` with 1437. The 50 ms hook budget still holds.
+- Both guard self-tests pass, with 640 and 636 cases.
 
-**`prChecks` is `fail`.** `test (node 22)`, `test (node 24)`, `test (node 26)` and `pre-commit (yamllint / shellcheck / markdownlint / gitleaks)` fail on run 43445500043/43445500035 for `9246985`. `gh pr checks` also lists `test (no gh on PATH)` as failing and `test (macos)` as pending. The run was still in progress, so its logs were not available. The local `kukulu_verify` reproduces the failures: the fast 7-16 s failures match a lint failure.
+**`prChecks`** is `pending`, with no failing checks. That is not a finding. Round 6's failing checks were caused by check-names, which now passes locally.
+
+`git diff 36df873..HEAD -- test/fixtures/guard-cases.json` has no removed lines, so no existing fixture changed. All 13 new fixture names end in `(R6-02)` or `(R6-03)`.
 
 Clean-room mode is off for this flight (`state.cleanroom.mode` is `general`), so there are no denials to read.
 
-I ran each guard form through three copies of `evaluate` with the template policy: the merge base `36df873`, the round-5 review commit `d9b19ea`, and HEAD. Each copy came from `git show <rev>:mcp/cleanroom.mjs` in a scratch directory. I checked every form a finding depends on with real bash 5.2.21 (`bash -c`, `echo RANn` in place of the write).
+I ran each guard form through three copies of `evaluate` with the template policy: the merge base `36df873`, the round-6 review commit `7c838e4`, and HEAD. Each copy came from `git show <rev>:mcp/cleanroom.mjs` in a scratch directory. I checked every form a finding depends on with real bash 5.2.21: `bash -c`, with `echo RAN` in place of the `rm`.
 
 ## Findings
 
-### 1. A heredoc piped into a shell is allowed; it was denied at the merge base (`mcp/cleanroom.mjs`, `stripHeredocs` body judgment, about line 704)
+### 1. A heredoc piped into a shell on a later line, or into a grouped shell, is allowed; it was denied at the merge base (`mcp/cleanroom.mjs`, `pipesIntoShell`, about line 742)
 
-Category 1: a principle-1 regression of an always-protected write. The edited SPEC A-02 now requires these forms ("Judgment of a body", the pipe case; "Required fixtures", denied).
+Category 1: a principle-1 regression of an always-protected write.
 
-`stripHeredocs` judges a body as commands only when the *owning* segment is a shell. A body piped into a later segment whose command word is `sh`, `bash`, `zsh`, `dash` or `ksh`, with no `-c`, is treated as data. Bash runs every row below.
+SPEC A-02 says a body is shell-read when "the owning segment pipes (`|` or `|&`) into a later segment of the same pipeline whose command word is one of those shells". `pipesIntoShell` scans only the rest of the operator's own line, `command.slice(from, eol)`. R6-02 recorded this as its interpretation, but it is narrower than SPEC. A bash pipeline continues past a trailing `|` and past a backslash-newline, and the heredoc body is read in between. A grouped stage also has a shell command word: `(bash)` and `{ bash; }` reduce to `bash` through the same `stripGrouping` that `bashReading` applies to every segment.
 
-| Command | `36df873` | `d9b19ea` | HEAD |
+Every row below was denied at the merge base and is allowed at HEAD, and bash prints `RAN` for each:
+
+| Command | `36df873` | `7c838e4` | HEAD |
 |---|---|---|---|
-| `cat <<EOF \| bash` NL `rm -rf .kukulu/cleanroom` NL `EOF` | denied | allowed | allowed |
-| `cat <<'EOF' \| sh` NL `rm -rf .kukulu/cleanroom` NL `EOF` | denied | allowed | allowed |
-| `cat <<EOF \|& bash` NL `rm -rf .kukulu/cleanroom` NL `EOF` | denied | allowed | allowed |
-| `cat <<EOF \| tee x \| bash` NL `rm -rf .kukulu/cleanroom` NL `EOF` | denied | allowed | allowed |
+| `cat <<EOF \|` NL `rm -rf .kukulu/cleanroom` NL `EOF` NL `bash` | denied | allowed | allowed |
+| `cat <<EOF \` NL `\| bash` NL `rm -rf .kukulu/cleanroom` NL `EOF` | denied | allowed | allowed |
+| `cat <<EOF \| (bash)` NL `rm -rf .kukulu/cleanroom` NL `EOF` | denied | allowed | allowed |
+| `cat <<EOF \| { bash; }` NL `rm -rf .kukulu/cleanroom` NL `EOF` | denied | allowed | allowed |
 
-- **What breaks:** an implementer in a clean-room flight can delete the clean-room log, or overwrite `docs/cleanroom.json` or `.kukulu/state.json`, by piping a heredoc into a shell.
-- **Fix:** a body is also judged as commands when its owning segment pipes (`|` or `|&`) into a later segment of the same pipeline whose command word is one of the five shells and that has no `-c`.
-- **Fixtures:** the two pipe forms SPEC requires, plus the `|&` and `| tee x | bash` rows above, all denied. `cat <<'EOF' | grep x` with the priorArt JSON body stays allowed.
-- **Task:** R6-02.
+- **What breaks:** an implementer in a clean-room flight can delete the clean-room log, or overwrite `docs/cleanroom.json` or `.kukulu/state.json`, by putting the shell stage of the pipe on the line after the body, or inside `( )` or `{ }`.
+- **Minimal fix:** decide pipeline membership from the whole pipeline, not from the operator's line:
+  - a backslash-newline is a blank;
+  - a `|` or `|&` that ends the line holding the operator (blanks after it skipped) continues the pipeline on the first line after the last body that line opened;
+  - each later stage's command word is taken after the grouping strip `bashReading` uses (`stripGrouping`), then through `commandWord` as now.
 
-### 2. SPEC A-02's two readings are not implemented (`mcp/cleanroom.mjs`, `stripHeredocs` and its caller in `bashVerdict`)
-
-Category 5, spec drift: a requirement of the edited SPEC with no implementation. Category 3 also applies, because SPEC's required fixtures are missing.
-
-SPEC A-02 now requires every command to be read twice. The first reading uses the closed list of non-operator regions. The second treats every unquoted `<<` that is not `<<<` and has a delimiter word as an operator, digits-only delimiters included. The command is denied when either reading denies. HEAD has only the first reading.
-
-The required fixture `cat <<1 > x.txt` NL `it's` NL `1` NL `rm -rf .kukulu/cleanroom` is **allowed at HEAD**. Bash reads `<<1` as a heredoc and runs the `rm`. The digits rule hides the operator, so the apostrophe in `it's` hides the `rm`. It is allowed at the merge base too, so this is not a regression, but SPEC now names it as required.
-
-SPEC rule 6 also changed. In the first reading, `!(` is copied through like the other extglob openers. The second reading reads `!(` as a subshell, and "no other handling is required". R5-01 built a different mechanism instead: the `negated` list, which marks every heredoc inside a command-position `!(` as shell-read. Its effect is an over-denial: `!(cat <<EOF` NL `<protected write as data>` NL `EOF` NL `)` is denied, although bash reads that body as data. Once the second reading exists, that mechanism is redundant and contradicts rule 6's text.
-
-Of SPEC's required A-02 fixtures, these are missing from `guard-cases.json`:
-
-- `cat <<EOF | bash` and `cat <<'EOF' | sh` (finding 1)
-- `cat <<1 > x.txt` …
-- `x=$(!(cat <<EOF` … `))`. It is denied at HEAD, but no fixture pins it.
-- `echo $((1<<y))` NL `rm -rf .kukulu/cleanroom`
-- `cat <<'EOF' | grep x` …
-- `[[ a =~ (x<<y) ]] && echo ok`
-- `echo $((1<<3))`
-
-**Fix:**
-
-- Implement the second reading as SPEC A-02 "Two readings" states:
-  - It runs only when the first reading skipped a `<<`.
-  - Its bodies are judged by the same body rules, the R6-02 pipe case included.
-  - When either reading denies, report the first denying reading's reason.
-- Make rule 6's first reading copy a command-position `!(` through, and remove the `negated` marking.
-- Add the missing fixtures.
-- Every existing fixture must keep its expect and reason.
-
-This is task R6-03. It depends on R6-02, because the second reading reuses the pipe body rule.
-
-### 3. PR checks fail: `check-names` is red at `docs/kukulu.json:655` and `.kukulu/feedback.jsonl:8`
-
-Category 3: a failing CI check. Neither hit comes from a task.
-
-- **`docs/kukulu.json:655`:** `9d2f86b` (`kukulu_flight_options`, run by the installed 0.8.0) re-serialized the whole file with `JSON.stringify`. Every JSON escape of U+016B (the macron u), U+2014 (the em dash) and U+26A0 U+FE0F (the warning sign) became the literal character. The `progress-no-bare-macron` `shouldMatch` example `the ASCII identifier is k…kulu, never this` now holds a bare macron letter, which check-names refuses.
-- **`.kukulu/feedback.jsonl:8`:** the controller's pipeline-friction entry quotes the macron letter in prose. `kukulu_feedback_log` committed it as written.
-
-**What breaks:**
-
-- `npm run lint`, pre-commit and the `plugin` suite fail.
-- Every CI test job and the pre-commit job fail, so the PR cannot go green.
-- Any later controller feedback that names the letter breaks the build again.
-
-**Fix:**
-
-- In `docs/kukulu.json`, restore the JSON escapes `9d2f86b` removed, so that `git diff d9b19ea -- docs/kukulu.json` shows only the `maxRounds` and `maxRoundsHard` lines.
-- In `scripts/check-names.mjs`, exempt `.kukulu/feedback.jsonl` from the bare-letter check only. It is an append-only machine log of agents' words, the same kind of record as `docs/feedback/`, and rewriting a committed entry would rewrite history. The NFD check, the path check and the private-name check stay on.
-- Add a `test/plugin.mjs` assertion that a temp directory whose `.kukulu/feedback.jsonl` holds the bare letter passes check-names, and that the same line in another file still fails.
-- The failing checks `test (node 22)`, `test (node 24)`, `test (node 26)` and `pre-commit (yamllint / shellcheck / markdownlint / gitleaks)` prove the fix.
-
-This is task R6-01.
+  The pipeline still ends at the first unquoted `;`, `&&`, `||` or `&`, or at a newline that does not follow a `|`.
+- **Fixtures:** the four rows above, all denied. These stay allowed:
+  - `cat <<'EOF' | grep x` with the priorArt JSON body;
+  - `cat <<'EOF' |` NL priorArt JSON NL `EOF` NL `grep x`;
+  - the existing `cat <<EOF | bash -c 'echo hi'` fixture.
+- **Task:** R7-01.
 
 ## Spec issues
 
-- **`kukulu_flight_options` rewrites `docs/kukulu.json` with literal non-ASCII.** `flightOptions` writes `JSON.stringify(raw, null, 2)`, in both the installed 0.8.0 and this branch (`mcp/server.mjs`, about line 4262). That turns every escape in the file into a literal character, the macron letter included. The controller has already logged this as feedback. SPEC 0.8.1 does not cover it, so it is not a task here. Should the writer keep non-ASCII escaped, or edit only the keys it changes? That is the owner's call for 0.8.1 or 0.9.0. Until then, any flight-options call in a repository whose config holds the letter breaks check-names.
-- **A fix task written before a SPEC edit.** R5-01 was planned against the pre-edit A-02 and implemented after the edit. Nothing in the pipeline re-checks open fix tasks when SPEC changes mid-flight. I have logged this as review feedback.
-- **Carried, still open for the owner:** A-01's "a cluster that contains `i`" wording is broader than the implementation's getopt reading of `-e`/`-f`/`-l` values.
-- **Known-gap candidates:**
-  - An escaped quote inside ANSI-C quoting: `echo $'\''; rm -rf .kukulu/cleanroom # '` is allowed at the merge base and at HEAD, so it is not a regression.
-  - The over-denial from R5-01's `negated` marking (finding 2) is a known-gap candidate under the new A-02 triage rule on its own. It is listed under finding 2 only because SPEC rule 6 now states the intended mechanism.
+- **SPEC A-02's "two readings" safety argument does not hold, and the owner must decide this before another round.**
+  - **The argument.** SPEC says: "The second reading never hides a real operator. An operator it invents can only turn lines into data that the first reading still judges as commands. A hole now needs both readings to be wrong about the same `<<`."
+  - **Why it fails.** The two readings can be wrong about *different* `<<`s:
+    - The first reading hides the real operator `<<1` under rule 8's digits-only case.
+    - The second reading invents an operator out of an earlier skipped `<<` (arithmetic, a comment). That operator's unterminated body swallows the rest of the command, real heredoc included, as data.
+  - **Forms allowed at HEAD** (and at the merge base). Bash prints `RAN` for each:
+    - `echo $((1<<3))` NL `cat <<1 > x.txt` NL `it's` NL `1` NL `rm -rf .kukulu/cleanroom`
+    - `# a << b` NL `cat <<1 > x.txt` NL `it's` NL `1` NL `rm -rf .kukulu/cleanroom`
+  - **The triage conflict.** Both forms meet all three of A-02's triage conditions: allowed under both readings, a protected-path write, and real bash runs it. They are SPEC's own required fixture `cat <<1 > x.txt` … with one line in front. But HEAD implements both readings exactly as SPEC words them, so a fix needs a SPEC change, and I have not queued a task.
+  - **A proposed wording that restores the stated property:** "in the second reading, the body of an operator the first reading skipped is judged as commands (with both readings, recursively), not by the body rules."
+    - With that wording, an invented operator can only add commands to judge, never turn commands into data.
+    - It would over-deny only where a skipped `<<`'s supposed body holds a denied command, which is a known-gap class.
+    - I checked `echo $((1<<3)) > a.txt` NL `cat > build/k.json <<'EOF'` NL priorArt JSON NL `EOF` by hand: under the proposed rule it would stay allowed, because the nested reading treats the quoted body as data.
+- **R6-03's plan text, not SPEC, held the contradiction.** PLAN R6-03 listed `!(cat <<EOF` NL `rm -rf .kukulu/cleanroom` NL `EOF` NL `)` as allowed. Round 6's review wrote that, and it was wrong:
+  - SPEC rule 6 has the first reading copy a command-position `!(` through, so its `rm` line is judged and denied.
+  - SPEC A-02 does not list the form among its allowed fixtures.
+  - Under SPEC's triage it is an over-denial, which makes it a known-gap candidate.
+
+  The implementer was right to keep it denied and to log the conflict. HANDOFF's suggestion that the owner reconcile SPEC rule 6 with it needs no SPEC change.
+- **Carried from round 6:**
+  - `kukulu_flight_options` rewrites `docs/kukulu.json` with literal non-ASCII characters (`JSON.stringify`).
+  - Nothing re-checks open fix tasks after a mid-flight SPEC edit.
+  - A-01's "a cluster that contains `i`" wording is broader than the getopt reading of the `-e`/`-f`/`-l` values.
+- **Known-gap candidates.** Each was denied at the merge base, is allowed at HEAD, and bash runs it. Each lies outside SPEC A-02's two named shell-read cases, which require one of the five shells "with no `-c`". Widening those cases is the owner's call, so none is queued:
+  - **A `-c` string that is itself a shell reading stdin:** `cat <<EOF | bash -c bash` NL `rm -rf .kukulu/cleanroom` NL `EOF`.
+  - **`.` or `source` of stdin:** `cat <<EOF | . /dev/stdin` NL `rm -rf .kukulu/cleanroom` NL `EOF`.
+  - **A body written to a file that a later segment runs:** `cat <<EOF > s.sh` NL `rm -rf .kukulu/cleanroom` NL `EOF` NL `bash s.sh`. This is the existing `indirect` class.
+  - **Carried, allowed at the merge base too:** an escaped quote inside ANSI-C quoting, `echo $'\''; rm -rf .kukulu/cleanroom # '`.
 
 ## Manual checks still owed
 
@@ -120,16 +102,25 @@ From HANDOFF.md, all NOT VERIFIED (human):
 - **Phase 1:** with the working tree as the plugin, a `kukulu_verify` whose `extraVerify` sleeps 40 minutes returns its result instead of an idle-timeout error. After a clean-room flight's archive, `git checkout main` succeeds from the build branch with no stash.
 - **Phase 2:** with `policies.finalize "draft"` in the owner's global file, `kukulu_config_show` in a project with no policies block reports finalize `"draft"`, with `policySources.finalize` `"global"`.
 - **Phase 3:** on the next flight, go-flight's first `Agent` call carries `description` and does not fail validation. `cargo test --workspace -- a b` runs both filters on a stable Rust toolchain.
+- **Round 6:** after push, the four PR checks pass: test on node 22, 24 and 26, and pre-commit.
 
 ## Notes
 
-- **Mutation:** round 6 is past `review.mutationFixRounds` (2). All five mutants in `mcp/cleanroom.mjs` were killed, so no survivors are recorded this round.
+- **Mutation.** Round 7 is past `review.mutationFixRounds` (2), so survivors are advisory and never tasks. I ran seven mutants on the round-6 files. Five were killed:
+  - The pipe clause removed: the four `(R6-02)` denials failed.
+  - The `|&` skip removed: the `|&` fixture failed.
+  - The second reading never run: the R5-01 apostrophe fixtures and the `(R6-03)` digits and `x=$(!(` fixtures failed.
+  - The digits rule applied in both readings: the `cat <<1` fixture failed.
+  - The pipe and grep `stripHeredocs` assertions were added by R6-02. I did not mutate them separately.
+- **Two survivors:**
+  - **`bashVerdict`'s reset of `shellCwd` and `previousCwd` before the second reading (`mcp/cleanroom.mjs`, about line 1332).** Without the reset, a command that `cd`s and then needs the second reading starts that reading in the wrong directory. Example: `cd build` NL `cat <<1 > x` NL `it's` NL `1` NL `rm -rf ../.kukulu/cleanroom`. HEAD denies it. A scratch copy without the reset resolves the `rm` against `build/build` and allows it. No fixture pins it.
+  - **`BARE_LETTER_EXEMPT`'s `^` anchor in `scripts/check-names.mjs`.** Without it, a nested `x/.kukulu/feedback.jsonl` would be exempt too. No test covers a nested path.
+- **Readability.** `bashVerdict` calls `stripHeredocs(command, false)` a second time only to read `skipped`, although `bashReading` has just computed it. Returning `skipped` from the first reading would save one scan. The hook budget holds either way.
 - **Carried advisory survivors** (never tasks):
-  - `conditionalEnd`'s closer boundary (round 5).
-  - `assignmentEnd`'s list nesting and `backtickEnd`'s escape (round 4).
-  - `expansionEnd`'s nesting and quote branches, and `validateMutation`'s `filterAt !== -1 &&` (round 3).
-  - Round 5's `groupEnd` nesting survivor is now pinned. A fifth mutant, which made `groupEnd` return the first `)`, was killed by R5-01's `echo @(a|(x)<<y)` fixture.
+  - `conditionalEnd`'s closer boundary;
+  - `assignmentEnd`'s list nesting and `backtickEnd`'s escape;
+  - `expansionEnd`'s nesting and quote branches;
+  - `validateMutation`'s `filterAt !== -1 &&`.
 - **Carried from round 1:**
-  - `kukulu_next`'s `TOOLS` description still omits `description` from its result shape.
+  - `kukulu_next`'s `TOOLS` description omits `description` from its result shape.
   - P1-05's suggestion reads `<slug>-2 or <slug>-2` when the SPEC has no `Version:` line.
-- **The R5-01 marker commit:** `6a0975f` is an empty commit that exists only because `kukulu_task_done` needs HEAD's subject to start with the task id, and a feedback commit landed after the task commit. It is harmless.
