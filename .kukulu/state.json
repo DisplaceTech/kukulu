@@ -1,10 +1,10 @@
 {
-  "round": 7,
-  "implemented": true,
-  "reviewed": false,
-  "verdict": null,
+  "round": 8,
+  "implemented": false,
+  "reviewed": true,
+  "verdict": "CHANGES REQUESTED",
   "summarized": false,
-  "halted": null,
+  "halted": "round 8 is non-converging (findings per round: 4 → 4 → 1 → 1 → 1 → 3 → 1 → 3), the 5th non-converging round, reaching maxRounds=5; a human must decide whether to continue: call kukulu_flight_options({ maxRounds: 6, resume: true })",
   "preexistingUntracked": [],
   "policies": {
     "signing": "auto",
@@ -108,6 +108,19 @@
         "blocked": 0
       },
       "at": "2026-11-13T15:41:30.784Z"
+    },
+    {
+      "round": 8,
+      "fixTasks": 3,
+      "unblocked": 0,
+      "verdict": "CHANGES REQUESTED",
+      "nonConverging": true,
+      "sources": {
+        "review": 3,
+        "mutation": 0,
+        "blocked": 0
+      },
+      "at": "2026-11-13T16:08:51.039Z"
     }
   ],
   "archived": {
@@ -318,5 +331,10 @@
   ],
   "cleanroom": {
     "mode": "general"
+  },
+  "haltCap": {
+    "cap": "maxRounds",
+    "round": 8,
+    "nonConverging": 5
   }
 }
