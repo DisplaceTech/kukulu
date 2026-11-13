@@ -99,3 +99,10 @@ Tasks R6-01 to R6-03 are done (35 of 35 done, none blocked).
 - R6-02: a heredoc body whose operator line pipes (`|` or `|&`) into a later sh, bash, zsh, dash or ksh stage without `-c` is judged as commands. Interpretation: only the operator's own line is scanned for the pipeline.
 - R6-03: two readings of every heredoc command (the second only when the first skipped a `<<`), denied when either denies; the negated-subshell marking is gone. Interpretation and SPEC conflict: the acceptance fixture `!(cat <<EOF` / `rm -rf .kukulu/cleanroom` / `EOF` / `)` cannot be allowed, because reading one copies the group through and judges the rm line. It is kept as a denied fixture; the owner should reconcile SPEC A-02 rule 6 with it.
 - Check by hand: after push, the four PR checks (test node 22/24/26, pre-commit) pass.
+
+## Round 7
+
+Task R7-01 is done (36 of 36 done, none blocked).
+
+- R7-01: `pipesIntoShell` now decides pipeline membership over the whole pipeline: a backslash-newline is a blank, a trailing `|` continues on the first line after the bodies the line opened, and each stage is read after `stripGrouping` so `(bash)` and `{ bash; }` count. Five (R7-01) fixtures, two `stripHeredocs` assertions, `docs/cleanroom.md` and the A-02 CHANGELOG line updated. No Interpretation choices.
+- Check by hand: after push, the PR checks pass.
