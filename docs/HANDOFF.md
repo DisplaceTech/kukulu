@@ -83,3 +83,10 @@ Fix task R3-01, done (30 of 30 tasks done, none blocked). `kukulu_verify` is ok:
 - R4-01 (done, 0398316): `stripHeredocs` copies a `[[ ... ]]` conditional and a `?*+@!(...)` extglob group through unread, so a `<<` inside no longer hides later commands. The arithmetic branch still wins for `$((2*(1<<3)))`. No interpretation choices.
 - Tests: 12 new `(R4-01)` fixtures in `test/fixtures/guard-cases.json`, one `stripHeredocs` assertion in `test/cleanroom.mjs`. `docs/cleanroom.md` and the A-02 CHANGELOG line extended.
 - Counts: 31 done, 0 blocked, 0 skipped. `kukulu_verify` is green.
+
+## Round 5
+
+- R5-01 (80c02ca): `stripHeredocs` gains a shared `commandPosition` helper. `[[` is a conditional only in command position (start, after newline `;` `&` `|` `(` `{`, or after if/then/else/elif/while/until/do/time/`!`); elsewhere it is an ordinary word. `!(` in command position is not copied through: a heredoc inside it has its body judged as commands, covering both extglob readings. Interpretation: an unclosed `!(` group extends to the end of the command.
+- 11 fixtures ending `(R5-01)` added (5 regressions, 5 pins, 1 allowed); no existing fixture changed. Guard self-tests pass on both templates.
+- Known red baseline, not from this round: `npm run lint` and the plugin suite's check-names fail at `docs/kukulu.json:655` (a literal macron u in a `progress-no-bare-macron` shouldMatch example). Logged as feedback.
+- HEAD of the task is a no-op marker commit `6a0975f` because the feedback commit landed after 80c02ca.
