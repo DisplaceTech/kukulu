@@ -37,7 +37,7 @@ Started: 2026-11-14T04:52:50.030Z
 - [x] P3-04 Documentation sweep for 0.9.0
 - [x] P3-05 CHANGELOG 0.9.0 and the version
 - [x] P3-06 Phase 3 end: push and record the manual checks
-- [ ] R1-01 The probe redacts the token before it cuts the error body
+- [x] R1-01 The probe redacts the token before it cuts the error body
 - [ ] R1-02 A failed activation on a flight's first timeline record keeps its activateFailures count
 - [ ] R1-03 The kukulu_next, kukulu_status and kukulu_pr_finalize tool descriptions name 0.9.0's behavior
 
@@ -172,3 +172,7 @@ Version 0.9.0 in package.json, plugin.json, VERSION and README badge; CHANGELOG 
 ### P3-06 — 474ccee
 
 Push: pushed build/2026-11-14 to origin. Verify green on identical tree (P3-05). Manual check: NOT VERIFIED (human): the commands in docs/local-runners.md start a fully local session against the owner's inference host
+
+### R1-01 — ea13020
+
+Token replaced in raw body before oneLine and cut. Added straddle test in test/routing.mjs. verify green.
