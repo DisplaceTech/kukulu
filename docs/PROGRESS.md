@@ -14,7 +14,7 @@ Started: 2026-11-14T04:52:50.030Z
 - [x] P1-01 scripts/runner-probe.mjs
 - [x] P1-02 Runner keys activate, activateTimeoutMs, servedAs and tokenEnv, and the served id
 - [x] P1-03 kukulu_next warms the stage's runner and records the wait
-- [ ] P1-04 A runner that does not serve its model halts the flight
+- [x] P1-04 A runner that does not serve its model halts the flight
 - [ ] P1-05 Activation in the chain, and the runner-drift notes
 - [ ] P1-06 go-flight prints the activation line
 - [ ] P1-07 Measure what the probe costs and how it fails
@@ -77,3 +77,7 @@ server.mjs: RUNNER_KEYS gains four keys, runnerActivation() holds the 30-minute 
 ### P1-03 — 483527d
 
 activateRunner(role) + activationRecord in server.mjs; next() probes via spawnSync(KUKULU_RUNNER_PROBE or scripts/runner-probe.mjs); recordTimeline(res, activation) orders end, activate, start (activate alone when unchanged), ignores activate when finding the open span, skips activate in chain stage entries (P1-05 owns that). kukulu_status.activateSeconds. Failed probe: result.activation.error, no record (P1-04 replaces). mkFakeProbe in harness. state suite 350.
+
+### P1-04 — b82d986
+
+Failed warm probe -> follow-up --models probe (RUNNER_LIST_TIMEOUT_MS=10000) -> next() calls nextDecision(forcedHalt) for a halt-shaped result; recordTimeline writes end + activate ok:false, sets state.halted (no haltCap), commit chore: stage end. readCounters/bumpCounter added (activateFailures; countersNote on failure). runProbe() shared helper. state suite 365. Interpretation: forcedHalt param on nextDecision.
