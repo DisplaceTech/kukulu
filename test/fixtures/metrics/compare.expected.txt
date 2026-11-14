@@ -1,0 +1,98 @@
+A: flight-a  harness claude-code 2.0.0  plugin 0.9.0  general  spec aaaaaaaaaaaa
+B: flight-b  harness claude-code 2.0.1  plugin 0.9.0  clean-room  spec bbbbbbbbbbbb
+the two flights were built from different specs; the comparison below is not like for like
+
+Outcome
+  verdict          APPROVED  APPROVED  =
+  halted           n/a       n/a
+  reviews          3         2         -1
+  fixRounds        2         1         -1
+  approvedAtRound  3         2         -1
+  maxRounds        3         3         0
+  maxRoundsHard    6         6         0
+
+Wall time
+  seconds          1800  2000  +200
+  stage plan       60    80    +20
+  stage implement  1260  1595  +335
+  stage review     380   280   -100
+  stage summarize  30    n/a
+  activate spark   n/a   14
+  idle             70    31    -39
+
+Rounds
+  round 1 findings          5    2     -3
+  round 1 implementSeconds  930  1305  +375
+  round 1 reviewSeconds     190  190   0
+  round 2 findings          1    0     -1
+  round 2 implementSeconds  290  290   0
+  round 2 reviewSeconds     140  90    -50
+  round 3 findings          0    n/a
+  round 3 implementSeconds  40   n/a
+  round 3 reviewSeconds     50   n/a
+
+Roles
+  planner model                      opus       opus                                      =
+  planner runner                     anthropic  anthropic                                 =
+  planner family                     claude     claude                                    =
+  planner requests                   10         12                                        +2
+  planner input                      1000       1100                                      +100
+  planner output                     200        250                                       +50
+  planner activeSeconds              600        600                                       0
+  planner outputPerActiveSecond      0.3        0.4                                       +0.1
+  planner toolErrors                 2          2                                         0
+  planner cost                       1.2        1.4                                       +0.2
+  implementer model                  sonnet     spark/qwen38-27b                          differs
+  implementer runner                 anthropic  spark                                     differs
+  implementer family                 claude     qwen                                      differs
+  implementer requests               120        300                                       +180
+  implementer input                  90000      150000                                    +60000
+  implementer output                 7000       12000                                     +5000
+  implementer activeSeconds          600        1200                                      +600
+  implementer outputPerActiveSecond  11.7       10                                        -1.7
+  implementer toolErrors             9          20                                        +11
+  implementer cost                   3.4        n/a
+  reviewer model                     opus       spark/qwen38-27b                          differs
+  reviewer runner                    anthropic  spark                                     differs
+  reviewer family                    claude     qwen                                      differs
+  reviewer requests                  30         40                                        +10
+  reviewer input                     12000      20000                                     +8000
+  reviewer output                    1500       2500                                      +1000
+  reviewer activeSeconds             600        600                                       0
+  reviewer outputPerActiveSecond     2.5        4.2                                       +1.7
+  reviewer toolErrors                2          2                                         0
+  reviewer cost                      2.1        n/a
+  summarizer model                   sonnet     sonnet                                    =
+  summarizer runner                  anthropic  anthropic                                 =
+  summarizer family                  claude     claude                                    =
+  summarizer requests                6          not recorded
+  summarizer input                   900        not recorded
+  summarizer output                  400        not recorded
+  summarizer activeSeconds           600        not recorded
+  summarizer outputPerActiveSecond   0.7        not recorded
+  summarizer toolErrors              2          not recorded
+  summarizer cost                    0.2        not recorded
+  controller model                   n/a        n/a
+  controller runner                  n/a        n/a
+  controller family                  n/a        n/a
+  controller requests                40         55                                        +15
+  controller input                   9000       11000                                     +2000
+  controller output                  800        900                                       +100
+  controller activeSeconds           600        600                                       0
+  controller outputPerActiveSecond   1.3        1.5                                       +0.2
+  controller toolErrors              2          2                                         0
+  controller cost                    0.026      0.031                                     +0.005
+  totals requests                    206        407 partial (summarizer not recorded)
+  totals input                       112900     182100 partial (summarizer not recorded)
+  totals output                      9900       15650 partial (summarizer not recorded)
+  totals cost                        6.926      n/a partial (summarizer not recorded)
+
+Friction
+  feedback restart       1   0    -1
+  feedback runner-drift  0   1    +1
+  feedback stall         2   1    -1
+  guardReblocks          3   n/a
+  verifyRuns             20  31   +11
+  verifyFailures         4   9    +5
+  tasksReopened          1   0    -1
+  activateFailures       0   0    0

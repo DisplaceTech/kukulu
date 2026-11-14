@@ -12,6 +12,8 @@ Kūkulu is a Claude Code plugin: a dependency-free MCP server (`mcp/server.mjs`)
 - Error messages are written for a model: say what is wrong and what to do instead. Comments explain why, not what.
 - No dependencies anywhere: server, tests, lint.
 - Tests never depend on an untracked file: a test that reads documentation reads only paths in `git ls-files`, and a test that needs a denylist, a key or a policy writes its own in a temp directory.
+- Measuring never stops a flight (from 0.9.0): a failure to read usage, write a counter or build metrics is a note in the tool's result, never a refusal or a halt. The one halt measuring adds is a runner that does not serve its model.
+- A number with no source is `null`, never 0, and `docs/metrics.md` names the source of every `METRICS.json` field.
 
 ## Commands
 
@@ -27,6 +29,9 @@ Kūkulu is a Claude Code plugin: a dependency-free MCP server (`mcp/server.mjs`)
 - `npm run site:serve`: serve `site/` on `127.0.0.1` with `site/_headers` applied (`SITE_PORT` or `--port N`); `node scripts/serve-site.mjs --self-test` checks it on an ephemeral port.
 - `node scripts/cleanroom-guard.mjs --self-test templates/cleanroom.example.json`: the clean-room guard's fixed fixture set plus the policy's own fixtures (once the guard exists).
 - `node scripts/verify-attestation.mjs <bundle-dir> [--key sha256:<hex>] [--json]`: the offline bundle verifier; `--legacy-log <tool-log.jsonl>` reads a pre-0.6.0 log.
+- `node scripts/runner-probe.mjs --endpoint <url> --models` or `--warm <served id>`, with `[--timeout-ms N] [--token-env NAME]`: one request to a runner, one JSON line, exit 0, 1 or 2 (from P1-01 of flight v0-9-0).
+- `node scripts/compare-flights.mjs <a> <b> [--trees <dir-a> <dir-b>] [--json]`: two flights' `METRICS.json` side by side (from P2-10 of flight v0-9-0).
+- `KUKULU_RUNNER_IT=1 KUKULU_RUNNER_IT_ENDPOINT=<url> node test/routing.mjs`: the opt-in probe step against a real runner; never in `verify`.
 
 ## Module map
 
@@ -34,20 +39,22 @@ Kūkulu is a Claude Code plugin: a dependency-free MCP server (`mcp/server.mjs`)
 |---|---|
 | `mcp/server.mjs` | Every deterministic operation and the JSON-RPC transport; one file |
 | `mcp/cleanroom.mjs` | Pure, synchronous clean-room functions shared by the server, the hooks and the tests: policy, canonicalization, guard decision, chain, checkpoints, key, scorer, coverage (new in 0.7.0) |
+| `mcp/metrics.mjs` | Pure, synchronous metrics functions: `METRICS_VERSION`, `USAGE_KEYS`, `validateUsageRecord`, `buildMetrics`, `usageFromChain`, `compareMetrics`; `node:` imports only, no harness name (new in 0.9.0) |
 | `mcp/run-command.mjs` | Runs one bounded command in its own process group (unchanged) |
 | `mcp/relay.mjs` | Inside the sandbox: pipes the server's stdio to the controller socket; `node:` only, may use `async`; the server reaches it only through `spawnSync` (new in 0.8.0) |
 | `scripts/sandbox.mjs`, `scripts/sandbox-entry.mjs` | The sandbox launcher and controller host (`doctor`, `run`, `stop`; the controller, log and proxy sockets), and the container's entrypoint (the loopback-to-socket bridge, then the harness) (new in 0.8.0) |
 | `scripts/model-identity.mjs`, `scripts/publish-bundle.mjs`, `scripts/compare-bundles.mjs` | Weight-file digests on an inference host; a publishable bundle copy and its re-check; two bundles side by side (new in 0.8.0) |
 | `templates/sandbox/Containerfile`, `templates/cleanroom.local-only.example.json` | The sandbox image template; the worked local-only, sandboxed policy |
 | `scripts/implement-guard.mjs` | Stop/SubagentStop hook |
-| `scripts/cleanroom-guard.mjs`, `scripts/cleanroom-log.mjs` | PreToolUse guard; PostToolUse and UserPromptSubmit logger (new in 0.7.0) |
+| `scripts/cleanroom-guard.mjs`, `scripts/cleanroom-log.mjs` | PreToolUse guard; PostToolUse and UserPromptSubmit logger (new in 0.7.0); it runs on SubagentStop since 0.8.0 and on Stop from 0.9.0, when it also holds `usageFromClaudeCode` and in general mode appends usage records to `.kukulu/metrics/usage.jsonl` |
+| `scripts/runner-probe.mjs`, `scripts/compare-flights.mjs` | One HTTP request to a runner, the only network I/O the plugin makes; two flights' metrics side by side (new in 0.9.0) |
 | `scripts/verify-attestation.mjs` | The offline attestation verifier, `node:` imports only, copied into every bundle (new in 0.7.0) |
 | `scripts/check-names.mjs` | Display-name rules and the private-name denylist check |
 | `hooks/hooks.json` | Stop, SubagentStop, and from 0.7.0 PreToolUse, PostToolUse, UserPromptSubmit |
 | `agents/*.md` | Default model, effort and `tools:` per role; the tool list is the contract |
 | `skills/*/SKILL.md` | Stage prose |
 | `templates/` | SPEC skeleton, routing example, constraint examples |
-| `test/harness.mjs` + the suites | `plugin`, `protocol`, `state`, `implement`, `review`, `routing`, `constraints`, `feedback`, `streams`, `guard`, `drive`, from 0.7.0 `cleanroom` and `attest`, and from 0.8.0 `sandbox` and `bundles`; `test/fixtures/` holds recorded data |
+| `test/harness.mjs` + the suites | `plugin`, `protocol`, `state`, `implement`, `review`, `routing`, `constraints`, `feedback`, `streams`, `guard`, `drive`, from 0.7.0 `cleanroom` and `attest`, from 0.8.0 `sandbox` and `bundles`, and from 0.9.0 `metrics`; `test/fixtures/` holds recorded data |
 | `docs/*.md`, `README.md`, `CHANGELOG.md`, `CONTRIBUTING.md` | User and maintainer docs |
 | `site/` | The kukulu.tech landing page, deployed as-is by Cloudflare Pages; a closed file set |
 | `docs/site/` | The site's inputs: approved mockup, screens, seeded assets, `checks.json`, `DEPLOY.md`; never deployed |
@@ -83,11 +90,17 @@ Mechanical rules are in the `constraints` of a flight's `docs/kukulu.json`, whic
 - `relay-not-in-server` (from P2-02): `mcp/server.mjs` never imports `node:net`, `net` or `./relay.mjs`; it reaches the relay only through `spawnSync`.
 - `no-hardcoded-log-socket-timeout`: 2000 is written only as `export const LOG_SOCKET_TIMEOUT_MS = 2000;` in `mcp/cleanroom.mjs`; the hooks and the sandbox read the export.
 - `no-hardcoded-mcp-timeout` (from flight v0-8-1): the per-server MCP tool-call timeout (86400000 ms, 24 h, an ⚠️ ASSUMPTION) is written only in `.mcp.json`'s `kukulu` entry; `mcp/`, `scripts/`, `test/`, the skills, the agents, the docs (SPEC, PLAN, flights and spikes excepted), README and CHANGELOG never spell it, in any form (`86_400_000`, `864e5`, `24 * 60 * 60 * 1000`); the server reads it with `mcpTimeoutMs()` and the tests read the file.
+- `metrics-module-pure` (from flight v0-9-0): `mcp/metrics.mjs` imports only `node:` modules and has no child process, `process.exit`, `console.*(` or dynamic `import(`; the pattern is `cleanroom-module-pure`'s.
+- `metrics-harness-neutral`: `mcp/metrics.mjs` never names a harness or a transcript field (`claude-code`, `isSidechain`, `isApiErrorMessage`, `requestId`, `costUSD`, `transcript_path`), in code, a string or a comment; a transcript format is known only to a `usageFrom<Harness>` function in the hook script.
+- `server-no-network`: `mcp/server.mjs` imports none of `node:http`, `node:https`, `node:net` or `node:dgram`, with or without the prefix; network I/O happens only in `scripts/runner-probe.mjs`, run through `spawnSync`.
+- `no-hardcoded-activate-timeout`: the `activateTimeoutMs` default (an ⚠️ ASSUMPTION) is written only as `activateTimeoutMs: r.activateTimeoutMs ?? 1800000,` in `runnerFor`; `mcp/`, `scripts/`, `skills/`, `agents/` and `hooks/` never spell it otherwise, in any form.
+- `probe-node-only`: `scripts/runner-probe.mjs` imports only `node:` modules and no sibling file.
+- `compare-flights-imports`: `scripts/compare-flights.mjs` imports only `node:` modules, `../mcp/metrics.mjs`, and exactly `{ scorePair }` from `../mcp/cleanroom.mjs`.
 The reviewer checks these by reading, because no line pattern can express them:
 
 - Refusals before writes; rollback on a failed commit (principle 3). The one sanctioned exception is the clean-room gate, which appends its own `gate` entry to the log before it refuses.
 - `fable` stays a legal alias (`ANTHROPIC_ALIASES`, `AGENT_TOOL_ALIASES`).
-- `TASK_ID`, `TASK_LINE` and the guard's task regexes are unchanged; only `kukulu_plan_commit`'s renumber mode accepts a suffix such as `P1-02a`. The implement guard's `RUN_START_TOOL` is `/^(?:mcp__.+__)?kukulu_run_start$/` and its agent-type set is `kukulu-implementer` and `kukulu:implementer`; nothing else about them changes.
+- `TASK_ID`, `TASK_LINE` and the guard's task regexes are unchanged; only `kukulu_plan_commit`'s renumber mode accepts a suffix such as `P1-02a`. The implement guard's `RUN_START_TOOL` is `/^(?:mcp__.+__)?kukulu_run_start$/` and its agent-type set is `kukulu-implementer` and `kukulu:implementer`; both stay as they are. The lock's cumulative `total` field, written beside `count` (P2-02 of flight v0-9-0), is the one permitted change to `scripts/implement-guard.mjs` in that flight; its decision rules, messages and cap do not change.
 - No existing file under `docs/plans/` changes (new plans may be added); under `docs/feedback/` only the "addressed in" header lines. Never edit `docs/SPEC.md`, and never edit `docs/PLAN.md` or `docs/PROGRESS.md` by hand.
 - Under `docs/site/` only `mockup.html` changes, and only by applying the owner's `docs/site/copy-changes.json`; `checks.json`, `assets/`, `screens/` and `copy-changes.json` itself never change in a flight commit (`git log <merge-base>..HEAD -- docs/site/copy-changes.json` is empty). Nothing under `mcp/`, `skills/`, `agents/`, `hooks/` or `.claude-plugin/` changes for the site. `check-site.mjs` and `serve-site.mjs` never write into `site/`; `check-site-browser.mjs` writes only to `.site-shots/`, and only with `--shots`.
 - `site/` matches the mockup visually with semantic class names and shared rules; it is not the mockup with its inline styles moved into classes one by one.
@@ -99,6 +112,11 @@ The reviewer checks these by reading, because no line pattern can express them:
 - `scripts/verify-attestation.mjs` duplicates `KNOWN_LIMITS`, `knownLimitsFor`, the `level`-aware `coverageGaps` and (from P2-05 of flight v0-8-1) `sameModel` of `mcp/cleanroom.mjs` on purpose, and `test/attest.mjs` feeds both copies the same inputs.
 - The controller and the checkpoint key stay outside the boundary: nothing in `scripts/sandbox-entry.mjs` or `mcp/relay.mjs` reads a key, writes `.kukulu/`, or opens a network connection except the loopback bridge; `scripts/sandbox.mjs` is the only file that spawns a container engine.
 - Every `spawnSync("git", …)` in `mcp/server.mjs` goes through `gitArgv` once P2-08 of flight v0-8-0 lands, so the sandbox's `-c core.hooksPath` and `-c core.fsmonitor=false` reach every git call.
+- The server never calls the `anthropic` runner and never reads a runner's token: `mcp/server.mjs` passes only the variable's name (`--token-env`) to the probe, and no state, timeline, chain entry, feedback entry, tool result or halt reason holds a token value.
+- Hooks never dirty the tracked tree: general-mode usage and the counters are written only under `.kukulu/metrics/`, which `.git/info/exclude` names; no hook script is added, and `usageFromClaudeCode` exists once, in `scripts/cleanroom-log.mjs`.
+- One usage source per mode: a clean-room flight's metrics read usage only from the chain (the archived log after an archive), a general flight's only from `.kukulu/metrics/usage.jsonl`.
+- `METRICS.json` holds no commit hash, and a role with no usage record is `usage: null` and listed in `totals.missing`, never zeros.
+- `policies.metrics`' default `true` is written only in `cfgFrom`; `RUNNER_LIST_TIMEOUT_MS` and the probe's `max_tokens` of 1 are fixed, not tunables.
 
 ## Task protocols
 
@@ -124,11 +142,15 @@ The reviewer checks these by reading, because no line pattern can express them:
 
 **Changing a guard rule.** Every change to `evaluate` in `mcp/cleanroom.mjs` adds deny and allow cases to `test/fixtures/guard-cases.json` whose names end in `(<task id>)`, after a space. An existing fixture may change its `expect` or `reason` only when the task names that fixture's form, and the commit body lists every one it changed (`git diff <merge-base>..HEAD -- test/fixtures/guard-cases.json` is how the reviewer checks). The same commit updates the rule's text in `docs/cleanroom.md`. A fixture's `reason` is a regular expression; `__ROOT__` and `__HOME__` are substituted in `input` only, never in `policy` or `reason` (write a policy path repo-relative, and a reason path as `.*`). The file is indented with one space: append cases with a script that loads it and dumps it with `indent=1` and no ASCII escaping, so the diff stays one block per case. Run `node scripts/cleanroom-guard.mjs --self-test templates/cleanroom.example.json` before committing.
 
-**Adding a test suite.** Register it in `test/run.mjs`'s `SUITES` at the position the task names; add its row to CONTRIBUTING.md's suite table and update CONTRIBUTING's two suite counts ("Harness plus N suites", `# all N suites`); update README's two counts (the `test/` line of the repo layout and the "N suites, about …" sentence under Testing) and `test/plugin.mjs`'s "README counts N suites" assertion to the new number word. Thirteen before flight v0-8-0, fourteen after P0-05, fifteen after P2-02.
+**Adding a test suite.** Register it in `test/run.mjs`'s `SUITES` at the position the task names; add its row to CONTRIBUTING.md's suite table and update CONTRIBUTING's two suite counts ("Harness plus N suites", `# all N suites`); update README's two counts (the `test/` line of the repo layout and the "N suites, about …" sentence under Testing) and `test/plugin.mjs`'s "README counts N suites" assertion to the new number word. Thirteen before flight v0-8-0, fourteen after P0-05, fifteen after P2-02; sixteen after P0-01 of flight v0-9-0.
 
 **The fake docker.** `test/harness.mjs`'s `mkFakeDocker()` returns a directory holding a `docker` script to prepend to `PATH`; it appends every invocation to `<dir>/calls.log` and answers from files in that directory (`version.txt`, `image-inspect.txt`, `image-missing`, `inspect.json`, `run-exit`, `exec-output`), with `exec` running the trailing `sh -c <command>` locally when no `exec-output` exists. Recorded engine output lives in `test/fixtures/docker/`, copied into the directory by the test; never inline in a `test/*.mjs`. A server under test gets `KUKULU_SANDBOX=<container name>`, `KUKULU_SANDBOX_ENGINE=docker` and `KUKULU_SANDBOX_HOOKS_PATH=<temp dir>` through `startServer(repo, { env })`. Tests never need a real engine; only the `KUKULU_SANDBOX_IT=1` step does.
 
 **Sandbox sockets in tests.** A Unix socket path is limited to about 100 bytes on macOS, so put sockets under a short temp directory (`os.tmpdir()` plus a short name), never under the repo. Start listeners in-process through the exported `startControllerSocket`, `startLogSocket`, `startProxy` and `startBridge`, and close them in a `finally`. Run `scripts/sandbox.mjs`'s CLI through its exported `main(argv, { platform, env, cwd })`, passing `platform: "linux"`, so the darwin refusal never fires on macOS CI.
+
+**Metrics tests.** A hook test runs `scripts/cleanroom-log.mjs` with `runHook`, a JSON payload shaped as Claude Code sends it, and `CLAUDE_PROJECT_DIR`, `CLAUDE_PLUGIN_ROOT` and `HOME` set; recorded transcripts live in `test/fixtures/transcripts/` and hold no prompt, content or path from any session. A probe test starts a `node:http` server on `127.0.0.1` port 0 in the test process, closes it in a `finally`, and runs the script with `spawn` (never `spawnSync`, which would block the test's own server). A server test replaces the probe with `test/harness.mjs`'s `mkFakeProbe()` through `KUKULU_RUNNER_PROBE` and routes roles with `writeGlobalConfig` and `KUKULU_CONFIG`; a role on a non-Anthropic model needs its generated agent file on disk before the server under test starts (run `kukulu_agents_sync` in an earlier server process). No test needs a GPU, a model or a second machine. Metrics fixtures live in `test/fixtures/metrics/`, ASCII only (escape non-ASCII as `\uXXXX`), with expected values worked out from the rules, not copied from the code's output.
+
+**Notes, not refusals.** A measuring failure (a counter that cannot be written, metrics that cannot be built or written, a usage file that cannot be read) never changes a tool's decision, refusals or commits. The tool adds a one-line `<what>Note` field to its result (`countersNote`, `metricsNote`). A feedback entry (`category: "metrics"`, once per distinct message) is added only where the call is already making a commit that carries `.kukulu/feedback.jsonl`; `kukulu_verify` commits nothing, so it returns the note only. A test makes the write fail by putting a directory where the file belongs.
 
 **HANDOFF.md.** `kukulu_run_finish` uses `docs/HANDOFF.md` as the draft PR's body. When a flight's spec says its result must not be merged yet (the 0.5.0 flight's did, until a human had run a flight from the working tree), put that instruction in the first line, in bold.
 
@@ -314,5 +336,39 @@ Server vocabulary (SPEC §6 B–F):
 - A similarity pair's `group` (slug, `PAIR_ID`) is kept in the normalized config only when given; every row carries `group` (`default` when none). `sameModel(declared, reported)` is exported by both `mcp/cleanroom.mjs` and `scripts/verify-attestation.mjs`.
 - `description` is `Kūkulu <stage>`, `Kūkulu <stage> round <n>` or `Kūkulu stream <name>`, absent on `done` and `halt`. `taskLog` is `pr.logs[id] ?? null`.
 - Refusal texts are quoted in PLAN.md; copy them verbatim.
+
+SPEC.md wins over PLAN.md, and PLAN.md wins over code comments.
+
+## Flight v0-9-0 notes
+
+This flight builds Kūkulu 0.9.0 (SPEC §1): runner comparison metrics. One tool is added (`kukulu_metrics`); no input field is removed or renamed. The plugin running the flight is the installed 0.8.1, so none of the new behavior is active while the flight runs; where earlier flights' notes disagree with these, these win. This repository has no `docs/cleanroom.json`, so the guard never fires here.
+
+- Every task is serial. `baseBranch` is `main`; build branches are `build/<date>`. `docs/kukulu.json` has no `policies` block (the running 0.8.1 would refuse `policies.metrics`); do not add one.
+- Tool count: 26 until P2-06, then 27 ("Twenty-seven tools", "twenty-seven tools"). `kukulu_metrics` goes last, after `kukulu_config_show`; no agent and no skill gets it. Prose may name it only from P2-06 on.
+- Never edit `docs/SPEC.md`, `docs/flights/`, `docs/plans/`, `site/`, `docs/site/` or `docs/kukulu.json`. `scripts/verify-attestation.mjs`, `scripts/compare-bundles.mjs`, `CHECKPOINT_KEYS`, `KINDS` and both copies of `rolesUsage` do not change.
+- `CHANGELOG.md`: P0-01 creates `## [Unreleased]` above `## [0.8.1] — 2026-11-13`; lines go under `### Added` or `### Changed`, each citing its requirement (`B-02`); no Breaking changes heading. A-03 is patent pending; never write "patented".
+- `docs/HANDOFF.md` has no "do not merge" line; it lists the manual checks of all four phases.
+- The macron letter: in prose Kūkulu; in server, script and test source the Unicode escape of U+016B; in a `kukulu_task_done` log or a reason only inside the display name. The 24-hour MCP limit is never written in milliseconds; a test reads `.mcp.json`.
+- New scripts have no shebang, are not executable, and run their CLI only as the entry script. `scripts/cleanroom-log.mjs` may not contain the literals 2000 or 4000.
+- Spikes: `docs/spikes/P1-07.md` (the probe's cost, beside the `activateTimeoutMs` default) and `docs/spikes/P3-01.md` (`MODEL_FAMILIES`), each with the `Measurement:` line.
+
+Usage vocabulary (SPEC §6 B, PLAN Decisions):
+
+- A usage record has the fifteen `USAGE_KEYS`: `v`, `harness`, `session`, `agent`, `role`, `stage`, `round`, `models`, `first`, `last`, `activeMs`, `toolCalls`, `toolErrors`, `apiErrors`, `cost`; the error form is `{ v, harness, session, agent, role, error }`. `role` is `planner`, `implementer`, `reviewer`, `summarizer` or `controller`.
+- `usageFromClaudeCode(hookInput)` lives in `scripts/cleanroom-log.mjs` only. A subagent's record reads `agent_transcript_path` and skips nothing; the controller's (`Stop`) reads `transcript_path` and skips `isSidechain: true` rows. A row for `activeMs` is a `user` or `assistant` line with a timestamp. `stage` is the open timeline span's stage and `round` is `state.round`, both from `.kukulu/state.json`.
+- General mode writes `.kukulu/metrics/usage.jsonl` (only with `docs/kukulu.json`, never with `KUKULU_LOG_SOCKET`); clean-room mode writes the chain's `usage` entry and nothing else. The controller keeps the last record per session; in general mode a record supersedes one with the same `session`, `agent` and `first`; from the chain every role record is summed, as `rolesUsage` does.
+- `.kukulu/metrics/` holds `usage.jsonl` (the logger) and `counters.json` (the server: `verifyRuns`, `verifyFailures`, `guardReblocks`, `tasksReopened`, `activateFailures`). `kukulu_run_start` and `kukulu_next` add it to `.git/info/exclude`; `kukulu_next` empties it at a flight's first timeline record.
+
+Activation vocabulary (SPEC §6 A):
+
+- Runner keys: `activate` (`"none"` or `"warm"`), `activateTimeoutMs`, `servedAs`, `tokenEnv`. `runnerFor` and `resolveRouting().roles[role]` carry `activate`, `activateTimeoutMs`, `served`, `tokenEnv`; `servedId(runnerName, model, runners)`.
+- `activateRunner(role)` runs the probe through `spawnSync`; `KUKULU_RUNNER_PROBE` replaces the script in tests. The timeline record is `{ event: "activate", stage, round, runner, served, reported, ms, ok, at }`, written after the previous span's `end` and before the new `start`; the open span ignores it. The result carries `activation: { runner, served, reported, ms }`; `kukulu_status` reports `activateSeconds`.
+- A failed activation halts with SPEC A-03's reason (quoted in PLAN.md P1-04; copy it verbatim) and counts `activateFailures`; `kukulu_run_resume` clears it. Drift is a `runner-drift` feedback entry, never a halt.
+
+Metrics vocabulary (SPEC §6 C, D, Appendix A):
+
+- `buildMetrics(inputs)` with `inputs = { plugin, flight, spec, state, caps, routing, usage, counters, feedback, tasks, git, genesis, now }`; `metricsInputs()` in the server gathers them. The flight's home is the archive (`state.archived.dir`) when `state.archived` is set, `docs/kukulu.json` is absent and the live timeline is empty; else the live files.
+- `docs/METRICS.json` is written by `kukulu_next` on a `done` or `halt` that writes a timeline record (in the `chore: stage end` commit) and by `kukulu_pr_finalize` (`chore: flight metrics`, before its first push), only when `policies.metrics` is true. `state.harness` is `[{ name, version }]` from `initialize`'s `clientInfo`.
+- `compareMetrics(a, b)` returns `{ v, header, sections }`; `scripts/compare-flights.mjs` prints `not recorded` for a role with no usage and `partial (<roles> not recorded)` for a total that leaves one out.
 
 SPEC.md wins over PLAN.md, and PLAN.md wins over code comments.

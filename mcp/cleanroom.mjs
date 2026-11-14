@@ -251,6 +251,7 @@ export const MODEL_FAMILIES = [
   { family: "llama", pattern: /llama/ },
   { family: "gemma", pattern: /gemma/ },
   { family: "gpt", pattern: /^gpt|[-_/]gpt|^o[1-9]\b/ },
+  { family: "laguna", pattern: /laguna|poolside/ },
 ];
 
 /** The family a model string belongs to, or `unknown:<normalized string>`. */

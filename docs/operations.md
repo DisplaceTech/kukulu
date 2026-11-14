@@ -10,6 +10,8 @@ claude
 > /kukulu:go-flight
 ```
 
+When a role runs on a runner with `activate: "warm"`, `kukulu_next` returns only after the runner answers its one-token request, which can take as long as the model's load, and the controller prints `runner <name>: <served> ready in <seconds> s` (with `(reports <id>)` when the runner answered as another model).
+
 The controller is model-invocable, so asking for it by name also works; the slash command is the documented shortcut. It prints the stage it is entering, delegates, and repeats. Each stage is one `Agent` call that either blocks until the stage finishes or returns at once and delivers its result later as a completion notification. The controller treats both the same way and never polls in between. When it stops, it prints the final stage, the number of reviews and fix rounds, the branch, and the path to `docs/SUMMARY.md` if one exists.
 
 ### Flight options
@@ -79,7 +81,7 @@ Every task that was skipped because of it comes back too, transitively. A depend
 
 ## Halts
 
-Five things halt a flight on purpose.
+Six things halt a flight on purpose.
 
 **Owner action needed.** When the review finds nothing wrong and the only open item is a task blocked on something only you can do, the reviewer calls `kukulu_run_halt` with `owner action needed: <task id>: <what you must do>` instead of a verdict. Do what it says, then call `kukulu_run_resume({ reason })`; the next `kukulu_next` is the review stage again, and the reviewer unblocks the task with your answer.
 
@@ -99,6 +101,8 @@ To continue anyway, make the call the halt message names: `kukulu_flight_options
 **An operator-level problem.** `kukulu_run_halt` records a reason when the implementer hits something no task-level retry fixes: a signing agent that died, a full disk, a `verify` command that cannot even run, a vanished base branch. Nothing is reset or cleaned up, so you can read the branch exactly as the run left it.
 
 To continue once the problem is fixed, call `kukulu_run_resume({ reason: "<what you fixed>" })` (or tell `/kukulu:go-flight` `resume: <what you fixed>`). It clears the halt and commits `chore: run resumed`; it refuses while the tree is dirty or a stream worktree exists. A stream-merge halt is cleared the same way, after you merge or delete the stream's branch.
+
+**A runner that does not serve its model.** When a role's runner has `activate: "warm"` and the one-token request `kukulu_next` sends before the stage does not succeed within `activateTimeoutMs`, the stage does not start. `kukulu_next` returns `halt` with `runner <name> did not serve <served id> within <N> ms (<error>). It serves: <ids>. Fix the runner or the routing, then resume: kukulu_run_resume({ reason: "<what you fixed>" })`, records the failed `activate` in the timeline and commits `chore: stage end`. Fix the runner (load the model, correct `servedAs`), then call `kukulu_run_resume`; the next `kukulu_next` probes again.
 
 **A stream merge conflict.** When a parallel stream's branch conflicts on merge, `kukulu_stream_finish` aborts the merge, keeps the stream's branch and worktree, and halts with the conflicting paths in the reason. Kūkulu cannot guess a merge. See [Parallel streams](#parallel-streams) for the recovery.
 
@@ -134,7 +138,7 @@ To continue once the problem is fixed, call `kukulu_run_resume({ reason: "<what 
 
 A `kukulu_verify` or mutate call can run for much longer than a normal tool call. Claude Code aborts a stdio tool call that sends no response and no progress for its idle timeout, set by `CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT` (default 1800000 ms, 30 minutes).
 
-The plugin sets a per-server `timeout` of 24 hours on the `kukulu` entry of its `.mcp.json`. A per-server `timeout` is that server's wall clock and a floor under the idle timeout; see Claude Code's MCP documentation for the version that introduced the field. The value must stay below Claude Code's default wall clock of about 28 hours, so the plugin's limit is the one that applies. The config loader refuses any `commandTimeoutMs` or command `timeoutMs` (`verify`, `extraVerify`, `parallel.setup`, `mutation.targeted`) at or above that limit, and `kukulu_status` reports it as `mcpTimeoutMs`.
+The plugin sets a per-server `timeout` of 24 hours on the `kukulu` entry of its `.mcp.json`. A per-server `timeout` is that server's wall clock and a floor under the idle timeout. Claude Code honors it from version 2.1.162, the first release whose changelog names the field, and ignores a value below 1000 ms; the plugin was last checked on 2.1.325. The value must stay below Claude Code's default wall clock of about 28 hours, so the plugin's limit is the one that applies. The config loader refuses any `commandTimeoutMs` or command `timeoutMs` (`verify`, `extraVerify`, `parallel.setup`, `mutation.targeted`) at or above that limit, and `kukulu_status` reports it as `mcpTimeoutMs`.
 
 With an older Claude Code that ignores the field, set `CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT` in the `env` of your `settings.json` to a value above `kukulu_status`'s `longestCommandTimeoutMs`.
 
@@ -238,6 +242,7 @@ A policy with `"enforcement": "container+proxy"` is run with `node scripts/sandb
 | `policies.archive` | `true` | An owner decision (two release flights needed it), not an ⚠️ ASSUMPTION. `true` makes the summarizer call `kukulu_flight_archive` after the summary, moving the finished flight into `docs/flights/<flight>/` so the repository can run another; `false` keeps the finished flight in place |
 | `policies.finalize` | `"ready"` | What `kukulu_pr_finalize` does to a fully signed flight's draft pull request: `"ready"` only marks it ready; `"auto"` marks it ready and, unless the flight is breaking, enables auto-merge; `"draft"` leaves it alone |
 | `policies.syncBase` | `true` | `kukulu_run_start` on an existing build branch and a serial `kukulu_task_next` merge the local base branch into the build branch when it has commits the branch lacks (`git merge --no-ff`, committed as `chore: merge <base> into <branch>`; nothing is fetched). A conflict aborts the merge and refuses, naming the files, and never halts; a tracked tree with uncommitted changes skips the sync and says so in `baseSynced`. `false` keeps the 0.7.0 behavior of never merging the base. Streams never sync |
+| `policies.metrics` | `true` | A flight that reaches `done` or `halt` through `kukulu_next` leaves `docs/METRICS.json` (the metrics object of [metrics.md](./metrics.md)) in the `chore: stage end` commit. `false` writes none. A boolean; also settable in the global file and in a profile |
 | `policies.mergeMethod` | `"merge"` | The method `kukulu_pr_finalize` passes to `gh pr merge --auto`: `"merge"`, `"squash"` or `"rebase"`. Kūkulu never merges without `--auto` |
 | `prTitle` | derived | A string of 1 to 120 characters on one line: the title of the draft PR `kukulu_run_finish` opens (and the merge commit's subject). Absent, the title is `<flight>: <spec title>` (the first top-level heading of `docs/SPEC.md` without a trailing "Specification"), the spec title alone without a `flight`, or `Build: <branch>` without a heading; no round suffix |
 | `flight` | absent | A slug (`^[a-z0-9][a-z0-9-]{0,39}$`) naming this flight; the default `slug` for `kukulu_flight_archive` |
@@ -266,6 +271,7 @@ Environment variables:
 | `KUKULU_SANDBOX` | unset | The sandbox's container name (`kukulu-<project id>`); set by `scripts/sandbox.mjs` on the server it runs outside the container, never by hand. `kukulu_status` reports it as `sandbox` |
 | `KUKULU_SANDBOX_ENGINE` | unset | `docker` or `podman`: the engine the sandbox uses; set by `scripts/sandbox.mjs`, never by hand |
 | `KUKULU_SANDBOX_HOOKS_PATH` | unset | The empty directory git's hooks are redirected to for the server's own git calls while the sandbox runs; set by `scripts/sandbox.mjs`, never by hand |
+| `KUKULU_RUNNER_PROBE` | `scripts/runner-probe.mjs` under the plugin root | The script `kukulu_next` runs to warm a runner; for tests only, so a suite can answer without a runner |
 | `KUKULU_CONTROLLER_SOCKET` | unset | Inside the sandbox, the Unix socket the MCP relay connects to; set by `scripts/sandbox.mjs`, never by hand |
 | `KUKULU_LOG_SOCKET` | unset | Inside the sandbox, the Unix socket the two clean-room hooks send log entries to; set by `scripts/sandbox.mjs`, never by hand |
 
@@ -348,6 +354,8 @@ case "$out" in
 esac
 ```
 
+A runner in the global file may also carry `activate`, `activateTimeoutMs`, `servedAs` and `tokenEnv`. `activate` defaults to `"none"`; `activateTimeoutMs` defaults to 1800000 ms (30 minutes, ⚠️ ASSUMPTION) and must be below the plugin's MCP tool-call limit of 24 hours; see [routing.md](./routing.md#runners) for what each does.
+
 `kukulu_config_show` prints the merged config and the source of every value; run it whenever the resolved model for a role is not what you expected.
 
 ## Parallel streams
@@ -390,7 +398,8 @@ A `build/<date>` branch containing:
 - interleaved `progress:` commits recording each state change with its sha
 - for a plan with parallel streams, one `merge stream <s> (wave <n>)` commit per stream, and `chore: wave <n> runs serially` for any wave that could not run in parallel
 - `review: round N` commits, one per round, each carrying that round's `REVIEW.md` and the fix tasks it queued
-- `docs/HANDOFF.md`, `docs/REVIEW.md` and `docs/SUMMARY.md` at the tip
+- `docs/HANDOFF.md`, `docs/REVIEW.md` and `docs/SUMMARY.md` at the tip, and `docs/METRICS.json` (or `docs/flights/<slug>/METRICS.json`) when the flight ended or halted and `policies.metrics` is not `false`; `kukulu_pr_finalize` commits it as `chore: flight metrics` before it pushes
+- on your machine only, never committed, `.kukulu/metrics/` (the usage records and counters; see [metrics.md](./metrics.md))
 - a draft PR, if `gh` was available and `policies.pr` is not `"none"`
 - `chore: finalize flight` or `chore: awaiting signing`, from `kukulu_pr_finalize`, and `chore: archive flight <slug>` when the flight was archived
 

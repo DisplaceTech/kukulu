@@ -1,0 +1,105 @@
+{
+ "plugin": "0.8.0",
+ "flight": "v0-8-0",
+ "spec": {
+  "title": "K\u016bkulu 0.8.0 \u2014 Specification",
+  "sha256": "0b314e61c1330c1611aeeba938cbee25f51872bed74e4281fdee2f4ac2a3750d"
+ },
+ "state": {
+  "round": 2,
+  "implemented": true,
+  "reviewed": true,
+  "verdict": "APPROVED",
+  "summarized": true,
+  "halted": null,
+  "preexistingUntracked": [],
+  "policies": {
+   "signing": "auto",
+   "push": true,
+   "pr": "draft",
+   "feedback": true,
+   "archive": true,
+   "finalize": "ready",
+   "mergeMethod": "merge",
+   "syncBase": true
+  },
+  "signing": "on",
+  "rounds": [
+   {
+    "round": 1,
+    "fixTasks": 8,
+    "unblocked": 0,
+    "verdict": "CHANGES REQUESTED",
+    "nonConverging": false,
+    "sources": {
+     "review": 7,
+     "mutation": 1,
+     "blocked": 0
+    },
+    "at": "2026-10-27T03:11:15.916Z"
+   },
+   {
+    "round": 2,
+    "fixTasks": 1,
+    "unblocked": 0,
+    "verdict": "CHANGES REQUESTED",
+    "nonConverging": false,
+    "sources": {
+     "review": 1,
+     "mutation": 0,
+     "blocked": 0
+    },
+    "at": "2026-10-27T04:58:28.705Z"
+   },
+   {
+    "round": 3,
+    "fixTasks": 0,
+    "unblocked": 0,
+    "verdict": "APPROVED",
+    "sources": {
+     "review": 0,
+     "mutation": 0,
+     "blocked": 0
+    },
+    "at": "2026-10-27T05:16:43.712Z"
+   }
+  ],
+  "archived": {
+   "slug": "v0-7-2",
+   "dir": "docs/flights/v0-7-2",
+   "at": "2026-10-26T20:04:43.339Z"
+  },
+  "breaking": true,
+  "cleanroom": {
+   "mode": "general"
+  }
+ },
+ "caps": {
+  "maxRounds": 3,
+  "maxRoundsHard": 6
+ },
+ "feedback": [
+  {
+   "at": "2026-10-27T03:08:49.777Z",
+   "stage": "review",
+   "round": 0,
+   "category": "verbose-output",
+   "message": "kukulu_mutate returns the full constraints result list (32 rules, all ok) on every call, even with a targeted command; across ~25 sampled mutants that block is most of each result and buries the failure tail the reviewer needs. Returning only failing constraints (or a count) would cut the noise.",
+   "source": "agent"
+  },
+  {
+   "at": "2026-10-27T05:18:50.330Z",
+   "stage": "summarize",
+   "round": 2,
+   "category": "pr-lookup",
+   "message": "The 0.8.0 flight reused branch name build/2026-10-26 from the same-day 0.7.2 flight, whose PR #4 was already merged; kukulu_summary_commit reported that merged PR as this branch's PR, so the 0.8.0 build has no open PR and finalize cannot ready one. Build branch names should be unique per flight (or the PR lookup should ignore merged PRs whose head is not the branch's current head).",
+   "source": "agent"
+  }
+ ],
+ "tasks": {
+  "total": 47,
+  "done": 47,
+  "blocked": 0,
+  "skipped": 0
+ }
+}

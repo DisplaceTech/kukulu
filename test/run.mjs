@@ -23,6 +23,7 @@ const SUITES = [
   ["attest", "the offline verifier, attestation bundles and pre-0.6.0 logs"],
   ["sandbox", "the sandbox: relay, sockets, proxy, container, gate checks 9 and 10"],
   ["bundles", "scripts/model-identity.mjs, publish-bundle.mjs and compare-bundles.mjs"],
+  ["metrics", "usage records, counters, METRICS.json and scripts/compare-flights.mjs"],
   ["drive", "one whole flight, end to end"],
 ];
 

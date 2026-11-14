@@ -10,7 +10,7 @@ import {
   ROOT, finish, ok, eq, like, isError,
   mkDir, mkFakeGpg, specRepo, plannedRepo, withServer, useLegacyLayout, mkBareRemote, mkFakeGhBin,
   writeFile, readFile, hasFile, setState, markTasks, git, subject, planDoc, progressDoc,
-  cleanroomRepo, addPlan, logCall,
+  cleanroomRepo, addPlan, logCall, mkFakeProbe, writeGlobalConfig,
 } from "./harness.mjs";
 import { readEntries } from "../mcp/cleanroom.mjs";
 
@@ -1255,7 +1255,7 @@ const OLD_LAYOUT = /pre-0\.6\.0 Foundry layout, which 0\.7\.0 no longer reads/;
   const repo = specRepo();
   await withServer(repo, async ({ call }) => {
     const p = (await call("kukulu_status")).policies;
-    eq(Object.keys(p).sort().join(",") + "|" + p.finalize, "archive,feedback,finalize,mergeMethod,pr,push,signing,syncBase|ready", "kukulu_status.policies before a run lists every policy default");
+    eq(Object.keys(p).sort().join(",") + "|" + p.finalize, "archive,feedback,finalize,mergeMethod,metrics,pr,push,signing,syncBase|ready", "kukulu_status.policies before a run lists every policy default");
   });
 }
 
@@ -1270,6 +1270,414 @@ const OLD_LAYOUT = /pre-0\.6\.0 Foundry layout, which 0\.7\.0 no longer reads/;
   await withServer(plannedRepo({ config }), async ({ call }) => {
     eq((await call("kukulu_status")).longestCommandTimeoutMs, 1500000, "longestCommandTimeoutMs counts mutation.targeted");
   });
+}
+
+// ---------------------------------------------------------------- the metrics directory (P0-03)
+
+{
+  const repo = plannedRepo();
+  writeFile(repo, ".kukulu/metrics/usage.jsonl", "{\"old\":1}\n");
+  await withServer(repo, async ({ call }) => {
+    await call("kukulu_next");
+    ok(readFile(repo, ".git/info/exclude").split("\n").includes(".kukulu/metrics/"), "kukulu_next excludes .kukulu/metrics/");
+    ok(!hasFile(repo, ".kukulu/metrics/usage.jsonl"), "the first timeline record of a flight empties .kukulu/metrics/");
+    writeFile(repo, ".kukulu/metrics/usage.jsonl", "{\"new\":1}\n");
+    await call("kukulu_next");
+    ok(hasFile(repo, ".kukulu/metrics/usage.jsonl"), "a later kukulu_next leaves .kukulu/metrics/ alone");
+    eq(git(repo, ["status", "--porcelain"]).includes("metrics"), false, "...and git status never shows it");
+  });
+}
+
+// ---------------------------------------------------------------- runner activation (P1-03)
+
+{
+  const warm = async (runner = {}, { tasks, config, sync = true } = {}) => {
+    const probe = mkFakeProbe();
+    const cfgPath = writeGlobalConfig(mkDir(), { runners: { spark: { endpoint: "http://h:1", locality: "local", match: ["spark/"], activate: "warm", ...runner } }, roles: { implementer: { model: "spark/qwen38-27b" } } });
+    const repo = plannedRepo({ ...(tasks ? { tasks } : {}), ...(config ? { config } : {}) });
+    const env = { KUKULU_CONFIG: cfgPath, KUKULU_RUNNER_PROBE: probe.script };
+    // the generated agent files must exist before the server under test starts, or the routed model needs a restart
+    if (sync) await withServer(repo, ({ call }) => call("kukulu_agents_sync"), { env });
+    return { repo, probe, env };
+  };
+  const T = (id, files, extra = {}) => ({ id, title: `Task ${id}`, goal: `do ${id}`, files: files.map((f) => `\`${f}\``).join(", "), ...extra });
+  const timelineOf = (repo) => JSON.parse(readFile(repo, ".kukulu/state.json")).timeline;
+  const events = (tl) => tl.map((r) => (r.event === "activate" ? "activate" : `${r.event} ${r.stage}`)).join(", ");
+
+  {
+    const { repo, probe, env } = await warm();
+    setState(repo, { timeline: [{ event: "start", stage: "plan", round: 0, at: "2026-01-01T00:00:00.000Z" }] });
+    await withServer(repo, async ({ call }) => {
+      const n = await call("kukulu_next");
+      eq(n.stage, "implement", "the warm role's stage is implement");
+      eq(JSON.stringify(n.activation), JSON.stringify({ runner: "spark", served: "qwen38-27b", reported: "qwen38-27b", ms: 1500 }), "an ok activation returns activation with runner, served, reported and ms");
+      const tl = timelineOf(repo);
+      eq(events(tl), "start plan, end plan, activate, start implement", "the timeline holds end, activate, start in that order");
+      const [end, act] = tl.slice(1, 3);
+      ok(Date.parse(end.at) <= Date.parse(act.at), "...and the end's at is not later than the activate's");
+      eq(JSON.stringify(act, ["event", "stage", "round", "runner", "served", "reported", "ms", "ok"]), JSON.stringify({ event: "activate", stage: "implement", round: 0, runner: "spark", served: "qwen38-27b", reported: "qwen38-27b", ms: 1500, ok: true }), "...the activate record names the runner, served id and wait");
+      eq(JSON.stringify(probe.calls()[0]), JSON.stringify(["--endpoint", "http://h:1", "--warm", "qwen38-27b", "--timeout-ms", "1800000"]), "the probe is called with --endpoint, --warm <served>, --timeout-ms and no token flag");
+      eq(subject(repo), "chore: stage implement", "the commit subject is chore: stage implement");
+      await call("kukulu_next");
+      eq(events(timelineOf(repo)), "start plan, end plan, activate, start implement, activate", "the probe runs again for the same stage and round and writes the activate record alone");
+      eq(probe.calls().length, 2, "...so the probe was called twice");
+      const st = await call("kukulu_status");
+      eq(st.activateSeconds.spark, 3, "activateSeconds sums ok records per runner (1500 ms twice is 3 s)");
+    }, { env });
+  }
+  {
+    const { repo, probe, env } = await warm({ tokenEnv: "SPARK_TOKEN" });
+    await withServer(repo, async ({ call }) => {
+      await call("kukulu_next");
+      eq(probe.calls()[0].slice(-2).join(" "), "--token-env SPARK_TOKEN", "tokenEnv adds --token-env <NAME>, never a value");
+    }, { env: { ...env, SPARK_TOKEN: "do-not-pass-me" } });
+    ok(!JSON.stringify(probe.calls()).includes("do-not-pass-me"), "...and the token's value is in no argument");
+  }
+  {
+    const repo = plannedRepo();
+    const base = "2026-01-01T00:00:";
+    setState(repo, { timeline: [
+      { event: "start", stage: "implement", round: 0, at: `${base}00.000Z` },
+      { event: "activate", stage: "implement", round: 0, runner: "spark", served: "s", reported: "s", ms: 5000, ok: true, at: `${base}02.000Z` },
+      { event: "end", stage: "implement", round: 0, at: `${base}10.000Z` },
+      { event: "activate", stage: "review", round: 0, runner: "spark", served: "s", reported: "s", ms: 2000, ok: true, at: `${base}12.000Z` },
+      { event: "activate", stage: "review", round: 0, runner: "spark", served: "s", reported: null, ms: 9000, ok: false, at: `${base}13.000Z` },
+    ] });
+    await withServer(repo, async ({ call }) => {
+      const st = await call("kukulu_status");
+      eq(st.stageSeconds.implement, 10, "stageSeconds is unchanged by an activate record");
+      eq(JSON.stringify(st.activateSeconds), '{"spark":7}', "activateSeconds counts ok records only");
+    });
+    await withServer(plannedRepo(), async ({ call }) => {
+      eq(JSON.stringify((await call("kukulu_status")).activateSeconds), "{}", "activateSeconds is {} with no activate record");
+    });
+  }
+  {
+    const { repo, probe, env } = await warm({ activate: "none" });
+    await withServer(repo, async ({ call }) => {
+      const n = await call("kukulu_next");
+      ok(n.activation === undefined && probe.calls().length === 0, "activate none runs no probe");
+    }, { env });
+  }
+  {
+    const probe = mkFakeProbe();
+    const cfgPath = writeGlobalConfig(mkDir(), { runners: { spark: { endpoint: "http://h:1", locality: "local", match: ["spark/"], activate: "warm" } } });
+    await withServer(plannedRepo(), async ({ call }) => {
+      const n = await call("kukulu_next");
+      ok(n.activation === undefined && probe.calls().length === 0, "a role on the anthropic runner runs no probe");
+    }, { env: { KUKULU_CONFIG: cfgPath, KUKULU_RUNNER_PROBE: probe.script } });
+  }
+  {
+    const { repo, probe, env } = await warm({}, { sync: false });
+    await withServer(repo, async ({ call }) => {
+      const n = await call("kukulu_next");
+      ok(n.restartRequired === true && n.activation === undefined && probe.calls().length === 0, "restartRequired runs no probe");
+    }, { env });
+  }
+  {
+    const tasks = [T("P0-01", ["package.json"]), T("P0-02", ["docs/"]), T("P1-01", ["src/api/a.txt"], { stream: "api" }), T("P1-02", ["src/ui/a.txt"], { stream: "ui" })];
+    const { repo, probe, env } = await warm({}, { tasks });
+    markTasks(repo, { "P0-01": "x", "P0-02": "x" });
+    git(repo, ["add", "-A"]);
+    git(repo, ["commit", "-qm", "chore: serial tasks done"]);
+    await withServer(repo, async ({ call }) => {
+      const n = await call("kukulu_next");
+      ok((n.streams ?? []).length === 2 && probe.calls().length === 1, "a wave runs one probe");
+    }, { env });
+  }
+  {
+    const { repo, probe, env } = await warm();
+    markTasks(repo, ALL_DONE);
+    setState(repo, { implemented: true, reviewed: true, verdict: "APPROVED", summarized: true });
+    await withServer(repo, async ({ call }) => {
+      eq((await call("kukulu_next")).stage, "done", "a finished flight is done");
+    }, { env });
+    await withServer(mkDir(), async ({ call }) => {
+      eq((await call("kukulu_next")).stage, "halt", "...and a project with no spec halts");
+    }, { env });
+    eq(probe.calls().length, 0, "done and halt run no probe");
+  }
+  {
+    const { repo, probe, env } = await warm();
+    setState(repo, { timeline: [{ event: "start", stage: "plan", round: 0, at: "2026-01-01T00:00:00.000Z" }] });
+    const bad = { ok: false, status: 503, ms: 40, error: "HTTP 503: loading" };
+    probe.answers([bad, { ok: true, status: 200, ms: 3, served: ["alpha", "beta"] }, bad, bad, bad, bad]);
+    const counters = () => JSON.parse(readFile(repo, ".kukulu/metrics/counters.json"));
+    await withServer(repo, async ({ call }) => {
+      const n = await call("kukulu_next");
+      const reason = 'runner spark did not serve qwen38-27b within 1800000 ms (HTTP 503: loading). It serves: alpha, beta. Fix the runner or the routing, then resume: kukulu_run_resume({ reason: "<what you fixed>" })';
+      eq(n.stage + "|" + n.reason, `halt|${reason}`, "a failed activation halts with the reason naming the runner, the served id, the wait and the error");
+      ok(n.agent === null && n.prompt === null && !("description" in n) && !("streams" in n), "...shaped as nextDecision's own halts are");
+      eq(JSON.stringify(n.activation), JSON.stringify({ runner: "spark", served: "qwen38-27b", reported: null, ms: 40, error: "HTTP 503: loading" }), "...with activation carrying the error");
+      like(n.reason, /It serves: alpha, beta\./, "the reason lists what the runner serves");
+      eq(JSON.stringify(probe.calls()[1]), JSON.stringify(["--endpoint", "http://h:1", "--models", "--timeout-ms", "10000"]), "the follow-up probe is --models with the capped timeout");
+      const tl = timelineOf(repo);
+      eq(events(tl), "start plan, end plan, activate", "the timeline ends the open span and holds the activate record");
+      eq(tl.at(-1).ok + "|" + tl.at(-1).reported + "|" + tl.at(-1).stage, "false|null|implement", "...with ok false");
+      eq(JSON.parse(readFile(repo, ".kukulu/state.json")).halted, reason, "state.halted is the reason");
+      eq(subject(repo), "chore: stage end", "...and the commit is chore: stage end");
+      eq(counters().activateFailures, 1, "activateFailures is 1");
+      const again = await call("kukulu_next");
+      eq(again.stage + "|" + probe.calls().length, "halt|2", "the next kukulu_next returns the halt without probing");
+      const resumed = await call("kukulu_run_resume", { reason: "restarted the runner" });
+      eq(resumed.resumed, true, "kukulu_run_resume clears the halt");
+      const third = await call("kukulu_next");
+      eq(third.stage + "|" + probe.calls().length, "halt|4", "...and the next call probes again");
+      eq(counters().activateFailures, 2, "activateFailures is 2");
+      like(third.reason, /It serves: nothing it would list\./, "the reason says so when the runner lists nothing it would list");
+    }, { env });
+  }
+  // drift notes and the real probe (P1-05)
+  const drift = (repo) => (hasFile(repo, ".kukulu/feedback.jsonl") ? readFile(repo, ".kukulu/feedback.jsonl").split("\n").filter(Boolean).map((l) => JSON.parse(l)).filter((e) => e.category === "runner-drift") : []);
+  {
+    const { repo, probe, env } = await warm();
+    probe.answers([{ ok: true, status: 200, ms: 10, reported: "some-other-model" }]);
+    await withServer(repo, async ({ call }) => {
+      await call("kukulu_next");
+      const d = drift(repo);
+      eq(d.length + "|" + d[0].stage + "|" + d[0].source, "1|controller|auto", "a reported id that differs from the served id logs one runner-drift entry");
+      eq(d[0].message, "runner spark answered as some-other-model when asked for qwen38-27b (stage implement, round 0); the chain keeps both", "...with the message naming both");
+      const files = git(repo, ["show", "--name-only", "--format=%s", "HEAD"]).split("\n");
+      ok(files[0] === "chore: stage implement" && files.includes(".kukulu/feedback.jsonl") && files.includes(".kukulu/state.json"), "the drift entry is in the same commit as the timeline");
+    }, { env });
+  }
+  {
+    const { repo, probe, env } = await warm();
+    probe.answers([{ ok: true, status: 200, ms: 10, reported: "Spark/Qwen38-27b" }]);
+    await withServer(repo, async ({ call }) => {
+      await call("kukulu_next");
+      eq(drift(repo).length, 0, "no drift entry when the reported id equals the served id once normalized");
+    }, { env });
+  }
+  {
+    const { repo, probe, env } = await warm();
+    probe.answers([{ ok: true, status: 200, ms: 10, reported: null }]);
+    await withServer(repo, async ({ call }) => { await call("kukulu_next"); }, { env });
+    const cfgPath = env.KUKULU_CONFIG;
+    const cfg = JSON.parse(fs.readFileSync(cfgPath, "utf8"));
+    cfg.runners.spark.servedAs = { "spark/qwen38-27b": "renamed" };
+    fs.writeFileSync(cfgPath, JSON.stringify(cfg));
+    await withServer(repo, async ({ call }) => {
+      await call("kukulu_next");
+      const d = drift(repo);
+      eq(d.length + "|" + d[0]?.message, "1|the implementer was served as qwen38-27b at an earlier activation and is renamed now (runner spark); the routing changed mid-flight", "a role whose served id changed logs one runner-drift entry");
+    }, { env });
+  }
+  {
+    const { repo, probe, env } = await warm({}, { config: { verify: ["true"], policies: { feedback: false } } });
+    probe.answers([{ ok: true, status: 200, ms: 10, reported: "other" }]);
+    await withServer(repo, async ({ call }) => { await call("kukulu_next"); }, { env });
+    const cfgPath = env.KUKULU_CONFIG;
+    const cfg = JSON.parse(fs.readFileSync(cfgPath, "utf8"));
+    cfg.runners.spark.servedAs = { "spark/qwen38-27b": "renamed" };
+    fs.writeFileSync(cfgPath, JSON.stringify(cfg));
+    await withServer(repo, async ({ call }) => { await call("kukulu_next"); }, { env });
+    eq(drift(repo).length, 0, "policies.feedback false logs neither drift entry");
+  }
+  {
+    const { createServer } = await import("node:http");
+    const seen = [];
+    const runner = createServer((req, res) => {
+      let body = "";
+      req.on("data", (d) => { body += d; });
+      req.on("end", () => { seen.push({ method: req.method, url: req.url, body }); res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify({ model: "qwen38-27b" })); });
+    });
+    await new Promise((r) => runner.listen(0, "127.0.0.1", r));
+    try {
+      const cfgPath = writeGlobalConfig(mkDir(), { runners: { spark: { endpoint: `http://127.0.0.1:${runner.address().port}`, locality: "local", match: ["spark/"], activate: "warm" } }, roles: { implementer: { model: "spark/qwen38-27b" } } });
+      const repo = plannedRepo();
+      const env = { KUKULU_CONFIG: cfgPath };
+      await withServer(repo, ({ call }) => call("kukulu_agents_sync"), { env });
+      await withServer(repo, async ({ call }) => {
+        const n = await call("kukulu_next");
+        eq(n.activation.reported + "|" + n.activation.runner, "qwen38-27b|spark", "the real probe answers through kukulu_next");
+        eq(seen.length + "|" + seen[0].method + "|" + seen[0].url + "|" + JSON.parse(seen[0].body).model, "1|POST|/v1/messages|qwen38-27b", "...the runner saw one POST /v1/messages for the served id");
+      }, { env });
+    } finally {
+      runner.closeAllConnections?.();
+      await new Promise((r) => runner.close(r));
+    }
+  }
+  {
+    const { repo, probe, env } = await warm();
+    fs.writeFileSync(path.join(probe.dir, "silent.mjs"), "process.exit(1);\n");
+    await withServer(repo, async ({ call }) => {
+      const n = await call("kukulu_next");
+      like(n.reason, /\(the probe printed no result \(exit 1\)\)\. It serves: nothing it would list\./, "a probe that prints nothing is a failure, not a crash");
+    }, { env: { ...env, KUKULU_RUNNER_PROBE: path.join(probe.dir, "silent.mjs") } });
+  }
+  {
+    const { repo, probe, env } = await warm();
+    probe.answers([{ ok: false, status: null, ms: 5, error: "ECONNREFUSED: nope" }]);
+    fs.mkdirSync(path.join(repo, ".kukulu", "metrics", "counters.json"), { recursive: true });
+    await withServer(repo, async ({ call }) => {
+      const n = await call("kukulu_next");
+      ok(n.stage === "halt" && /^the activateFailures counter was not recorded: /.test(n.countersNote), "a counters file that cannot be written is a countersNote, and the halt stands");
+    }, { env });
+  }
+}
+
+// ---------------------------------------------------------------- counters in kukulu_status and reopen (P2-01)
+
+{
+  const repo = plannedRepo({ config: { verify: ["true"] } });
+  await withServer(repo, async ({ call }) => {
+    eq((await call("kukulu_status")).counters, null, "kukulu_status.counters is null before anything is counted");
+    await call("kukulu_verify");
+    eq(JSON.stringify((await call("kukulu_status")).counters), JSON.stringify({ verifyRuns: 1, verifyFailures: 0, guardReblocks: null, tasksReopened: 0, activateFailures: 0 }), "kukulu_status reports the counters");
+    await call("kukulu_run_start");
+    eq(git(repo, ["status", "--porcelain"]).includes("metrics"), false, "the counters file is not in git status after kukulu_run_start");
+  });
+  const blocked = plannedRepo();
+  git(blocked, ["checkout", "-q", "-b", "build/2026-11-14"]);
+  markTasks(blocked, { "P0-01": "!", "P0-02": "x", "P0-03": "x" });
+  setState(blocked, { round: 0, implemented: true });
+  git(blocked, ["add", "-A"]);
+  git(blocked, ["commit", "-qm", "chore: blocked"]);
+  await withServer(blocked, async ({ call }) => {
+    const r = await call("kukulu_task_reopen", { id: "P0-01", reason: "fixed" });
+    ok(!r.countersNote, "kukulu_task_reopen succeeds");
+    eq((await call("kukulu_status")).counters.tasksReopened, 1, "kukulu_task_reopen counts tasksReopened");
+  });
+}
+
+// ---------------------------------------------------------------- guardReblocks on halt (P2-02)
+
+{
+  const lockWith = (repo, total) => writeFile(repo, ".kukulu/implement.lock", total === undefined ? "4\n" : JSON.stringify({ count: 0, total, armedAt: "x", round: 0, cap: 60 }) + "\n");
+  const counter = (repo) => JSON.parse(readFile(repo, ".kukulu/metrics/counters.json")).guardReblocks;
+  const repo = plannedRepo();
+  git(repo, ["checkout", "-q", "-b", "build/2026-11-14"]);
+  writeFile(repo, ".gitignore", ".kukulu/implement.lock\n");
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-qm", "chore: ignore lock"]);
+  await withServer(repo, async ({ call }) => {
+    lockWith(repo, 4);
+    await call("kukulu_run_halt", { reason: "first stop" });
+    eq(counter(repo), 4, "kukulu_run_halt adds the lock's total to guardReblocks");
+    lockWith(repo, 3);
+    await call("kukulu_run_halt", { reason: "second stop" });
+    eq(counter(repo), 7, "two runs' totals add up");
+  });
+  const legacy = plannedRepo();
+  git(legacy, ["checkout", "-q", "-b", "build/2026-11-14"]);
+  writeFile(legacy, ".gitignore", ".kukulu/implement.lock\n");
+  git(legacy, ["add", "-A"]);
+  git(legacy, ["commit", "-qm", "chore: ignore lock"]);
+  await withServer(legacy, async ({ call }) => {
+    lockWith(legacy, undefined);
+    await call("kukulu_run_halt", { reason: "legacy stop" });
+    ok(!hasFile(legacy, ".kukulu/metrics/counters.json") || JSON.parse(readFile(legacy, ".kukulu/metrics/counters.json")).guardReblocks === null, "a legacy lock leaves guardReblocks null");
+  });
+}
+
+// ---------------------------------------------------------------- METRICS.json when a flight ends or halts (P2-08)
+
+{
+  const done = (config) => {
+    const repo = plannedRepo(config ? { config } : {});
+    markTasks(repo, ALL_DONE);
+    setState(repo, { implemented: true, reviewed: true, verdict: "APPROVED", summarized: true, rounds: [{ round: 1, fixTasks: 0, verdict: "APPROVED" }], timeline: [{ event: "start", stage: "summarize", round: 0, at: "2026-01-01T00:00:00.000Z" }] });
+    git(repo, ["add", "-A"]);
+    git(repo, ["commit", "-qm", "chore: done"]);
+    return repo;
+  };
+  const metricsOf = (repo) => JSON.parse(readFile(repo, "docs/METRICS.json"));
+  const files = (repo) => git(repo, ["show", "--name-only", "--format=%s", "HEAD"]).split("\n");
+  {
+    const repo = done();
+    await withServer(repo, async ({ call }) => {
+      const n = await call("kukulu_next");
+      eq(n.stage, "done", "a finished flight is done");
+      const f = files(repo);
+      ok(f[0] === "chore: stage end" && f.includes("docs/METRICS.json"), "a done with an open span writes docs/METRICS.json in the chore: stage end commit");
+      const m = metricsOf(repo);
+      eq(m.v + "|" + m.outcome.verdict + "|" + m.outcome.approvedAtRound + "|" + m.tasks.done, "1|APPROVED|1|3", "...which parses, and holds the state's outcome and the task counts");
+      ok(m.wall.stageSeconds !== null && "summarize" in m.wall.stageSeconds, "...with the timeline records just written");
+      const head = git(repo, ["rev-parse", "HEAD"]);
+      await call("kukulu_next");
+      eq(git(repo, ["rev-parse", "HEAD"]), head, "a done that writes no timeline record writes no file and moves no HEAD");
+    });
+  }
+  {
+    const repo = done({ policies: { metrics: false } });
+    await withServer(repo, async ({ call }) => {
+      await call("kukulu_next");
+      ok(!hasFile(repo, "docs/METRICS.json") && subject(repo) === "chore: stage end", "policies.metrics false writes no file (the timeline is still recorded)");
+    });
+  }
+  {
+    const repo = done();
+    fs.mkdirSync(path.join(repo, "docs", "METRICS.json"));
+    await withServer(repo, async ({ call }) => {
+      const n = await call("kukulu_next");
+      ok(n.stage === "done" && /^METRICS\.json was not written: /.test(n.metricsNote), "a METRICS.json that cannot be written is a metricsNote and the decision stands");
+      eq(JSON.parse(readFile(repo, ".kukulu/state.json")).timeline.at(-1).event, "end", "...and the timeline is recorded");
+      like(readFile(repo, ".kukulu/feedback.jsonl"), /"category":"metrics"/, "...with one metrics feedback entry");
+    });
+  }
+  {
+    const repo = plannedRepo();
+    await withServer(repo, async ({ call }) => {
+      await call("kukulu_next");
+      await call("kukulu_run_halt", { reason: "first stop" });
+      const n = await call("kukulu_next");
+      eq(n.stage, "halt", "a halted flight halts");
+      eq(metricsOf(repo).outcome.halted, "first stop", "a halt writes docs/METRICS.json too, with outcome.halted");
+      await call("kukulu_run_resume", { reason: "fixed" });
+      await call("kukulu_next");
+      await call("kukulu_run_halt", { reason: "second stop" });
+      await call("kukulu_next");
+      eq(metricsOf(repo).outcome.halted, "second stop", "a resumed flight overwrites the file");
+    });
+  }
+  {
+    const probe = mkFakeProbe();
+    probe.answers([{ ok: false, status: 503, ms: 40, error: "HTTP 503: loading" }]);
+    const cfgPath = writeGlobalConfig(mkDir(), { runners: { spark: { endpoint: "http://h:1", locality: "local", match: ["spark/"], activate: "warm" } }, roles: { implementer: { model: "spark/qwen38-27b" } } });
+    const repo = plannedRepo();
+    const env = { KUKULU_CONFIG: cfgPath, KUKULU_RUNNER_PROBE: probe.script };
+    await withServer(repo, ({ call }) => call("kukulu_agents_sync"), { env });
+    setState(repo, { timeline: [{ event: "start", stage: "plan", round: 0, at: "2026-01-01T00:00:00.000Z" }] });
+    await withServer(repo, async ({ call }) => {
+      const n = await call("kukulu_next");
+      eq(n.stage, "halt", "a failed activation halts");
+      const m = metricsOf(repo);
+      eq(m.friction.activateFailures + "|" + (m.outcome.halted ?? "").slice(0, 20), "1|runner spark did not", "a halt from a failed activation writes it, with friction.activateFailures 1");
+    }, { env });
+  }
+  {
+    const probe = mkFakeProbe();
+    probe.answers([{ ok: false, status: 503, ms: 40, error: "HTTP 503: loading" }]);
+    const cfgPath = writeGlobalConfig(mkDir(), { runners: { spark: { endpoint: "http://h:1", locality: "local", match: ["spark/"], activate: "warm" } }, roles: { implementer: { model: "spark/qwen38-27b" } } });
+    const repo = plannedRepo();
+    const env = { KUKULU_CONFIG: cfgPath, KUKULU_RUNNER_PROBE: probe.script };
+    await withServer(repo, ({ call }) => call("kukulu_agents_sync"), { env });
+    await withServer(repo, async ({ call }) => {
+      const n = await call("kukulu_next");
+      eq(n.stage, "halt", "the first timeline record is a failed activation");
+      const c = hasFile(repo, ".kukulu/metrics/counters.json") ? JSON.parse(readFile(repo, ".kukulu/metrics/counters.json")) : null;
+      eq(c?.activateFailures + "|" + (await call("kukulu_status")).counters?.activateFailures, "1|1", "a failed activation on a flight's first timeline record counts activateFailures 1");
+      eq(metricsOf(repo).friction.activateFailures, 1, "...and its METRICS.json has friction.activateFailures 1");
+    }, { env });
+  }
+  {
+    // kukulu_flight_archive moves docs/METRICS.json
+    const repo = plannedRepo({ config: { flight: "w1-share" } });
+    git(repo, ["checkout", "-q", "-b", "build/2026-11-14"]);
+    markTasks(repo, ALL_DONE);
+    writeFile(repo, "docs/HANDOFF.md", "# handoff\n");
+    writeFile(repo, "docs/REVIEW.md", "# Review\nRound: 1\n**Verdict**: APPROVED\n");
+    writeFile(repo, "docs/SUMMARY.md", "# summary\n");
+    writeFile(repo, "docs/METRICS.json", "{}\n");
+    setState(repo, { round: 0, implemented: true, reviewed: true, verdict: "APPROVED", summarized: true });
+    git(repo, ["add", "-A"]);
+    git(repo, ["commit", "-qm", "chore: build summary"]);
+    await withServer(repo, async ({ call }) => {
+      const r = await call("kukulu_flight_archive", {});
+      ok(!r.error && hasFile(repo, "docs/flights/w1-share/METRICS.json") && !hasFile(repo, "docs/METRICS.json"), "kukulu_flight_archive moves docs/METRICS.json");
+    });
+  }
 }
 
 finish();

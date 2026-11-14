@@ -1,0 +1,331 @@
+{
+ "plugin": "0.9.0",
+ "flight": "v0-9-0",
+ "spec": {
+  "title": "widget - Specification",
+  "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+ },
+ "state": {
+  "round": 1,
+  "verdict": "APPROVED",
+  "halted": null,
+  "rounds": [
+   {
+    "round": 1,
+    "fixTasks": 3,
+    "unblocked": 0,
+    "verdict": "CHANGES REQUESTED",
+    "nonConverging": false,
+    "sources": {
+     "review": 2,
+     "mutation": 1,
+     "blocked": 0
+    }
+   },
+   {
+    "round": 2,
+    "fixTasks": 0,
+    "unblocked": 0,
+    "verdict": "APPROVED",
+    "sources": {
+     "review": 0,
+     "mutation": 0,
+     "blocked": 0
+    }
+   }
+  ],
+  "timeline": [
+   {
+    "event": "start",
+    "stage": "plan",
+    "round": 0,
+    "at": "2026-11-14T10:00:00.000Z"
+   },
+   {
+    "event": "end",
+    "stage": "plan",
+    "round": 0,
+    "at": "2026-11-14T10:01:00.000Z"
+   },
+   {
+    "event": "activate",
+    "stage": "implement",
+    "round": 0,
+    "runner": "spark",
+    "served": "qwen38-27b",
+    "reported": "qwen38-27b",
+    "ms": 14000,
+    "ok": true,
+    "at": "2026-11-14T10:01:15.000Z"
+   },
+   {
+    "event": "start",
+    "stage": "implement",
+    "round": 0,
+    "at": "2026-11-14T10:01:15.000Z"
+   },
+   {
+    "event": "end",
+    "stage": "implement",
+    "round": 0,
+    "at": "2026-11-14T10:11:15.000Z"
+   },
+   {
+    "event": "start",
+    "stage": "review",
+    "round": 0,
+    "at": "2026-11-14T10:11:20.000Z"
+   },
+   {
+    "event": "end",
+    "stage": "review",
+    "round": 0,
+    "at": "2026-11-14T10:13:20.000Z"
+   },
+   {
+    "event": "start",
+    "stage": "implement",
+    "round": 1,
+    "at": "2026-11-14T10:13:30.000Z"
+   },
+   {
+    "event": "end",
+    "stage": "implement",
+    "round": 1,
+    "at": "2026-11-14T10:16:40.000Z"
+   },
+   {
+    "event": "start",
+    "stage": "review",
+    "round": 1,
+    "at": "2026-11-14T10:16:50.000Z"
+   },
+   {
+    "event": "end",
+    "stage": "review",
+    "round": 1,
+    "at": "2026-11-14T10:18:20.000Z"
+   },
+   {
+    "event": "start",
+    "stage": "summarize",
+    "round": 1,
+    "at": "2026-11-14T10:18:30.000Z"
+   },
+   {
+    "event": "end",
+    "stage": "summarize",
+    "round": 1,
+    "at": "2026-11-14T10:19:10.000Z"
+   }
+  ],
+  "harness": [
+   {
+    "name": "claude-code",
+    "version": "2.0.0"
+   }
+  ]
+ },
+ "caps": {
+  "maxRounds": 3,
+  "maxRoundsHard": 6
+ },
+ "routing": {
+  "planner": {
+   "model": "opus",
+   "runner": "anthropic",
+   "locality": "remote",
+   "family": "claude"
+  },
+  "implementer": {
+   "model": "spark/qwen38-27b",
+   "runner": "spark",
+   "locality": "local",
+   "family": "qwen"
+  },
+  "reviewer": {
+   "model": "opus",
+   "runner": "anthropic",
+   "locality": "remote",
+   "family": "claude"
+  },
+  "summarizer": {
+   "model": "sonnet",
+   "runner": "anthropic",
+   "locality": "remote",
+   "family": "claude"
+  }
+ },
+ "usage": {
+  "source": "chain",
+  "chainHead": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "records": [
+   {
+    "v": 1,
+    "harness": "claude-code",
+    "session": "s-planner",
+    "agent": "kukulu-planner",
+    "role": "planner",
+    "stage": "plan",
+    "round": 0,
+    "models": {
+     "claude-opus-5-5": {
+      "requests": 10,
+      "input": 1000,
+      "output": 200,
+      "cacheRead": 500,
+      "cacheWrite": 50
+     }
+    },
+    "first": "2026-11-14T10:00:00.000Z",
+    "last": "2026-11-14T10:30:00.000Z",
+    "activeMs": 600000,
+    "toolCalls": 40,
+    "toolErrors": 2,
+    "apiErrors": 0,
+    "cost": 1.25
+   },
+   {
+    "v": 1,
+    "harness": "claude-code",
+    "session": "s-implementer",
+    "agent": "kukulu-implementer",
+    "role": "implementer",
+    "stage": "implement",
+    "round": 0,
+    "models": {
+     "qwen38-27b": {
+      "requests": 100,
+      "input": 50000,
+      "output": 4000,
+      "cacheRead": 40000,
+      "cacheWrite": 0
+     }
+    },
+    "first": "2026-11-14T10:00:00.000Z",
+    "last": "2026-11-14T10:30:00.000Z",
+    "activeMs": 600000,
+    "toolCalls": 40,
+    "toolErrors": 2,
+    "apiErrors": 0,
+    "cost": 0.9
+   },
+   {
+    "v": 1,
+    "harness": "claude-code",
+    "session": "s-reviewer",
+    "agent": "kukulu-reviewer",
+    "role": "reviewer",
+    "stage": "review",
+    "round": 0,
+    "models": {
+     "claude-opus-5-5": {
+      "requests": 20,
+      "input": 3000,
+      "output": 900,
+      "cacheRead": 0,
+      "cacheWrite": 0
+     }
+    },
+    "first": "2026-11-14T10:00:00.000Z",
+    "last": "2026-11-14T10:30:00.000Z",
+    "activeMs": 600000,
+    "toolCalls": 40,
+    "toolErrors": 2,
+    "apiErrors": 0,
+    "cost": 2.5
+   },
+   {
+    "v": 1,
+    "harness": "claude-code",
+    "session": "s-summarizer",
+    "agent": "kukulu-summarizer",
+    "role": "summarizer",
+    "stage": "summarize",
+    "round": 0,
+    "models": {
+     "claude-sonnet-5-5": {
+      "requests": 4,
+      "input": 800,
+      "output": 300,
+      "cacheRead": 0,
+      "cacheWrite": 0
+     }
+    },
+    "first": "2026-11-14T10:00:00.000Z",
+    "last": "2026-11-14T10:30:00.000Z",
+    "activeMs": 600000,
+    "toolCalls": 40,
+    "toolErrors": 2,
+    "apiErrors": 0,
+    "cost": 0.1
+   },
+   {
+    "v": 1,
+    "harness": "claude-code",
+    "session": "s-controller",
+    "agent": null,
+    "role": "controller",
+    "stage": "review",
+    "round": 0,
+    "models": {
+     "claude-sonnet-5-5": {
+      "requests": 30,
+      "input": 9000,
+      "output": 700,
+      "cacheRead": 0,
+      "cacheWrite": 0
+     }
+    },
+    "first": "2026-11-14T10:00:00.000Z",
+    "last": "2026-11-14T10:30:00.000Z",
+    "activeMs": 600000,
+    "toolCalls": 40,
+    "toolErrors": 2,
+    "apiErrors": 0,
+    "cost": null
+   }
+  ]
+ },
+ "counters": {
+  "verifyRuns": 12,
+  "verifyFailures": 3,
+  "guardReblocks": 4,
+  "tasksReopened": 1,
+  "activateFailures": 0
+ },
+ "feedback": [
+  {
+   "at": "2026-11-14T10:00:05.000Z",
+   "stage": "controller",
+   "round": 0,
+   "category": "runner-drift",
+   "message": "x",
+   "source": "auto"
+  },
+  {
+   "at": "2026-11-14T10:00:06.000Z",
+   "stage": "plan",
+   "round": 0,
+   "category": "stall",
+   "message": "y",
+   "source": "agent"
+  }
+ ],
+ "tasks": {
+  "total": 12,
+  "done": 11,
+  "blocked": 1,
+  "skipped": 0
+ },
+ "git": {
+  "commits": 30,
+  "shortstat": " 14 files changed, 900 insertions(+), 40 deletions(-)",
+  "mergeBase": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+ },
+ "genesis": {
+  "mode": "clean-room",
+  "enforcement": "hook"
+ },
+ "now": "2026-11-14T10:20:00.000Z"
+}

@@ -38,7 +38,23 @@ function policyFile(root) {
 
 const input = parseInput(readStdin());
 const root = process.env.CLAUDE_PROJECT_DIR || input?.cwd || process.cwd();
-if (!fs.existsSync(policyFile(root))) process.exit(0);
+if (!fs.existsSync(policyFile(root))) {
+  // General mode (SPEC B-02): a role agent's usage goes to .kukulu/metrics/usage.jsonl. Every other event, and every
+  // project that is not a Kūkulu project, leaves here at once; the log socket means a sandbox, where the controller owns the files.
+  try {
+    if ((input?.hook_event_name === "SubagentStop" || input?.hook_event_name === "Stop") && fs.existsSync(path.join(root, "docs", "kukulu.json")) && !process.env.KUKULU_LOG_SOCKET) {
+      const record = usageFromClaudeCode(input);
+      if (record.role !== null) {
+        const dir = path.join(root, ".kukulu", "metrics");
+        fs.mkdirSync(dir, { recursive: true });
+        fs.appendFileSync(path.join(dir, "usage.jsonl"), `${JSON.stringify(record)}\n`);
+      }
+    }
+  } catch {
+    // the hook never blocks anything
+  }
+  process.exit(0);
+}
 
 let cr = null;
 const UNREACHABLE = "the log socket is unreachable, so this call cannot be logged; restart the session with node scripts/sandbox.mjs run";
@@ -72,35 +88,66 @@ async function record(logPath, fields) {
   return cr.appendEntry(logPath, fields);
 }
 
-/**
- * Token use of one subagent, from its transcript: per model the requests and the input, output, cache-read and
- * cache-write tokens, each request once (the first line of a repeated requestId), the first and last timestamps,
- * and the cost when every counted line carries one. An unreadable transcript is `{ error }`, never a failure.
- */
-function usageOf(hookInput) {
-  const file = hookInput.agent_transcript_path || hookInput.transcript_path;
+/** Stage and round from `.kukulu/state.json`, as the usage record wants them: null when the file cannot say. */
+function stageAndRound() {
   try {
+    const st = JSON.parse(fs.readFileSync(path.join(root, ".kukulu", "state.json"), "utf8"));
+    const round = Number.isInteger(st?.round) ? st.round : null;
+    const spans = Array.isArray(st?.timeline) ? st.timeline.filter((r) => r && (r.event === "start" || r.event === "end")) : [];
+    const last = spans.at(-1);
+    return { stage: last?.event === "start" && typeof last.stage === "string" ? last.stage : null, round };
+  } catch {
+    return { stage: null, round: null };
+  }
+}
+
+/**
+ * The usage record of one agent (docs/metrics.md), from its Claude Code transcript. This is the only place that
+ * knows the transcript format. Each request counts once (the first line of a repeated requestId); an unreadable
+ * transcript is the six-key error record, never a failure.
+ */
+function usageFromClaudeCode(hookInput) {
+  // A Stop is the controller session's own: its role is fixed, it has no agent type, and the subagents' sidechain rows
+  // in its transcript are dropped below so its record never holds their requests.
+  const controller = hookInput.hook_event_name === "Stop";
+  const type = !controller && typeof hookInput.agent_type === "string" ? hookInput.agent_type : null;
+  const head = {
+    v: 1,
+    harness: "claude-code",
+    session: typeof hookInput.session_id === "string" && hookInput.session_id ? hookInput.session_id : null,
+    agent: type && type.length ? type : null,
+    role: controller ? "controller" : (type?.match(/^kukulu[-:](planner|implementer|reviewer|summarizer)$/)?.[1] ?? null),
+  };
+  const file = controller ? hookInput.transcript_path : hookInput.agent_transcript_path || hookInput.transcript_path;
+  try {
+    const rows = [];
+    for (const line of fs.readFileSync(file, "utf8").split("\n")) {
+      if (!line.trim()) continue;
+      try {
+        const row = JSON.parse(line);
+        if (row && typeof row === "object" && !Array.isArray(row) && !(controller && row.isSidechain === true)) rows.push(row);
+      } catch {
+        continue;
+      }
+    }
+    const n = (v) => (typeof v === "number" ? v : 0);
+    const time = (row) => Date.parse(row.timestamp);
+    const conv = rows.filter((r) => (r.type === "user" || r.type === "assistant") && typeof r.timestamp === "string" && !Number.isNaN(time(r)));
     const seen = new Set();
     const models = {};
     const stamps = [];
     let cost = 0;
     let costed = true;
     let counted = 0;
-    for (const line of fs.readFileSync(file, "utf8").split("\n")) {
-      if (!line.trim()) continue;
-      let row;
-      try {
-        row = JSON.parse(line);
-      } catch {
-        continue;
-      }
-      const usage = row?.message?.usage;
-      if (row?.type !== "assistant" || !usage || typeof usage !== "object") continue;
+    let active = 0;
+    let timed = false;
+    for (const row of rows) {
+      const usage = row.message?.usage;
+      if (row.type !== "assistant" || !usage || typeof usage !== "object") continue;
       if (typeof row.requestId === "string") {
         if (seen.has(row.requestId)) continue;
         seen.add(row.requestId);
       }
-      const n = (v) => (typeof v === "number" ? v : 0);
       const m = (models[row.message.model ?? "unknown"] ??= { requests: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
       m.requests += 1;
       m.input += n(usage.input_tokens);
@@ -111,12 +158,31 @@ function usageOf(hookInput) {
       if (typeof row.costUSD === "number") cost += row.costUSD;
       else costed = false;
       counted += 1;
+      const at = conv.indexOf(row);
+      if (at > 0) {
+        let lastRow = row;
+        if (typeof row.requestId === "string") for (const r of conv) if (r.requestId === row.requestId) lastRow = r;
+        active += Math.max(0, time(lastRow) - time(conv[at - 1]));
+        timed = true;
+      }
     }
     if (!counted) throw new Error("the transcript has no assistant line with usage");
+    const items = (row) => (Array.isArray(row.message?.content) ? row.message.content : []);
     stamps.sort();
-    return { models, first: stamps[0] ?? null, last: stamps.at(-1) ?? null, cost: costed ? Math.round(cost * 1e6) / 1e6 : null };
+    return {
+      ...head,
+      ...stageAndRound(),
+      models,
+      first: stamps[0] ?? null,
+      last: stamps.at(-1) ?? null,
+      activeMs: timed ? Math.round(active) : null,
+      toolCalls: rows.reduce((t, r) => t + items(r).filter((i) => i?.type === "tool_use").length, 0),
+      toolErrors: rows.reduce((t, r) => t + items(r).filter((i) => i?.type === "tool_result" && i.is_error === true).length, 0),
+      apiErrors: rows.filter((r) => r.isApiErrorMessage === true).length,
+      cost: costed ? Math.round(cost * 1e6) / 1e6 : null,
+    };
   } catch (e) {
-    return { error: String(e instanceof Error ? e.message : e).split("\n")[0] };
+    return { ...head, error: String(e instanceof Error ? e.message : e).split("\n")[0] };
   }
 }
 
@@ -142,7 +208,11 @@ try {
     });
   }
   if (cr.loggingActive(ctx, logPath) && input.hook_event_name === "SubagentStop") {
-    await record(logPath, { kind: "usage", ...cr.entryFields(input, ctx), tool: null, decision: null, target: null, data: usageOf(input) });
+    await record(logPath, { kind: "usage", ...cr.entryFields(input, ctx), tool: null, decision: null, target: null, data: usageFromClaudeCode(input) });
+  }
+  if (cr.loggingActive(ctx, logPath) && input.hook_event_name === "Stop") {
+    // The controller's cumulative record; its entry role is "session", so no per-role recount counts it.
+    await record(logPath, { kind: "usage", ...cr.entryFields(input, ctx), tool: null, decision: null, target: null, data: usageFromClaudeCode(input) });
   }
   // Any other event is not ours.
 } catch (e) {

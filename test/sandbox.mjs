@@ -165,6 +165,40 @@ const runHookAsync = (script, payload, env) => new Promise((resolve) => {
   }
 }
 
+// ---------------------------------------------------------------- usage records cross the log socket (P0-05)
+
+{
+  const repo = cleanroomRepo();
+  setState(repo, { cleanroom: { genesis: "a".repeat(64) }, round: 0, timeline: [{ event: "start", stage: "implement", round: 0 }] });
+  const dir = shortDir();
+  const logPath = path.join(dir, "box-log.jsonl");
+  const socketPath = path.join(dir, "u.sock");
+  const logSocket = startLogSocket({ socketPath, logPath });
+  await logSocket.listening;
+  const FULL = path.join(ROOT, "test", "fixtures", "transcripts", "agent-full.jsonl");
+  const env = { CLAUDE_PROJECT_DIR: repo, CLAUDE_PLUGIN_ROOT: ROOT, KUKULU_LOG_SOCKET: socketPath };
+  const FIFTEEN = "v,harness,session,agent,role,stage,round,models,first,last,activeMs,toolCalls,toolErrors,apiErrors,cost,source";
+  try {
+    const sub = await runHookAsync(LOGGER, { hook_event_name: "SubagentStop", agent_type: "kukulu-implementer", agent_transcript_path: FULL, session_id: "s-1", cwd: repo }, env);
+    eq(sub.status, 0, "the logger exits 0 on SubagentStop over the log socket");
+    const first = readEntries(logPath).at(-1);
+    eq(first.kind + "|" + Object.keys(first.data).join(","), `usage|${FIFTEEN}`, "a SubagentStop inside the boundary sends the usage record through the log socket (fifteen fields and source box)");
+    eq(first.data.source, "box", "...with source box");
+    const stop = await runHookAsync(LOGGER, { hook_event_name: "Stop", transcript_path: FULL, session_id: "s-1", cwd: repo }, env);
+    eq(stop.status, 0, "the logger exits 0 on Stop over the log socket");
+    const ctl = readEntries(logPath).at(-1);
+    eq(ctl.kind + "|" + ctl.role + "|" + ctl.data.role + "|" + ctl.data.source, "usage|session|controller|box", "a Stop inside the boundary sends the controller's record");
+    ok(verifyChain(fs.readFileSync(logPath, "utf8").split("\n").filter(Boolean)).ok, "...in a chain that verifies");
+    ok(!fs.existsSync(path.join(repo, ".kukulu", "metrics")), "nothing is written under .kukulu/metrics/ when KUKULU_LOG_SOCKET is set");
+  } finally {
+    await logSocket.close();
+  }
+  // General mode inside the boundary writes nothing either.
+  const general = plannedRepo();
+  const none = await runHookAsync(LOGGER, { hook_event_name: "SubagentStop", agent_type: "kukulu-implementer", agent_transcript_path: FULL, session_id: "s-1", cwd: general }, { CLAUDE_PROJECT_DIR: general, CLAUDE_PLUGIN_ROOT: ROOT, KUKULU_LOG_SOCKET: path.join(dir, "none.sock") });
+  eq(none.status + "|" + fs.existsSync(path.join(general, ".kukulu", "metrics")), "0|false", "...and general mode writes nothing under the socket");
+}
+
 // ---------------------------------------------------------------- the egress proxy and the bridge (P2-04)
 
 /** A local TCP echo server, the fake runner. Resolves { port, close }. */

@@ -19,6 +19,7 @@ import { createHash } from "node:crypto";
 import {
   CleanroomError, loadPolicy, policyHash, appendEntry, readEntries, logPathFor, generateKey, loadKey, signCheckpoint, verifyCheckpoint, verifyChain, evaluate, lockdownActive, normalizeModel, familyOf, controlPaths, rolesUsage, lockfileEcosystem, lockfilePackages, deniedPackage, normalizePackageName, ZERO_HASH, scorePair, position, verdictOf, LIMITS, coverageGaps, knownLimitsFor, summarizeEntries, signBytes,
 } from "./cleanroom.mjs";
+import { buildMetrics, usageFromChain } from "./metrics.mjs";
 
 /**
  * An environment variable by its Kūkulu name. An empty value counts as unset,
@@ -39,6 +40,7 @@ function layoutFor(stateName, configName) {
     handoff: path.join(ROOT, "docs", "HANDOFF.md"),
     review: path.join(ROOT, "docs", "REVIEW.md"),
     summary: path.join(ROOT, "docs", "SUMMARY.md"),
+    metrics: path.join(ROOT, "docs", "METRICS.json"),
     similarityDoc: path.join(ROOT, "docs", "SIMILARITY.md"),
     config: path.join(ROOT, "docs", configName),
     stateDir,
@@ -46,6 +48,9 @@ function layoutFor(stateName, configName) {
     lock: path.join(stateDir, "implement.lock"),
     feedback: path.join(stateDir, "feedback.jsonl"),
     mutation: path.join(stateDir, "mutation.json"),
+    metricsDir: path.join(stateDir, "metrics"),
+    usage: path.join(stateDir, "metrics", "usage.jsonl"),
+    counters: path.join(stateDir, "metrics", "counters.json"),
     worktrees: path.join(stateDir, "worktrees"),
     gitignore: path.join(ROOT, ".gitignore"),
     agentsDir: path.join(ROOT, ".claude", "agents"),
@@ -99,7 +104,7 @@ if (envVar("CONTROLLER_SOCKET")) {
 }
 
 // Keep in sync with .claude-plugin/plugin.json and package.json; test/plugin.mjs checks it.
-const VERSION = "0.8.1";
+const VERSION = "0.9.0";
 
 // ---------------------------------------------------------------- clean-room mode (SPEC D-06)
 
@@ -417,7 +422,7 @@ function runGate(stage, st = loadState()) {
     return failed("guard", `hooks/hooks.json cannot be read: ${e.message}`);
   }
   const registers = (event, script) => (hooks[event] || []).some((entry) => (entry.hooks || []).some((h) => String(h.command || "").includes(script)));
-  for (const [event, script] of [["PreToolUse", "cleanroom-guard.mjs"], ["PostToolUse", "cleanroom-log.mjs"], ["UserPromptSubmit", "cleanroom-log.mjs"], ["SubagentStop", "cleanroom-log.mjs"]]) {
+  for (const [event, script] of [["PreToolUse", "cleanroom-guard.mjs"], ["PostToolUse", "cleanroom-log.mjs"], ["UserPromptSubmit", "cleanroom-log.mjs"], ["SubagentStop", "cleanroom-log.mjs"], ["Stop", "cleanroom-log.mjs"]]) {
     if (!registers(event, script)) return failed("guard", `hooks/hooks.json no longer registers ${script} on ${event}`);
   }
 
@@ -611,6 +616,12 @@ function ensureLineInFile(file, line) {
   if (cur.split("\n").includes(line)) return false;
   write(file, cur.replace(/\s*$/, "") + (cur ? "\n" : "") + line + "\n");
   return true;
+}
+
+/** Keep `.kukulu/metrics/` out of `git status` per clone, as the agent files are: usage records are never committed. */
+function ensureMetricsExcluded() {
+  if (!gitFacts().inRepo) return;
+  ensureLineInFile(gitPath("info/exclude"), `${rel(P.metricsDir)}/`);
 }
 
 /**
@@ -851,7 +862,7 @@ function loadConfig() {
 
 const SIGNING_POLICIES = ["auto", "off", "required"];
 const PR_POLICIES = ["draft", "none"];
-const POLICY_KEYS = ["signing", "push", "pr", "feedback", "archive", "finalize", "mergeMethod", "syncBase"];
+const POLICY_KEYS = ["signing", "push", "pr", "feedback", "archive", "finalize", "mergeMethod", "syncBase", "metrics"];
 const FINALIZE_POLICIES = ["auto", "ready", "draft"];
 const MERGE_METHODS = ["merge", "squash", "rebase"];
 const FLIGHT_SLUG = /^[a-z0-9][a-z0-9-]{0,39}$/;
@@ -887,6 +898,7 @@ function validatePolicies(policies, where = "docs/kukulu.json", joiner = " ") {
   oneOf("finalize", FINALIZE_POLICIES);
   oneOf("mergeMethod", MERGE_METHODS);
   bool("syncBase");
+  bool("metrics");
 }
 
 /**
@@ -1266,6 +1278,7 @@ function cfgFrom(c, planIds, limit = mcpTimeoutMs()) {
       finalize: c.policies?.finalize ?? "ready",
       mergeMethod: c.policies?.mergeMethod ?? "merge",
       syncBase: c.policies?.syncBase ?? true,
+      metrics: c.policies?.metrics ?? true,
     },
   };
   if (limit !== null) {
@@ -1399,13 +1412,22 @@ function validateRolesBlock(roles, where, { allowPolicies = false } = {}) {
   }
 }
 
-const RUNNER_KEYS = ["endpoint", "locality", "match", "identities"];
+const RUNNER_KEYS = ["endpoint", "locality", "match", "identities", "activate", "activateTimeoutMs", "servedAs", "tokenEnv"];
+const TOKEN_ENV = /^[A-Z][A-Z0-9_]*$/;
 const RUNNER_NAME = /^[a-z0-9][a-z0-9-]{0,39}$/;
 const DIGEST = /^sha256:[0-9a-f]{64}$/;
 const ANTHROPIC_ENDPOINT = "https://api.anthropic.com";
 
-/** `where` names the block itself, e.g. "global config <path> runners". Returns the map, `{}` when absent. */
-function validateRunners(runners, where) {
+/** A runner block's activation keys with their defaults. The timeout is an ⚠️ ASSUMPTION (SPEC 5.6) and lives only on its line below. */
+function runnerActivation(r) {
+  return {
+    activate: r.activate ?? "none",
+    activateTimeoutMs: r.activateTimeoutMs ?? 1800000,
+  };
+}
+
+/** `where` names the block itself, e.g. "global config <path> runners". `limit` is the MCP tool-call limit, or null. Returns the map, `{}` when absent. */
+function validateRunners(runners, where, limit = mcpTimeoutMs()) {
   if (runners === undefined) return {};
   if (typeof runners !== "object" || runners === null || Array.isArray(runners)) {
     throw new ToolError(`${where} must be an object`);
@@ -1461,15 +1483,41 @@ function validateRunners(runners, where) {
             throw new ToolError(`${where}.${name}.identities[${JSON.stringify(model)}].weights must be sha256:<64 hex>`);
           }
         }
+      } else if (k === "activate") {
+        if (v !== "none" && v !== "warm") throw new ToolError(`${where}.${name}.activate must be "none" or "warm"`);
+      } else if (k === "activateTimeoutMs") {
+        if (!Number.isInteger(v) || v < 1000) throw new ToolError(`${where}.${name}.activateTimeoutMs must be an integer of at least 1000`);
+      } else if (k === "servedAs") {
+        if (typeof v !== "object" || v === null || Array.isArray(v) || Object.entries(v).some(([m, s]) => !m || typeof s !== "string" || !s)) {
+          throw new ToolError(`${where}.${name}.servedAs must map a model string to a non-empty string`);
+        }
+      } else if (k === "tokenEnv") {
+        if (typeof v !== "string" || !TOKEN_ENV.test(v)) throw new ToolError(`${where}.${name}.tokenEnv must be an environment variable name such as SPARK_TOKEN`);
       }
+    }
+    const act = runnerActivation(block);
+    if (limit !== null && (block.activateTimeoutMs !== undefined || act.activate === "warm") && act.activateTimeoutMs >= limit) {
+      throw new ToolError(`${where}.${name}.activateTimeoutMs (${act.activateTimeoutMs} ms) is at or above the MCP timeout (${limit} ms from .mcp.json); the client would abort kukulu_next first. Lower it, or raise the timeout`);
+    }
+    if (act.activate === "warm" && block.endpoint === undefined) {
+      throw new ToolError(`${where}.${name}.activate is "warm" but the runner has no endpoint to send the request to; add endpoint, or set activate to "none"`);
     }
   }
   return runners;
 }
 
+/** The model id a runner is asked for: the servedAs entry, else the model string without its longest matching prefix. */
+function servedId(runnerName, model, runners) {
+  const r = runners?.[runnerName];
+  if (r?.servedAs?.[model] !== undefined) return r.servedAs[model];
+  let cut = 0;
+  for (const prefix of r?.match || []) if (model.startsWith(prefix) && prefix.length > cut) cut = prefix.length;
+  return model.slice(cut);
+}
+
 /** Which runner serves a model: the built-in one for Anthropic ids, else the longest configured match prefix. */
 function runnerFor(model, runners) {
-  if (isAnthropicModel(model)) return { runner: "anthropic", endpoint: ANTHROPIC_ENDPOINT, locality: "remote" };
+  if (isAnthropicModel(model)) return { runner: "anthropic", endpoint: ANTHROPIC_ENDPOINT, locality: "remote", activate: "none", activateTimeoutMs: null, served: null, tokenEnv: null };
   let best = null;
   let bestLen = -1;
   for (const [name, r] of Object.entries(runners || {})) {
@@ -1477,9 +1525,9 @@ function runnerFor(model, runners) {
       if (model.startsWith(prefix) && prefix.length > bestLen) { best = name; bestLen = prefix.length; }
     }
   }
-  if (best === null) return { runner: null, endpoint: null, locality: "unknown" };
+  if (best === null) return { runner: null, endpoint: null, locality: "unknown", activate: "none", activateTimeoutMs: null, served: null, tokenEnv: null };
   const r = runners[best];
-  return { runner: best, endpoint: r.endpoint ?? null, locality: r.locality ?? "unknown" };
+  return { runner: best, endpoint: r.endpoint ?? null, locality: r.locality ?? "unknown", ...runnerActivation(r), served: servedId(best, model, runners), tokenEnv: r.tokenEnv ?? null };
 }
 
 /** `where` names the key itself, e.g. "global config <path> permissionMode". */
@@ -1588,6 +1636,10 @@ function resolveRouting() {
       effort = undefined;
     }
     const run = runnerFor(model, runners);
+    if (run.served === "") {
+      const prefix = (runners[run.runner].match || []).find((p) => p === model);
+      throw new ToolError(`global config ${global.path} runners.${run.runner}.match entry '${prefix}' equals the model string '${model}', so no model id is left to ask the runner for; add a servedAs entry`);
+    }
     const runnerSource = run.runner === "anthropic" ? "builtin" : run.runner === null ? "none" : "global";
     roles[role] = { model, effort, ...run, source: { model: modelSource, effort: effortSource, runner: runnerSource } };
   }
@@ -1638,9 +1690,10 @@ function routingTable(r) {
     const e = r.roles[role];
     const effort = e.effort !== undefined ? e.effort : "–";
     const source = e.source.model === e.source.effort ? e.source.model : `model:${e.source.model} effort:${e.source.effort}`;
-    return `| ${role} | kukulu-${role} | ${e.model} | ${e.runner ?? "–"} | ${effort} | ${source} |`;
+    const configured = e.runner && e.runner !== "anthropic";
+    return `| ${role} | kukulu-${role} | ${e.model} | ${e.runner ?? "–"} | ${configured ? e.served : "–"} | ${configured ? e.activate : "–"} | ${effort} | ${source} |`;
   });
-  return ["| role | agent | model | runner | effort | source |", "|---|---|---|---|---|---|", ...rows].join("\n");
+  return ["| role | agent | model | runner | served | activate | effort | source |", "|---|---|---|---|---|---|---|---|", ...rows].join("\n");
 }
 
 /** Roles whose generated agent file currently exists on disk. */
@@ -1718,7 +1771,7 @@ function configShow() {
     roles: Object.fromEntries(
       ROLES.map((role) => {
         const e = r.roles[role];
-        return [role, { agent: `kukulu-${role}`, model: e.model, effort: e.effort, runner: e.runner, endpoint: e.endpoint, locality: e.locality, source: e.source }];
+        return [role, { agent: `kukulu-${role}`, model: e.model, effort: e.effort, runner: e.runner, endpoint: e.endpoint, locality: e.locality, activate: e.activate, served: e.served, activateTimeoutMs: e.activateTimeoutMs, source: e.source }];
       }),
     ),
     runners: r.runners,
@@ -1831,6 +1884,15 @@ function loadState() {
     return { ...DEFAULT_STATE };
   }
 }
+/** The harness that sent this process's `initialize` (SPEC C-04): `{ name, version }`, `unknown` until a client names itself. */
+let harnessClient = { name: "unknown", version: null };
+
+/** Add this process's harness to `st.harness` (first-seen order) unless that name and version are already listed. */
+function noteHarness(st) {
+  const list = Array.isArray(st.harness) ? st.harness : [];
+  st.harness = list.some((h) => h && h.name === harnessClient.name && h.version === harnessClient.version) ? list : [...list, { ...harnessClient }];
+}
+
 function saveState(s) {
   write(P.state, JSON.stringify(s, null, 2) + "\n");
 }
@@ -2245,6 +2307,16 @@ function lockCounter() {
 }
 
 /**
+ * Add the lock's cumulative re-block `total` to the guardReblocks counter, just before the lock is removed (SPEC C-02).
+ * A lock without one (the legacy bare-number form) leaves the counter as it is. Returns bumpCounter's note, or null.
+ */
+function countGuardReblocks() {
+  if (!exists(P.lock)) return null;
+  const total = parseLock().json?.total;
+  return Number.isInteger(total) ? bumpCounter("guardReblocks", total) : null;
+}
+
+/**
  * Reset the guard's re-block counter to zero on every task state change
  * (kukulu_task_done, kukulu_task_block, kukulu_run_start on resume), so
  * the cap bounds re-blocks *since the last time work actually moved*
@@ -2428,6 +2500,13 @@ function status() {
   out.cleanroom = cleanroomStatus(st);
   out.timeline = Array.isArray(st.timeline) ? st.timeline : [];
   out.stageSeconds = stageSecondsOf(out.timeline);
+  out.harness = Array.isArray(st.harness) ? st.harness : [];
+  out.counters = readCounters();
+  out.activateSeconds = {};
+  for (const r of out.timeline) {
+    if (r.event === "activate" && r.ok === true && typeof r.runner === "string" && Number.isFinite(r.ms)) out.activateSeconds[r.runner] = (out.activateSeconds[r.runner] ?? 0) + r.ms;
+  }
+  for (const k of Object.keys(out.activateSeconds)) out.activateSeconds[k] = Math.round(out.activateSeconds[k] / 1000);
   return out;
 }
 
@@ -2500,7 +2579,7 @@ function baseHealth(st) {
   }
 }
 
-function nextDecision() {
+function nextDecision(forcedHalt = null) {
   const routing = resolveRouting();
   const s = status();
   const c = cfg();
@@ -2609,6 +2688,7 @@ function nextDecision() {
   const policyPresent = cleanroomOn(c);
   const broken = cleanroomModeBreak(st, policyPresent, s.planPresent);
   if (broken) return stage("halt", modeBreakText(broken));
+  if (forcedHalt) return stage("halt", forcedHalt);
   if (st.halted) return stage("halt", st.haltCap || st.halted.includes("kukulu_run_resume") ? st.halted : `${st.halted} — ${RESUME_HINT}`);
   if (st.awaitingSigning) {
     const mb = git(["merge-base", c.baseBranch, "HEAD"], { allowFail: true }).out || "<merge-base>";
@@ -2797,6 +2877,7 @@ function startRun({ sync = false } = {}) {
   if (envVar("SANDBOX") && c.policies.signing === "required") throw new ToolError(SANDBOX_SIGNING_REFUSAL);
   const g = gitFacts();
   if (!g.inRepo) throw new ToolError("not a git repository");
+  ensureMetricsExcluded();
   // A branch this call cuts from the base is already up to date; only an existing build branch can lag behind it.
   // A fallback the base sync itself just made is not re-probed in the same call; only an override that was already there is.
   const overrideBefore = loadState().signingOverride === true;
@@ -2851,7 +2932,7 @@ function startRun({ sync = false } = {}) {
   // plan gets the extra line (a plan without streams stays byte-identical).
   if (pr.tasks.some((t) => t.stream)) ensureLineInFile(P.gitignore, `${rel(P.worktrees)}/`);
   fs.mkdirSync(P.stateDir, { recursive: true });
-  write(P.lock, `${JSON.stringify({ count: 0, armedAt: new Date().toISOString(), round: st.round, cap: c.guardCap })}\n`);
+  write(P.lock, `${JSON.stringify({ count: 0, total: 0, armedAt: new Date().toISOString(), round: st.round, cap: c.guardCap })}\n`);
   if (!pr.branch || pr.branch.startsWith("(")) setHeader(pr, "Branch", branch);
   if (!pr.started || pr.started.startsWith("(")) setHeader(pr, "Started", new Date().toISOString());
   writeProgress(pr);
@@ -2865,6 +2946,7 @@ function startRun({ sync = false } = {}) {
   if (st.signing.startsWith("off (probe failed")) st.signingOverride = true;
   else if (st.signing === "none") delete st.signingOverride;
   st.implemented = false; st.reviewed = false; st.verdict = null;
+  noteHarness(st);
   saveState(st);
   // Only the auto fallback is friction — an explicit "off" or an
   // unconfigured "none" is the operator's or the project's own choice
@@ -3240,7 +3322,8 @@ function taskReopen({ id, reason } = {}) {
     return gitCommitIfChanged([P.progress], `progress: reopen ${id}${dependents.length ? ` (+${dependents.length} dependent${dependents.length === 1 ? "" : "s"})` : ""}`, { stage: implementStage(st), task: id });
   });
   resetLockCounter();
-  return { id, reopenedDependents: dependents, commit, counts: counts(pr.tasks) };
+  const countersNote = bumpCounter("tasksReopened");
+  return { id, reopenedDependents: dependents, commit, counts: counts(pr.tasks), ...(countersNote ? { countersNote } : {}) };
 }
 
 // Every command Kūkulu runs for the model goes through mcp/run-command.mjs,
@@ -3454,7 +3537,10 @@ function verify({ files = [], stream } = {}) {
     const waiting = inactiveUntil(c2.from, progress);
     return waiting ? { cmd: c2.cmd, skipped: `inactive until ${waiting}` } : runShell(c2.cmd, c2.timeoutMs, cwd);
   });
-  return { ok: constraints.ok && results.every((r) => r.skipped || r.ok), constraints, results, ...(recovered ? { recoveredMutation: recovered } : {}) };
+  const failed = results.some((r) => !r.skipped && !r.ok);
+  // Counting is bookkeeping: a note on the result, never a change to ok, a refusal or a commit.
+  const countersNote = bumpCounter("verifyRuns") ?? (failed ? bumpCounter("verifyFailures") : null);
+  return { ok: constraints.ok && !failed, constraints, results, ...(recovered ? { recoveredMutation: recovered } : {}), ...(countersNote ? { countersNote } : {}) };
 }
 
 // ---------------------------------------------------------------- mutation testing
@@ -3779,6 +3865,7 @@ function runFinish() {
       }
     }
   }
+  const countersNote = countGuardReblocks();
   if (exists(P.lock)) fs.unlinkSync(P.lock);
   const head = git(["rev-parse", "--short", "HEAD"]).out;
   // A whole-tree constraint scan at handoff, reported rather than refused:
@@ -3789,6 +3876,7 @@ function runFinish() {
   return {
     branch: g.branch, base: g.base, head, handoffCommit, stateCommit, push, pr: pr_url, ...(title !== null && pr_url?.startsWith("pr create failed") !== true ? { prTitle: title } : {}), counts: cnt, round: st.round,
     constraints: { ok: scan.ok, failing },
+    ...(countersNote ? { countersNote } : {}),
     readyLine: `READY FOR REVIEW — branch ${g.branch}, head ${head}, ${cnt.done} done / ${cnt.blocked} blocked / ${cnt.skipped} skipped of ${cnt.total}${failing.length ? `; constraints failing: ${failing.join(", ")}` : ""}`,
   };
 }
@@ -3804,6 +3892,112 @@ function prTitleFor(c, branch) {
   const topic = heading?.replace(/\s*[—–:-]\s*Spec(ification)?\s*$/i, "").trim();
   const title = topic ? (c.flight ? `${c.flight}: ${topic}` : topic) : `Build: ${branch}`;
   return [...title].slice(0, 120).join("");
+}
+
+/**
+ * Plain data for buildMetrics (SPEC C-01), gathered from what is on disk. A missing input is `null`, never a throw.
+ * After an archive, with no new flight started, the flight is the archived one and its own copies are read.
+ */
+function archivedFlightDir(live) {
+  return live.archived && !exists(P.config) && !(Array.isArray(live.timeline) && live.timeline.length) ? path.join(ROOT, live.archived.dir) : null;
+}
+
+function metricsInputs() {
+  const live = loadState();
+  const home = archivedFlightDir(live);
+  const where = (liveFile, name) => (home ? path.join(home, name) : liveFile);
+  const readJson = (file) => {
+    try {
+      return exists(file) ? JSON.parse(read(file)) : null;
+    } catch {
+      return null;
+    }
+  };
+  const state = home ? (readJson(path.join(home, "state.json")) ?? {}) : live;
+  const rawConfig = readJson(home ? ["kukulu.json", "foun" + "dry.json"].map((n) => path.join(home, n)).find(exists) ?? "" : P.config);
+  let config = null;
+  try {
+    config = rawConfig ? cfgFrom(rawConfig, null) : null;
+  } catch {
+    config = null;
+  }
+  const specFile = where(P.spec, "SPEC.md");
+  let spec = null;
+  if (exists(specFile)) {
+    const bytes = fs.readFileSync(specFile);
+    const title = /^# (.+)$/m.exec(bytes.toString("utf8"))?.[1];
+    spec = title ? { title, sha256: sha256Hex(bytes) } : null;
+  }
+  let routing = null;
+  try {
+    routing = Object.fromEntries(ROLES.map((role) => {
+      const e = resolveRouting().roles[role];
+      return [role, { model: e.model, runner: e.runner, locality: e.locality, family: familyOf(e.model) }];
+    }));
+  } catch {
+    routing = null;
+  }
+  const lines = (file) => (exists(file) ? read(file).split("\n").filter((l) => l.trim()) : []);
+  const parsed = (file) => lines(file).flatMap((l) => {
+    try {
+      return [JSON.parse(l)];
+    } catch {
+      return [];
+    }
+  });
+  const progressFile = where(P.progress, "PROGRESS.md");
+  let tasks = null;
+  try {
+    tasks = exists(progressFile) ? counts(parseProgressText(read(progressFile)).tasks) : null;
+  } catch {
+    tasks = null;
+  }
+  let git_ = null;
+  if (gitFacts().inRepo) {
+    const base = (config ?? cfg()).baseBranch;
+    const mergeBase = git(["merge-base", base, "HEAD"], { allowFail: true });
+    if (mergeBase.ok && mergeBase.out) {
+      const n = git(["rev-list", "--count", `${mergeBase.out}..HEAD`], { allowFail: true });
+      const stat = git(["diff", "--shortstat", `${mergeBase.out}..HEAD`], { allowFail: true });
+      git_ = { mergeBase: mergeBase.out, commits: n.ok ? Number(n.out) : null, shortstat: stat.ok ? stat.out : null };
+    }
+  }
+  // A clean-room flight's usage comes only from the signed chain, never from usage.jsonl (SPEC B-05).
+  let usage = { source: "usage.jsonl", chainHead: null, records: parsed(P.usage) };
+  let genesis = null;
+  if (state.cleanroom?.genesis) {
+    genesis = { mode: "clean-room", enforcement: null };
+    usage = null;
+    try {
+      const entries = readEntries(home ? path.join(home, "cleanroom", "log.jsonl") : cleanroomLogPath());
+      usage = { source: "chain", ...usageFromChain(entries) };
+      const g = entries.find((e) => e.kind === "genesis")?.data;
+      genesis = { ...("mode" in (g ?? {}) ? { mode: g.mode } : {}), ...("enforcement" in (g ?? {}) ? { enforcement: g.enforcement } : {}) };
+    } catch {
+      // an unreadable log is no usage, and a genesis that says nothing more
+    }
+  }
+  return {
+    plugin: VERSION,
+    flight: config?.flight ?? (home ? live.archived.slug : null),
+    spec,
+    state,
+    caps: config ? { maxRounds: config.maxRounds, maxRoundsHard: config.maxRoundsHard } : null,
+    routing,
+    usage,
+    counters: readCounters(),
+    feedback: parsed(where(P.feedback, "feedback.jsonl")),
+    tasks,
+    git: git_,
+    genesis,
+    now: new Date().toISOString(),
+  };
+}
+
+/** `kukulu_metrics`: the metrics object, computed now from what is on disk. Refuses what kukulu_status refuses; writes nothing. */
+function metricsTool() {
+  status();
+  return buildMetrics(metricsInputs());
 }
 
 const FLIGHT_OPTION_KEYS = ["maxRounds", "maxRoundsHard"];
@@ -4288,15 +4482,17 @@ function runHalt({ reason }) {
   st.halted = reason;
   delete st.haltCap; // only a round-cap halt is resumable through kukulu_flight_options
   delete st.haltStream;
+  const countersNote = countGuardReblocks();
   const commit = withRollback([P.state, P.progress, P.feedback], () => {
     saveState(st);
     if (exists(P.lock)) fs.unlinkSync(P.lock);
     if (cfg().policies.feedback) appendFeedback("controller", `Run halted: ${reason}`, "halt", "auto");
+    if (countersNote && cfg().policies.feedback) appendFeedback("controller", countersNote, "metrics", "auto");
     return gitCommitIfChanged([P.state, P.progress, P.feedback], "chore: run halted", { stage: "controller" });
   });
   const g = gitFacts();
   const dirty = git(["status", "--porcelain"], { allowFail: true }).out !== "";
-  return { halted: reason, branch: g.branch, head: g.head, commit, dirty, next: RESUME_HINT };
+  return { halted: reason, branch: g.branch, head: g.head, commit, dirty, next: RESUME_HINT, ...(countersNote ? { countersNote } : {}) };
 }
 
 const RESUME_HINT = 'once the cause is fixed, call kukulu_run_resume({ reason: "<what you fixed>" })';
@@ -4633,49 +4829,198 @@ function summaryCommit({ content } = {}) {
  * the last record when it is a `start`. A new stage closes it and opens another; `done` and `halt` close it;
  * the same stage and round again writes nothing.
  */
-function recordTimeline(res) {
+function recordTimeline(res, activation = null, afterReset = () => {}) {
   const st = loadState();
   const timeline = Array.isArray(st.timeline) ? st.timeline : [];
-  const last = timeline.at(-1);
+  // An activate record is not a span edge: the open span is the last start or end.
+  const last = timeline.filter((r) => r.event === "start" || r.event === "end").at(-1);
   const open = last?.event === "start" ? last : null;
-  const at = new Date().toISOString();
+  const at = activation?.beforeAt ?? new Date().toISOString();
   const records = [];
+  const changed = !open || open.stage !== res.stage || open.round !== res.round;
   if (res.stage === "done" || res.stage === "halt") {
     if (open) records.push({ event: "end", stage: open.stage, round: open.round, at });
-  } else if (!open || open.stage !== res.stage || open.round !== res.round) {
+    if (activation?.error) records.push(activationRecord(activation));
+  } else if (changed) {
     if (open) records.push({ event: "end", stage: open.stage, round: open.round, at });
-    records.push({ event: "start", stage: res.stage, round: res.round, at });
+    if (activation) records.push(activationRecord(activation));
+    records.push({ event: "start", stage: res.stage, round: res.round, at: activation?.afterAt ?? at });
+  } else if (activation) {
+    records.push(activationRecord(activation));
   }
   if (!records.length) return res;
+  // A flight's first record starts its metrics afresh: the directory holds one flight's usage, never two.
+  if (!timeline.length) {
+    try {
+      for (const f of fs.readdirSync(P.metricsDir, { withFileTypes: true })) if (f.isFile()) fs.rmSync(path.join(P.metricsDir, f.name), { force: true });
+    } catch {
+      // no directory, or a file that will not go: the next flight's records overwrite or append regardless
+    }
+  }
+  // Counting waits until the directory is emptied, or a flight's first record would delete its own count.
+  afterReset();
   const crPaths = cleanroomPaths(st);
-  const paths = [P.state, ...crPaths];
+  // The metrics file is written when a flight ends or halts and this call wrote a record (SPEC C-03). A path that is
+  // a directory cannot be snapshotted, so it is left out and reported instead.
+  const wantMetrics = (res.stage === "done" || res.stage === "halt") && resolvePolicies().policies.metrics === true;
+  const metricsBlocked = wantMetrics && exists(P.metrics) && fs.statSync(P.metrics).isDirectory();
+  const paths = [P.state, P.feedback, ...(wantMetrics && !metricsBlocked ? [P.metrics] : []), ...crPaths];
+  let metricsNote = metricsBlocked ? "METRICS.json was not written: docs/METRICS.json is a directory" : null;
   // The timeline is bookkeeping: when it cannot be committed (a signer that is down, say) the files are put back and
   // the decision is returned as it was, with a note; the next call records the same transition again.
   try {
     withRollback(paths, () => {
     st.timeline = [...timeline, ...records];
+    noteHarness(st);
+    // A runner that did not serve its model halts the flight: not a round-cap halt, so kukulu_run_resume clears it.
+    if (activation?.error) {
+      st.halted = res.reason;
+      delete st.haltCap;
+    }
     saveState(st);
+    // Drift is friction to note, never a halt (SPEC A-03, A-04): the runner answered as another model than it was asked
+    // for, or the role's served id differs from the one an earlier activation of the same stage used.
+    if (activation && !activation.error && cfg().policies.feedback) {
+      const normal = (m) => normalizeModel(m);
+      if (activation.reported !== null && normal(activation.reported) !== normal(activation.served)) {
+        appendFeedback("controller", `runner ${activation.runner} answered as ${activation.reported} when asked for ${activation.served} (stage ${activation.stage}, round ${activation.round}); the chain keeps both`, "runner-drift", "auto");
+      }
+      const earlier = timeline.filter((r) => r.event === "activate" && r.ok === true && r.stage === activation.stage).at(-1);
+      if (earlier && earlier.served !== activation.served) {
+        appendFeedback("controller", `the ${ROLE_OF_STAGE[activation.stage]} was served as ${earlier.served} at an earlier activation and is ${activation.served} now (runner ${activation.runner}); the routing changed mid-flight`, "runner-drift", "auto");
+      }
+    }
     if (crPaths.length) {
-      for (const r of records) {
+      for (const r of records.filter((x) => x.event !== "activate")) {
         appendEntry(cleanroomLogPath(), {
           kind: "stage",
           stage: r.stage,
           role: "controller",
           ...(r.event === "start" ? { model: res.model ?? null } : {}),
-          data: { event: r.event, stage: r.stage, round: r.round, ...(r.event === "start" ? { agent: res.agent ?? null, model: res.model ?? null } : {}) },
+          data: {
+            event: r.event,
+            stage: r.stage,
+            round: r.round,
+            ...(r.event === "start" ? { agent: res.agent ?? null, model: res.model ?? null } : {}),
+            // The model asked for, the model the runner reports and the wait: the token's name or value is never here.
+            ...(r.event === "start" && activation && !activation.error ? { activate: { runner: activation.runner, served: activation.served, reported: activation.reported, ms: activation.ms } } : {}),
+          },
         });
       }
     }
-    if (gitFacts().inRepo) gitCommitIfChanged(paths, records.at(-1).event === "start" ? `chore: stage ${records.at(-1).stage}` : "chore: stage end", { stage: "controller", noSigningFallback: true });
+    if (wantMetrics && !metricsBlocked) {
+      // Built after the state is saved, so the metrics include the records just written. A failure here never changes the decision or the timeline.
+      try {
+        fs.mkdirSync(path.dirname(P.metrics), { recursive: true });
+        fs.writeFileSync(P.metrics, `${JSON.stringify(buildMetrics(metricsInputs()), null, 2)}\n`);
+      } catch (e) {
+        metricsNote = `METRICS.json was not written: ${(e instanceof Error ? e.message : String(e)).split("\n")[0]}`;
+      }
+    }
+    if (metricsNote && cfg().policies.feedback && !(exists(P.feedback) && read(P.feedback).includes(JSON.stringify(metricsNote)))) appendFeedback("controller", metricsNote, "metrics", "auto");
+    if (gitFacts().inRepo) gitCommitIfChanged(paths, records.at(-1).event === "end" || activation?.error ? "chore: stage end" : `chore: stage ${records.at(-1).stage}`, { stage: "controller", noSigningFallback: true });
     });
   } catch (e) {
     return { ...res, timelineNote: `the stage timeline was not recorded this call: ${e instanceof Error ? e.message : String(e)}` };
   }
-  return res;
+  return metricsNote ? { ...res, metricsNote } : res;
+}
+
+/** The timeline's activate record: the warm-up, between the span that ended and the one that starts. */
+function activationRecord(a) {
+  return { event: "activate", stage: a.stage, round: a.round, runner: a.runner, served: a.served, reported: a.reported, ms: a.ms, ok: !a.error, at: a.afterAt };
+}
+
+// The follow-up listing only decorates a halt's reason, so its wait is fixed, not a tunable.
+const RUNNER_LIST_TIMEOUT_MS = 10000;
+
+/** One run of the probe script for a role's runner, through spawnSync; the last JSON line it printed, or a failure of our own making. */
+function runProbe(e, mode, timeoutMs) {
+  const probePath = envVar("RUNNER_PROBE") || path.join(PLUGIN_ROOT, "scripts", "runner-probe.mjs");
+  const args = [probePath, "--endpoint", e.endpoint, ...(mode === "warm" ? ["--warm", e.served] : ["--models"]), "--timeout-ms", String(timeoutMs), ...(e.tokenEnv ? ["--token-env", e.tokenEnv] : [])];
+  const started = Date.now();
+  const r = spawnSync(process.execPath, args, { encoding: "utf8", timeout: timeoutMs + RUNNER_BACKSTOP_MS, env: process.env });
+  let line = null;
+  try {
+    line = JSON.parse((r.stdout || "").trim().split("\n").filter(Boolean).pop());
+  } catch {
+    line = null;
+  }
+  if (!line || typeof line !== "object") line = { ok: false, status: null, ms: Date.now() - started, error: `the probe printed no result (exit ${r.status})` };
+  return line;
+}
+
+/**
+ * Warm a role's runner (SPEC A-03): when its runner is configured with `activate: "warm"`, run the probe, wait for
+ * the answer and return `{ runner, served, reported, ms }`, or the same with `error` and the reason for a halt when
+ * the runner did not serve its model. Null when no probe applies. The request is the probe script's, run through
+ * spawnSync; the server opens no socket and never reads the token variable, only passes its own environment on.
+ */
+function activateRunner(role) {
+  const e = resolveRouting().roles[role];
+  if (!e || !e.runner || e.runner === "anthropic" || e.activate !== "warm") return null;
+  const line = runProbe(e, "warm", e.activateTimeoutMs);
+  const base = { runner: e.runner, served: e.served, reported: line.ok ? (line.reported ?? null) : null, ms: Number.isFinite(line.ms) ? line.ms : 0 };
+  if (line.ok) return base;
+  const error = String(line.error ?? "the runner did not answer");
+  const list = runProbe(e, "models", Math.min(e.activateTimeoutMs, RUNNER_LIST_TIMEOUT_MS));
+  const ids = list.ok && Array.isArray(list.served) && list.served.length ? list.served.join(", ") : "nothing it would list";
+  const reason = `runner ${e.runner} did not serve ${e.served} within ${e.activateTimeoutMs} ms (${error}). It serves: ${ids}. Fix the runner or the routing, then resume: kukulu_run_resume({ reason: "<what you fixed>" })`;
+  return { ...base, error, reason };
+}
+
+const COUNTER_START = { verifyRuns: 0, verifyFailures: 0, guardReblocks: null, tasksReopened: 0, activateFailures: 0 };
+
+/** The metrics counters (.kukulu/metrics/counters.json), or null when the file is absent or unreadable. */
+function readCounters() {
+  try {
+    const c = JSON.parse(fs.readFileSync(P.counters, "utf8"));
+    return c && typeof c === "object" && !Array.isArray(c) ? c : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Add to one counter. Never throws: a file that cannot be written is a one-line note for the caller to pass on, else null. */
+function bumpCounter(name, by = 1) {
+  try {
+    const c = { ...COUNTER_START, ...(readCounters() ?? {}) };
+    c[name] = (typeof c[name] === "number" ? c[name] : 0) + by;
+    fs.mkdirSync(P.metricsDir, { recursive: true });
+    fs.writeFileSync(P.counters, `${JSON.stringify(c)}\n`);
+    ensureMetricsExcluded();
+    return null;
+  } catch (e) {
+    return `the ${name} counter was not recorded: ${e instanceof Error ? e.message : String(e)}`;
+  }
 }
 
 function next() {
-  return recordTimeline(nextDecision());
+  try {
+    ensureMetricsExcluded();
+  } catch {
+    // the exclusion is a convenience; a decision is never refused for it
+  }
+  let res = nextDecision();
+  let activation = null;
+  let countersNote = null;
+  if (ROLE_OF_STAGE[res.stage] && res.restartRequired === false) {
+    const beforeAt = new Date().toISOString();
+    const a = activateRunner(ROLE_OF_STAGE[res.stage]);
+    if (a) {
+      const { reason, ...shown } = a;
+      activation = { ...shown, stage: res.stage, round: res.round, beforeAt, afterAt: new Date().toISOString() };
+      if (a.error) {
+        // The stage does not start: the answer is the halt, shaped as nextDecision's own halts are.
+        res = nextDecision(reason);
+      }
+      res.activation = shown;
+    }
+  }
+  const out = recordTimeline(res, activation, () => {
+    if (activation?.error) countersNote = bumpCounter("activateFailures");
+  });
+  return countersNote ? { ...out, countersNote } : out;
 }
 
 /** Whole seconds each stage has run, from the timeline's spans; an open span counts up to now. */
@@ -4770,7 +5115,35 @@ function changelogVerdict() {
   return { breaking: lines.slice(start + 1, end).some((l) => /^###\s+Breaking changes\s*$/i.test(l)), heading: lines[start] };
 }
 
-function prFinalize({ breaking, resign } = {}) {
+/** `kukulu_pr_finalize`: the work is `prFinalizeCore`; a metrics failure rides along on the result as `metricsNote` and changes nothing else. */
+function prFinalize(args = {}) {
+  const ctx = { metricsNote: null, done: false };
+  const result = prFinalizeCore(args, ctx);
+  return ctx.metricsNote ? { ...result, metricsNote: ctx.metricsNote } : result;
+}
+
+/**
+ * Commit the flight's metrics as `chore: flight metrics` (SPEC C-03), beside the summary: in the archived flight's directory,
+ * else docs/. Called after every refusal that precedes a write and before the first push, so the file reaches the pull request.
+ * It never fails the call: a note goes to `ctx.metricsNote`. No feedback entry: after an archive the feedback file is the next flight's.
+ */
+function commitFlightMetrics(st, cc, ctx) {
+  if (cc.policies.metrics !== true || ctx.done) return;
+  ctx.done = true;
+  try {
+    const home = archivedFlightDir(st);
+    const file = home ? path.join(home, "METRICS.json") : P.metrics;
+    withRollback([file], () => {
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, `${JSON.stringify(buildMetrics(metricsInputs()), null, 2)}\n`);
+      gitCommitIfChanged([file], "chore: flight metrics", { stage: "summarize" });
+    });
+  } catch (e) {
+    ctx.metricsNote = `METRICS.json was not written: ${(e instanceof Error ? e.message : String(e)).split("\n")[0]}`;
+  }
+}
+
+function prFinalizeCore({ breaking, resign } = {}, ctx) {
   const st = loadState();
   let summarized = st.summarized === true;
   if (!summarized && st.archived) {
@@ -4814,6 +5187,7 @@ function prFinalize({ breaking, resign } = {}) {
   const summaryPath = exists(P.summary) ? P.summary : st.archived && exists(path.join(ROOT, st.archived.dir, "SUMMARY.md")) ? path.join(ROOT, st.archived.dir, "SUMMARY.md") : null;
 
   const awaiting = (check) => {
+    commitFlightMetrics(st, cc, ctx);
     const prior = st.awaitingSigning;
     st.breaking = brk;
     st.awaitingSigning = { unsigned: check.unsigned, first: check.first, since: prior?.since || new Date().toISOString() };
@@ -4854,6 +5228,8 @@ function prFinalize({ breaking, resign } = {}) {
       putOverrideBack();
       throw e;
     }
+    // Written before the rebase, so the rebase signs it.
+    commitFlightMetrics(st, cc, ctx);
     // The operator's instruction goes into the chain, and into a commit the rebase will re-sign, before the rebase needs a clean tree.
     const crPaths = cleanroomPaths(st);
     if (crPaths.length) {
@@ -4904,6 +5280,8 @@ function prFinalize({ breaking, resign } = {}) {
     saveState(st);
     gitCommitIfChanged([P.state], "chore: finalize flight", { stage: "summarize" });
   });
+  // After a manual re-sign cleared the override, so the commit is signed like the rest; still before the call's first push.
+  commitFlightMetrics(st, cc, ctx);
   const after = signedCheck(mb);
   if (after.unsigned && expected) return awaiting(after);
 
@@ -4958,7 +5336,7 @@ function cleanroomMovables(st) {
 }
 
 /** The files an archive moves, as [absolute path, repo-relative name]; a move keeps each file's name. */
-const archivedFiles = () => [P.plan, P.progress, P.handoff, P.review, P.summary, P.similarityDoc, P.config, P.state, P.feedback].map((abs) => [abs, rel(abs)]);
+const archivedFiles = () => [P.plan, P.progress, P.handoff, P.review, P.summary, P.metrics, P.similarityDoc, P.config, P.state, P.feedback].map((abs) => [abs, rel(abs)]);
 
 /**
  * Move a summarized flight's artifacts into docs/flights/<slug>/ so the
@@ -5446,8 +5824,8 @@ const S = (props, required = []) => ({
   additionalProperties: false,
 });
 const TOOLS = [
-  { name: "kukulu_status", description: "Everything the pipeline knows from disk: which docs exist, task counts by state, branch/base/head, lock, round, review verdict, review.mutationFixRounds, and the pull request's CI checks as prChecks (every gh call bounded to 30 s). Read-only.", inputSchema: S({}), fn: () => ({ ...status(), prChecks: prChecks() }) },
-  { name: "kukulu_next", description: "Deterministic stage selection: returns { stage, agent, agentFallback, fallbackAgent, restartRequired, model, agentModel, agentModelExact, round, reason, prompt, streams? }. stage is plan | implement | review | summarize | done | halt. agentModel is the value to pass as the Agent tool's model when agentFallback is true (an alias, or null to pass none); agentModelExact is false when a full claude-* id was mapped to its family alias. restartRequired is true only when the routed model cannot be reached without relaunching the session. Writes only the stage timeline (state.timeline, and in clean-room mode a stage entry in the chain, committed as chore: stage <stage>) and, when a parallel wave's partition is invalid, a record (state, one feedback entry, one commit, only on a build branch) that the wave runs serially. When streams is present, spawn one implementer per entry, all at once, and wait for all of them.", inputSchema: S({}), fn: next },
+  { name: "kukulu_status", description: "Everything the pipeline knows from disk: which docs exist, task counts by state, branch/base/head, lock, round, review verdict, review.mutationFixRounds, and the pull request's CI checks as prChecks (every gh call bounded to 30 s). It also reports counters (the friction counts of .kukulu/metrics/counters.json), harness and activateSeconds (per runner, the total wait of its successful activations, in whole seconds). Read-only.", inputSchema: S({}), fn: () => ({ ...status(), prChecks: prChecks() }) },
+  { name: "kukulu_next", description: "Deterministic stage selection: returns { stage, agent, agentFallback, fallbackAgent, restartRequired, model, agentModel, agentModelExact, round, reason, prompt, streams? }. stage is plan | implement | review | summarize | done | halt. agentModel is the value to pass as the Agent tool's model when agentFallback is true (an alias, or null to pass none); agentModelExact is false when a full claude-* id was mapped to its family alias. restartRequired is true only when the routed model cannot be reached without relaunching the session. Before a stage whose role runs on a runner with activate \"warm\" it runs the runner probe and waits as long as a model load takes, then returns activation { runner, served, reported, ms }; a runner that does not serve its model returns a halt naming the runner, the served id and what it does serve (fix it, then kukulu_run_resume). It writes the stage timeline (state.timeline, and in clean-room mode a stage entry in the chain, committed as chore: stage <stage>), may append runner-drift and metrics feedback entries, and on done or halt writes docs/METRICS.json into that chore: stage end commit when policies.metrics is on; the result may carry metricsNote and countersNote when a metrics file or counter could not be written. When a parallel wave's partition is invalid, it also writes a record (state, one feedback entry, one commit, only on a build branch) that the wave runs serially. When streams is present, spawn one implementer per entry, all at once, and wait for all of them.", inputSchema: S({}), fn: next },
   { name: "kukulu_plan_commit", description: "Validate the plan as a whole and commit it: docs/PLAN.md, docs/PROGRESS.md, docs/kukulu.json and CLAUDE.md must exist and agree (task headings, numbering, dependencies, streams, config, from references). Every problem is listed at once, as numbered lines and as structuredContent.problems [{ check, id?, message }]; nothing is committed while any remain. With renumber: true (only before any run has started) it first renumbers split ids everywhere. On success it commits 'plan: derive build plan from SPEC' and returns { commit, tasks, phases, waves, renumbered }. For the planner, as its last step.", inputSchema: S({ renumber: { type: "boolean", description: "rewrite split or out-of-sequence task ids (such as P1-02a) to a clean P<n>-01.. sequence everywhere they appear, then validate and commit; refused once a run has started" } }), fn: planCommit },
   { name: "kukulu_run_start", description: "Begin (or resume) an implementation run: create/reuse the build branch, arm the implement guard lock, stamp Branch/Started in PROGRESS.md, commit. Idempotent. The result carries signingNote when commits are or will be unsigned and says whether kukulu_pr_finalize will wait for signatures. With stream, also create (or resume) that stream's git worktree for a parallel wave, run parallel.setup in it, and return its cwd: do all of that stream's work inside cwd.", inputSchema: S({ stream: { type: "string", description: "a stream of the current parallel wave, when kukulu_next handed you one" } }), fn: runStart },
   { name: "kukulu_task_next", description: "Select the next task (first [~], else first [ ]), auto-skip tasks whose dependencies are blocked, mark it [~], and return its PLAN.md text, its dependencies' log entries (dependencyLogs) and its own log entries (taskLog, null for a fresh task; an unblock or reopen reason is in it). Returns { done: true } when none remain.", inputSchema: S({ stream: { type: "string", description: "restrict to this stream's tasks (parallel waves only)" } }), fn: taskNext },
@@ -5556,7 +5934,7 @@ const TOOLS = [
     fn: attest,
   },
   { name: "kukulu_flight_archive", description: "Archive a summarized flight so the repository can run its next flight: move PLAN, PROGRESS, HANDOFF, REVIEW, SUMMARY, kukulu.json, .kukulu/state.json and .kukulu/feedback.jsonl into docs/flights/<slug>/ and docs/attestation/ into docs/flights/<slug>/attestation/ (copying SPEC.md, which stays), write a fresh state.json, commit 'chore: archive flight <slug>' and push per policy. slug defaults to the 'flight' key in docs/kukulu.json. Refused unless the flight is summarized, no run is armed, and the tree is clean. All-or-nothing. Returns { slug, dir, moved, copied, commit, push }.", inputSchema: S({ slug: { type: "string", description: "lowercase letters, digits and - (at most 40 characters); defaults to docs/kukulu.json's flight" } }), fn: flightArchive },
-  { name: "kukulu_pr_finalize", description: "End a flight. Checks that every commit since the merge base with baseBranch is signed (judged from the commits, not from state): if so, or if the policy does not expect signatures (policies.signing off, or auto with signing never configured; the result says so in signatures), marks the draft PR ready and, unless breaking is true, enables auto-merge (gh pr merge --auto, never an immediate merge), per policies.finalize and policies.mergeMethod. If any commit is unsigned and signatures are expected the PR stays a draft, state.awaitingSigning is recorded, the steps are appended to SUMMARY.md, and kukulu_next reports done until it is resolved. breaking is required on the first call unless CHANGELOG.md decides it. Returns { signed, unsigned, ready, merge, signatures, breaking, breakingSource, awaitingSigning, resigned, push, pr, next? }; signatures is required or not required: <why>; merge is enabled, skipped: breaking, skipped: policy, skipped: no pull request, skipped: awaiting signing or unavailable: <why>.", inputSchema: S({ breaking: { type: "boolean", description: "whether this flight is a breaking change, so its PR must not auto-merge; optional when CHANGELOG.md decides (its newest entry has or lacks a Breaking changes section; a disagreeing value is refused), required on the first call otherwise, remembered after" }, resign: { type: "boolean", description: "HUMAN-INITIATED ONLY: never pass this on your own. Re-sign every commit of the branch (git rebase -f --rebase-merges --gpg-sign), force-push with lease, then finalize. For an operator who has unlocked the signing agent after an awaiting-signing result" } }), fn: prFinalize },
+  { name: "kukulu_pr_finalize", description: "End a flight. When policies.metrics is on it first commits the flight's usage as chore: flight metrics (docs/METRICS.json, or its archived copy under docs/flights/<slug>/), before the push; the result may carry metricsNote when the file could not be written. Checks that every commit since the merge base with baseBranch is signed (judged from the commits, not from state): if so, or if the policy does not expect signatures (policies.signing off, or auto with signing never configured; the result says so in signatures), marks the draft PR ready and, unless breaking is true, enables auto-merge (gh pr merge --auto, never an immediate merge), per policies.finalize and policies.mergeMethod. If any commit is unsigned and signatures are expected the PR stays a draft, state.awaitingSigning is recorded, the steps are appended to SUMMARY.md, and kukulu_next reports done until it is resolved. breaking is required on the first call unless CHANGELOG.md decides it. Returns { signed, unsigned, ready, merge, signatures, breaking, breakingSource, awaitingSigning, resigned, push, pr, next? }; signatures is required or not required: <why>; merge is enabled, skipped: breaking, skipped: policy, skipped: no pull request, skipped: awaiting signing or unavailable: <why>.", inputSchema: S({ breaking: { type: "boolean", description: "whether this flight is a breaking change, so its PR must not auto-merge; optional when CHANGELOG.md decides (its newest entry has or lacks a Breaking changes section; a disagreeing value is refused), required on the first call otherwise, remembered after" }, resign: { type: "boolean", description: "HUMAN-INITIATED ONLY: never pass this on your own. Re-sign every commit of the branch (git rebase -f --rebase-merges --gpg-sign), force-push with lease, then finalize. For an operator who has unlocked the signing agent after an awaiting-signing result" } }), fn: prFinalize },
   {
     name: "kukulu_release",
     description: "Release the flight that origin/<base> says was archived last, after a human has merged its pull request: it fetches origin and reads the merged flight from origin/<base>, so it needs no checkout and works from any branch. Tags the merge commit v<x.y.z> from CHANGELOG.md's newest numbered entry (signed when tag.gpgsign is true or the flight's commits were signed), pushes the tag, and creates a GitHub release from that entry (a draft unless publish is true). Refuses before the tag when the fetch fails, origin/<base> has no archived flight, the PR is not MERGED, the CHANGELOG has no numbered entry at the merge commit, or the tag already exists (unless it is at the merge commit and has no release yet, when only the release is created). A repeated call creates only what is missing. Last, fast-forwards the local base only when it is checked out with no tracked changes. For the flight controller, on the operator's request only. Returns { tag, sha, release, draft, flight: { slug, dir, from }, localState, fastForward }.",
@@ -5570,6 +5948,7 @@ const TOOLS = [
     fn: agentsSync,
   },
   { name: "kukulu_config_show", description: "The merged routing config with the source of every role/key (default | global | profile:<name> | project) and the global file path. Read-only.", inputSchema: S({}), fn: configShow },
+  { name: "kukulu_metrics", description: "The flight's metrics object (docs/metrics.md): outcome, wall time, rounds, per-role token use and model wait time, tasks, friction and the tree, computed now from what is on disk. Read-only: writes nothing and makes no commit.", inputSchema: S({}), fn: metricsTool },
 ];
 
 function send(msg) {
@@ -5582,6 +5961,9 @@ function handle(req) {
   const fail = (code, message) => id !== undefined && send({ jsonrpc: "2.0", id, error: { code, message } });
   switch (method) {
     case "initialize":
+      if (typeof params?.clientInfo?.name === "string" && params.clientInfo.name) {
+        harnessClient = { name: params.clientInfo.name, version: typeof params.clientInfo.version === "string" ? params.clientInfo.version : null };
+      }
       return reply({
         protocolVersion: params?.protocolVersion || "2025-06-18",
         capabilities: { tools: {} },
