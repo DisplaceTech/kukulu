@@ -348,6 +348,8 @@ case "$out" in
 esac
 ```
 
+A runner in the global file may also carry `activate`, `activateTimeoutMs`, `servedAs` and `tokenEnv`. `activate` defaults to `"none"`; `activateTimeoutMs` defaults to 1800000 ms (30 minutes, ⚠️ ASSUMPTION) and must be below the plugin's MCP tool-call limit of 24 hours; see [routing.md](./routing.md#runners) for what each does.
+
 `kukulu_config_show` prints the merged config and the source of every value; run it whenever the resolved model for a role is not what you expected.
 
 ## Parallel streams

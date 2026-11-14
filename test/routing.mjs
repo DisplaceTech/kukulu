@@ -72,7 +72,7 @@ await withRunners({ runners: RUNNERS_OK, roles: { implementer: { model: "spark/b
   eq(cfg.roles.summarizer.locality, "unknown", "...with locality unknown");
   eq(cfg.roles.summarizer.source.runner, "none", "...and source none");
   const rows = cfg.table.split("\n");
-  eq(rows[0], "| role | agent | model | runner | effort | source |", "the routing table has a runner column after model");
+  eq(rows[0], "| role | agent | model | runner | served | activate | effort | source |", "the routing table has runner, served and activate columns");
   like(rows[3], /\| spark-big \|/, "...naming the runner in a row");
   like(rows[5], /\| other\/x \| – \|/, "...and – for an unmatched model");
 });
@@ -93,6 +93,51 @@ for (const [runners, re, label] of [
 ]) {
   await withRunners({ runners }, async ({ call }) => {
     isError(await call("kukulu_config_show"), re, label);
+  });
+}
+
+// ---------------------------------------------------------------- activation keys and the served id (P1-02)
+
+{
+  const limit = JSON.parse(fs.readFileSync(path.join(ROOT, ".mcp.json"), "utf8")).mcpServers.kukulu.timeout;
+  const A = (extra) => ({ a: { endpoint: "http://h:1", locality: "local", match: ["x/"], ...extra } });
+  for (const [runners, re, label] of [
+    [A({ activate: "hot" }), /runners\.a\.activate must be "none" or "warm"/, "runners.<name>.activate 'hot' is refused"],
+    [A({ activateTimeoutMs: 999 }), /runners\.a\.activateTimeoutMs must be an integer of at least 1000/, "activateTimeoutMs 999 is refused"],
+    [A({ activateTimeoutMs: 1000.5 }), /runners\.a\.activateTimeoutMs must be an integer of at least 1000/, "activateTimeoutMs 1000.5 is refused"],
+    [A({ activateTimeoutMs: limit }), new RegExp(`runners\\.a\\.activateTimeoutMs \\(${limit} ms\\) is at or above the MCP timeout \\(${limit} ms from \\.mcp\\.json\\); the client would abort kukulu_next first\\. Lower it, or raise the timeout`), "activateTimeoutMs at the MCP timeout is refused"],
+    [A({ servedAs: ["x"] }), /runners\.a\.servedAs must map a model string to a non-empty string/, "servedAs as an array is refused"],
+    [A({ servedAs: { "x/m": "" } }), /runners\.a\.servedAs must map a model string to a non-empty string/, "servedAs with an empty value is refused"],
+    [A({ tokenEnv: "spark-token" }), /runners\.a\.tokenEnv must be an environment variable name such as SPARK_TOKEN/, "tokenEnv 'spark-token' is refused"],
+    [{ a: { match: ["x/"], activate: "warm" } }, /runners\.a\.activate is "warm" but the runner has no endpoint to send the request to; add endpoint, or set activate to "none"/, "activate warm without an endpoint is refused"],
+    [{ anthropic: { activate: "warm", endpoint: "http://h:1" } }, /runners\.anthropic is reserved for the built-in Anthropic runner/, "the four keys on a runner named anthropic are refused as reserved"],
+  ]) {
+    await withRunners({ runners }, async ({ call }) => {
+      isError(await call("kukulu_config_show"), re, label);
+    });
+  }
+  await withRunners({ runners: A({ activateTimeoutMs: limit - 1 }) }, async ({ call }) => {
+    ok(!(await call("kukulu_config_show")).error, "an activateTimeoutMs one below the MCP timeout is accepted");
+  });
+  const roles = { implementer: { model: "spark/qwen38-27b" }, reviewer: { model: "spark/big-one" }, summarizer: { model: "x/x" } };
+  await withRunners({ runners: { ...RUNNERS_OK, ...A({ servedAs: { "x/x": "custom-id" }, tokenEnv: "SPARK_TOKEN", activate: "warm" }) }, roles }, async ({ call }) => {
+    const cfg = await call("kukulu_config_show");
+    eq(cfg.roles.implementer.served, "qwen38-27b", "the default strips the longest matching prefix");
+    eq(cfg.roles.reviewer.served, "one", "...the longer of two prefixes wins (spark/big- over spark/)");
+    eq(cfg.roles.summarizer.served, "custom-id", "servedAs overrides the strip");
+    eq(cfg.roles.summarizer.activate + "|" + cfg.roles.implementer.activate, "warm|none", "activate is carried per role, none by default");
+    eq(cfg.roles.implementer.activateTimeoutMs, 1800000, "activateTimeoutMs defaults to thirty minutes");
+    eq(cfg.roles.planner.served + "|" + cfg.roles.planner.activate + "|" + cfg.roles.planner.activateTimeoutMs, "null|none|null", "an anthropic role has served null and activate none");
+    const rows = cfg.table.split("\n");
+    like(rows[3], /\| spark \| qwen38-27b \| none \|/, "the routing table shows the served id and activate");
+    like(rows[2], /\| anthropic \| – \| – \|/, "...and – for both on an anthropic role");
+    ok(cfg.runners.a.tokenEnv === "SPARK_TOKEN" && cfg.runners.a.activate === "warm" && cfg.runners.a.servedAs["x/x"] === "custom-id", "kukulu_config_show echoes the new runner keys");
+  });
+  await withRunners({ runners: { s: { endpoint: "http://h:1", locality: "local", match: ["spark/qwen"] } }, roles: { implementer: { model: "spark/qwen" } } }, async ({ call }) => {
+    isError(await call("kukulu_config_show"), /runners\.s\.match entry 'spark\/qwen' equals the model string 'spark\/qwen', so no model id is left to ask the runner for; add a servedAs entry/, "a match prefix equal to the model string is refused");
+  });
+  await withRunners({ runners: { s: { endpoint: "http://h:1", locality: "local", match: ["spark/qwen"], servedAs: { "spark/qwen": "qwen" } } }, roles: { implementer: { model: "spark/qwen" } } }, async ({ call }) => {
+    eq((await call("kukulu_config_show")).roles.implementer.served, "qwen", "a servedAs entry rescues a prefix equal to the model");
   });
 }
 

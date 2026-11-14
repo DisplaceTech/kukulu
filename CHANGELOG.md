@@ -9,6 +9,7 @@ All notable changes to this plugin. Format follows
 ### Added
 
 - `scripts/runner-probe.mjs` sends one request to a runner and prints one JSON line, without ever printing the runner's token (A-01).
+- Runner keys `activate`, `activateTimeoutMs`, `servedAs` and `tokenEnv`, and the served id in `kukulu_config_show` and the routing table (A-02).
 - The usage record: one schema for every harness, validated by `validateUsageRecord` in `mcp/metrics.mjs` (B-01).
 - Every flight records token use per role; in general mode to `.kukulu/metrics/usage.jsonl`, excluded per clone (B-02, §5.4).
 - The controller session's usage is recorded on every `Stop` (B-03).

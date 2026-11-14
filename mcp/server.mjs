@@ -1408,13 +1408,22 @@ function validateRolesBlock(roles, where, { allowPolicies = false } = {}) {
   }
 }
 
-const RUNNER_KEYS = ["endpoint", "locality", "match", "identities"];
+const RUNNER_KEYS = ["endpoint", "locality", "match", "identities", "activate", "activateTimeoutMs", "servedAs", "tokenEnv"];
+const TOKEN_ENV = /^[A-Z][A-Z0-9_]*$/;
 const RUNNER_NAME = /^[a-z0-9][a-z0-9-]{0,39}$/;
 const DIGEST = /^sha256:[0-9a-f]{64}$/;
 const ANTHROPIC_ENDPOINT = "https://api.anthropic.com";
 
-/** `where` names the block itself, e.g. "global config <path> runners". Returns the map, `{}` when absent. */
-function validateRunners(runners, where) {
+/** A runner block's activation keys with their defaults. The timeout is an ⚠️ ASSUMPTION (SPEC 5.6) and lives only on its line below. */
+function runnerActivation(r) {
+  return {
+    activate: r.activate ?? "none",
+    activateTimeoutMs: r.activateTimeoutMs ?? 1800000,
+  };
+}
+
+/** `where` names the block itself, e.g. "global config <path> runners". `limit` is the MCP tool-call limit, or null. Returns the map, `{}` when absent. */
+function validateRunners(runners, where, limit = mcpTimeoutMs()) {
   if (runners === undefined) return {};
   if (typeof runners !== "object" || runners === null || Array.isArray(runners)) {
     throw new ToolError(`${where} must be an object`);
@@ -1470,15 +1479,41 @@ function validateRunners(runners, where) {
             throw new ToolError(`${where}.${name}.identities[${JSON.stringify(model)}].weights must be sha256:<64 hex>`);
           }
         }
+      } else if (k === "activate") {
+        if (v !== "none" && v !== "warm") throw new ToolError(`${where}.${name}.activate must be "none" or "warm"`);
+      } else if (k === "activateTimeoutMs") {
+        if (!Number.isInteger(v) || v < 1000) throw new ToolError(`${where}.${name}.activateTimeoutMs must be an integer of at least 1000`);
+      } else if (k === "servedAs") {
+        if (typeof v !== "object" || v === null || Array.isArray(v) || Object.entries(v).some(([m, s]) => !m || typeof s !== "string" || !s)) {
+          throw new ToolError(`${where}.${name}.servedAs must map a model string to a non-empty string`);
+        }
+      } else if (k === "tokenEnv") {
+        if (typeof v !== "string" || !TOKEN_ENV.test(v)) throw new ToolError(`${where}.${name}.tokenEnv must be an environment variable name such as SPARK_TOKEN`);
       }
+    }
+    const act = runnerActivation(block);
+    if (limit !== null && (block.activateTimeoutMs !== undefined || act.activate === "warm") && act.activateTimeoutMs >= limit) {
+      throw new ToolError(`${where}.${name}.activateTimeoutMs (${act.activateTimeoutMs} ms) is at or above the MCP timeout (${limit} ms from .mcp.json); the client would abort kukulu_next first. Lower it, or raise the timeout`);
+    }
+    if (act.activate === "warm" && block.endpoint === undefined) {
+      throw new ToolError(`${where}.${name}.activate is "warm" but the runner has no endpoint to send the request to; add endpoint, or set activate to "none"`);
     }
   }
   return runners;
 }
 
+/** The model id a runner is asked for: the servedAs entry, else the model string without its longest matching prefix. */
+function servedId(runnerName, model, runners) {
+  const r = runners?.[runnerName];
+  if (r?.servedAs?.[model] !== undefined) return r.servedAs[model];
+  let cut = 0;
+  for (const prefix of r?.match || []) if (model.startsWith(prefix) && prefix.length > cut) cut = prefix.length;
+  return model.slice(cut);
+}
+
 /** Which runner serves a model: the built-in one for Anthropic ids, else the longest configured match prefix. */
 function runnerFor(model, runners) {
-  if (isAnthropicModel(model)) return { runner: "anthropic", endpoint: ANTHROPIC_ENDPOINT, locality: "remote" };
+  if (isAnthropicModel(model)) return { runner: "anthropic", endpoint: ANTHROPIC_ENDPOINT, locality: "remote", activate: "none", activateTimeoutMs: null, served: null, tokenEnv: null };
   let best = null;
   let bestLen = -1;
   for (const [name, r] of Object.entries(runners || {})) {
@@ -1486,9 +1521,9 @@ function runnerFor(model, runners) {
       if (model.startsWith(prefix) && prefix.length > bestLen) { best = name; bestLen = prefix.length; }
     }
   }
-  if (best === null) return { runner: null, endpoint: null, locality: "unknown" };
+  if (best === null) return { runner: null, endpoint: null, locality: "unknown", activate: "none", activateTimeoutMs: null, served: null, tokenEnv: null };
   const r = runners[best];
-  return { runner: best, endpoint: r.endpoint ?? null, locality: r.locality ?? "unknown" };
+  return { runner: best, endpoint: r.endpoint ?? null, locality: r.locality ?? "unknown", ...runnerActivation(r), served: servedId(best, model, runners), tokenEnv: r.tokenEnv ?? null };
 }
 
 /** `where` names the key itself, e.g. "global config <path> permissionMode". */
@@ -1597,6 +1632,10 @@ function resolveRouting() {
       effort = undefined;
     }
     const run = runnerFor(model, runners);
+    if (run.served === "") {
+      const prefix = (runners[run.runner].match || []).find((p) => p === model);
+      throw new ToolError(`global config ${global.path} runners.${run.runner}.match entry '${prefix}' equals the model string '${model}', so no model id is left to ask the runner for; add a servedAs entry`);
+    }
     const runnerSource = run.runner === "anthropic" ? "builtin" : run.runner === null ? "none" : "global";
     roles[role] = { model, effort, ...run, source: { model: modelSource, effort: effortSource, runner: runnerSource } };
   }
@@ -1647,9 +1686,10 @@ function routingTable(r) {
     const e = r.roles[role];
     const effort = e.effort !== undefined ? e.effort : "–";
     const source = e.source.model === e.source.effort ? e.source.model : `model:${e.source.model} effort:${e.source.effort}`;
-    return `| ${role} | kukulu-${role} | ${e.model} | ${e.runner ?? "–"} | ${effort} | ${source} |`;
+    const configured = e.runner && e.runner !== "anthropic";
+    return `| ${role} | kukulu-${role} | ${e.model} | ${e.runner ?? "–"} | ${configured ? e.served : "–"} | ${configured ? e.activate : "–"} | ${effort} | ${source} |`;
   });
-  return ["| role | agent | model | runner | effort | source |", "|---|---|---|---|---|---|", ...rows].join("\n");
+  return ["| role | agent | model | runner | served | activate | effort | source |", "|---|---|---|---|---|---|---|---|", ...rows].join("\n");
 }
 
 /** Roles whose generated agent file currently exists on disk. */
@@ -1727,7 +1767,7 @@ function configShow() {
     roles: Object.fromEntries(
       ROLES.map((role) => {
         const e = r.roles[role];
-        return [role, { agent: `kukulu-${role}`, model: e.model, effort: e.effort, runner: e.runner, endpoint: e.endpoint, locality: e.locality, source: e.source }];
+        return [role, { agent: `kukulu-${role}`, model: e.model, effort: e.effort, runner: e.runner, endpoint: e.endpoint, locality: e.locality, activate: e.activate, served: e.served, activateTimeoutMs: e.activateTimeoutMs, source: e.source }];
       }),
     ),
     runners: r.runners,
