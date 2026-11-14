@@ -25,7 +25,7 @@ Started: 2026-11-14T04:52:50.030Z
 - [x] P2-04 buildMetrics: outcome, wall time, rounds, tasks, friction and tree
 - [x] P2-05 buildMetrics: usage, roles and totals
 - [x] P2-06 kukulu_metrics
-- [ ] P2-07 A clean-room flight's metrics read usage from the chain only
+- [x] P2-07 A clean-room flight's metrics read usage from the chain only
 - [ ] P2-08 policies.metrics, and METRICS.json when kukulu_next ends or halts a flight
 - [ ] P2-09 METRICS.json at kukulu_pr_finalize
 - [ ] P2-10 compareMetrics and scripts/compare-flights.mjs
@@ -121,3 +121,7 @@ buildMetrics gains usage/roles/totals (countedRecords, rolesAndTotals); fixtures
 ### P2-06 — e8eb9e9
 
 kukulu_metrics added last in TOOLS (27 tools): metricsInputs() + metricsTool(); docs/mcp-tools.md section, README row + count, plugin/protocol tests. Archived flight read when state.archived && no docs/kukulu.json && empty live timeline. Genesis/chain usage left for P2-07 (usage null with a genesis). metrics suite 122. Interpretation: fresh repo tree zeros not null.
+
+### P2-07 — 3515e92
+
+usageFromChain in metrics.mjs; metricsInputs reads the chain (live or archived cleanroom/log.jsonl) for clean-room flights and never usage.jsonl; genesis mode/enforcement passed. Sums equal rolesUsage and manifest roles. metrics suite 140. Interpretation: archived head includes archive checkpoint.
