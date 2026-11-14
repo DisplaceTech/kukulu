@@ -21,7 +21,7 @@ Started: 2026-11-14T04:52:50.030Z
 - [x] P1-08 Phase 1 end: push and record the manual checks
 - [x] P2-01 Counters for verify runs, verify failures and reopened tasks
 - [x] P2-02 The implement guard keeps a cumulative total, read as guardReblocks
-- [ ] P2-03 The harness's name from initialize
+- [x] P2-03 The harness's name from initialize
 - [ ] P2-04 buildMetrics: outcome, wall time, rounds, tasks, friction and tree
 - [ ] P2-05 buildMetrics: usage, roles and totals
 - [ ] P2-06 kukulu_metrics
@@ -105,3 +105,7 @@ verify() bumps verifyRuns/verifyFailures, taskReopen bumps tasksReopened, status
 ### P2-02 — fae613d
 
 Guard writeLock also writes total (JSON locks only); startRun arms total 0; countGuardReblocks() before lock removal in runFinish/runHalt; run_halt adds a metrics feedback entry on note. guard 84, implement 409, state 381. Interpretation: JSON lock without total starts one at first re-block; total 0 still added.
+
+### P2-03 — bee6a07
+
+harnessClient from initialize clientInfo; noteHarness(st) in startRun and recordTimeline state writes; status.harness. protocol suite 44. Full verify green.
