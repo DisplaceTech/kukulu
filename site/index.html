@@ -437,6 +437,29 @@ git add docs/SPEC.md &amp;&amp; git commit -m "spec"</code></pre>
 <p class="proof-sub">Every claim below comes from the flight’s signed attestation bundle, published in the repository, and anyone can check that bundle offline with one command.</p>
 </div>
 
+<figure class="chart-fig" aria-labelledby="cal-lz4-h">
+<figcaption class="chart-cap">
+<span id="cal-lz4-h" class="chart-q">Did anything leak from lz4_flex?</span>
+<span class="chart-sub">Token 5-gram overlap with lz4_flex, an existing Rust LZ4 library the build could not read (Jaccard index). Lower means more independent.</span>
+</figcaption>
+<div class="chart chart-lz4" role="img" aria-label="Token 5-gram overlap with lz4_flex: cleanlz4 0.22, an unrelated Rust decoder 0.23, a disguised copy of lz4_flex 0.98.">
+<span class="axis" aria-hidden="true"></span>
+<span class="tick tick-start" aria-hidden="true"></span>
+<span class="tick tick-mid" aria-hidden="true"></span>
+<span class="tick tick-end" aria-hidden="true"></span>
+<span class="mark mark-cleanlz4" aria-hidden="true"></span>
+<span class="mark mark-unrelated" aria-hidden="true"></span>
+<span class="mark mark-disguised" aria-hidden="true"></span>
+<span class="chart-label label-cleanlz4" aria-hidden="true">cleanlz4 0.22</span>
+<span class="chart-label label-unrelated" aria-hidden="true">unrelated Rust decoder 0.23</span>
+<span class="chart-label label-disguised" aria-hidden="true">disguised copy 0.98</span>
+<span class="scale scale-min" aria-hidden="true">0</span>
+<span class="scale scale-mid" aria-hidden="true">0.5</span>
+<span class="scale scale-max" aria-hidden="true">1.0</span>
+</div>
+<p class="chart-note">cleanlz4 scores the same as an unrelated Rust decoder, cleanflate, and nowhere near a lightly disguised copy of lz4_flex. Against C LZ4, the reference implementation, identifier overlap is 0.013.</p>
+</figure>
+
 <div class="table-wrap">
 <table class="proof-table">
 <caption>From the signed 0.2.0 attestation bundle in the <a href="https://github.com/ericmann/cleanlz4">cleanlz4</a> repository. Throughput measured on one x86 machine. <b>Limits:</b> one target library; the guard was enforced by hooks, not a sandbox. 0.1.0’s similarity controls were cross-language and did not separate, and its score did not support independence, so 0.2.0 re-scored against same-language controls.</caption>
@@ -465,7 +488,7 @@ git add docs/SPEC.md &amp;&amp; git commit -m "spec"</code></pre>
 </tr>
 <tr>
 <th scope="row">Independent</th>
-<td>Identifier overlap with C LZ4 of 0.013. Token 5-gram overlap of 0.22, against 0.23 for independently written code and 0.98 for derived code.</td>
+<td>Token 5-gram overlap of 0.22 with lz4_flex, a Rust LZ4 library the build could not read; an unrelated Rust decoder scores 0.23 and a disguised copy 0.98. Identifier overlap with C LZ4 of 0.013.</td>
 </tr>
 <tr>
 <th scope="row">Viable</th>

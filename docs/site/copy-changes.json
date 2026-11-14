@@ -17,6 +17,7 @@
       { "old": "Clean-room mode in the plugin, for modernizing legacy software into memory-safe code.", "new": "A hotfix lane: a short, reviewed stage for an operator fix, flagged in the attestation." },
       { "old": "See the cleanflate results", "new": "See both rebuilds" },
       { "old": ">Continuous fuzzing and multi-pair similarity calibration.</p>", "new": ">Runner comparison: usage and outcome metrics, so two flights of one spec can be compared across models, a local one included.</p>" },
-      { "old": ">A vendor-agnostic package.</p>", "new": ">A vendor-agnostic package, starting with OpenCode.</p>" }
+      { "old": ">A vendor-agnostic package.</p>", "new": ">A vendor-agnostic package, starting with OpenCode.</p>" },
+      { "old": "Token 5-gram overlap of 0.22, against 0.23 for independently written code and 0.98 for derived code.", "new": "Token 5-gram overlap of 0.22 with lz4_flex, a Rust LZ4 library the build could not read; an unrelated Rust decoder scores 0.23 and a disguised copy 0.98." }
     ]
   }

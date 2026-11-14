@@ -91,6 +91,9 @@ pre.lines .ln::before{content:counter(line);display:inline-block;width:2.2em;col
 .step{grid-template-columns:minmax(0,1fr) !important}
 .codebox{flex-direction:column;align-items:stretch !important}
 .codebox .copy{align-self:flex-end}
+.chart{height:140px !important}
+.chart .label-far{top:88px !important}
+.chart .scale{top:120px !important}
 }
 </style>
 </head>
@@ -439,7 +442,7 @@ git add docs/SPEC.md &amp;&amp; git commit -m "spec"</code></pre>
 <span id="cal-h" style="font-size: 19px; font-weight: 700">Did anything leak from zlib?</span>
 <span style="font-size: 15px; color: var(--muted)">Identifier overlap with C zlib (Jaccard index). Lower means more independent.</span>
 </figcaption>
-<div role="img" aria-label="Identifier overlap with C zlib: cleanflate 0.021, an independently written decoder 0.019, a known port 0.095." style="position: relative; height: 118px">
+<div class="chart" role="img" aria-label="Identifier overlap with C zlib: cleanflate 0.021, an independently written decoder 0.019, a known port 0.095." style="position: relative; height: 118px">
 <span aria-hidden="true" style="position: absolute; left: 0; right: 0; top: 46px; height: 2px; background: var(--line2)"></span>
 <span aria-hidden="true" style="position: absolute; left: 0; top: 40px; width: 2px; height: 14px; background: var(--line2)"></span>
 <span aria-hidden="true" style="position: absolute; left: calc(50% - 1px); top: 40px; width: 2px; height: 14px; background: var(--line2)"></span>
@@ -449,10 +452,10 @@ git add docs/SPEC.md &amp;&amp; git commit -m "spec"</code></pre>
 <span aria-hidden="true" style="position: absolute; left: calc(95% - 7px); top: 40px; width: 14px; height: 14px; background: var(--muted)"></span>
 <span aria-hidden="true" style="position: absolute; left: calc(21% - 4px); top: 6px; white-space: nowrap; font-family: var(--mono); font-size: 13px; font-weight: 600; color: var(--accent-text)">cleanflate 0.021</span>
 <span aria-hidden="true" style="position: absolute; left: calc(19% - 4px); top: 66px; white-space: nowrap; font-family: var(--mono); font-size: 13px; color: var(--ink)">independent decoder 0.019</span>
-<span aria-hidden="true" style="position: absolute; right: calc(5% - 7px); top: 6px; white-space: nowrap; font-family: var(--mono); font-size: 13px; color: var(--muted)">known port 0.095</span>
-<span aria-hidden="true" style="position: absolute; left: 0; top: 98px; font-family: var(--mono); font-size: 11px; color: var(--muted)">0</span>
-<span aria-hidden="true" style="position: absolute; left: calc(50% - 16px); top: 98px; font-family: var(--mono); font-size: 11px; color: var(--muted)">0.05</span>
-<span aria-hidden="true" style="position: absolute; right: 0; top: 98px; font-family: var(--mono); font-size: 11px; color: var(--muted)">0.10</span>
+<span class="label-far" aria-hidden="true" style="position: absolute; right: calc(5% - 7px); top: 6px; white-space: nowrap; font-family: var(--mono); font-size: 13px; color: var(--muted)">known port 0.095</span>
+<span class="scale" aria-hidden="true" style="position: absolute; left: 0; top: 98px; font-family: var(--mono); font-size: 11px; color: var(--muted)">0</span>
+<span class="scale" aria-hidden="true" style="position: absolute; left: calc(50% - 16px); top: 98px; font-family: var(--mono); font-size: 11px; color: var(--muted)">0.05</span>
+<span class="scale" aria-hidden="true" style="position: absolute; right: 0; top: 98px; font-family: var(--mono); font-size: 11px; color: var(--muted)">0.10</span>
 </div>
 <p style="margin: 16px 0 0; font-size: 15px; line-height: 1.55; color: var(--muted)">cleanflate sits with an independently written decoder, at about a fifth of a known port. Comment overlap is near zero: 0.0003, against 0.032 for the port.</p>
 </figure>
@@ -504,6 +507,29 @@ git add docs/SPEC.md &amp;&amp; git commit -m "spec"</code></pre>
 <p style="margin: 0; max-width: 760px; font-size: 16px; line-height: 1.55; color: var(--muted)">Every claim below comes from the flight’s signed attestation bundle, published in the repository, and anyone can check that bundle offline with one command.</p>
 </div>
 
+<figure aria-labelledby="cal-lz4-h" style="margin: 0; padding: clamp(20px, 3vw, 32px); border: 1px solid var(--line2); border-radius: 10px; background: var(--bg2)">
+<figcaption style="display: flex; flex-direction: column; gap: 6px; margin-bottom: 20px">
+<span id="cal-lz4-h" style="font-size: 19px; font-weight: 700">Did anything leak from lz4_flex?</span>
+<span style="font-size: 15px; color: var(--muted)">Token 5-gram overlap with lz4_flex, an existing Rust LZ4 library the build could not read (Jaccard index). Lower means more independent.</span>
+</figcaption>
+<div class="chart" role="img" aria-label="Token 5-gram overlap with lz4_flex: cleanlz4 0.22, an unrelated Rust decoder 0.23, a disguised copy of lz4_flex 0.98." style="position: relative; height: 118px">
+<span aria-hidden="true" style="position: absolute; left: 0; right: 0; top: 46px; height: 2px; background: var(--line2)"></span>
+<span aria-hidden="true" style="position: absolute; left: 0; top: 40px; width: 2px; height: 14px; background: var(--line2)"></span>
+<span aria-hidden="true" style="position: absolute; left: calc(50% - 1px); top: 40px; width: 2px; height: 14px; background: var(--line2)"></span>
+<span aria-hidden="true" style="position: absolute; right: 0; top: 40px; width: 2px; height: 14px; background: var(--line2)"></span>
+<span aria-hidden="true" style="position: absolute; left: calc(22.45% - 9px); top: 38px; width: 18px; height: 18px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 4px var(--bg2)"></span>
+<span aria-hidden="true" style="position: absolute; left: calc(22.53% - 15px); top: 32px; width: 30px; height: 30px; border-radius: 50%; border: 2px solid var(--ink)"></span>
+<span aria-hidden="true" style="position: absolute; left: calc(98.17% - 7px); top: 40px; width: 14px; height: 14px; background: var(--muted)"></span>
+<span aria-hidden="true" style="position: absolute; left: calc(22.45% - 4px); top: 6px; white-space: nowrap; font-family: var(--mono); font-size: 13px; font-weight: 600; color: var(--accent-text)">cleanlz4 0.22</span>
+<span aria-hidden="true" style="position: absolute; left: calc(22.53% - 4px); top: 68px; white-space: nowrap; font-family: var(--mono); font-size: 13px; color: var(--ink)">unrelated Rust decoder 0.23</span>
+<span class="label-far" aria-hidden="true" style="position: absolute; right: calc(1.83% - 7px); top: 6px; white-space: nowrap; font-family: var(--mono); font-size: 13px; color: var(--muted)">disguised copy 0.98</span>
+<span class="scale" aria-hidden="true" style="position: absolute; left: 0; top: 98px; font-family: var(--mono); font-size: 11px; color: var(--muted)">0</span>
+<span class="scale" aria-hidden="true" style="position: absolute; left: calc(50% - 10px); top: 98px; font-family: var(--mono); font-size: 11px; color: var(--muted)">0.5</span>
+<span class="scale" aria-hidden="true" style="position: absolute; right: 0; top: 98px; font-family: var(--mono); font-size: 11px; color: var(--muted)">1.0</span>
+</div>
+<p style="margin: 16px 0 0; font-size: 15px; line-height: 1.55; color: var(--muted)">cleanlz4 scores the same as an unrelated Rust decoder, cleanflate, and nowhere near a lightly disguised copy of lz4_flex. Against C LZ4, the reference implementation, identifier overlap is 0.013.</p>
+</figure>
+
 <div style="overflow-x: auto; border: 1px solid var(--line2); border-radius: 10px; background: var(--bg2)">
 <table style="width: 100%; min-width: 320px; border-collapse: collapse; font-size: 16px">
 <caption style="caption-side: bottom; text-align: left; padding: 14px 20px; border-top: 1px solid var(--line); font-size: 13px; line-height: 1.55; color: var(--muted)">From the signed 0.2.0 attestation bundle in the <a href="https://github.com/ericmann/cleanlz4">cleanlz4</a> repository. Throughput measured on one x86 machine. <b style="color: var(--ink); font-weight: 600">Limits:</b> one target library; the guard was enforced by hooks, not a sandbox. 0.1.0’s similarity controls were cross-language and did not separate, and its score did not support independence, so 0.2.0 re-scored against same-language controls.</caption>
@@ -532,7 +558,7 @@ git add docs/SPEC.md &amp;&amp; git commit -m "spec"</code></pre>
 </tr>
 <tr>
 <th scope="row" style="text-align: left; vertical-align: top; padding: 16px 20px; font-weight: 700; border-bottom: 1px solid var(--line)">Independent</th>
-<td style="padding: 16px 20px; border-bottom: 1px solid var(--line)">Identifier overlap with C LZ4 of 0.013. Token 5-gram overlap of 0.22, against 0.23 for independently written code and 0.98 for derived code.</td>
+<td style="padding: 16px 20px; border-bottom: 1px solid var(--line)">Token 5-gram overlap of 0.22 with lz4_flex, a Rust LZ4 library the build could not read; an unrelated Rust decoder scores 0.23 and a disguised copy 0.98. Identifier overlap with C LZ4 of 0.013.</td>
 </tr>
 <tr>
 <th scope="row" style="text-align: left; vertical-align: top; padding: 16px 20px; font-weight: 700; border-bottom: 1px solid var(--line)">Viable</th>

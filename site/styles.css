@@ -184,16 +184,27 @@ pre.lines .ln::before{content:counter(line);display:inline-block;width:2.2em;col
 .tick-start{left:0}
 .tick-mid{left:calc(50% - 1px)}
 .tick-end{right:0}
-.mark-cleanflate{left:calc(21% - 9px);top:38px;width:18px;height:18px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 4px var(--bg2)}
+.mark-cleanflate,.mark-cleanlz4{top:38px;width:18px;height:18px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 4px var(--bg2)}
+.mark-cleanflate{left:calc(21% - 9px)}
+.mark-cleanlz4{left:calc(22.45% - 9px)}
 .mark-independent{left:calc(19% - 7px);top:40px;width:14px;height:14px;border-radius:50%;border:2px solid var(--ink);background:var(--bg2)}
-.mark-port{left:calc(95% - 7px);top:40px;width:14px;height:14px;background:var(--muted)}
+.mark-unrelated{left:calc(22.53% - 15px);top:32px;width:30px;height:30px;border-radius:50%;border:2px solid var(--ink)}
+.mark-port,.mark-disguised{top:40px;width:14px;height:14px;background:var(--muted)}
+.mark-port{left:calc(95% - 7px)}
+.mark-disguised{left:calc(98.17% - 7px)}
 .chart-label{white-space:nowrap;font-family:var(--mono);font-size:13px}
-.label-cleanflate{left:calc(21% - 4px);top:6px;font-weight:600;color:var(--accent-text)}
+.label-cleanflate,.label-cleanlz4{top:6px;font-weight:600;color:var(--accent-text)}
+.label-cleanflate{left:calc(21% - 4px)}
+.label-cleanlz4{left:calc(22.45% - 4px)}
 .label-independent{left:calc(19% - 4px);top:66px;color:var(--ink)}
-.label-port{right:calc(5% - 7px);top:6px;color:var(--muted)}
+.label-unrelated{left:calc(22.53% - 4px);top:68px;color:var(--ink)}
+.label-port,.label-disguised{top:6px;color:var(--muted)}
+.label-port{right:calc(5% - 7px)}
+.label-disguised{right:calc(1.83% - 7px)}
 .scale{top:98px;font-family:var(--mono);font-size:11px;color:var(--muted)}
 .scale-min{left:0}
 .scale-mid{left:calc(50% - 16px)}
+.chart-lz4 .scale-mid{left:calc(50% - 10px)}
 .scale-max{right:0}
 .chart-note{margin:16px 0 0;font-size:15px;line-height:1.55;color:var(--muted)}
 .table-wrap{overflow-x:auto;border:1px solid var(--line2);border-radius:10px;background:var(--bg2)}
@@ -249,4 +260,7 @@ pre.lines .ln::before{content:counter(line);display:inline-block;width:2.2em;col
 .step{grid-template-columns:minmax(0,1fr)}
 .codebox{flex-direction:column;align-items:stretch}
 .codebox .copy{align-self:flex-end}
+.chart{height:140px}
+.label-port,.label-disguised{top:88px}
+.scale{top:120px}
 }
