@@ -81,7 +81,7 @@
 
 <div class="cta-row">
 <a href="#start" class="btn-outline">Get started</a>
-<a href="#proof" class="link-arrow">See the cleanflate results <span aria-hidden="true">→</span></a>
+<a href="#proof" class="link-arrow">See both rebuilds <span aria-hidden="true">→</span></a>
 </div>
 <p class="meaning">Kūkulu is Hawaiian for “to build.”</p>
 </div>
@@ -356,7 +356,21 @@ git add docs/SPEC.md &amp;&amp; git commit -m "spec"</code></pre>
 <div class="wrap wrap-stack-tight">
 <div class="sec-head">
 <p class="eyebrow">06 — Proof</p>
-<h2 id="proof-h" class="h2"><span class="mono-title">cleanflate</span></h2>
+<h2 id="proof-h" class="h2">Two rebuilds.</h2>
+</div>
+
+<div class="tabs">
+<div class="tab-bar" role="radiogroup" aria-label="Rebuilds">
+<input type="radio" name="rebuild" id="tab-deflate" class="tab-input" checked>
+<label for="tab-deflate" class="tab"><span class="tab-no">Rebuild 01</span> <span class="tab-name">DEFLATE</span></label>
+<input type="radio" name="rebuild" id="tab-lz4" class="tab-input">
+<label for="tab-lz4" class="tab"><span class="tab-no">Rebuild 02</span> <span class="tab-name">LZ4</span></label>
+</div>
+
+<article id="rebuild-deflate" class="rebuild" aria-labelledby="cleanflate-h">
+<div class="rebuild-head">
+<p class="kicker kicker-accent rebuild-kicker">Rebuild 01 · DEFLATE</p>
+<h3 id="cleanflate-h" class="rebuild-title mono-title">cleanflate</h3>
 <p class="proof-lede">A clean-room DEFLATE decompressor in safe Rust, built by Kūkulu from RFCs 1950–1952 alone, without access to zlib’s source.</p>
 <p class="proof-sub">Built with Kūkulu 0.3.2, then named Foundry, under project-local clean-room controls; their general form is the plugin’s clean-room mode, as of 0.7.0.</p>
 </div>
@@ -421,6 +435,96 @@ git add docs/SPEC.md &amp;&amp; git commit -m "spec"</code></pre>
 <a href="https://github.com/ericmann/cleanflate" class="link-arrow link-ext">cleanflate repository <span aria-hidden="true">↗</span></a>
 <a href="https://github.com/ericmann/cleanflate-bench" class="link-arrow link-ext">cleanflate-bench <span aria-hidden="true">↗</span></a>
 </div>
+</article>
+
+<article id="rebuild-lz4" class="rebuild" aria-labelledby="cleanlz4-h">
+<div class="rebuild-head">
+<p class="kicker kicker-accent rebuild-kicker">Rebuild 02 · LZ4</p>
+<h3 id="cleanlz4-h" class="rebuild-title mono-title">cleanlz4</h3>
+<p class="proof-lede">A clean-room LZ4 block and frame decoder in safe Rust, built by Kūkulu 0.8.0’s clean-room mode from the LZ4 format documents alone, without access to the LZ4 source.</p>
+<p class="proof-sub">Every claim below comes from the flight’s signed attestation bundle, published in the repository, and anyone can check that bundle offline with one command.</p>
+</div>
+
+<figure class="chart-fig" aria-labelledby="cal-lz4-h">
+<figcaption class="chart-cap">
+<span id="cal-lz4-h" class="chart-q">Did anything leak from lz4_flex?</span>
+<span class="chart-sub">Token 5-gram overlap with lz4_flex, an existing Rust LZ4 library the build could not read (Jaccard index). Lower means more independent.</span>
+</figcaption>
+<div class="chart chart-lz4" role="img" aria-label="Token 5-gram overlap with lz4_flex: cleanlz4 0.22, an unrelated Rust decoder 0.23, a disguised copy of lz4_flex 0.98.">
+<span class="axis" aria-hidden="true"></span>
+<span class="tick tick-start" aria-hidden="true"></span>
+<span class="tick tick-mid" aria-hidden="true"></span>
+<span class="tick tick-end" aria-hidden="true"></span>
+<span class="mark mark-cleanlz4" aria-hidden="true"></span>
+<span class="mark mark-unrelated" aria-hidden="true"></span>
+<span class="mark mark-disguised" aria-hidden="true"></span>
+<span class="chart-label label-cleanlz4" aria-hidden="true">cleanlz4 0.22</span>
+<span class="chart-label label-unrelated" aria-hidden="true">unrelated Rust decoder 0.23</span>
+<span class="chart-label label-disguised" aria-hidden="true">disguised copy 0.98</span>
+<span class="scale scale-min" aria-hidden="true">0</span>
+<span class="scale scale-mid" aria-hidden="true">0.5</span>
+<span class="scale scale-max" aria-hidden="true">1.0</span>
+</div>
+<p class="chart-note">cleanlz4 scores the same as an unrelated Rust decoder, cleanflate, and nowhere near a lightly disguised copy of lz4_flex. Against C LZ4, the reference implementation, identifier overlap is 0.013.</p>
+</figure>
+
+<div class="table-wrap">
+<table class="proof-table">
+<caption>From the signed 0.2.0 attestation bundle in the <a href="https://github.com/ericmann/cleanlz4">cleanlz4</a> repository. Throughput measured on one x86 machine. <b>Limits:</b> one target library; the guard was enforced by hooks, not a sandbox. 0.1.0’s similarity controls were cross-language and did not separate, and its score did not support independence, so 0.2.0 re-scored against same-language controls.</caption>
+<thead>
+<tr>
+<th scope="col">Claim</th>
+<th scope="col">Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<th scope="row">Clean room</th>
+<td>0 prior-art reads among 437 guarded tool calls. The 3 denials were guard false positives, since fixed in 0.8.1.</td>
+</tr>
+<tr>
+<th scope="row">Equivalent</th>
+<td>2,349 of 2,349 conformance cases pass. 0 crashes in 226M fuzz executions across five one-hour targets; 0 divergences in the two differential targets.</td>
+</tr>
+<tr>
+<th scope="row">Robust</th>
+<td>144 of 144 malformed inputs rejected, 0 panics.</td>
+</tr>
+<tr>
+<th scope="row">Memory-safe</th>
+<td>0 lines of <code>unsafe</code> code, 0 runtime dependencies.</td>
+</tr>
+<tr>
+<th scope="row">Independent</th>
+<td>Token 5-gram overlap of 0.22 with lz4_flex, a Rust LZ4 library the build could not read; an unrelated Rust decoder scores 0.23 and a disguised copy 0.98. Identifier overlap with C LZ4 of 0.013.</td>
+</tr>
+<tr>
+<th scope="row">Viable</th>
+<td>0.61× C LZ4 throughput overall, 0.33–3.05× per file, with no <code>unsafe</code>.</td>
+</tr>
+<tr>
+<th scope="row">Cost</th>
+<td>About 7.5 hours of pipeline time, including five one-hour fuzz runs; about $42 in model usage at API list prices; 1 operator intervention, before the build began.</td>
+</tr>
+</tbody>
+</table>
+</div>
+
+<div class="verify">
+<p class="kicker">Verify it yourself</p>
+<p class="verify-fp">Signer fingerprint: <code>sha256:29eb2de703efe67ab50bf992d6c66c1e75d824010c727b1a76b0b336a5ed9f75</code></p>
+<div class="codebox">
+<pre><code>git clone --depth 1 https://github.com/ericmann/cleanlz4 &amp;&amp; node cleanlz4/attestation/cleanlz4-0-2-0/verify.mjs cleanlz4/attestation/cleanlz4-0-2-0 --key sha256:29eb2de703efe67ab50bf992d6c66c1e75d824010c727b1a76b0b336a5ed9f75</code></pre>
+</div>
+<p class="verify-note">Needs git and Node 22 or later. The fingerprint is also in the repository’s README; check that the two match. The last line the verifier prints is <code>verify-attestation: PASS</code>.</p>
+</div>
+
+<div class="links-row">
+<a href="https://github.com/ericmann/cleanlz4" class="link-arrow link-ext">cleanlz4 repository <span aria-hidden="true">↗</span></a>
+<a href="https://github.com/ericmann/cleanlz4/tree/main/attestation/cleanlz4-0-2-0" class="link-arrow link-ext">Published bundle <span aria-hidden="true">↗</span></a>
+</div>
+</article>
+</div>
 </div>
 </section>
 
@@ -433,15 +537,15 @@ git add docs/SPEC.md &amp;&amp; git commit -m "spec"</code></pre>
 <ol class="next">
 <li>
 <p class="next-no">NEXT 01</p>
-<p class="next-text">A hotfix lane: a short, reviewed stage for an operator fix, flagged in the attestation.</p>
+<p class="next-text">Runner comparison: usage and outcome metrics, so two flights of one spec can be compared across models, a local one included.</p>
 </li>
 <li>
 <p class="next-no">NEXT 02</p>
-<p class="next-text">A vendor-agnostic package.</p>
+<p class="next-text">A vendor-agnostic package, starting with OpenCode.</p>
 </li>
 <li>
 <p class="next-no">NEXT 03</p>
-<p class="next-text">Continuous fuzzing and multi-pair similarity calibration.</p>
+<p class="next-text">A hotfix lane: a short, reviewed stage for an operator fix, flagged in the attestation.</p>
 </li>
 </ol>
 </div>
