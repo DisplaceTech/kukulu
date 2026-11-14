@@ -35,6 +35,20 @@
         "model": "haiku",
         "effort": "low"
       }
+    },
+    "spark": {
+      "planner": {
+        "model": "spark/qwen38-27b"
+      },
+      "implementer": {
+        "model": "spark/qwen38-27b"
+      },
+      "reviewer": {
+        "model": "spark/nemotron-3.5-super-nvfp4"
+      },
+      "summarizer": {
+        "model": "spark/nemotron-3.5-super-nvfp4"
+      }
     }
   },
   "permissionMode": "acceptEdits",
@@ -45,6 +59,7 @@
       "match": [
         "spark/"
       ],
+      "activate": "warm",
       "identities": {
         "spark/nemotron-3.5-super-nvfp4": {
           "weights": "sha256:0000000000000000000000000000000000000000000000000000000000000000",

@@ -10,6 +10,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { familyOf } from "../mcp/cleanroom.mjs";
 import {
   finish, ok, eq, like, isError,
   ROOT, mkDir, plannedRepo, withServer, tempPlugin, mkFakeGhBin, mkBareRemote, mkFakeGpg, useFakeSigner, setState,
@@ -679,6 +680,14 @@ for (const [value, got, label] of [
     eq(cfg.profile, "cheap", "the template's cheap profile is selected");
     eq(cfg.roles.implementer.model, "haiku", "the template's cheap profile resolves");
   }, { env: { KUKULU_CONFIG: templatePath, KUKULU_PROFILE: "cheap" } });
+
+  await withServer(repo, async ({ call }) => {
+    const cfg = await call("kukulu_config_show");
+    eq(cfg.runners.spark.activate, "warm", "the template's spark runner is warmed");
+    eq(cfg.profile, "spark", "the template's spark profile is selected");
+    eq(ROLES.map((r) => `${cfg.roles[r].runner}:${cfg.roles[r].served}:${cfg.roles[r].activate}`).join(","), "spark:qwen38-27b:warm,spark:qwen38-27b:warm,spark:nemotron-3.5-super-nvfp4:warm,spark:nemotron-3.5-super-nvfp4:warm", "the spark profile routes all four roles to the spark runner, with the served ids");
+    ok(familyOf(cfg.roles.implementer.model) === "qwen" && familyOf(cfg.roles.reviewer.model) === "nemotron" && familyOf(cfg.roles.implementer.model) !== familyOf(cfg.roles.reviewer.model), "the spark profile's implementer and reviewer are different families");
+  }, { env: { KUKULU_CONFIG: templatePath, KUKULU_PROFILE: "spark" } });
 
   for (const file of ["ollama.provider.json", "openrouter.provider.json"]) {
     const provider = JSON.parse(readFile(ROOT, `templates/ccr/${file}`)).provider;

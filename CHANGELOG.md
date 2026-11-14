@@ -8,6 +8,7 @@ All notable changes to this plugin. Format follows
 
 ### Added
 
+- The `spark` profile with `activate: "warm"` in `templates/kukulu.config.example.json`, and `templates/runners/llama-swap.example.yaml` (E-02).
 - The model family `laguna` (Laguna and Poolside model strings) (E-03).
 - `scripts/runner-probe.mjs` sends one request to a runner and prints one JSON line, without ever printing the runner's token (A-01).
 - Runner keys `activate`, `activateTimeoutMs`, `servedAs` and `tokenEnv`, and the served id in `kukulu_config_show` and the routing table (A-02).

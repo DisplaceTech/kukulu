@@ -1,0 +1,44 @@
+# Example llama-swap configuration for one inference host serving a flight.
+# Checked against llama-swap v272 (2026-11-10), docs/config.example.yaml.
+# A model id below is what a runner asks for: with match ["spark/"], the role
+# model spark/qwen38-27b is served as qwen38-27b (or name it in servedAs).
+---
+# Seconds a model may take to become ready; keep it above the slowest cold load.
+healthCheckTimeout: 1800
+
+models:
+  # Stays resident: the controller session and the harness's small-model calls.
+  "resident-small":
+    cmd: |
+      llama-server --port ${PORT}
+      --model /models/resident-small.gguf
+  # The two stage models that cannot be resident together.
+  "qwen38-27b":
+    cmd: |
+      llama-server --port ${PORT}
+      --model /models/qwen38-27b.gguf
+  "nemotron-3.5-super-nvfp4":
+    cmd: |
+      llama-server --port ${PORT}
+      --model /models/nemotron-3.5-super-nvfp4.gguf
+
+routing:
+  router:
+    use: group
+    settings:
+      groups:
+        # Resident group: no other group can unload it.
+        "resident":
+          persistent: true
+          swap: false
+          exclusive: false
+          members:
+            - "resident-small"
+        # Swapping group: one member at a time; loading one unloads the other
+        # and leaves the resident group alone.
+        "stages":
+          swap: true
+          exclusive: false
+          members:
+            - "qwen38-27b"
+            - "nemotron-3.5-super-nvfp4"

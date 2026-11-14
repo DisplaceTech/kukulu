@@ -598,6 +598,13 @@ like(template, /⚠️ ASSUMPTION/, "the template explains the assumption marker
 // ---------------------------------------------------------------- routing config templates
 
 const kukuluConfigTemplate = json("templates/kukulu.config.example.json");
+{
+  const swap = read("templates/runners/llama-swap.example.yaml");
+  like(swap.split("\n")[1], /Checked against llama-swap v\d+/, "the llama-swap template names the release it was checked against");
+  ok(/persistent: true/.test(swap) && /swap: true/.test(swap) && /swap: false/.test(swap), "...has a persistent group and a swapping group");
+  const served = Object.values(kukuluConfigTemplate.profiles.spark).map((r) => r.model.replace(/^spark\//, ""));
+  ok(served.every((id) => swap.includes(`"${id}":`)) && new Set(served).size === 2, "...and its stage model ids are the spark profile's served ids");
+}
 eq(
   Object.keys(kukuluConfigTemplate.roles).sort().join(","),
   ["implementer", "planner", "reviewer", "summarizer"].join(","),

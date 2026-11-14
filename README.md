@@ -271,6 +271,7 @@ Everything is on disk and committed, so `/kukulu:go-flight` can be re-run from a
 ├── templates/
 │   ├── SPEC.md                  the spec skeleton the planner reads
 │   ├── kukulu.config.example.json   the global routing config, explained in docs/routing.md
+│   ├── runners/                 a llama-swap example for one inference host
 │   └── ccr/                     claude-code-router provider manifests
 ├── docs/                        architecture · MCP reference · routing · spec guide · runbook
 └── test/                        harness + sixteen suites, run by test/run.mjs
