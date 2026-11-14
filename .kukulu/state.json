@@ -22,5 +22,6 @@
     "slug": "v0-9-0",
     "dir": "docs/flights/v0-9-0",
     "at": "2026-11-14T12:53:03.493Z"
-  }
+  },
+  "breaking": false
 }
