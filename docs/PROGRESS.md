@@ -31,7 +31,7 @@ Started: 2026-11-14T04:52:50.030Z
 - [x] P2-10 compareMetrics and scripts/compare-flights.mjs
 - [x] P2-11 compare-flights --trees
 - [x] P2-12 Phase 2 end: push and record the manual check
-- [ ] P3-01 MODEL_FAMILIES gains laguna
+- [x] P3-01 MODEL_FAMILIES gains laguna
 - [ ] P3-02 Templates: a spark profile with activation, and a llama-swap example
 - [ ] P3-03 docs/local-runners.md
 - [ ] P3-04 Documentation sweep for 0.9.0
@@ -145,3 +145,7 @@ compare-flights --trees: scorePair import (only added import), TREE_LANGUAGES co
 ### P2-12 — 68540ae
 
 Push: pushed build/2026-11-14 to origin. Verify green on identical tree (P2-11). Manual check: NOT VERIFIED (human): node scripts/compare-flights.mjs on two real flights of one spec prints all five sections with no null in the Anthropic flight's cost column (see PLAN.md Spec issues: this Claude Code version's transcripts carry no per-row cost, so the column is expected to read n/a until the owner rules)
+
+### P3-01 — 2b7c9ea
+
+MODEL_FAMILIES gains laguna last. Measurement: before 26 existing fixture rows all resolve, three new strings unknown:<normalized>; after 29 rows all resolve (three new to laguna), no existing family changed. docs/spikes/P3-01.md; guard self-tests ran in verify (693 and 689 cases ok); cleanroom suite 1513.
