@@ -398,7 +398,7 @@ A `build/<date>` branch containing:
 - interleaved `progress:` commits recording each state change with its sha
 - for a plan with parallel streams, one `merge stream <s> (wave <n>)` commit per stream, and `chore: wave <n> runs serially` for any wave that could not run in parallel
 - `review: round N` commits, one per round, each carrying that round's `REVIEW.md` and the fix tasks it queued
-- `docs/HANDOFF.md`, `docs/REVIEW.md` and `docs/SUMMARY.md` at the tip, and `docs/METRICS.json` when the flight ended or halted and `policies.metrics` is not `false`
+- `docs/HANDOFF.md`, `docs/REVIEW.md` and `docs/SUMMARY.md` at the tip, and `docs/METRICS.json` (or `docs/flights/<slug>/METRICS.json`) when the flight ended or halted and `policies.metrics` is not `false`; `kukulu_pr_finalize` commits it as `chore: flight metrics` before it pushes
 - on your machine only, never committed, `.kukulu/metrics/` (the usage records and counters; see [metrics.md](./metrics.md))
 - a draft PR, if `gh` was available and `policies.pr` is not `"none"`
 - `chore: finalize flight` or `chore: awaiting signing`, from `kukulu_pr_finalize`, and `chore: archive flight <slug>` when the flight was archived

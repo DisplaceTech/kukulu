@@ -1369,7 +1369,7 @@ function resignRepo({ extraState = {} } = {}) {
   await withServer(repo, async ({ call }) => {
     isError(await call("kukulu_pr_finalize", { breaking: false, resign: true }), /re-signing failed/, "a failing rebase refuses resign");
     ok(!hasFile(repo, ".git/rebase-merge") && !hasFile(repo, ".git/rebase-apply"), "...the rebase is aborted");
-    eq(git(repo, ["rev-parse", "HEAD"]), head, "...HEAD is unchanged");
+    eq(git(repo, ["rev-parse", "HEAD~1"]) + "|" + subject(repo), `${head}|chore: flight metrics`, "...HEAD is the original plus the metrics commit written before the rebase (P2-09)");
     eq(git(repo, ["config", "--local", "commit.gpgsign"]), "false", "...and the override is back");
   }, { env: { ...opts.env, GIT_CONFIG_GLOBAL: globalCfg } });
 }
@@ -1645,6 +1645,79 @@ const remoteTag = (remote, tag) => spawnSync("git", ["-C", remote, "rev-parse", 
     eq(r.localState, "current", "localState is current when the local base names the same flight as origin");
     eq(r.fastForward, "up to date", "fastForward is up to date when the checked-out base already equals origin");
   }, opts);
+}
+
+// ---------------------------------------------------------------- METRICS.json at finalize (P2-09)
+
+{
+  const metricsCommits = (repo) => git(repo, ["log", "--format=%H", "--grep=^chore: flight metrics$"]).split("\n").filter(Boolean);
+  const onlyPath = (repo, sha) => git(repo, ["show", "--name-only", "--format=", sha]);
+
+  // a non-archived flight gets docs/METRICS.json, committed alone before the push
+  {
+    const { repo, opts } = finalizeRepo({ signed: true, policies: { finalize: "ready" } });
+    setState(repo, { timeline: [{ event: "start", stage: "summarize", round: 0, at: "2026-01-01T00:00:00.000Z" }] });
+    git(repo, ["add", "-A"]);
+    git(repo, ["commit", "-qm", "chore: open summarize span"]);
+    await withServer(repo, async ({ call }) => {
+      const r = await call("kukulu_pr_finalize", { breaking: false });
+      ok(!r.metricsNote, "kukulu_pr_finalize with metrics on has no metricsNote");
+      const [sha] = metricsCommits(repo);
+      eq(onlyPath(repo, sha), "docs/METRICS.json", "a non-archived flight gets docs/METRICS.json, committed alone as chore: flight metrics");
+      eq(git(repo, ["ls-remote", "origin", "refs/heads/build/x"]).split("\t")[0], git(repo, ["rev-parse", "HEAD"]), "the pushed head...");
+      ok(spawnSync("git", ["merge-base", "--is-ancestor", sha, "HEAD"], { cwd: repo }).status === 0, "...contains the metrics commit (it is committed before the push)");
+      const m = JSON.parse(readFile(repo, "docs/METRICS.json"));
+      eq(m.roles.summarizer.usage + "|" + m.roles.summarizer.requests + "|" + m.totals.missing.includes("summarizer"), "null|null|true", "the summarizer is missing, not zero");
+      ok(Date.now() - Date.parse(m.wall.endedAt) < 120000 && m.wall.endedAt > "2026-01-02", "wall.endedAt is the time of the call while the summarize span is open");
+      ok(!/\b[0-9a-f]{40}\b/.test(readFile(repo, "docs/METRICS.json")), "the file holds no 40-hex string");
+      eq(subject(repo) + "|" + git(repo, ["log", "-1", "--format=%s", "HEAD~1"]), "chore: flight metrics|chore: finalize flight", "...and it follows the finalize commit, ahead of the push");
+    }, opts);
+  }
+
+  // an archived flight's file goes into its directory
+  {
+    const { repo, opts } = finalizeRepo({ signed: true, policies: { finalize: "ready" } });
+    await withServer(repo, async ({ call }) => {
+      ok(!(await call("kukulu_flight_archive", { slug: "w1" })).error, "the flight archives");
+      await call("kukulu_pr_finalize", { breaking: false });
+      const [sha] = metricsCommits(repo);
+      ok(hasFile(repo, "docs/flights/w1/METRICS.json") && !hasFile(repo, "docs/METRICS.json"), "kukulu_pr_finalize writes METRICS.json in the archived flight's directory");
+      eq(onlyPath(repo, sha), "docs/flights/w1/METRICS.json", "...committed alone as chore: flight metrics");
+    }, opts);
+  }
+
+  // policies.metrics false
+  {
+    const { repo, opts } = finalizeRepo({ signed: true, policies: { finalize: "ready", metrics: false } });
+    await withServer(repo, async ({ call }) => {
+      await call("kukulu_pr_finalize", { breaking: false });
+      ok(metricsCommits(repo).length === 0 && !hasFile(repo, "docs/METRICS.json"), "policies.metrics false writes and commits nothing");
+    }, opts);
+  }
+
+  // a write failure is a note, and finalize completes
+  {
+    const { repo, opts } = finalizeRepo({ signed: true, policies: { finalize: "ready" } });
+    fs.mkdirSync(path.join(repo, "docs", "METRICS.json"));
+    await withServer(repo, async ({ call }) => {
+      const r = await call("kukulu_pr_finalize", { breaking: false });
+      ok(/^METRICS\.json was not written: /.test(r.metricsNote) && r.merge === "skipped: policy" && subject(repo) === "chore: finalize flight", "a write failure is a metricsNote and finalize completes");
+    }, opts);
+  }
+
+  // resign rewrites the file before the rebase, so the rebase signs it
+  {
+    const { repo, opts } = resignRepo();
+    const gpg = mkFakeGpg();
+    await withServer(repo, async ({ call }) => {
+      const r = await call("kukulu_pr_finalize", { breaking: false, resign: true });
+      eq(r.resigned, true, "resign succeeds with metrics on");
+      const shas = metricsCommits(repo);
+      eq(shas.length, 1, "resign rewrites the file before the rebase (one metrics commit)");
+      const sig = git(repo, ["-c", `gpg.program=${gpg}`, "log", "-1", "--format=%G?", shas[0]]);
+      ok(sig !== "N" && sig !== "B", "...and the metrics commit is signed afterwards");
+    }, { env: { ...opts.env, GIT_CONFIG_GLOBAL: fakeSignerGlobal(gpg) } });
+  }
 }
 
 finish();

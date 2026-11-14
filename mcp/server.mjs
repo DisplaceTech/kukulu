@@ -3898,10 +3898,13 @@ function prTitleFor(c, branch) {
  * Plain data for buildMetrics (SPEC C-01), gathered from what is on disk. A missing input is `null`, never a throw.
  * After an archive, with no new flight started, the flight is the archived one and its own copies are read.
  */
+function archivedFlightDir(live) {
+  return live.archived && !exists(P.config) && !(Array.isArray(live.timeline) && live.timeline.length) ? path.join(ROOT, live.archived.dir) : null;
+}
+
 function metricsInputs() {
   const live = loadState();
-  const archivedFlight = Boolean(live.archived) && !exists(P.config) && !(Array.isArray(live.timeline) && live.timeline.length);
-  const home = archivedFlight ? path.join(ROOT, live.archived.dir) : null;
+  const home = archivedFlightDir(live);
   const where = (liveFile, name) => (home ? path.join(home, name) : liveFile);
   const readJson = (file) => {
     try {
@@ -5109,7 +5112,35 @@ function changelogVerdict() {
   return { breaking: lines.slice(start + 1, end).some((l) => /^###\s+Breaking changes\s*$/i.test(l)), heading: lines[start] };
 }
 
-function prFinalize({ breaking, resign } = {}) {
+/** `kukulu_pr_finalize`: the work is `prFinalizeCore`; a metrics failure rides along on the result as `metricsNote` and changes nothing else. */
+function prFinalize(args = {}) {
+  const ctx = { metricsNote: null, done: false };
+  const result = prFinalizeCore(args, ctx);
+  return ctx.metricsNote ? { ...result, metricsNote: ctx.metricsNote } : result;
+}
+
+/**
+ * Commit the flight's metrics as `chore: flight metrics` (SPEC C-03), beside the summary: in the archived flight's directory,
+ * else docs/. Called after every refusal that precedes a write and before the first push, so the file reaches the pull request.
+ * It never fails the call: a note goes to `ctx.metricsNote`. No feedback entry: after an archive the feedback file is the next flight's.
+ */
+function commitFlightMetrics(st, cc, ctx) {
+  if (cc.policies.metrics !== true || ctx.done) return;
+  ctx.done = true;
+  try {
+    const home = archivedFlightDir(st);
+    const file = home ? path.join(home, "METRICS.json") : P.metrics;
+    withRollback([file], () => {
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, `${JSON.stringify(buildMetrics(metricsInputs()), null, 2)}\n`);
+      gitCommitIfChanged([file], "chore: flight metrics", { stage: "summarize" });
+    });
+  } catch (e) {
+    ctx.metricsNote = `METRICS.json was not written: ${(e instanceof Error ? e.message : String(e)).split("\n")[0]}`;
+  }
+}
+
+function prFinalizeCore({ breaking, resign } = {}, ctx) {
   const st = loadState();
   let summarized = st.summarized === true;
   if (!summarized && st.archived) {
@@ -5153,6 +5184,7 @@ function prFinalize({ breaking, resign } = {}) {
   const summaryPath = exists(P.summary) ? P.summary : st.archived && exists(path.join(ROOT, st.archived.dir, "SUMMARY.md")) ? path.join(ROOT, st.archived.dir, "SUMMARY.md") : null;
 
   const awaiting = (check) => {
+    commitFlightMetrics(st, cc, ctx);
     const prior = st.awaitingSigning;
     st.breaking = brk;
     st.awaitingSigning = { unsigned: check.unsigned, first: check.first, since: prior?.since || new Date().toISOString() };
@@ -5193,6 +5225,8 @@ function prFinalize({ breaking, resign } = {}) {
       putOverrideBack();
       throw e;
     }
+    // Written before the rebase, so the rebase signs it.
+    commitFlightMetrics(st, cc, ctx);
     // The operator's instruction goes into the chain, and into a commit the rebase will re-sign, before the rebase needs a clean tree.
     const crPaths = cleanroomPaths(st);
     if (crPaths.length) {
@@ -5243,6 +5277,8 @@ function prFinalize({ breaking, resign } = {}) {
     saveState(st);
     gitCommitIfChanged([P.state], "chore: finalize flight", { stage: "summarize" });
   });
+  // After a manual re-sign cleared the override, so the commit is signed like the rest; still before the call's first push.
+  commitFlightMetrics(st, cc, ctx);
   const after = signedCheck(mb);
   if (after.unsigned && expected) return awaiting(after);
 
