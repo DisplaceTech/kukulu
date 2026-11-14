@@ -26,7 +26,7 @@ Started: 2026-11-14T04:52:50.030Z
 - [x] P2-05 buildMetrics: usage, roles and totals
 - [x] P2-06 kukulu_metrics
 - [x] P2-07 A clean-room flight's metrics read usage from the chain only
-- [ ] P2-08 policies.metrics, and METRICS.json when kukulu_next ends or halts a flight
+- [x] P2-08 policies.metrics, and METRICS.json when kukulu_next ends or halts a flight
 - [ ] P2-09 METRICS.json at kukulu_pr_finalize
 - [ ] P2-10 compareMetrics and scripts/compare-flights.mjs
 - [ ] P2-11 compare-flights --trees
@@ -125,3 +125,7 @@ kukulu_metrics added last in TOOLS (27 tools): metricsInputs() + metricsTool(); 
 ### P2-07 — 3515e92
 
 usageFromChain in metrics.mjs; metricsInputs reads the chain (live or archived cleanroom/log.jsonl) for clean-room flights and never usage.jsonl; genesis mode/enforcement passed. Sums equal rolesUsage and manifest roles. metrics suite 140. Interpretation: archived head includes archive checkpoint.
+
+### P2-08 — bdfc5dd
+
+policies.metrics (cfgFrom default true, POLICY_KEYS, validatePolicies bool); P.metrics = docs/METRICS.json, in archivedFiles; recordTimeline writes it inside the withRollback when done/halt + records + policy, metricsNote + metrics feedback on failure. state 396, routing 353, plugin 607. Interpretation: directory at the path detected up front (snapshot cannot read dirs).
