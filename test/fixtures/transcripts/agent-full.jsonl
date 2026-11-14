@@ -1,0 +1,10 @@
+{"type":"user","timestamp":"2026-11-14T10:00:00.000Z","message":{"content":[{"type":"text","text":"go"}]}}
+{"type":"assistant","timestamp":"2026-11-14T10:00:04.000Z","requestId":"req_a","costUSD":0.01,"message":{"model":"m-one","usage":{"input_tokens":100,"output_tokens":10,"cache_read_input_tokens":1000,"cache_creation_input_tokens":50},"content":[{"type":"tool_use"}]}}
+{"type":"assistant","timestamp":"2026-11-14T10:00:05.000Z","requestId":"req_a","costUSD":0.02,"message":{"model":"m-one","usage":{"input_tokens":100,"output_tokens":20,"cache_read_input_tokens":1000,"cache_creation_input_tokens":50},"content":[{"type":"tool_use"}]}}
+{"type":"user","timestamp":"2026-11-14T10:00:07.000Z","message":{"content":[{"type":"tool_result"},{"type":"tool_result","is_error":true}]}}
+{"type":"attachment","timestamp":"2026-11-14T10:00:10.000Z"}
+{"type":"assistant","timestamp":"2026-11-14T10:00:10.000Z","requestId":"req_b","costUSD":0.03,"message":{"model":"m-one","usage":{"input_tokens":200,"output_tokens":30,"cache_read_input_tokens":0,"cache_creation_input_tokens":0},"content":[{"type":"text"}]}}
+{"type":"assistant","timestamp":"2026-11-14T10:00:11.000Z","isSidechain":true,"requestId":"req_s","costUSD":1,"message":{"model":"m-side","usage":{"input_tokens":999,"output_tokens":999,"cache_read_input_tokens":0,"cache_creation_input_tokens":0},"content":[{"type":"tool_use"}]}}
+{"type":"user","timestamp":"2026-11-14T10:00:12.000Z","isSidechain":true,"message":{"content":[{"type":"tool_result","is_error":true}]}}
+{"type":"assistant","timestamp":"2026-11-14T10:00:13.000Z","isApiErrorMessage":true,"message":{"model":"<synthetic>","usage":{"input_tokens":0,"output_tokens":0,"cache_read_input_tokens":0,"cache_creation_input_tokens":0},"content":[{"type":"text"}]}}
+{"type":"assistant","timestamp":"2026-11-14T10:00:20.000Z","requestId":"req_c","costUSD":0.001,"message":{"model":"m-two","usage":{"input_tokens":10,"output_tokens":5,"cache_read_input_tokens":5,"cache_creation_input_tokens":0},"content":[{"type":"tool_use"}]}}

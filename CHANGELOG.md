@@ -10,6 +10,10 @@ All notable changes to this plugin. Format follows
 
 - The usage record: one schema for every harness, validated by `validateUsageRecord` in `mcp/metrics.mjs` (B-01).
 
+### Changed
+
+- The clean-room chain's `usage` entry carries the full usage record (B-01, B-04).
+
 ## [0.8.1] — 2026-11-13
 
 ### Added

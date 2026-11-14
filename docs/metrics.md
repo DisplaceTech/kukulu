@@ -42,3 +42,11 @@ This page covers the usage record: what one agent's use of models looks like onc
 | `cost` | number | Sum of the reported cost, in dollars | any counted row lacks one |
 
 A transcript that cannot be read yields an error record with only `v`, `harness`, `session`, `agent`, `role` and `error`. `validateUsageRecord` in `mcp/metrics.mjs` checks both shapes.
+
+## How Claude Code's adapter counts
+
+An `assistant` row with `message.usage` is a request, and each `requestId` counts once, by its first row. The row's `message.model` names the `models` entry (`unknown` when absent), and its token counts add to that entry. A row the transcript flags as an API error is counted in `apiErrors` and, when it carries usage, as a request under its own model name.
+
+`activeMs` is the time spent waiting on a model. The conversation rows are the `user` and `assistant` rows that have a timestamp, in file order. For each counted request, the time is the timestamp of the request's last conversation row minus the timestamp of the conversation row just before its first row. That includes prefill, decode and the network, and excludes tool execution. A request with no conversation row before it adds nothing, and `activeMs` is `null` when no request was timed.
+
+`toolCalls` counts `tool_use` items, `toolErrors` counts `tool_result` items with `is_error` true, and `cost` is the sum of the counted rows' reported cost when every counted row has one. `stage` and `round` come from `.kukulu/state.json` at the time of the hook.
