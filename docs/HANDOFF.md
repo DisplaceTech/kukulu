@@ -66,3 +66,11 @@ None.
 - `scripts/implement-guard.mjs` changed only by the lock's `total` field (SPEC C-02); `RUN_START_TOOL`, the agent-type set and the task regexes are untouched.
 - Gate check 3 now also requires the logger on `Stop`, so a clean-room flight begun on 0.8.x cannot continue on 0.9.0 (documented in the changelog and README).
 - A-03's clean-room chain record is described as patent pending wherever it is mentioned.
+
+## Round 1
+
+- Tasks: 3 done (R1-01 to R1-03), 0 blocked. Final `kukulu_verify` green (5,283 assertions).
+- R1-01: `scripts/runner-probe.mjs` replaces the token in the raw error body before collapsing whitespace and cutting to 300 characters; new straddle test in `test/routing.mjs`.
+- R1-02: `recordTimeline` takes an `afterReset` callback run right after a flight's first-record emptying of `.kukulu/metrics/`; `next()` bumps `activateFailures` there, so the count survives (interpretation: callback rather than reordering `next()`, to keep "only when a record is written").
+- R1-03: the `kukulu_next`, `kukulu_status` and `kukulu_pr_finalize` descriptions name the activation wait and halt, METRICS.json, counters, harness, activateSeconds and the `chore: flight metrics` commit; four assertions in `test/protocol.mjs`.
+- Nothing for a human to check by hand.
