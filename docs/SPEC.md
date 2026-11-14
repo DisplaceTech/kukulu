@@ -31,13 +31,13 @@ Done means:
 
 **Why a minor version.** One tool is added (`kukulu_metrics`). No tool's input schema loses or renames a field. These change for someone upgrading:
 
-- **Hooks.** `hooks/hooks.json` registers `scripts/usage-log.mjs`, and `scripts/cleanroom-log.mjs` handles `Stop`. Gate check 3 pins both, so a clean-room flight started on 0.8.x cannot continue on 0.9.0.
+- **Hooks.** `hooks/hooks.json` registers `scripts/cleanroom-log.mjs` on `Stop` as well, and that script now writes general-mode usage. No hook script is added. Gate check 3 pins both files, so a clean-room flight started on 0.8.x cannot continue on 0.9.0.
 - **New optional runner keys.** `activate`, `activateTimeoutMs`, `servedAs` and `tokenEnv` (§5.1).
 - **`kukulu_next`.** It can now take as long as a model load, and it can return a `halt` for a runner that does not answer (A-03).
 - **New files.** `docs/METRICS.json` (committed) and `.kukulu/metrics/` (excluded per clone, never committed).
 - **New refusal.** An `activateTimeoutMs` at or above the MCP timeout (A-02).
 
-**Patent note.** The owner decides whether activation timing in the signed chain (A-03) or the harness-neutral usage record (B-01) goes beyond U.S. Provisional Application No. 64/178,095, and marks the section `⚠️ NEW MATTER` if so. Write "patent pending", never "patented".
+**Patent note.** Owner decision of 2026-11-13: A-03 is `⚠️ NEW MATTER` beyond U.S. Provisional Application No. 64/178,095, because the signed chain records, at stage time, the model the runner itself reports serving; that extends 0.8.0's model-identity record. B-01 is a record format and is not marked. Write "patent pending", never "patented".
 
 ## 2. Goals and non-goals
 
@@ -49,6 +49,7 @@ Done means:
 - Goal: the metrics name the harness and its version, taken from the MCP `initialize` request (C-04).
 - Goal: `scripts/compare-flights.mjs` compares two flights' metrics and, with `--trees`, their result trees (D-01).
 - Goal: the docs and templates cover a fully local flight on one inference host, resident and swapping (E-01 to E-03).
+- Non-goal: new OpenRouter code. OpenRouter is already a remote runner through routing (`docs/routing.md`), so its usage is recorded like any other runner's. Its `cost` stays `null` (C-01): the harness prices requests at Anthropic's rates, not the runner's.
 - Non-goal: running under OpenCode or Codex. That is 0.10.0 and later. This release ships no second adapter and no fake second harness.
 - Non-goal: scraping an inference engine's own `/metrics` endpoint. The Anthropic runner has none, so a measure taken there cannot be compared across runners. Deferred.
 - Non-goal: grading a flight's output. Held-out tests, conformance scoring and energy cost are the operator's, outside the pipeline.
@@ -68,15 +69,16 @@ Each is checkable by grep or test. Those marked `[rule:<id>]` are `constraints` 
 5. **The server never calls the `anthropic` runner.** No probe, no warm request and no key. A test asserts that no probe runs for a role on it.
 6. **Measuring never stops a flight.** A failure to read usage, write a counter or build metrics becomes a note in the tool's result and one feedback entry. The one halt this release adds is a runner that does not serve its model (A-03).
 7. **A number with no source is `null`, never 0.** `docs/metrics.md` names, for every field of `METRICS.json`, the file and field it is derived from.
-8. **Hooks never dirty the tracked tree.** `scripts/usage-log.mjs` and the counters write only under `.kukulu/metrics/`, which `.git/info/exclude` names. This is the lesson of project-g F-16 and F-17.
+8. **Hooks never dirty the tracked tree.** General-mode usage and the counters are written only under `.kukulu/metrics/`, which `.git/info/exclude` names. This is the lesson of project-g F-16 and F-17.
 9. **Tools validate, then mutate**, and config never silently defaults a bad value: every new runner key has a refusal for every bad shape, and the unknown-key refusals stay.
 10. **Every server behavior change has a test** in the suite that owns the tool (CONTRIBUTING.md's table). `test/metrics.mjs` is new and gets a row. Every new refusal has a test that triggers it and asserts its message.
 11. **Tests need no GPU, model or second machine.** Probe tests run against a `node:http` server the test starts. One opt-in step, `KUKULU_RUNNER_IT=1`, uses a real endpoint and is never part of `kukulu_verify`.
 12. **No dependencies anywhere.** Every `scripts/*.mjs` imports only `node:` built-ins or sibling files `[rule:scripts-node-builtins]`.
-13. **Pinned scripts keep their own copy.** Gate check 3 pins each hook script by hash, so `usageFromClaudeCode` exists in both `scripts/cleanroom-log.mjs` and `scripts/usage-log.mjs`. A test feeds both the same fixture and asserts identical output.
+13. **No unpinned hook.** Gate check 3 pins the logger (`loggerHash`) and `hooks/hooks.json` (`hooksHash`). Rather than add a hook script the checkpoints do not pin, general-mode usage is written by `scripts/cleanroom-log.mjs` itself, and `usageFromClaudeCode` lives there once. No hook script is added in this release.
 14. **Documentation moves with the code** (0.8.1 principle 8, unchanged).
 15. **Every constraint in `docs/flights/v0-8-1/kukulu.json` carries over unchanged.** Three are added (§5.5).
 16. **Error messages are written for a model**: say what is wrong and what to do instead.
+17. **One usage source per mode.** A clean-room flight's metrics read usage only from the signed chain; a general flight's only from `.kukulu/metrics/usage.jsonl`. No flight has two records of the same request (B-05).
 
 ## 4. Architecture
 
@@ -86,11 +88,10 @@ Each is checkable by grep or test. Those marked `[rule:<id>]` are `constraints` 
 | `mcp/server.mjs` | `RUNNER_KEYS` and runner validation (A-02); `servedId`, `activateRunner`, `next`'s activation step (A-03, A-04); counters (C-02); `metrics` tool and the write at `done` and `halt` (C-01, C-03); `initialize` keeps `clientInfo` (C-04); `status` reports `counters`, `harness` and `activateSeconds`; `configShow` reports the new runner keys |
 | `mcp/cleanroom.mjs` | `MODEL_FAMILIES` gains `laguna` (E-03); a `stage` entry's `data` may carry `activate` (A-03) |
 | `scripts/runner-probe.mjs` (new) | One HTTP request to a runner, one JSON line out (A-01) |
-| `scripts/usage-log.mjs` (new) | `SubagentStop` and `Stop` hook: appends a usage record to `.kukulu/metrics/usage.jsonl` (B-02, B-03) |
-| `scripts/cleanroom-log.mjs` | `usageFromClaudeCode` with the new fields; a `usage` entry on `Stop` for the controller (B-01, B-03) |
+| `scripts/cleanroom-log.mjs` | `usageFromClaudeCode` with the new fields (B-01); general mode: appends the record to `.kukulu/metrics/usage.jsonl` on `SubagentStop` and `Stop` (B-02); clean-room mode: the chain's `usage` entry carries the record, and the controller gets one on `Stop` (B-03) |
 | `scripts/implement-guard.mjs` | A cumulative re-block count beside the resetting one (C-02) |
 | `scripts/compare-flights.mjs` (new) | Two flights side by side; `--trees`; `--json` (D-01) |
-| `hooks/hooks.json` | `usage-log.mjs` on `SubagentStop` and `Stop` |
+| `hooks/hooks.json` | `cleanroom-log.mjs` on `Stop` too (it is already on `SubagentStop`) |
 | `skills/go-flight/SKILL.md` | Prints `kukulu_next`'s `activation` line |
 | `templates/kukulu.config.example.json`, `templates/runners/llama-swap.example.yaml` (new) | E-02 |
 | `docs/metrics.md` (new), `docs/local-runners.md` (new), `docs/routing.md`, `docs/operations.md`, `docs/mcp-tools.md`, `docs/architecture.md`, `README.md`, `CONTRIBUTING.md`, `CHANGELOG.md` | As each requirement says |
@@ -107,7 +108,7 @@ Boundaries the reviewer enforces: `mcp/metrics.mjs` imports nothing from `mcp/se
 | Key | Type | Default | Notes |
 |---|---|---|---|
 | `runners.<name>.activate` | `"none"` \| `"warm"` | `"none"` | A-02. `"warm"` makes `kukulu_next` send one request before each stage on this runner |
-| `runners.<name>.activateTimeoutMs` | integer ≥ 1000 | 1200000 | ⚠️ ASSUMPTION (§5.6). Refused at or above the MCP timeout |
+| `runners.<name>.activateTimeoutMs` | integer ≥ 1000 | 1800000 | ⚠️ ASSUMPTION (§5.6). Refused at or above the MCP timeout |
 | `runners.<name>.servedAs` | object | none | Exact role model string → the model id the endpoint serves. Without an entry the id is the model string with its matched `match` prefix removed (A-02) |
 | `runners.<name>.tokenEnv` | string, `/^[A-Z][A-Z0-9_]*$/` | none | Name of an environment variable holding the runner's API token. The token itself is never written to config, state, the log or a result |
 
@@ -128,7 +129,7 @@ Boundaries the reviewer enforces: `mcp/metrics.mjs` imports nothing from `mcp/se
 
 | File | Writer | Content |
 |---|---|---|
-| `usage.jsonl` | `scripts/usage-log.mjs` | One usage record per line (B-01) |
+| `usage.jsonl` | `scripts/cleanroom-log.mjs`, general mode only | One usage record per line (B-01, B-02) |
 | `counters.json` | the server | `{ verifyRuns, verifyFailures, guardReblocks, tasksReopened, activateFailures }` (C-02) |
 
 `kukulu_run_start` adds `.kukulu/metrics/` to `.git/info/exclude`, the way `kukulu_agents_sync` excludes the generated agents.
@@ -139,13 +140,13 @@ The constraints in `docs/flights/v0-8-1/kukulu.json` carry over unchanged (princ
 
 - `metrics-module-pure`: `mcp/metrics.mjs` has no `process.exit`, no console call, no `child_process` and no import outside `node:`. The pattern is `cleanroom-module-pure`'s, with the path changed.
 - `server-no-network`: `mcp/server.mjs` has no import of `node:http`, `node:https`, `node:net` or `node:dgram`, with or without the `node:` prefix.
-- `no-hardcoded-activate-timeout`: `1200000` appears once in `mcp/server.mjs`, on the line where `loadGlobalConfig` applies a runner's defaults.
+- `no-hardcoded-activate-timeout`: `1800000` appears once in `mcp/server.mjs`, on the line where `loadGlobalConfig` applies a runner's defaults.
 
 ### 5.6 Tunables
 
 | Value | Where | Status |
 |---|---|---|
-| `activateTimeoutMs`: 1200000 ms (20 min) | One line in `loadGlobalConfig` | ⚠️ ASSUMPTION. It must sit above the slowest model load a runner makes. One published cold start of a 76 GiB checkpoint on a DGX Spark took 12 min 54 s |
+| `activateTimeoutMs`: 1800000 ms (30 min) | One line in `loadGlobalConfig` | ⚠️ ASSUMPTION. It must sit above the slowest cold load a runner makes. One published cold start of a 76 GiB checkpoint on a DGX Spark took 12 min 54 s; 30 minutes is 2.3 times that, for larger checkpoints and slower disks. A runner that refuses the connection fails at once; only one that accepts and never answers costs the full wait |
 | The warm request's `max_tokens`: 1 | `scripts/runner-probe.mjs` only | Fixed, not tunable: the request exists to be answered, not to generate |
 
 ## 6. Interfaces
@@ -163,12 +164,13 @@ node scripts/runner-probe.mjs --endpoint <http(s)://host[:port]> --warm <served 
 
 - `--models` sends `GET /v1/models` and reports the ids in the response's `data[].id`.
 - `--warm` sends `POST /v1/messages` with `{ "model": <served id>, "max_tokens": 1, "messages": [{ "role": "user", "content": "ping" }] }` and the header `anthropic-version: 2023-06-01`.
-- With `--token-env`, the variable's value is sent as both `x-api-key` and `Authorization: Bearer`. An unset variable is an error before any request.
-- It prints exactly one JSON line: `{ "ok": true, "status": 200, "ms": 1834, "served": ["a", "b"] }` (`served` only for `--models`) or `{ "ok": false, "status": 404 | null, "ms": 31, "error": "<one line>" }`. `ok` is true only for a 2xx status. Exit status is 0 when `ok`, 1 otherwise, 2 for a usage error.
+- With `--token-env`, the variable's value is sent as both `x-api-key` and `Authorization: Bearer`. An unset variable is an error before any request. The value travels only in the environment, never in argv.
+- **The token never leaves the request.** The probe replaces every occurrence of the token's value in anything it prints (an error body the runner echoes included) with `<redacted>`. The server never reads the variable. So the value cannot reach the state, the timeline, the chain, a feedback entry, a tool result or a halt reason.
+- It prints exactly one JSON line: `{ "ok": true, "status": 200, "ms": 1834, "served": ["a", "b"] }` (`served` only for `--models`), and for `--warm` `"reported"`: the response body's `model` field, the id the runner says answered, or `null` when the body has none; or `{ "ok": false, "status": 404 | null, "ms": 31, "error": "<one line>" }`. `ok` is true only for a 2xx status. Exit status is 0 when `ok`, 1 otherwise, 2 for a usage error.
 - A timeout aborts the request and reports `error: "no answer within <N> ms"`.
 - It follows no redirect and writes no file.
 
-Tests in `test/routing.mjs`, against a `node:http` server the test starts: a 200 for each mode, a 404 with a body, a server that never answers (timeout), a refused connection, an unset token variable, and the token reaching the fake in both headers.
+Tests in `test/routing.mjs`, against a `node:http` server the test starts: a 200 for each mode, `reported` from the response body and `null` without one, a 404 with a body, a server that never answers (timeout), a refused connection, an unset token variable, the token reaching the fake in both headers, and a fake that echoes the `Authorization` header in a 401 body: the token's value is absent from the probe's output.
 
 #### A-02 — runner keys and the served id
 
@@ -192,12 +194,12 @@ runners.<name>.match entry '<prefix>' equals the model string '<model>', so no m
 
 Tests in `test/routing.mjs`: each refusal, the default strip, a `servedAs` override, and the keys refused on `anthropic`.
 
-#### A-03 — activation in `kukulu_next`
+#### A-03 — activation in `kukulu_next` ⚠️ NEW MATTER
 
 When `nextDecision` returns a stage with a role (`plan`, `implement`, `review`, `summarize`) and that role's runner has `activate: "warm"`, `next` runs the probe before it records the timeline:
 
 1. `spawnSync(process.execPath, [runner-probe.mjs, "--endpoint", endpoint, "--warm", servedId, "--timeout-ms", activateTimeoutMs, …])`.
-2. On `ok`, it appends `{ event: "activate", stage, round, runner, served, ms, ok: true, at }` to `state.timeline`, before the stage's `start` record, and the result carries `activation: { runner, served, ms }`.
+2. On `ok`, it appends `{ event: "activate", stage, round, runner, served, reported, ms, ok: true, at }` to `state.timeline`, before the stage's `start` record, and the result carries `activation: { runner, served, reported, ms }`. `reported` is the probe's `reported`: what the runner says served the request, recorded beside what was asked for.
 3. On failure, it runs the probe once more with `--models`, appends the same record with `ok: false`, increments `activateFailures`, sets `state.halted` and returns `stage: "halt"` with this reason:
 
 ```text
@@ -209,15 +211,17 @@ Rules:
 - The probe runs every time, even when the previous stage used the same model. A loaded model answers a one-token request in about a second, and the harness may have asked the runner for another model in between.
 - A parallel wave warms once, for the wave's role, before `streams` is returned.
 - `stageSecondsOf` skips `activate` records, so a model load is never counted as stage time. `kukulu_status` gains `activateSeconds`: per runner, the sum of `ms` over `ok` records, in whole seconds.
-- In clean-room mode the stage's `start` entry in the chain gains `data.activate: { runner, served, ms }`. No entry kind is added.
+- In clean-room mode the stage's `start` entry in the chain gains `data.activate: { runner, served, reported, ms }`. No entry kind is added.
+- When `reported` is not `null` and differs from `served` once both are passed through `normalizeModel`, the server logs one feedback entry with `category: "runner-drift"` naming both. It is a note, not a halt (principle 6); the chain keeps both values for a reviewer.
+- No token value reaches any of these records (A-01).
 - The halt is not a round-cap halt, so `kukulu_run_resume` clears it (0.7.0).
 - Behind the sandbox the server runs outside the container, so the probe reaches the runner directly and needs no egress entry.
 
-The go-flight skill prints `runner <name>: <served> ready in <seconds> s` when a result carries `activation`.
+The go-flight skill prints `runner <name>: <served> ready in <seconds> s` when a result carries `activation`, and ends the line with `(reports <reported>)` when the two differ.
 
 **The limit this cannot remove.** The probe makes a swapping proxy load the stage's model. The controller's own next request, the one that spawns the stage, then goes to the controller's model. If the proxy must unload the stage's model to serve that request, the swap is undone before the stage starts. `docs/local-runners.md` states the rule (E-01): with models that cannot be resident together, the controller and the harness's small-model calls run on a model that stays resident.
 
-Tests in `test/state.mjs`, with the probe replaced by a fake script named through an environment variable the tests set: an `ok` activation and its timeline record, `stageSeconds` unchanged by it, a failure's halt text and counter, resume after it, no probe for `activate: "none"`, no probe for the `anthropic` runner, one probe for a wave.
+Tests in `test/state.mjs`, with the probe replaced by a fake script named through an environment variable the tests set: an `ok` activation and its timeline record with `reported`, the `runner-drift` note when `reported` differs, `stageSeconds` unchanged by it, a failure's halt text and counter, resume after it, no probe for `activate: "none"`, no probe for the `anthropic` runner, one probe for a wave.
 
 #### A-04 — activation and identity
 
@@ -259,23 +263,32 @@ One record describes one agent's use of models, from the harness's own transcrip
 
 `validateUsageRecord` in `mcp/metrics.mjs` is the contract a second harness's adapter must meet. Tests in `test/metrics.mjs`: the fixture transcript's exact record, a repeated `requestId`, a sidechain row, a missing `costUSD`, an unreadable file, and both copies of the adapter producing identical output (principle 13).
 
-#### B-02 — `scripts/usage-log.mjs`, the general-mode hook
+#### B-02 — general-mode usage, written by `scripts/cleanroom-log.mjs`
 
-Registered on `SubagentStop` and `Stop`. It exits 0 at once, silently, when the project has no `docs/kukulu.json`, when `policies.metrics` is false, or when `KUKULU_LOG_SOCKET` is set (inside the sandbox `.kukulu/` is not writable, and the chain carries the usage there). Otherwise it appends one record to `.kukulu/metrics/usage.jsonl`. It never blocks a stop: every path ends in exit 0.
+`scripts/cleanroom-log.mjs` already runs on `SubagentStop`, and now on `Stop` too. On those two events, with no clean-room policy file, it appends one usage record to `.kukulu/metrics/usage.jsonl`. It exits 0 at once, silently, when the project has no `docs/kukulu.json` or when `KUKULU_LOG_SOCKET` is set (inside the sandbox `.kukulu/` is not writable, and the chain carries the usage there). It reads no other config: `policies.metrics` governs only `METRICS.json`, and an excluded file costs nothing. It never blocks a stop: every path ends in exit 0.
 
-It writes in clean-room mode too. The chain's `usage` entries stay the signed evidence the verifier's check 12 recounts; `usage.jsonl` is what metrics read.
+The general-mode path does not import `mcp/cleanroom.mjs`, so `hooks-lazy-cleanroom` holds: the adapter lives in the script, and the script imports the module only after it finds a policy. With a policy file, the script writes the chain's `usage` entry as today and writes nothing to `usage.jsonl` (B-05).
 
-Tests in `test/metrics.mjs`: the appended record, the three silent exits, and a transcript that cannot be read.
+Tests in `test/metrics.mjs`: the appended record in general mode, the silent exits, a transcript that cannot be read, and no `usage.jsonl` line in clean-room mode.
 
 #### B-03 — the controller's usage
 
-On `Stop`, both hook scripts write a record with `role: "controller"`, computed from the whole main transcript. `Stop` fires more than once in a flight, so each record is cumulative, and readers keep the last one per session. `rolesUsage` matches only the four role agents, so the verifier's check 12 does not count these entries.
+On `Stop`, `scripts/cleanroom-log.mjs` writes a record with `role: "controller"`, computed from the whole main transcript: to `usage.jsonl` in general mode, as a chain `usage` entry in clean-room mode. `Stop` fires more than once in a flight, so each record is cumulative, and readers keep the last one per session. `rolesUsage` matches only the four role agents, so the verifier's check 12 does not count these entries.
 
 Known limit, stated in `docs/metrics.md`: requests the controller makes after its last `Stop` hook ran are not counted.
 
 #### B-04 — usage under the sandbox
 
-Inside the boundary `scripts/cleanroom-log.mjs` already sends each `usage` entry through the log socket. It now sends the B-01 fields in `data`. The server reads usage records from `.kukulu/metrics/usage.jsonl` when the file exists, else from the chain's `usage` entries. Test in `test/metrics.mjs`: the same flight read from each source yields the same metrics.
+Inside the boundary `scripts/cleanroom-log.mjs` already sends each `usage` entry through the log socket. A chain `usage` entry's `data` now carries the B-01 fields, inside the sandbox and out. The planner checks that the verifier accepts the added keys in `data` (Appendix C); check 12's recount reads only the token sums it reads today.
+
+#### B-05 — one usage source per mode
+
+- **Clean-room mode** (`state.cleanroom.genesis` set, or the archived state's): the metrics read usage only from the chain's `usage` entries, from the archived copy of the log after an archive. `usage.jsonl` is never read for a clean-room flight, and the hook does not write it (B-02).
+- **General mode:** the metrics read `.kukulu/metrics/usage.jsonl`.
+
+`METRICS.json` records which: `usage: { source: "chain" | "usage.jsonl", records: <n>, chainHead: "<hash of the last log entry read>" | null }`. In clean-room mode the bundle holds that log, so anyone with the bundle can recompute the usage sums and tie them to `chainHead`.
+
+Tests in `test/metrics.mjs`: for a recorded clean-room flight, each role's token sums in the metrics equal check 12's recount (`rolesUsage`) of the same log and the bundle manifest's `roles.<role>.usage`, so `compare-flights.mjs` and `compare-bundles.mjs` report the same totals for one flight; a clean-room flight with a stray `usage.jsonl` present still reads the chain.
 
 ### C — Metrics
 
@@ -295,8 +308,10 @@ Derived fields, each documented in `docs/metrics.md`:
 - `outcome.approvedAtRound`: the round of the first `APPROVED` verdict, else `null`.
 - `roles.<role>`: the routing facts (`model`, `runner`, `locality`, `family`) and the sums of that role's usage records; `outputPerActiveSecond` is `output / (activeMs / 1000)`, rounded to one decimal; `cost` is `null` unless the role's runner is `anthropic`.
 - `friction.feedback`: feedback entries counted by `category`.
+- **Missing is not zero.** A role with no usage record has `usage: null` in its entry and its token fields `null`, never 0. `totals` sums only the roles that have records and lists the rest in `totals.missing` (for example `["summarizer"]`, C-03). `compare-flights.mjs` prints `not recorded` for a missing role and marks a total that leaves a role out `partial (summarizer not recorded)`, so two flights are never compared on totals that silently differ in coverage.
+- **No commit hashes.** `METRICS.json` holds counts, timestamps, the spec file's content hash and `chainHead`, never a commit hash, so re-signing the branch (`kukulu_pr_finalize({ resign: true })`) leaves it accurate.
 
-Tests in `test/metrics.mjs`: a recorded flight's inputs (a fixture built from `docs/flights/v0-8-0/`) to its exact metrics; every `null` path; `cost` nulled for a local runner; a halted flight; a flight with no usage records.
+Tests in `test/metrics.mjs`: a recorded flight's inputs (a fixture built from `docs/flights/v0-8-0/`) to its exact metrics; every `null` path; `cost` nulled for a local runner; a halted flight; a flight with no usage records; a missing summarizer record giving `usage: null` and `totals.missing: ["summarizer"]`; and no 40-hex commit hash anywhere in the output.
 
 #### C-02 — counters
 
@@ -326,7 +341,7 @@ This is a change to `scripts/implement-guard.mjs`. CLAUDE.md's reviewer rule say
 
 An archive moves `.kukulu/state.json`, `docs/kukulu.json` and `.kukulu/feedback.jsonl` into the flight's directory. After one, the metrics read those three inputs from `state.archived.dir`, and the usage records and counters from `.kukulu/metrics/`, which an archive does not move.
 
-Known limit, stated in `docs/metrics.md`: at `kukulu_pr_finalize` the summarizer has not stopped, so its usage record (B-02) is not written yet, and the summarizer's role in the committed `METRICS.json` holds `null` sums. `kukulu_metrics` called after the flight shows it.
+Known limit, stated in `docs/metrics.md`: at `kukulu_pr_finalize` the summarizer has not stopped, so its usage record is not written yet. The committed `METRICS.json` records it as missing (`usage: null`, `totals.missing: ["summarizer"]`), never as zero (C-01). In general mode, `kukulu_metrics` called after the flight includes it; in clean-room mode the log has stopped at the archive (0.8.1 C-01), so it stays missing.
 
 A failure to build or write it never changes the decision: the result carries `metricsNote`, as `timelineNote` does today.
 
@@ -351,7 +366,7 @@ It prints five sections, each with A, B and the difference:
 1. **Outcome**: verdict, halt, reviews, the round of approval, the caps.
 2. **Wall time**: total, per stage, activation, idle.
 3. **Rounds**: one row per round: findings, implement and review seconds.
-4. **Roles**: per role: model, runner, family, requests, input and output tokens, active seconds, output per active second, tool errors, cost.
+4. **Roles**: per role: model, runner, family, requests, input and output tokens, active seconds, output per active second, tool errors, cost; `not recorded` for a role with no usage, and the totals row marked `partial` when either flight's `totals.missing` is not empty.
 5. **Friction**: feedback by category, guard re-blocks, verify runs and failures, reopened tasks, activation failures.
 
 A header names each flight's harness, plugin version, mode and spec hash, and prints one line when the two spec hashes differ: `the two flights were built from different specs; the comparison below is not like for like`.
@@ -403,6 +418,8 @@ These are `docs/kukulu.json`'s today and stay as they are:
 - extra, by path: as in `docs/flights/v0-8-1/kukulu.json`
 - targeted, for `mutation.targeted`: `node test/{filter}.mjs`
 
+The planner sets `maxRounds: 4` and `maxRoundsHard: 10` in `docs/kukulu.json`. `maxRounds` bounds non-converging rounds and `maxRoundsHard` all rounds; 0.8.1 needed eleven rounds and its soft cap of 3 fired twice. Keeping the two apart keeps the non-convergence halt, which one "max review rounds N" flight option would switch off by setting both to N.
+
 ## 8. Phases
 
 ### Phase 0 — Usage records
@@ -433,9 +450,13 @@ None block the build. Each is decided here, so the planner records it under `## 
 3. **The served id.** The matched prefix is stripped, with `servedAs` as the override (A-02). Sending the role's model string unchanged was the alternative; it fails when a workstation router rewrites the string on the way to the runner.
 4. **Where metrics are written.** By the server at `done` and `halt` (C-03), not by the summarizer, whose own usage is not known until it stops.
 5. **Usage in every mode.** A second hook script writes an untracked file in general mode (B-02). Requiring clean-room mode for metrics was the alternative; it would keep everyday flights unmeasured.
-6. **The summarizer's record after an archive.** The summarizer archives the flight and then stops, so its `SubagentStop` arrives after the archive, and 0.8.1 C-01 stops the clean-room log there. `usage-log.mjs` still writes its record, and `next` reads it at `done`. Under the sandbox that record is lost; `docs/metrics.md` lists it as a known limit.
+6. **The summarizer's record after an archive.** The summarizer archives the flight and then stops, so its `SubagentStop` arrives after the archive and after `kukulu_pr_finalize` has committed `METRICS.json`. The committed file records it as missing (C-01, C-03). In general mode the record is still written to `usage.jsonl`, and `kukulu_metrics` shows it afterwards; in clean-room mode 0.8.1 C-01 has stopped the log, so it is not recorded. `docs/metrics.md` lists both as known limits.
 7. **Cost for local runners.** `null`. Energy and hardware cost are the operator's arithmetic.
 8. **Engine metrics.** Not scraped (§2). `outputPerActiveSecond` is the one throughput figure, because both kinds of runner can produce it.
+9. **Clean-room usage has one source** (B-05). The signed chain, because `METRICS.json` is committed after `kukulu_attest` and so sits outside the bundle; reading the chain lets the bundle reproduce it. Keeping both sources and preferring `usage.jsonl` was the alternative; it would let `compare-flights` and `compare-bundles` disagree about one flight.
+10. **No new hook script** (principle 13). A new script running on every stop of a clean-room flight would be outside the checkpoints' pins. Adding a pin changes `CHECKPOINT_KEYS` and the verifier, which this release does not touch (Appendix B 5); folding the writer into the pinned logger does not.
+11. **0.8.1 R6-03 against 0.8.1 A-02 rule 6** (owner ruling, 2026-11-13). The denial of `!(cat <<EOF` / `rm -rf .kukulu/cleanroom` / `EOF` / `)` is correct and stays. Rule 6 decides how `!(` is read (a pattern word, then a subshell); it does not decide the verdict. Under either reading the `rm` line is a heredoc body line, and the final A-02 checks every body line for protected-path writes "in every case". No code or fixture changes.
+12. **The Claude Code version for the MCP timeout** (0.8.1 B-01). Filled in by the owner in `docs/operations.md` before this flight, from Claude Code's changelog. Not a task.
 
 ## Appendix A: `METRICS.json`
 
@@ -446,6 +467,7 @@ None block the build. Each is decided here, so the planner records it under `## 
   "flight": "v0-9-0",
   "spec": { "title": "cleancbor — Specification", "sha256": "…" },
   "harness": [{ "name": "claude-code", "version": "…" }],
+  "usage": { "source": "chain", "records": 14, "chainHead": "…" },
   "mode": "clean-room",
   "enforcement": "hook",
   "outcome": {
@@ -472,6 +494,7 @@ None block the build. Each is decided here, so the planner records it under `## 
     },
     "controller": { "…": "…" }
   },
+  "totals": { "requests": 1840, "input": 30122004, "output": 902113, "missing": ["summarizer"] },
   "tasks": { "total": 41, "done": 41, "blocked": 0, "skipped": 0, "reopened": 1 },
   "friction": {
     "feedback": { "restart": 0, "runner-drift": 0 },
@@ -489,6 +512,8 @@ None block the build. Each is decided here, so the planner records it under `## 
 4. **`outputPerActiveSecond` is not decode speed.** It divides output tokens by all model wait time, so a flight with long prompts reads slower than its engine's benchmark. It is the same measure on every runner, which is what a comparison needs.
 5. **No change to bundles.** A clean-room bundle already carries the log the metrics are built from. Adding `METRICS.json` to the manifest would change the verifier, and that is not this release.
 6. **Metrics at `kukulu_pr_finalize`, not at the `done` after an archive** (C-03). The `done` after an archive commits nothing (0.8.1 C-01), and a commit made there would come after the push. Writing at finalize gets the file into the pull request, at the cost of the summarizer's own usage, which is not known until it stops.
+7. **The token is redacted by the probe, not the server** (A-01). The server never holds the value, so it has nothing to leak.
+8. **`reported` drift is a note, not a halt** (A-03). A proxy may answer under an alias of the id it was asked for; halting on a string difference would stop flights that are fine. The chain keeps both values.
 
 ## Appendix C: what this draft was checked against
 
