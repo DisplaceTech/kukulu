@@ -139,6 +139,12 @@ eq(hooks.hooks.SubagentStop[0].matcher, "^(kukulu:implementer|kukulu-implementer
   eq(sub[0].hooks.map((h) => h.command).join(), `"${"$"}{CLAUDE_PLUGIN_ROOT}"/scripts/implement-guard.mjs`, "...and the implement guard stays first");
 }
 ok(!hooks.hooks.Stop[0].matcher, "Stop carries no matcher — a Stop event has no agent to match against");
+{
+  const stopHooks = hooks.hooks.Stop;
+  eq(stopHooks.length, 2, "Stop has two entries");
+  eq(stopHooks[1].hooks.map((h) => h.command).join(), `"${"$"}{CLAUDE_PLUGIN_ROOT}"/scripts/cleanroom-log.mjs`, "hooks.json runs the clean-room logger on Stop after the implement guard");
+  ok(!stopHooks[1].matcher, "...with no matcher");
+}
 
 // ---------------------------------------------------------------- agents and skills
 
@@ -214,7 +220,7 @@ for (const name of ["plan-build", "implement"]) {
   like(readme, /^## Upgrading to 0\.7\.0$/m, "README has a 0.7.0 migration paragraph");
   like(readme, /\.foundry\/state\.json[\s\S]*\.kukulu\/[\s\S]*`FOUNDRY_\*` environment variables are no longer read/, "...naming the manual move and the unread FOUNDRY_ variables");
   like(readme, /\*\*Clean-room mode\*\*, opt-in with a policy file/, "README's feature list names clean-room mode");
-  like(readme, /fifteen suites/, "README counts fifteen suites");
+  like(readme, /sixteen suites/, "README counts sixteen suites");
   const tools = read("docs/mcp-tools.md");
   ok(tools.includes("`prChecks`") && tools.includes("`gate`") && /"source": "review"/.test(tools) && tools.includes("`constraints`"), "mcp-tools documents prChecks, gate and source (and the mutate constraints)");
   ok(!tools.includes("kukulu_migrate"), "mcp-tools has no kukulu_migrate");
@@ -314,15 +320,17 @@ eq((AGENT_MAP.match(/kukulu:/g) || []).length, agentNames.length, "the stage tab
 // ---------------------------------------------------------------- the flight controller
 
 const goFlight = read("skills/go-flight/SKILL.md");
+like(goFlight, /print `runner <name>: <served> ready in <seconds> s`/, "go-flight prints the activation line");
+like(goFlight, /`\(reports <reported>\)` when `reported` is not null and differs from `served`/, "...and the reported id when it differs");
 like(goFlight, /policies\.signing is 'required' and the signing probe failed/, "go-flight stops on a required-signing probe failure");
 like(goFlight, /`subagent_type`, `description`, `prompt`, and optionally `model`/, "go-flight names description beside subagent_type and prompt");
 like(goFlight, /`description`: the `description` value, verbatim/, "...and passes it in step 4");
 const fmGo = frontmatter(goFlight);
 const allowed = String(fmGo["allowed-tools"]).split(",").map((s) => s.trim());
 const toolNames = Array.from(serverSrc.matchAll(/name: "(kukulu_[a-z_]+)"/g), (m) => m[1]);
-eq(toolNames.length, 26, "the server defines twenty-six tools");
+eq(toolNames.length, 27, "the server defines twenty-seven tools");
 
-const COUNT_WORDS = { 18: "Eighteen", 19: "Nineteen", 20: "Twenty", 21: "Twenty-one", 22: "Twenty-two", 23: "Twenty-three", 24: "Twenty-four", 25: "Twenty-five", 26: "Twenty-six" };
+const COUNT_WORDS = { 18: "Eighteen", 19: "Nineteen", 20: "Twenty", 21: "Twenty-one", 22: "Twenty-two", 23: "Twenty-three", 24: "Twenty-four", 25: "Twenty-five", 26: "Twenty-six", 27: "Twenty-seven" };
 like(read("docs/mcp-tools.md").split("\n")[2], new RegExp(`^${COUNT_WORDS[toolNames.length]} tools,`), "docs/mcp-tools.md states the tool count in words");
 
 {
@@ -590,6 +598,48 @@ like(template, /⚠️ ASSUMPTION/, "the template explains the assumption marker
 // ---------------------------------------------------------------- routing config templates
 
 const kukuluConfigTemplate = json("templates/kukulu.config.example.json");
+{
+  const tools = read("docs/mcp-tools.md");
+  const section = (name) => tools.slice(tools.indexOf(`## \`${name}\``), tools.indexOf("\n## ", tools.indexOf(`## \`${name}\``) + 5));
+  const status = section("kukulu_status");
+  ok(/\| `counters` \|/.test(status) && /\| `harness` \|/.test(status) && /\| `activateSeconds` \|/.test(status), "mcp-tools documents counters, harness and activateSeconds in kukulu_status");
+  const next = section("kukulu_next");
+  ok(/\*\*Runner activation\.\*\*/.test(next) && next.includes("`activation:") && next.includes("metricsNote") && next.includes("`activate` record"), "mcp-tools documents activation and metricsNote in kukulu_next");
+  ok(/`activate`, `served`/.test(section("kukulu_config_show")) || /activate, served/.test(section("kukulu_config_show")), "...and activate and served in kukulu_config_show");
+  const start = section("kukulu_run_start");
+  ok(start.includes(".kukulu/metrics/") && start.includes("total: 0"), "...and the metrics exclusion and the lock's total in kukulu_run_start");
+  const readme9 = read("README.md");
+  const upgrade = readme9.slice(readme9.indexOf("## Upgrading to 0.9.0"), readme9.indexOf("## Per-project use"));
+  ok(upgrade.includes("`Stop`") && ["activate", "activateTimeoutMs", "servedAs", "tokenEnv"].every((k) => upgrade.includes(`\`${k}\``)) && upgrade.includes("METRICS.json") && upgrade.includes(".kukulu/metrics/"), "README has a 0.9.0 upgrade paragraph naming the Stop hook, the four runner keys, METRICS.json and .kukulu/metrics/");
+  ok(readme9.indexOf("## Upgrading to 0.7.0") < readme9.indexOf("## Upgrading to 0.9.0") && /## Upgrading to 0\.7\.0/.test(readme9), "...after the 0.7.0 one, which stays");
+  ok(/\| `docs\/METRICS\.json` \|/.test(readme9) && /\| `\.kukulu\/metrics\/` \|/.test(readme9), "README's file list names docs/METRICS.json and .kukulu/metrics/");
+  const arch = read("docs/architecture.md");
+  const loop = arch.slice(arch.indexOf("flowchart LR\n    N["), arch.indexOf("```", arch.indexOf("flowchart LR\n    N[")));
+  ok(/ACT\["activation:/.test(loop) && /"the runner does not serve its model"/.test(loop), "architecture.md shows activation in the stage loop");
+  ok(arch.includes(".kukulu/metrics/") && arch.includes("docs/METRICS.json") && /usage hook/.test(arch), "...and the metrics files and their writers in State on disk and Who may write what");
+  ok(/`## Leaves`|## What the flight leaves behind/.test(read("docs/operations.md")) && read("docs/operations.md").slice(read("docs/operations.md").indexOf("## What the flight leaves behind")).includes("docs/METRICS.json"), "operations.md lists METRICS.json among what a flight leaves behind");
+  const contributing = read("CONTRIBUTING.md");
+  ok(["mcp/metrics.mjs", "scripts/runner-probe.mjs", "scripts/compare-flights.mjs"].every((f) => contributing.includes(`\`${f}\``)) && /\| `metrics` \|/.test(contributing), "CONTRIBUTING lists the metrics module, the probe and the comparison script, and the metrics suite");
+}
+{
+  const page = read("docs/local-runners.md");
+  const headings = page.split("\n").filter((l) => l.startsWith("## "));
+  eq(headings.join("|"), "## Direct mode|## Resident and swapping layouts|## The controller rule|## Timeouts|## What activation measures|## A smoke test before a flight", "docs/local-runners.md has its six sections, in order");
+  // each paragraph or list item that names a Claude Code variable holds a link to Claude Code's own docs
+  const blocks = page.split(/\n\s*\n/).flatMap((b) => (b.trimStart().startsWith("- ") ? b.split(/\n(?=- )/) : [b]));
+  const named = blocks.filter((b) => /`(?:ANTHROPIC_\w+|API_TIMEOUT_MS|MCP_TOOL_TIMEOUT|CLAUDE_CODE_\w+)`/.test(b));
+  ok(named.length >= 8 && named.every((b) => b.includes("https://code.claude.com/docs/")), `docs/local-runners.md cites a page for every Claude Code variable it names (${named.length} blocks)`);
+  ok(page.includes("templates/runners/llama-swap.example.yaml") && page.includes("KUKULU_PROFILE=spark") && page.includes("`spark` profile"), "...points at the llama-swap template and the spark profile");
+  like(read("docs/routing.md"), /\(\.\/local-runners\.md\)/, "...is linked from docs/routing.md");
+  ok(/24 hours/.test(page) && !/\b\d{7,}\b/.test(page) && !/\bpatented\b/i.test(page), "...and says 24 hours, with no millisecond figure for the MCP limit, and never 'patented'");
+}
+{
+  const swap = read("templates/runners/llama-swap.example.yaml");
+  like(swap.split("\n")[1], /Checked against llama-swap v\d+/, "the llama-swap template names the release it was checked against");
+  ok(/persistent: true/.test(swap) && /swap: true/.test(swap) && /swap: false/.test(swap), "...has a persistent group and a swapping group");
+  const served = Object.values(kukuluConfigTemplate.profiles.spark).map((r) => r.model.replace(/^spark\//, ""));
+  ok(served.every((id) => swap.includes(`"${id}":`)) && new Set(served).size === 2, "...and its stage model ids are the spark profile's served ids");
+}
 eq(
   Object.keys(kukuluConfigTemplate.roles).sort().join(","),
   ["implementer", "planner", "reviewer", "summarizer"].join(","),
@@ -638,6 +688,7 @@ ok(read("skills/plan-build/SKILL.md").includes("templates/constraints.example.js
       ok(opsDoc.includes("`policies.finalize`"), "operations.md documents policies.finalize");
       ok(opsDoc.includes("`policies.mergeMethod`"), "operations.md documents policies.mergeMethod");
       ok(opsDoc.includes("`policies.syncBase`"), "operations.md documents policies.syncBase");
+      ok(opsDoc.includes("`policies.metrics`"), "operations.md documents policies.metrics");
       ok(opsDoc.includes("`profiles.<name>.policies`") && opsDoc.split("\n").some((l) => l.includes("global file") && l.includes("`policies`")), "operations.md documents the global and profile policies layers");
       continue;
     }

@@ -160,7 +160,9 @@ function readLock(lockPath) {
 }
 
 function writeLock(lockPath, lock, count) {
-  const text = lock.json ? JSON.stringify({ ...lock.json, count }) : String(count);
+  // `total` is the cumulative re-block count the server reads as guardReblocks; unlike `count` it is never reset.
+  // A legacy bare-number lock has nowhere to keep one and gets none.
+  const text = lock.json ? JSON.stringify({ ...lock.json, count, total: (Number.isInteger(lock.json.total) ? lock.json.total : 0) + 1 }) : String(count);
   fs.writeFileSync(lockPath, `${text}\n`);
 }
 

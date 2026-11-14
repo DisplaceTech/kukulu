@@ -617,6 +617,22 @@ const alive = (pid) => {
   });
 }
 
+// ---------------------------------------------------------------- the metrics directory is excluded per clone (P0-03)
+
+{
+  const repo = plannedRepo();
+  writeFile(repo, ".kukulu/metrics/usage.jsonl", "{}\n");
+  await withServer(repo, async ({ call }) => {
+    await call("kukulu_run_start");
+    const exclude = readFile(repo, ".git/info/exclude").split("\n");
+    eq(exclude.filter((l) => l === ".kukulu/metrics/").length, 1, "kukulu_run_start adds .kukulu/metrics/ to .git/info/exclude");
+    await call("kukulu_run_start");
+    eq(readFile(repo, ".git/info/exclude").split("\n").filter((l) => l === ".kukulu/metrics/").length, 1, "...once: a second call adds no second line");
+    const s = await call("kukulu_status");
+    ok(!s.preexistingUntracked.some((p) => p.includes("metrics")), "a usage.jsonl written before the run is not in preexistingUntracked");
+  });
+}
+
 // ---------------------------------------------------------------- pre-existing untracked files
 
 {
@@ -1639,6 +1655,66 @@ async function baseAhead(repo, { onBuild = null, onBase = null } = {}) {
     await call("kukulu_task_reopen", { id: "P0-02", reason: "the output is wrong" });
     const n = await call("kukulu_task_next");
     ok(n.id === "P0-02" && typeof n.taskLog === "string" && /REOPENED: the output is wrong/.test(n.taskLog), "a reopened task's taskLog carries REOPENED");
+  });
+}
+
+// ---------------------------------------------------------------- counters: verify runs and failures (P2-01)
+
+{
+  const countersOf = (repo) => JSON.parse(readFile(repo, ".kukulu/metrics/counters.json"));
+  const repo = plannedRepo({ config: { verify: ["true"] } });
+  await withServer(repo, async ({ call }) => {
+    const v = await call("kukulu_verify");
+    eq(v.ok, true, "a passing verify is ok");
+    eq(countersOf(repo).verifyRuns + "|" + countersOf(repo).verifyFailures, "1|0", "kukulu_verify counts a run, and a passing run counts no failure");
+    eq(git(repo, ["status", "--porcelain"]).includes("metrics"), false, "the counters file is not in git status");
+  });
+  const failing = plannedRepo({ config: { verify: ["true", "false"] } });
+  await withServer(failing, async ({ call }) => {
+    const v = await call("kukulu_verify");
+    eq(v.ok, false, "a failing command makes verify not ok");
+    eq(countersOf(failing).verifyRuns + "|" + countersOf(failing).verifyFailures, "1|1", "...and counts a run and a failure");
+    await call("kukulu_verify");
+    eq(countersOf(failing).verifyRuns + "|" + countersOf(failing).verifyFailures, "2|2", "...again on the next call");
+  });
+  const rule = { id: "no-bad", description: "no BAD", paths: ["x.txt"], pattern: "BAD", shouldMatch: ["BAD"], shouldNotMatch: ["good"] };
+  const constrained = plannedRepo({ config: { verify: ["true"], constraints: [rule] } });
+  writeFile(constrained, "x.txt", "BAD\n");
+  await withServer(constrained, async ({ call }) => {
+    const v = await call("kukulu_verify");
+    eq(v.ok, false, "a failing constraint makes verify not ok");
+    eq(countersOf(constrained).verifyRuns + "|" + countersOf(constrained).verifyFailures, "1|0", "a failing constraint alone counts a run and no failure");
+  });
+  const stuck = plannedRepo({ config: { verify: ["false"] } });
+  fs.mkdirSync(path.join(stuck, ".kukulu", "metrics", "counters.json"), { recursive: true });
+  await withServer(stuck, async ({ call }) => {
+    const v = await call("kukulu_verify");
+    ok(v.ok === false && v.results.length === 1 && /counter was not recorded/.test(v.countersNote), "a counters file that cannot be written is a countersNote and the result is unchanged");
+  });
+}
+
+// ---------------------------------------------------------------- the guard's cumulative total (P2-02)
+
+{
+  const repo = plannedRepo();
+  await withServer(repo, async ({ call }) => {
+    await call("kukulu_run_start");
+    eq(JSON.parse(readFile(repo, ".kukulu/implement.lock")).total, 0, "kukulu_run_start arms the lock with total 0");
+  });
+  const started = startedRepo();
+  writeFile(started, ".kukulu/implement.lock", JSON.stringify({ count: 3, total: 5, armedAt: "x", round: 0, cap: 60 }) + "\n");
+  await withServer(started, async ({ call }) => {
+    await call("kukulu_task_next");
+    const lock = JSON.parse(readFile(started, ".kukulu/implement.lock"));
+    ok(lock.total === 5, "the lock keeps total through server rewrites");
+  });
+  const fin = startedRepo();
+  writeFile(fin, ".kukulu/implement.lock", JSON.stringify({ count: 0, total: 7, armedAt: "x", round: 0, cap: 60 }) + "\n");
+  writeFile(fin, "docs/HANDOFF.md", "# handoff\n");
+  await withServer(fin, async ({ call }) => {
+    const r = await call("kukulu_run_finish");
+    ok(!r.countersNote, "kukulu_run_finish succeeds");
+    eq(JSON.parse(readFile(fin, ".kukulu/metrics/counters.json")).guardReblocks, 7, "kukulu_run_finish adds the lock's total to guardReblocks");
   });
 }
 

@@ -10,6 +10,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { familyOf } from "../mcp/cleanroom.mjs";
 import {
   finish, ok, eq, like, isError,
   ROOT, mkDir, plannedRepo, withServer, tempPlugin, mkFakeGhBin, mkBareRemote, mkFakeGpg, useFakeSigner, setState,
@@ -36,7 +37,7 @@ for (const [config, want, label] of [[{}, true, "config_show reports archive tru
 
 await withServer(plannedRepo({ config: {} }), async ({ call }) => {
   const cs = await call("kukulu_config_show");
-  eq(cs.policies.finalize + "|" + Object.keys(cs.policies).length, "ready|8", "kukulu_config_show reports finalize ready with no policies block");
+  eq(cs.policies.finalize + "|" + Object.keys(cs.policies).length, "ready|9", "kukulu_config_show reports finalize ready with no policies block");
 });
 
 // ---------------------------------------------------------------- runners (A-01)
@@ -72,7 +73,7 @@ await withRunners({ runners: RUNNERS_OK, roles: { implementer: { model: "spark/b
   eq(cfg.roles.summarizer.locality, "unknown", "...with locality unknown");
   eq(cfg.roles.summarizer.source.runner, "none", "...and source none");
   const rows = cfg.table.split("\n");
-  eq(rows[0], "| role | agent | model | runner | effort | source |", "the routing table has a runner column after model");
+  eq(rows[0], "| role | agent | model | runner | served | activate | effort | source |", "the routing table has runner, served and activate columns");
   like(rows[3], /\| spark-big \|/, "...naming the runner in a row");
   like(rows[5], /\| other\/x \| – \|/, "...and – for an unmatched model");
 });
@@ -93,6 +94,51 @@ for (const [runners, re, label] of [
 ]) {
   await withRunners({ runners }, async ({ call }) => {
     isError(await call("kukulu_config_show"), re, label);
+  });
+}
+
+// ---------------------------------------------------------------- activation keys and the served id (P1-02)
+
+{
+  const limit = JSON.parse(fs.readFileSync(path.join(ROOT, ".mcp.json"), "utf8")).mcpServers.kukulu.timeout;
+  const A = (extra) => ({ a: { endpoint: "http://h:1", locality: "local", match: ["x/"], ...extra } });
+  for (const [runners, re, label] of [
+    [A({ activate: "hot" }), /runners\.a\.activate must be "none" or "warm"/, "runners.<name>.activate 'hot' is refused"],
+    [A({ activateTimeoutMs: 999 }), /runners\.a\.activateTimeoutMs must be an integer of at least 1000/, "activateTimeoutMs 999 is refused"],
+    [A({ activateTimeoutMs: 1000.5 }), /runners\.a\.activateTimeoutMs must be an integer of at least 1000/, "activateTimeoutMs 1000.5 is refused"],
+    [A({ activateTimeoutMs: limit }), new RegExp(`runners\\.a\\.activateTimeoutMs \\(${limit} ms\\) is at or above the MCP timeout \\(${limit} ms from \\.mcp\\.json\\); the client would abort kukulu_next first\\. Lower it, or raise the timeout`), "activateTimeoutMs at the MCP timeout is refused"],
+    [A({ servedAs: ["x"] }), /runners\.a\.servedAs must map a model string to a non-empty string/, "servedAs as an array is refused"],
+    [A({ servedAs: { "x/m": "" } }), /runners\.a\.servedAs must map a model string to a non-empty string/, "servedAs with an empty value is refused"],
+    [A({ tokenEnv: "spark-token" }), /runners\.a\.tokenEnv must be an environment variable name such as SPARK_TOKEN/, "tokenEnv 'spark-token' is refused"],
+    [{ a: { match: ["x/"], activate: "warm" } }, /runners\.a\.activate is "warm" but the runner has no endpoint to send the request to; add endpoint, or set activate to "none"/, "activate warm without an endpoint is refused"],
+    [{ anthropic: { activate: "warm", endpoint: "http://h:1" } }, /runners\.anthropic is reserved for the built-in Anthropic runner/, "the four keys on a runner named anthropic are refused as reserved"],
+  ]) {
+    await withRunners({ runners }, async ({ call }) => {
+      isError(await call("kukulu_config_show"), re, label);
+    });
+  }
+  await withRunners({ runners: A({ activateTimeoutMs: limit - 1 }) }, async ({ call }) => {
+    ok(!(await call("kukulu_config_show")).error, "an activateTimeoutMs one below the MCP timeout is accepted");
+  });
+  const roles = { implementer: { model: "spark/qwen38-27b" }, reviewer: { model: "spark/big-one" }, summarizer: { model: "x/x" } };
+  await withRunners({ runners: { ...RUNNERS_OK, ...A({ servedAs: { "x/x": "custom-id" }, tokenEnv: "SPARK_TOKEN", activate: "warm" }) }, roles }, async ({ call }) => {
+    const cfg = await call("kukulu_config_show");
+    eq(cfg.roles.implementer.served, "qwen38-27b", "the default strips the longest matching prefix");
+    eq(cfg.roles.reviewer.served, "one", "...the longer of two prefixes wins (spark/big- over spark/)");
+    eq(cfg.roles.summarizer.served, "custom-id", "servedAs overrides the strip");
+    eq(cfg.roles.summarizer.activate + "|" + cfg.roles.implementer.activate, "warm|none", "activate is carried per role, none by default");
+    eq(cfg.roles.implementer.activateTimeoutMs, 1800000, "activateTimeoutMs defaults to thirty minutes");
+    eq(cfg.roles.planner.served + "|" + cfg.roles.planner.activate + "|" + cfg.roles.planner.activateTimeoutMs, "null|none|null", "an anthropic role has served null and activate none");
+    const rows = cfg.table.split("\n");
+    like(rows[3], /\| spark \| qwen38-27b \| none \|/, "the routing table shows the served id and activate");
+    like(rows[2], /\| anthropic \| – \| – \|/, "...and – for both on an anthropic role");
+    ok(cfg.runners.a.tokenEnv === "SPARK_TOKEN" && cfg.runners.a.activate === "warm" && cfg.runners.a.servedAs["x/x"] === "custom-id", "kukulu_config_show echoes the new runner keys");
+  });
+  await withRunners({ runners: { s: { endpoint: "http://h:1", locality: "local", match: ["spark/qwen"] } }, roles: { implementer: { model: "spark/qwen" } } }, async ({ call }) => {
+    isError(await call("kukulu_config_show"), /runners\.s\.match entry 'spark\/qwen' equals the model string 'spark\/qwen', so no model id is left to ask the runner for; add a servedAs entry/, "a match prefix equal to the model string is refused");
+  });
+  await withRunners({ runners: { s: { endpoint: "http://h:1", locality: "local", match: ["spark/qwen"], servedAs: { "spark/qwen": "qwen" } } }, roles: { implementer: { model: "spark/qwen" } } }, async ({ call }) => {
+    eq((await call("kukulu_config_show")).roles.implementer.served, "qwen", "a servedAs entry rescues a prefix equal to the model");
   });
 }
 
@@ -635,6 +681,14 @@ for (const [value, got, label] of [
     eq(cfg.roles.implementer.model, "haiku", "the template's cheap profile resolves");
   }, { env: { KUKULU_CONFIG: templatePath, KUKULU_PROFILE: "cheap" } });
 
+  await withServer(repo, async ({ call }) => {
+    const cfg = await call("kukulu_config_show");
+    eq(cfg.runners.spark.activate, "warm", "the template's spark runner is warmed");
+    eq(cfg.profile, "spark", "the template's spark profile is selected");
+    eq(ROLES.map((r) => `${cfg.roles[r].runner}:${cfg.roles[r].served}:${cfg.roles[r].activate}`).join(","), "spark:qwen38-27b:warm,spark:qwen38-27b:warm,spark:nemotron-3.5-super-nvfp4:warm,spark:nemotron-3.5-super-nvfp4:warm", "the spark profile routes all four roles to the spark runner, with the served ids");
+    ok(familyOf(cfg.roles.implementer.model) === "qwen" && familyOf(cfg.roles.reviewer.model) === "nemotron" && familyOf(cfg.roles.implementer.model) !== familyOf(cfg.roles.reviewer.model), "the spark profile's implementer and reviewer are different families");
+  }, { env: { KUKULU_CONFIG: templatePath, KUKULU_PROFILE: "spark" } });
+
   for (const file of ["ollama.provider.json", "openrouter.provider.json"]) {
     const provider = JSON.parse(readFile(ROOT, `templates/ccr/${file}`)).provider;
     ok(provider.name, `${file} names a provider`);
@@ -779,6 +833,24 @@ for (const [value, got, label] of [
       isError(await call("kukulu_config_show"), /profiles\.fast\.policies has an unknown key 'nope'$/, "a profile policies block with an unknown key names profiles.<name>.policies");
     }, { env: { KUKULU_CONFIG: file } });
   }
+  await withGlobal({ policies: { metrics: false }, profiles: { fast: { policies: { metrics: true } } } }, project(), async ({ call }) => {
+    const cs = await call("kukulu_config_show");
+    eq(cs.policies.metrics + "|" + cs.policySources.metrics, "false|global", "policies.metrics layers from the global file");
+  });
+  await withGlobal({ policies: { metrics: false }, profiles: { fast: { policies: { metrics: true } } } }, project(), async ({ call }) => {
+    const cs = await call("kukulu_config_show");
+    eq(cs.policies.metrics + "|" + cs.policySources.metrics, "true|profile:fast", "...and from a profile over the global file");
+  }, { KUKULU_PROFILE: "fast" });
+  await withGlobal({}, project(), async ({ call }) => {
+    const cs = await call("kukulu_config_show");
+    eq(cs.policies.metrics + "|" + cs.policySources.metrics, "true|default", "policies.metrics defaults to true");
+  });
+  await withGlobal({ policies: { metrics: "no" } }, project(), async ({ call }) => {
+    isError(await call("kukulu_config_show"), /global-config\.json policies\.metrics must be a boolean$/, "a non-boolean global policies.metrics is refused, naming the file");
+  });
+  await withGlobal({}, project({ metrics: 1 }), async ({ call }) => {
+    isError(await call("kukulu_config_show"), /^docs\/kukulu\.json policies\.metrics must be a boolean$/, "a non-boolean project policies.metrics is refused");
+  });
   await withGlobal({ policies: { finalize: "ready" } }, project({ signing: "off" }), async ({ call }) => {
     const n = await call("kukulu_next");
     like(n.prompt ?? "", /Run policies: signing=off, push=on, pr=draft, finalize=ready \(global\)\./, "the Run policies sentence names finalize and its source");
@@ -820,6 +892,104 @@ for (const [value, got, label] of [
   ok(!(await statusWith("cargo build && cargo test -- {filter}")).error, "cargo build && cargo test -- {filter} loads");
   ok(!(await statusWith("cargo +nightly test -- {filter}")).error, "cargo +nightly test -- {filter} loads");
   ok(!(await statusWith("vendor/bin/phpunit --filter {filter}")).error, "a non-cargo command with {filter} and no -- still loads");
+}
+
+// ---------------------------------------------------------------- scripts/runner-probe.mjs (P1-01)
+
+{
+  const PROBE = path.join(ROOT, "scripts", "runner-probe.mjs");
+  const { spawn } = await import("node:child_process");
+  const http = await import("node:http");
+  /** Run the script without blocking this process's event loop, so the fake server can answer. */
+  const run = (args, env = {}) => new Promise((resolve) => {
+    const p = spawn(process.execPath, [PROBE, ...args], { env: { PATH: process.env.PATH, ...env } });
+    let stdout = "";
+    let stderr = "";
+    p.stdout.on("data", (d) => { stdout += d; });
+    p.stderr.on("data", (d) => { stderr += d; });
+    p.on("close", (status) => resolve({ status, stdout, stderr, json: (() => { try { return JSON.parse(stdout); } catch { return null; } })() }));
+  });
+  const serve = async (handler) => {
+    const seen = [];
+    const server = http.createServer((req, res) => {
+      let body = "";
+      req.on("data", (d) => { body += d; });
+      req.on("end", () => { seen.push({ method: req.method, url: req.url, headers: req.headers, body }); handler(req, res, body); });
+    });
+    await new Promise((r) => server.listen(0, "127.0.0.1", r));
+    return { url: `http://127.0.0.1:${server.address().port}`, seen, close: () => new Promise((r) => { server.closeAllConnections?.(); server.close(r); }) };
+  };
+  const json = (res, status, obj) => { res.writeHead(status, { "content-type": "application/json" }); res.end(JSON.stringify(obj)); };
+
+  const a = await serve((req, res) => {
+    if (req.url === "/v1/models") json(res, 200, { data: [{ id: "m-1" }, { id: "m-2" }] });
+    else if (req.url === "/v1/messages" && JSON.parse(req.headers["x-test-nomodel"] ?? "false")) json(res, 200, {});
+    else json(res, 200, { model: "served-x" });
+  });
+  const b = await serve((req, res) => json(res, 200, { ok: true }));
+  const c = await serve((req, res) => { res.writeHead(404); res.end("no such\n   model  here"); });
+  const hang = await serve(() => {});
+  const echo = await serve((req, res) => json(res, 401, { error: `bad header ${req.headers.authorization}` }));
+  const straddle = await serve((req, res) => { res.writeHead(401); res.end("x".repeat(280) + " auth was " + req.headers["x-api-key"]); });
+  const redirect = await serve((req, res) => { res.writeHead(302, { location: `${a.url}/v1/models` }); res.end(); });
+  try {
+    const m = await run(["--endpoint", a.url, "--models"]);
+    eq(JSON.stringify(m.json.served) + "|" + m.json.ok + "|" + m.json.status + "|" + m.status, '["m-1","m-2"]|true|200|0', "--models lists the ids of data[].id");
+    const w = await run(["--endpoint", a.url, "--warm", "served-x"]);
+    eq(w.json.reported + "|" + w.status, "served-x|0", "--warm reports the body's model");
+    const w2 = await run(["--endpoint", b.url, "--warm", "served-x"]);
+    eq(w2.json.ok + "|" + w2.json.reported, "true|null", "--warm reports null when the body has no model");
+    const sent = b.seen[0];
+    eq(sent.method + "|" + sent.url + "|" + sent.headers["content-type"] + "|" + sent.headers["anthropic-version"], "POST|/v1/messages|application/json|2023-06-01", "--warm sends POST /v1/messages with the json and anthropic-version headers");
+    eq(JSON.stringify(JSON.parse(sent.body)), JSON.stringify({ model: "served-x", max_tokens: 1, messages: [{ role: "user", content: "ping" }] }), "...a body of model, max_tokens 1 and one ping message");
+    const nf = await run(["--endpoint", c.url, "--models"]);
+    eq(nf.json.ok + "|" + nf.json.status + "|" + nf.json.error + "|" + nf.status, "false|404|HTTP 404: no such model here|1", "a 404 with a body is ok false, status 404, error HTTP 404: <body>, exit 1");
+    const slow = await run(["--endpoint", hang.url, "--models", "--timeout-ms", "300"]);
+    eq(slow.json.error + "|" + slow.json.ok + "|" + slow.status, "no answer within 300 ms|false|1", "a server that never answers is no answer within <N> ms");
+    const dead = await serve(() => {});
+    const deadUrl = dead.url;
+    await dead.close();
+    const refused = await run(["--endpoint", deadUrl, "--models", "--timeout-ms", "60000"]);
+    ok(refused.json.status === null && /^ECONNREFUSED/.test(refused.json.error) && refused.json.ms < 5000, "a refused connection fails at once with status null");
+    const before = a.seen.length;
+    const unset = await run(["--endpoint", a.url, "--models", "--token-env", "PROBE_TOKEN"]);
+    eq(unset.json.error + "|" + unset.status + "|" + (a.seen.length === before), "the environment variable PROBE_TOKEN is not set|1|true", "an unset token variable is an error before any request");
+    await run(["--endpoint", a.url, "--models", "--token-env", "PROBE_TOKEN"], { PROBE_TOKEN: "sekret-123" });
+    const withToken = a.seen.at(-1);
+    eq(withToken.headers["x-api-key"] + "|" + withToken.headers.authorization, "sekret-123|Bearer sekret-123", "the token reaches the runner as x-api-key and as a Bearer authorization");
+    const leak = await run(["--endpoint", echo.url, "--models", "--token-env", "PROBE_TOKEN"], { PROBE_TOKEN: "sekret-123" });
+    ok(leak.stdout.includes("<redacted>") && !leak.stdout.includes("sekret-123") && !leak.stderr.includes("sekret-123"), "a runner that echoes the Authorization header in a 401 body does not leak the token");
+    const tok = "sk-SECRETTOKEN-0123456789abcdef";
+    const cut = await run(["--endpoint", straddle.url, "--models", "--token-env", "PROBE_TOKEN"], { PROBE_TOKEN: tok });
+    ok(!cut.stdout.includes(tok.slice(0, 8)) && !cut.stderr.includes(tok.slice(0, 8)) && /^HTTP 401: /.test(cut.json.error), "a token that straddles the 300-character cut is not leaked, not even in part");
+    const seenA = a.seen.length;
+    const red = await run(["--endpoint", redirect.url, "--models"]);
+    ok(red.json.ok === false && red.json.status === 302 && a.seen.length === seenA, "a redirect is not followed");
+    eq(m.stdout.split("\n").filter(Boolean).length + "|" + m.stdout.endsWith("\n"), "1|true", "the probe prints exactly one line");
+    for (const [name, args] of [
+      ["no --endpoint", ["--models"]],
+      ["an endpoint with a path", ["--endpoint", "http://x.test/v1", "--models"]],
+      ["an endpoint with credentials", ["--endpoint", "http://u:p@x.test", "--models"]],
+      ["an endpoint that is not http", ["--endpoint", "ftp://x.test", "--models"]],
+      ["both modes", ["--endpoint", a.url, "--models", "--warm", "x"]],
+      ["neither mode", ["--endpoint", a.url]],
+      ["--warm without an id", ["--endpoint", a.url, "--warm"]],
+      ["a bad --timeout-ms", ["--endpoint", a.url, "--models", "--timeout-ms", "0"]],
+      ["a bad --token-env", ["--endpoint", a.url, "--models", "--token-env", "lower"]],
+      ["an unknown option", ["--endpoint", a.url, "--models", "--frob"]],
+    ]) {
+      const r = await run(args);
+      ok(r.status === 2 && r.stdout === "" && /^usage: node scripts\/runner-probe\.mjs/m.test(r.stderr), `usage error: ${name} returns 2 with usage on stderr and nothing on stdout`);
+    }
+  } finally {
+    for (const s of [a, b, c, hang, echo, straddle, redirect]) await s.close();
+  }
+  if (process.env.KUKULU_RUNNER_IT === "1" && process.env.KUKULU_RUNNER_IT_ENDPOINT) {
+    const real = await run(["--endpoint", process.env.KUKULU_RUNNER_IT_ENDPOINT, "--models"]);
+    ok(real.status === 0 && real.json.served.length > 0, "a real runner answers --models with a non-empty served list");
+  } else {
+    console.log("# skipped: set KUKULU_RUNNER_IT=1 and KUKULU_RUNNER_IT_ENDPOINT=<url> to probe a real runner");
+  }
 }
 
 finish();

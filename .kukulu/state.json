@@ -10,34 +10,18 @@
     "signing": "auto",
     "push": true,
     "pr": "draft",
-    "feedback": true
+    "feedback": true,
+    "archive": true,
+    "finalize": "ready",
+    "mergeMethod": "merge",
+    "syncBase": true
   },
   "signing": null,
   "rounds": [],
   "archived": {
-    "slug": "v0-8-1",
-    "dir": "docs/flights/v0-8-1",
-    "at": "2026-11-13T20:08:33.316Z"
+    "slug": "v0-9-0",
+    "dir": "docs/flights/v0-9-0",
+    "at": "2026-11-14T12:53:03.493Z"
   },
-  "breaking": false,
-  "timeline": [
-    {
-      "event": "start",
-      "stage": "plan",
-      "round": 0,
-      "at": "2026-11-14T04:16:38.438Z"
-    },
-    {
-      "event": "end",
-      "stage": "plan",
-      "round": 0,
-      "at": "2026-11-14T04:52:39.990Z"
-    },
-    {
-      "event": "start",
-      "stage": "implement",
-      "round": 0,
-      "at": "2026-11-14T04:52:39.990Z"
-    }
-  ]
+  "breaking": false
 }

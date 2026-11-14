@@ -18,7 +18,9 @@ flowchart LR
         MCP["kukulu MCP server<br/>mcp/server.mjs"]
         HOOK["implement-guard.mjs<br/>Stop · SubagentStop (implementer only)"]
         CRG["cleanroom-guard.mjs<br/>PreToolUse (clean-room only)"]
-        CRL["cleanroom-log.mjs<br/>PostToolUse · UserPromptSubmit<br/>(clean-room only)"]
+        CRL["cleanroom-log.mjs<br/>PostToolUse · UserPromptSubmit · SubagentStop · Stop<br/>(clean-room: the chain; otherwise usage.jsonl)"]
+        MET["mcp/metrics.mjs<br/>usage record · METRICS.json"]
+        PROBE["runner-probe.mjs<br/>one request, one JSON line"]
         CRM["mcp/cleanroom.mjs<br/>policy · chain · keys · scorer"]
     end
 
@@ -26,6 +28,7 @@ flowchart LR
         DOCS["docs/*.md<br/>docs/kukulu.json"]
         STATE[".kukulu/state.json<br/>.kukulu/implement.lock"]
         LOG[".kukulu/cleanroom/log.jsonl<br/>docs/cleanroom.json"]
+        MD[".kukulu/metrics/<br/>docs/METRICS.json"]
         GIT["git history"]
     end
 
@@ -40,6 +43,10 @@ flowchart LR
     CRG -->|"reads policy"| LOG
     CRL -->|"appends"| LOG
     MCP -->|"gate · checkpoints"| LOG
+    CRL -->|"general mode appends"| MD
+    MCP -->|"counters · METRICS.json"| MD
+    MCP -->|"spawnSync: warms a runner"| PROBE
+    MCP --> MET
     CRG & CRL & MCP --> CRM
 ```
 
@@ -47,7 +54,7 @@ The flight controller is deliberately the weakest model in the system. Besides `
 
 ## The stage machine
 
-`kukulu_next` is a pure function of what is on disk. It never reads a subagent's report, and the flight controller is told not to interpret one. Besides its answer it records the stage timeline (when each stage started and ended) in `state.timeline`, and in the chain in clean-room mode; that is bookkeeping, never an input to the decision.
+`kukulu_next` is a pure function of what is on disk. It never reads a subagent's report, and the flight controller is told not to interpret one. Besides its answer it records the stage timeline (when each stage started and ended) in `state.timeline`, and in the chain in clean-room mode; that is bookkeeping, never an input to the decision. Between the decision and the timeline sits the activation step: when the stage's role runs on a runner with `activate: "warm"`, the server runs the runner probe (through `spawnSync`, so the server itself opens no socket), waits for the answer, and records the wait as an `activate` record between the span that ended and the one that starts.
 
 ```mermaid
 stateDiagram-v2
@@ -92,6 +99,8 @@ The server evaluates these decisions in this order:
 
 Only `kukulu_review_submit` makes the round-cap decision. It is the one place that decides a round is non-converging past `maxRounds` or is a review that requests changes numbered above `maxRoundsHard` (an approving review above it ends the flight and halts nothing), and it records that as decision 2's `state.halted`. `next()` never re-derives it from `round` and `maxRounds`: open tasks after a round that was not itself halted are the next implement stage, like any other round (V3-10). `kukulu_run_halt` also sets `state.halted` directly. An implementer calls it for an operator-level problem it cannot resolve itself, such as a dead signing agent, a full disk or a vanished base branch.
 
+Between the decision and the stage sits activation: a role on a runner with `activate: "warm"` makes `kukulu_next` run the probe and wait for the answer before it returns, and a runner that does not serve the stage's model turns the answer into a `halt`. `docs/METRICS.json` is written in the same step when the answer is `done` or `halt` and the call wrote a timeline record.
+
 Each stage comes back with a `prompt` that the flight controller passes to the subagent verbatim. The implement, review and summarize prompts each end with one sentence stating this run's policies (`signing`, `push`, `pr`), so every stage knows them without re-deriving them. The server generates the prompt and the controller only relays it, so the instruction a stage receives does not drift with the controller's context.
 
 ## Clean-room mode
@@ -107,7 +116,9 @@ The gate sits between stage selection and the stage:
 ```mermaid
 flowchart LR
     N["kukulu_next picks a stage"] --> G{"gate: up to ten checks"}
-    G -->|"all pass"| S["the stage runs"]
+    G -->|"all pass"| ACT["activation: a warm runner answers one request, the wait is recorded"]
+    ACT -->|"answered, or no runner to warm"| S["the stage runs"]
+    ACT -->|"the runner does not serve its model"| HR["halt, naming what it does serve"]
     G -->|"one fails"| H["gate entry in the log, then halt"]
     S --> T["each tool call: guard decides, logger records"]
     T --> C["bookkeeping tools append a signed checkpoint"]
@@ -136,6 +147,8 @@ flowchart TD
     MCP -->|"kukulu_plan_commit validates, then commits"| PLAN
     MCP -->|"kukulu_flight_archive moves the flight into"| FLIGHTS["docs/flights/slug/"]
     MCP -->|"kukulu_pr_finalize readies the PR, notes awaiting signing in"| SUMMARY
+    MCP -->|"counters, and METRICS.json when a flight ends or halts"| MD["docs/METRICS.json · .kukulu/metrics/"]
+    HOOKLOG["usage hook (cleanroom-log.mjs)"] -->|"appends usage.jsonl, general mode only"| MD
 ```
 
 Three tools have the MCP commit a stage's own output. `kukulu_plan_commit` validates the planner's four files together and commits them, so the planner never runs `git commit`. `kukulu_flight_archive` moves a summarized flight's artifacts into `docs/flights/<slug>/` and writes a fresh state. `kukulu_pr_finalize` is the last call of a flight: it checks the commits' signatures, marks the draft PR ready, and enables GitHub auto-merge (never a synchronous merge); when a commit is unsigned and the policy expects signatures (`required`, or `auto` with signing configured) it leaves the PR a draft and appends an `## Awaiting signing` section to `docs/SUMMARY.md`.
@@ -164,7 +177,7 @@ These are the plugin defaults, set in `agents/*.md`. Per-machine and per-project
 
 An implement run can last hours and will be compacted repeatedly. Three mechanisms keep it honest:
 
-- **The lock.** `kukulu_run_start` writes `.kukulu/implement.lock` as JSON (`{ count, armedAt, round }`; a bare-number lock left by a 0.2.x run is still read correctly). It is gitignored, so `git clean -fd` during a blocked task leaves it alone. `count` is the re-block counter.
+- **The lock.** `kukulu_run_start` writes `.kukulu/implement.lock` as JSON (`{ count, total, armedAt, round, cap }`, `total` being the guard's cumulative re-block count, which is never reset; a bare-number lock left by a 0.2.x run is still read correctly). It is gitignored, so `git clean -fd` during a blocked task leaves it alone. `count` is the re-block counter.
 - **The guard.** `implement-guard.mjs` runs on `Stop` and `SubagentStop`, but only considers a stop that belongs to the implementer. That is a `SubagentStop` whose `agent_type` names it (also scoped at hook registration by `hooks/hooks.json`'s matcher, so the harness never runs the guard for another subagent), or a `Stop` whose own transcript holds a `tool_use` of `kukulu_run_start` (the implement stage run directly in a session, not a background flight that another session is only waiting on; see [operations.md](./operations.md)). The guard parses the transcript for the call itself, not for the text. A controller's transcript always mentions `kukulu_run_start`, because the implement prompt it relays says "Call kukulu_run_start", and matching on the text blocked every one of its turn ends. Three refinements serve parallel streams (0.4.0). A lock flagged `paused` (set by `kukulu_task_next` when a serial implementer reaches a parallel wave) allows the stop. A `SubagentStop` whose transcript's last `kukulu_run_start` call passed a `stream` is blocked only while that stream still has open tasks (`{stream: <s>}` tags on the `PROGRESS.md` lines), never for a sibling's. And if the stream cannot be determined while stream worktrees exist, a wave is in flight and the stop is allowed: the controller hands out anything left unfinished again, so there the guard is an optimisation and not the only safety net. For a stop it does consider, the guard counts `[ ]` and `[~]` lines under `## Tasks`; if the lock exists and the count is non-zero it returns `{"decision":"block"}` with the next task's id and instructions to call `kukulu_task_next`. `kukulu_task_done`, `kukulu_task_block` and `kukulu_run_start` all reset the counter to zero, so the cap bounds re-blocks since work last moved, not over the whole run, and a large plan making normal progress cannot exhaust it. At the effective cap (`docs/kukulu.json`'s `guardCap`, carried in the lock; else `KUKULU_GUARD_CAP`; else 60) the guard stops blocking and emits a `systemMessage` naming the stalled task instead, leaving the lock in place so the next `kukulu_next` sees the unfinished run.
 - **The refusals.** `kukulu_task_done` requires HEAD's subject to start with the task id and the tree to be clean apart from `PROGRESS.md`. `kukulu_run_finish` requires zero open tasks, a `HANDOFF.md`, and a clean tree. Neither can be talked into accepting a claim.
 
@@ -252,8 +265,9 @@ What the reviewer submits as structured JSON is rendered into PLAN.md and parsed
 | `.kukulu/state.json` | yes | `round`, `implemented`, `reviewed`, `verdict`, `summarized`, `halted`, `preexistingUntracked`, `policies`, `signing`, `rounds`; and, once they apply, `signingOverride` (a commit failed to sign and signing was switched off), `awaitingSigning` (`{ unsigned, first, since }`), `breaking`, `haltCap` (which round cap halted the flight, so `resume` knows what lifts it) and `archived` (`{ slug, dir, at }`) |
 | `docs/flights/<slug>/` | yes | an archived flight: its PLAN, PROGRESS, HANDOFF, REVIEW, SUMMARY, `kukulu.json`, `state.json` and `feedback.jsonl`, plus a copy of `SPEC.md`; written by `kukulu_flight_archive` |
 | `.kukulu/feedback.jsonl` | yes | one JSON line per pipeline-friction entry: `at`, `stage`, `round`, `category`, `message`, `source`; see [mcp-tools.md](./mcp-tools.md#kukulu_feedback_log) |
-| `.kukulu/implement.lock` | no (gitignored) | JSON `{ count, armedAt, round }`, the guard's re-block counter (a legacy bare number still reads back correctly) |
+| `.kukulu/implement.lock` | no (gitignored) | JSON `{ count, total, armedAt, round, cap }`, the guard's re-block counter and its cumulative total (a legacy bare number still reads back correctly) |
 | `.kukulu/worktrees/<stream>/` | no (`.gitignore`) | a parallel stream's git worktree, present from `kukulu_run_start({ stream })` until `kukulu_stream_finish` merges it back; `state.streams[<s>]` records its branch and the untracked paths `parallel.setup` left behind, and `state.serialWaves` the waves degraded to serial |
+| `.kukulu/metrics/` | no (`.git/info/exclude`) | general mode's `usage.jsonl`, one usage record per line, emptied at a flight's first timeline record; see [metrics.md](./metrics.md) |
 | `.kukulu/mutation.json` | no (`.git/info/exclude`) | present only while `kukulu_mutate` has a file mutated: `{ file, at, original }`, so a crash can be repaired by the next call |
 | `docs/PROGRESS.md` | yes | task checkboxes and the per-task log |
 | `docs/kukulu.json` | yes | `verify`, `extraVerify`, `build`, `baseBranch`, `branchPrefix`, `maxRounds`, `commandTimeoutMs`, `roles`, `permissionMode` |

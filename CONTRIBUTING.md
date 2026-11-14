@@ -20,11 +20,14 @@ Every behaviour change to the server therefore needs a test, because the thing u
 | `scripts/sandbox-entry.mjs` | The container's entrypoint: bridges `127.0.0.1:3128` to the proxy socket, then starts the harness; `node:` only |
 | `templates/sandbox/Containerfile`, `templates/cleanroom.local-only.example.json` | The sandbox image template, and the worked local-only, sandboxed policy |
 | `scripts/sandbox.mjs` | The sandbox launcher: the controller, log and proxy sockets, `planFor` and `containerArgs`, and the `doctor`, `run` and `stop` subcommands |
+| `mcp/metrics.mjs` | The usage record's contract: `USAGE_KEYS` and `validateUsageRecord`; pure, harness-neutral |
 | `scripts/implement-guard.mjs` | The Stop / SubagentStop hook |
 | `scripts/lint.sh` | Dependency-free syntax and manifest lint |
 | `scripts/check-names.mjs` | Fails on a misplaced kahakō or an ASCII spelling of the display name in prose; run by `scripts/lint.sh` |
 | `scripts/model-identity.mjs` | Hashes a model's weight files into one digest, for the global config's `runners.<name>.identities`; run on the inference host |
+| `scripts/runner-probe.mjs` | Sends one request to a runner (`--models` or `--warm <id>`) and prints one JSON line, redacting the token; the only network I/O the server causes, always run through `spawnSync`; `node:` imports only |
 | `scripts/compare-bundles.mjs` | Compares two attestation bundles side by side (mode, gates, denials, similarity, roles, wall time, tokens), and with `--trees` scores their result trees against each other |
+| `scripts/compare-flights.mjs` | Compares two flights' `METRICS.json` side by side (outcome, wall time, rounds, roles, friction), as text or JSON; imports only `node:` modules and `mcp/metrics.mjs` |
 | `scripts/publish-bundle.mjs` | Writes a publishable copy of a verified attestation bundle with `SHA256SUMS` and `VERIFY.txt`, and re-checks one with `--check` |
 | `scripts/check-diagrams.mjs` | Parses every Mermaid block; CI-only, needs mermaid + jsdom |
 | `scripts/check-site.mjs` | Static checks for the site's SPEC rules 1–14, with `--self-test` and `--report`; run by `scripts/lint.sh` and `npm run check:site` |
@@ -36,7 +39,7 @@ Every behaviour change to the server therefore needs a test, because the thing u
 | `templates/SPEC.md` | The spec skeleton users copy |
 | `templates/kukulu.config.example.json`, `templates/ccr/` | The global routing config and claude-code-router provider manifests |
 | `templates/constraints.example.json` | Three worked `docs/kukulu.json` `constraints` rules, with fixtures |
-| `test/` | Harness plus fifteen suites |
+| `test/` | Harness plus sixteen suites |
 | `docs/` | Architecture, tool reference, routing guide, spec guide, runbook |
 | `docs/plans/` | The task-by-task plan behind each release |
 | `docs/feedback/` | Stumbling blocks a real flight hit, feeding the next release plan; gitignored, local to the maintainer |
@@ -63,7 +66,7 @@ When `docs/feedback/.private-names` exists on your machine (gitignored; see [Fli
 
 ```bash
 npm run lint                    # node --check, bash -n, JSON parse, exec bits
-npm test                        # all fifteen suites
+npm test                        # all sixteen suites
 npm test -- guard protocol      # named suites only
 node test/state.mjs             # one suite, directly
 KUKULU_SANDBOX_IT=1 node test/sandbox.mjs   # the real-container step (Linux, docker on PATH; never in verify)
@@ -89,6 +92,7 @@ npm install --no-save mermaid jsdom && node scripts/check-diagrams.mjs
 | `attest` | The offline verifier (`scripts/verify-attestation.mjs`), attestation bundles, tamper detection, and pre-0.6.0 logs |
 | `sandbox` | The sandbox: the relay and controller socket, the log socket, the proxy, the container launcher and gate checks 9 and 10; no container engine needed |
 | `bundles` | The bundle scripts: `scripts/model-identity.mjs`, and `publish-bundle.mjs` and `compare-bundles.mjs` once they exist |
+| `metrics` | The usage record and its validator, the logger's usage adapter and general-mode writer, the counters, `mcp/metrics.mjs`, and `scripts/compare-flights.mjs` once they exist |
 | `drive` | Complete flights end to end over real stdio: one serial, and parallel ones (a wave, `maxStreams: 1`, an overlapping partition) |
 
 Suites are plain Node programs that print TAP-ish lines and exit non-zero on failure. `test/harness.mjs` provides temp git repos, an MCP client, fixtures and the assertion helpers. Add assertions to the suite that owns the behaviour; add a new suite only for a new surface.
@@ -117,7 +121,7 @@ Flight feedback is how a real flight's friction reaches the next release. During
 
 Three workflows, all of which must be green:
 
-- **ci**: the suite on Node 22, 24 and 26; again on macOS; again with the GitHub CLI removed, since `kukulu_run_finish` treats `gh` as optional. EOL Node lines are not tested and not supported; the floor in `package.json` moves up as they age out.
+- **ci**: the suite on Node 22, 24 and 26; again on macOS, but only as a preflight on a PR that is ready for review and touches plugin code (or on a manual dispatch), since macOS minutes are expensive; again with the GitHub CLI removed, since `kukulu_run_finish` treats `gh` as optional. EOL Node lines are not tested and not supported; the floor in `package.json` moves up as they age out.
 - **lint**: `pre-commit` (yamllint, shellcheck, markdownlint, gitleaks, JSON and whitespace hygiene, plus `scripts/lint.sh`), `actionlint` over the workflows themselves, and a Mermaid parse of every diagram in the docs.
 - **secret-scan**: gitleaks on every push and PR, and over the whole history weekly.
 

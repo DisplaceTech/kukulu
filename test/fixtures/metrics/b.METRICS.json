@@ -1,0 +1,214 @@
+{
+  "v": 1,
+  "plugin": "0.9.0",
+  "flight": "flight-b",
+  "spec": {
+    "title": "widget - Specification",
+    "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  },
+  "harness": [
+    {
+      "name": "claude-code",
+      "version": "2.0.1"
+    }
+  ],
+  "usage": {
+    "source": "chain",
+    "records": 4,
+    "chainHead": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+  },
+  "mode": "clean-room",
+  "enforcement": "hook",
+  "outcome": {
+    "verdict": "APPROVED",
+    "halted": null,
+    "reviews": 2,
+    "fixRounds": 1,
+    "approvedAtRound": 2,
+    "caps": {
+      "maxRounds": 3,
+      "maxRoundsHard": 6
+    }
+  },
+  "wall": {
+    "startedAt": "2026-11-14T10:00:00.000Z",
+    "endedAt": "2026-11-14T10:33:20.000Z",
+    "seconds": 2000,
+    "stageSeconds": {
+      "plan": 80,
+      "implement": 1595,
+      "review": 280
+    },
+    "activateSeconds": {
+      "spark": 14
+    },
+    "idleSeconds": 31
+  },
+  "rounds": [
+    {
+      "round": 1,
+      "implementSeconds": 1305,
+      "reviewSeconds": 190,
+      "findings": 2,
+      "sources": {
+        "review": 2,
+        "mutation": 0,
+        "blocked": 0
+      },
+      "verdict": "CHANGES REQUESTED",
+      "nonConverging": false
+    },
+    {
+      "round": 2,
+      "implementSeconds": 290,
+      "reviewSeconds": 90,
+      "findings": 0,
+      "sources": {
+        "review": 0,
+        "mutation": 0,
+        "blocked": 0
+      },
+      "verdict": "APPROVED",
+      "nonConverging": false
+    }
+  ],
+  "roles": {
+    "planner": {
+      "model": "opus",
+      "runner": "anthropic",
+      "locality": "remote",
+      "family": "claude",
+      "reported": [
+        "claude-opus-5-5"
+      ],
+      "requests": 12,
+      "input": 1100,
+      "output": 250,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "activeSeconds": 600,
+      "outputPerActiveSecond": 0.4,
+      "toolCalls": 40,
+      "toolErrors": 2,
+      "apiErrors": 0,
+      "cost": 1.4,
+      "costSource": "reported"
+    },
+    "implementer": {
+      "model": "spark/qwen38-27b",
+      "runner": "spark",
+      "locality": "local",
+      "family": "qwen",
+      "reported": [
+        "qwen38-27b"
+      ],
+      "requests": 300,
+      "input": 150000,
+      "output": 12000,
+      "cacheRead": 100000,
+      "cacheWrite": 0,
+      "activeSeconds": 1200,
+      "outputPerActiveSecond": 10,
+      "toolCalls": 40,
+      "toolErrors": 20,
+      "apiErrors": 0,
+      "cost": null,
+      "costSource": null
+    },
+    "reviewer": {
+      "model": "spark/qwen38-27b",
+      "runner": "spark",
+      "locality": "local",
+      "family": "qwen",
+      "reported": [
+        "qwen38-27b"
+      ],
+      "requests": 40,
+      "input": 20000,
+      "output": 2500,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "activeSeconds": 600,
+      "outputPerActiveSecond": 4.2,
+      "toolCalls": 40,
+      "toolErrors": 2,
+      "apiErrors": 0,
+      "cost": null,
+      "costSource": null
+    },
+    "summarizer": {
+      "model": "sonnet",
+      "runner": "anthropic",
+      "locality": "remote",
+      "family": "claude",
+      "usage": null,
+      "reported": null,
+      "requests": null,
+      "input": null,
+      "output": null,
+      "cacheRead": null,
+      "cacheWrite": null,
+      "activeSeconds": null,
+      "outputPerActiveSecond": null,
+      "toolCalls": null,
+      "toolErrors": null,
+      "apiErrors": null,
+      "cost": null,
+      "costSource": null
+    },
+    "controller": {
+      "model": null,
+      "runner": null,
+      "locality": null,
+      "family": null,
+      "reported": [
+        "claude-sonnet-5-5"
+      ],
+      "requests": 55,
+      "input": 11000,
+      "output": 900,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "activeSeconds": 600,
+      "outputPerActiveSecond": 1.5,
+      "toolCalls": 40,
+      "toolErrors": 2,
+      "apiErrors": 0,
+      "cost": 0.031,
+      "costSource": "rates"
+    }
+  },
+  "totals": {
+    "requests": 407,
+    "input": 182100,
+    "output": 15650,
+    "cost": null,
+    "missing": [
+      "summarizer"
+    ]
+  },
+  "tasks": {
+    "total": 12,
+    "done": 11,
+    "blocked": 1,
+    "skipped": 0,
+    "reopened": 0
+  },
+  "friction": {
+    "feedback": {
+      "restart": 0,
+      "runner-drift": 1,
+      "stall": 1
+    },
+    "guardReblocks": null,
+    "verifyRuns": 31,
+    "verifyFailures": 9,
+    "activateFailures": 0
+  },
+  "tree": {
+    "commits": 41,
+    "filesChanged": 20,
+    "insertions": 1500,
+    "deletions": 80
+  }
+}

@@ -8,7 +8,7 @@ import os from "node:os";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import {
-  finish, ok, eq, like, isError, ROOT, plannedRepo, cleanroomRepo, withServer, runHook, mkDir, writeFile, readFile, hasFile, git, subject, testKeyFor, addPlan, commitTask, setState, tempPlugin, markTasks, startServer, logCall, buildBundle,
+  finish, ok, eq, like, isError, ROOT, plannedRepo, cleanroomRepo, withServer, runHook, mkDir, writeFile, readFile, hasFile, git, subject, testKeyFor, addPlan, commitTask, setState, tempPlugin, markTasks, startServer, logCall, buildBundle, mkFakeProbe,
 } from "./harness.mjs";
 import { spawn, spawnSync } from "node:child_process";
 import { createHash as sha, generateKeyPairSync } from "node:crypto";
@@ -19,7 +19,7 @@ import {
   splitSegments, stripHeredocs, shellWords, commandWord, isPathLike, tokenPath, canonicalPaths,
   evaluate, sedInPlace, lockdownActive, NETWORK_COMMANDS, READ_FAMILY, WRITE_FAMILY, protectedPaths,
   coverageGaps, KNOWN_LIMITS, knownLimitsFor,
-  normalizeModel, familyOf, controlPaths, LOG_SOCKET_TIMEOUT_MS,
+  normalizeModel, familyOf, MODEL_FAMILIES, controlPaths, LOG_SOCKET_TIMEOUT_MS,
   LOCKFILES, lockfileEcosystem, lockfilePackages, normalizePackageName, deniedPackage,
   generateKey, loadKey, keyFingerprint, CHECKPOINT_KEYS, signCheckpoint, verifyCheckpoint,
 } from "../mcp/cleanroom.mjs";
@@ -70,6 +70,8 @@ const pattern = (extra = {}) => ({ id: "p", pattern: "/build/", shouldMatch: ["/
   const families = JSON.parse(readFile(ROOT, "test/fixtures/families.json"));
   ok(families.length >= 16, "the family fixture has at least sixteen entries");
   for (const { model, family } of families) eq(familyOf(model), family, `familyOf classifies ${model}`);
+  eq(MODEL_FAMILIES.at(-1).family, "laguna", "laguna is the last family, so no earlier pattern changes");
+  eq(familyOf("spark/qwen-laguna-merge"), "qwen", "a string naming both qwen and laguna stays qwen (the first match wins)");
   eq(normalizeModel("OpenRouter/deepseek/deepseek-v4-pro"), "deepseek-v4-pro", "normalizeModel strips every provider prefix");
   eq(normalizeModel("Prov,Mixed/Model-X"), "model-x", "...whether the separator is a slash or a comma");
   ok(familyOf("alpha-1") !== familyOf("beta-1"), "two unknown strings are their own families");
@@ -1271,6 +1273,12 @@ const gateCheck = (reason) => (reason.match(/^clean-room gate failed: ([\w-]+):/
     j.hooks.SubagentStop = j.hooks.SubagentStop.filter((e) => !e.hooks.some((h) => h.command.includes("cleanroom-log.mjs")));
     fs.writeFileSync(file, JSON.stringify(j, null, 2));
   }, { before: true, reason: /hooks\/hooks\.json no longer registers cleanroom-log\.mjs on SubagentStop/ });
+  await edited("the gate requires the logger on Stop", "guard", (p) => {
+    const file = path.join(p, "hooks", "hooks.json");
+    const j = JSON.parse(fs.readFileSync(file, "utf8"));
+    j.hooks.Stop = j.hooks.Stop.filter((e) => !e.hooks.some((h) => h.command.includes("cleanroom-log.mjs")));
+    fs.writeFileSync(file, JSON.stringify(j, null, 2));
+  }, { before: true, reason: /hooks\/hooks\.json no longer registers cleanroom-log\.mjs on Stop/ });
   await edited("a failing self-test halts naming self-test", "self-test", (p) => {
     const file = path.join(p, "test", "fixtures", "guard-cases.json");
     const cases = JSON.parse(fs.readFileSync(file, "utf8"));
@@ -1596,6 +1604,9 @@ const gateCheck = (reason) => (reason.match(/^clean-room gate failed: ([\w-]+):/
   const bare = time(() => spawnSync(process.execPath, ["-e", "0"]));
   const fast = time(() => stop(general));
   ok(fast - bare < 50, `the SubagentStop hook's fast path costs under 50 ms beyond Node's own startup (${(fast - bare).toFixed(1)} ms)`);
+  const stopEvent = () => runHook(LOGGER, { hook_event_name: "Stop", transcript_path: TRANSCRIPT, session_id: "s-7", cwd: general }, { CLAUDE_PROJECT_DIR: general, CLAUDE_PLUGIN_ROOT: ROOT, HOME: mkDir("kukulu-home-") });
+  const stopFast = time(stopEvent);
+  ok(stopFast - bare < 50, `the Stop hook's general-mode path costs under 50 ms beyond Node's own startup (${(stopFast - bare).toFixed(1)} ms)`);
   const full = time(() => stop(repo));
   ok(full - bare < 50, `...and so does the SubagentStop hook with a policy and the fixture transcript (${(full - bare).toFixed(1)} ms)`);
 }
@@ -2258,6 +2269,31 @@ eq(LANGUAGES.join(","), "rust,c,cpp,go,python,javascript,typescript,java,php", "
     ok(para.startsWith("The guard is a tripwire, not a sandbox."), "docs/cleanroom.md opens the guard section with the tripwire paragraph");
     ok(lines.includes("### When a guard gap is a defect") && /Known-gap candidates/.test(doc), "docs/cleanroom.md has a When a guard gap is a defect subsection");
   }
+}
+
+// ---------------------------------------------------------------- activation in the chain (P1-05)
+
+{
+  const probe = mkFakeProbe();
+  probe.answers([{ ok: true, status: 200, ms: 12, reported: "q" }]);
+  const marker = "TOKEN-MARKER-9f3a7c";
+  const cfgPath = writeFile(mkDir("kukulu-cfg-"), "global.json", JSON.stringify({ runners: { spark: { endpoint: "http://h:1", locality: "local", match: ["spark/"], activate: "warm", tokenEnv: "SPARK_TOKEN" } }, roles: { planner: { model: "spark/q" } } }));
+  const repo = cleanroomRepo();
+  const env = { KUKULU_CONFIG: cfgPath, KUKULU_RUNNER_PROBE: probe.script, SPARK_TOKEN: marker };
+  await withServer(repo, ({ call }) => call("kukulu_agents_sync"), { env });
+  await live(repo, async ({ call }) => {
+    const n = await call("kukulu_next");
+    eq(n.stage + "|" + n.activation.served, "plan|q", "a clean-room flight's first stage is activated");
+    const starts = () => logOf(repo).filter((e) => e.kind === "stage" && e.data.event === "start");
+    eq(JSON.stringify(starts().at(-1).data.activate), JSON.stringify({ runner: "spark", served: "q", reported: "q", ms: 12 }), "the start entry carries data.activate with runner, served, reported and ms");
+    const before = logOf(repo).filter((e) => e.kind === "stage").length;
+    await call("kukulu_next");
+    eq(logOf(repo).filter((e) => e.kind === "stage").length, before, "an activation with no new start writes no chain entry");
+    eq(probe.calls().length, 2, "...though the probe ran again");
+    ok(verifyChain(fs.readFileSync(LOG(repo), "utf8").split("\n").filter(Boolean)).ok, "the chain still verifies");
+    const everything = [".kukulu/state.json", ".kukulu/cleanroom/log.jsonl", ".kukulu/feedback.jsonl"].map((f) => (hasFile(repo, f) ? readFile(repo, f) : "")).join("\n");
+    ok(!everything.includes(marker) && !JSON.stringify(probe.calls()).includes(marker), "no token value is in the state, the chain or the feedback file");
+  }, { env });
 }
 
 finish();

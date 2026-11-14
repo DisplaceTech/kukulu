@@ -6,7 +6,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/License-Apache%202.0-blue" alt="Apache License 2.0" />
-  <img src="https://img.shields.io/badge/version-0.8.1-informational" alt="Version 0.8.1" />
+  <img src="https://img.shields.io/badge/version-0.9.0-informational" alt="Version 0.9.0" />
   <img src="https://img.shields.io/badge/Node-%E2%89%A5%2022-339933?logo=nodedotjs&logoColor=white" alt="Node 22 or later" />
   <img src="https://img.shields.io/badge/Claude%20Code-plugin-D97757" alt="Claude Code plugin" />
   <img src="https://img.shields.io/badge/dependencies-none-brightgreen" alt="No dependencies" />
@@ -69,6 +69,7 @@ You need Node ≥ 22, git, and Claude Code. Nothing to `npm install`.
 - **A flight controller**, `/kukulu:go-flight`, that makes no engineering decisions. It asks the MCP what runs next, spawns that agent, and repeats until the pipeline reports `done` or `halt`.
 - **A deterministic MCP server** (`mcp/server.mjs`, no dependencies, Node ≥ 22) that owns stage selection, task selection, dependency skipping, checkbox edits, log entries, verification runs and every bookkeeping commit. The skills direct judgment and never describe mechanics.
 - **Clean-room mode**, opt-in with a policy file: a guard that checks every tool call (a tripwire, not a sandbox: the chain and the gate make a bypass visible afterwards), a hash-chained log with signed checkpoints, a gate before every stage, a lexical contamination score, and a signed attestation bundle that anyone with Node can verify offline. See [docs/cleanroom.md](./docs/cleanroom.md).
+- **Runner comparison metrics.** Every flight records token use and model wait time per role and for the controller session (to `.kukulu/metrics/usage.jsonl` in general mode, to the signed chain in clean-room mode), a runner can be warmed before its stage with the wait recorded, a flight that ends or halts leaves `docs/METRICS.json`, and `scripts/compare-flights.mjs` puts two flights side by side. See [docs/metrics.md](./docs/metrics.md).
 - **A Stop-hook guard** that refuses to let the implementer stop while tasks are open, and gives up after a configurable cap so a stuck run ends instead of looping.
 - **Blocked-task handling** that keeps an unattended run moving: a task that cannot be done is reset, logged and left for the reviewer; its dependents are skipped rather than attempted.
 - **Everything on disk.** The plan, progress, handoff, review and summary are all committed, so a flight can be resumed from any point by re-running one command.
@@ -150,6 +151,16 @@ Plugin skills are namespaced, so the entry point is `/kukulu:go-flight`; the bar
 
 0.7.0 no longer reads the pre-0.6.0 layout. A project that still has `.foundry/` or `docs/foundry.json` is refused by every tool with a message that names the move, which is by hand: `.foundry/state.json` and `.foundry/feedback.jsonl` go to `.kukulu/`, `docs/foundry.json` goes to `docs/kukulu.json`, the `.foundry/` lines of `.gitignore` become `.kukulu/`, and the result is committed (0.6.x's `kukulu_migrate` did this, and 0.7.0 does not). The `FOUNDRY_*` environment variables are no longer read either; use the `KUKULU_*` names. A project on the 0.6 layout needs nothing else, and clean-room mode stays off until it has a `docs/cleanroom.json`. Flights archived under `docs/flights/` keep their old file names and are never rewritten.
 
+## Upgrading to 0.9.0
+
+0.9.0 adds one tool, `kukulu_metrics`, and removes or renames nothing. What changes for someone upgrading:
+
+- **The logger runs on `Stop` too.** `hooks/hooks.json` registers `scripts/cleanroom-log.mjs` on `Stop` as well, and in general mode it now writes each role agent's and the controller session's usage to `.kukulu/metrics/usage.jsonl`. No hook script is added. The clean-room gate pins both files, so a clean-room flight started on 0.8.x cannot continue on 0.9.0: archive it and start another.
+- **Four optional runner keys** in the global file: `activate`, `activateTimeoutMs`, `servedAs` and `tokenEnv` (see [docs/routing.md](./docs/routing.md#runners)).
+- **`kukulu_next` can take as long as a model load**, and can return a `halt` for a runner that does not answer; resume it with `kukulu_run_resume`.
+- **New files.** `docs/METRICS.json` is committed when a flight ends or halts (`policies.metrics` turns it off), and `.kukulu/metrics/` is excluded per clone and never committed.
+- **A new refusal.** A runner's `activateTimeoutMs` at or above the plugin's tool-call limit is refused when the config loads.
+
 ## Per-project use
 
 ```bash
@@ -191,6 +202,8 @@ Each of the four roles can be pointed at a different model (an Anthropic alias o
 | `docs/REVIEW.md` | reviewer | summarizer |
 | `docs/SUMMARY.md` | summarizer | you |
 | `.kukulu/state.json` | MCP (committed) | `kukulu_next` |
+| `docs/METRICS.json` | MCP (written when a flight ends or halts, committed) | you, `scripts/compare-flights.mjs` |
+| `.kukulu/metrics/` | the usage hook and MCP (excluded per clone, never committed) | `kukulu_metrics` |
 | `.kukulu/implement.lock` | MCP (gitignored) | guard hook |
 | `.kukulu/worktrees/<stream>/` | MCP (gitignored) — a parallel stream's worktree, until it is merged back | that stream's implementer |
 | `.claude/agents/kukulu-*.md` | MCP (`kukulu_agents_sync`, git-excluded) | Claude Code |
@@ -200,7 +213,7 @@ Checkbox states in `PROGRESS.md`: `[ ]` todo · `[~]` in progress · `[x]` done 
 
 ## MCP tools
 
-The server exposes twenty-six tools.
+The server exposes twenty-seven tools.
 
 | Tool | Does |
 |---|---|
@@ -230,6 +243,7 @@ The server exposes twenty-six tools.
 | `kukulu_release` | After a human merges the flight's pull request: tag the merge commit from CHANGELOG.md's newest numbered entry, push the tag and create a GitHub release (a draft unless `publish: true`). For the flight controller, on request only |
 | `kukulu_agents_sync` | Write `.claude/agents/kukulu-<role>.md` from the merged routing config; only changed files are written |
 | `kukulu_config_show` | The merged routing config with the source of every value. Read-only |
+| `kukulu_metrics` | The flight's metrics: outcome, wall time, rounds, per-role token use, tasks, friction and the tree, computed now. Read-only |
 
 Full arguments, return shapes and failure modes: [docs/mcp-tools.md](./docs/mcp-tools.md).
 
@@ -255,10 +269,13 @@ Everything is on disk and committed, so `/kukulu:go-flight` can be re-run from a
 ├── .claude-plugin/              plugin.json + marketplace.json
 ├── .mcp.json                    how Claude Code launches the MCP server
 ├── mcp/server.mjs               the deterministic half of the pipeline
+├── mcp/metrics.mjs              the usage record's contract
 ├── mcp/run-command.mjs          runs one command bounded in time and output
 ├── hooks/hooks.json             Stop / SubagentStop wiring
 ├── scripts/
 │   ├── implement-guard.mjs      the guard hook
+│   ├── compare-flights.mjs      two flights' METRICS.json side by side
+│   ├── runner-probe.mjs         one request to a runner, one JSON line out
 │   ├── lint.sh                  dependency-free syntax + manifest lint
 │   └── check-diagrams.mjs       parses every Mermaid block (CI only)
 ├── site/                        the kukulu.tech landing page, deployed to Cloudflare Pages
@@ -267,9 +284,10 @@ Everything is on disk and committed, so `/kukulu:go-flight` can be re-run from a
 ├── templates/
 │   ├── SPEC.md                  the spec skeleton the planner reads
 │   ├── kukulu.config.example.json   the global routing config, explained in docs/routing.md
+│   ├── runners/                 a llama-swap example for one inference host
 │   └── ccr/                     claude-code-router provider manifests
 ├── docs/                        architecture · MCP reference · routing · spec guide · runbook
-└── test/                        harness + fifteen suites, run by test/run.mjs
+└── test/                        harness + sixteen suites, run by test/run.mjs
 ```
 
 ## Documentation map
@@ -277,7 +295,9 @@ Everything is on disk and committed, so `/kukulu:go-flight` can be re-run from a
 - [**docs/architecture.md**](./docs/architecture.md): why the pipeline is split this way, what each stage may and may not do, and where state lives
 - [**docs/sandbox.md**](./docs/sandbox.md): the sandbox: the sockets that cross the container boundary, and what an agent inside can and cannot do with them
 - [**docs/publishing.md**](./docs/publishing.md): publishing an attestation bundle with `scripts/publish-bundle.mjs`, and re-checking a published copy
+- [**docs/metrics.md**](./docs/metrics.md): the usage record every harness fills in, the `METRICS.json` built from it, and comparing two flights with `scripts/compare-flights.mjs`
 - [**docs/mcp-tools.md**](./docs/mcp-tools.md): every tool, argument, return field and refusal
+- [**docs/local-runners.md**](./docs/local-runners.md): running a whole flight on local models from one inference host: direct mode, resident and swapping layouts, timeouts and a smoke test
 - [**docs/routing.md**](./docs/routing.md): per-role model routing, covering the global config file, profiles, and running stages through a router like claude-code-router
 - [**docs/writing-specs.md**](./docs/writing-specs.md): how to write a `SPEC.md` the planner can turn into a usable plan
 - [**docs/cleanroom.md**](./docs/cleanroom.md): clean-room mode, covering the policy, the guard, the log and checkpoints, the gate, and recording what you did
@@ -302,7 +322,7 @@ npm test -- guard protocol     # one or more suites by name
 KEEP_REPO=1 npm test -- drive  # keep the temp repos to poke at afterwards
 ```
 
-Fifteen suites, about 4,000 assertions. They cover the plugin manifests and documentation links, the JSON-RPC transport, the `kukulu_next` decision table, the implement-stage tools, the review and summary tools, per-role routing (config merge, `kukulu_agents_sync`, `kukulu_config_show`), `docs/kukulu.json` constraints and their fixture self-tests, `kukulu_feedback_log` and the feedback policy, parallel streams (waves, partition validation, worktrees, merge-back), the guard hook, and serial and parallel end-to-end flights driven over real stdio against a real git repo. CI runs all of it on Node 22, 24 and 26, again on macOS, and again on a machine with no GitHub CLI installed.
+Sixteen suites, about 4,000 assertions. They cover the plugin manifests and documentation links, the JSON-RPC transport, the `kukulu_next` decision table, the implement-stage tools, the review and summary tools, per-role routing (config merge, `kukulu_agents_sync`, `kukulu_config_show`), `docs/kukulu.json` constraints and their fixture self-tests, `kukulu_feedback_log` and the feedback policy, parallel streams (waves, partition validation, worktrees, merge-back), the guard hook, and serial and parallel end-to-end flights driven over real stdio against a real git repo. CI runs all of it on Node 22, 24 and 26, again on macOS before a code PR merges, and again on a machine with no GitHub CLI installed.
 
 ## Contributing
 

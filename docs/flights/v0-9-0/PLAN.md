@@ -883,3 +883,47 @@ routing:
 - §6 C-01 says `cost` is `null` "unless the role's runner is `anthropic`"; the controller has no runner in routing, so its `cost` is always `null`. The owner may want the controller's runner recorded some other way.
 - §6 C-01's example for the recorded-flight test names `docs/flights/v0-8-0/`, whose state has no timeline (0.8.0 introduced it), so that fixture exercises the `null` wall fields; timelines are covered by synthetic inputs.
 - §6 E-01 asks for links to pages the implementer cannot open. The planner read them on 2026-11-13 and P3-03 carries the facts and URLs; they should be re-checked before release.
+
+## Review fixes (round 1)
+
+### R1-01: The probe redacts the token before it cuts the error body
+
+**Goal:** scripts/runner-probe.mjs never prints any part of the runner's token, also when a non-2xx body that echoes it is cut to 300 characters (SPEC A-01; CLAUDE.md: no halt reason holds a token value).
+**Files touched:** scripts/runner-probe.mjs, test/routing.mjs
+**Design constraints:** SPEC A-01 (redaction of every occurrence, one JSON line, exit statuses unchanged), CLAUDE.md reviewer rule on token values, probe-node-only, scripts-node-builtins, no shebang. Today line 74 builds `HTTP <status>: <oneLine(body).slice(0, ERROR_CUT)>` and only line 97 redacts, so a cut inside the token leaves a prefix that neither redact() nor main()'s final check matches. Replace every occurrence of the token's value in the raw body (and in any error message) before collapsing whitespace and cutting, so the cut can only shorten `<redacted>`; keep the final check on the serialized line. Do not change ERROR_CUT, the output shape or any other message.
+**Acceptance tests:** test/routing.mjs: new "a token that straddles the 300-character cut is not leaked, not even in part": a node:http fake answering 401 with a body of 280 padding characters, then ' auth was ', then the x-api-key header it received, probe run with --token-env and a token such as sk-SECRETTOKEN-0123456789abcdef; assert stdout and stderr contain neither the token nor its first 8 characters, and that the error still starts with 'HTTP 401: '. The existing "a runner that echoes the Authorization header in a 401 body does not leak the token" keeps passing. The new assertion must fail on the current code (it prints 'sk-SECRETT').
+**Out of scope:** Any other probe behavior; the server; encodings of the token other than its literal value.
+**Verification:** kukulu_verify; node test/routing.mjs
+**Depends on:** none
+
+### R1-02: A failed activation on a flight's first timeline record keeps its activateFailures count
+
+**Goal:** When the warm probe fails on the call that writes a flight's first timeline record, counters.json and the METRICS.json written in that commit both record activateFailures 1 (SPEC C-02, principle 7).
+**Files touched:** mcp/server.mjs, test/state.mjs
+**Design constraints:** SPEC A-03 step 3, C-02, C-03; PLAN P0-03 (a flight's first record empties .kukulu/metrics/), P1-04, P2-08. server-synchronous, server-no-network, no-hardcoded-activate-timeout. Today next() calls bumpCounter("activateFailures") (mcp/server.mjs:5014) before recordTimeline, whose first-record branch (:4853) deletes every file under .kukulu/metrics/, counters.json included, and then builds METRICS.json from the emptied directory. Make the emptying happen before anything the same call counts (for example move it ahead of the activation step in next(), keeping 'only when the timeline is absent or empty'), or bump after the emptying and before the metrics are built. The halt text, the timeline records, the commit subject and countersNote behavior do not change.
+**Acceptance tests:** test/state.mjs, with mkFakeProbe, writeGlobalConfig (a warm spark runner, implementer on spark/qwen38-27b), plannedRepo() with no timeline and kukulu_agents_sync first: new "a failed activation on a flight's first timeline record counts activateFailures 1" (counters.json and kukulu_status.counters) and "...and its METRICS.json has friction.activateFailures 1". Both must fail on the current code (counters is null there). The existing "the first timeline record of a flight empties .kukulu/metrics/", "a later kukulu_next leaves .kukulu/metrics/ alone", "activateFailures is 1" and "a halt from a failed activation writes it, with friction.activateFailures 1" keep passing.
+**Out of scope:** The other counters; the probe; the tool descriptions (R1-03).
+**Verification:** kukulu_verify; node test/state.mjs
+**Depends on:** none
+
+### R1-03: The kukulu_next, kukulu_status and kukulu_pr_finalize tool descriptions name 0.9.0's behavior
+
+**Goal:** The TOOLS descriptions a client shows the model no longer say kukulu_next writes only the timeline, and they name the activation wait and halt, METRICS.json, the counters and the metrics commit (SPEC §1, A-03, C-02, C-03, C-04).
+**Files touched:** mcp/server.mjs, test/protocol.mjs
+**Design constraints:** CLAUDE.md: documentation moves with the code; error and tool text written for a model. Match docs/mcp-tools.md, do not restate the 24-hour limit in milliseconds (no-hardcoded-mcp-timeout) or the activateTimeoutMs default (no-hardcoded-activate-timeout). kukulu_next: before a stage on a runner with activate "warm" it runs the runner probe and waits (as long as a model load), returns activation, can return a halt for a runner that does not serve its model, may append runner-drift and metrics feedback entries, writes docs/METRICS.json into the chore: stage end commit on a done or halt, and may carry metricsNote and countersNote; drop 'Writes only'. kukulu_status: counters, harness, activateSeconds. kukulu_pr_finalize: the chore: flight metrics commit before the push, where the file goes, metricsNote. No input schema changes.
+**Acceptance tests:** test/protocol.mjs: new "kukulu_next's description names the activation probe, the runner halt and docs/METRICS.json" (from tools/list), "kukulu_status's description names counters, harness and activateSeconds", "kukulu_pr_finalize's description names the chore: flight metrics commit"; each fails on the current descriptions. Existing tools/list order and count assertions keep passing.
+**Out of scope:** Any behavior change; docs/mcp-tools.md beyond keeping it consistent; other tools' descriptions.
+**Verification:** kukulu_verify; node test/protocol.mjs; node test/plugin.mjs
+**Depends on:** R1-02
+
+## Review fixes (round 2)
+
+### R2-01: kukulu_status and kukulu_next descriptions and the mcp-tools overview state 0.9.0's behavior correctly
+
+**Goal:** The kukulu_status description describes activateSeconds as SPEC and docs/mcp-tools.md do (per runner, the sum of successful activations' waits, in whole seconds), kukulu_next's wave sentence has a verb, and docs/mcp-tools.md's overview no longer says kukulu_next writes only the stage timeline (SPEC line 213, A-03, C-03; CLAUDE.md: documentation moves with the code).
+**Files touched:** mcp/server.mjs, test/protocol.mjs, docs/mcp-tools.md
+**Design constraints:** No behavior or input-schema change. Text only, written for a model. mcp/server.mjs:5827 (kukulu_status) says activateSeconds is 'how long the last runner activation waited'; the code at mcp/server.mjs:2505-2509, SPEC line 213 and docs/mcp-tools.md:51 make it an object keyed by runner holding the sum of the ms of every ok activate record, rounded to whole seconds. Write e.g. 'activateSeconds (per runner, the total wait of its successful activations, in whole seconds)'. mcp/server.mjs:5828 (kukulu_next): the sentence 'When a parallel wave's partition is invalid, a record (state, one feedback entry, one commit, only on a build branch) that the wave runs serially.' has no verb; make it 'When a parallel wave's partition is invalid, it also writes a record (...) that the wave runs serially.' docs/mcp-tools.md:5: replace 'kukulu_next answers from disk and writes only the stage timeline (and the wave record)' with text saying it may first run the runner probe for a warm runner and writes the stage timeline, the wave record and, on done and halt, docs/METRICS.json (keep the sentence's role in the read-only overview). Do not spell the 24-hour MCP limit or the activateTimeoutMs default in milliseconds (no-hardcoded-mcp-timeout, no-hardcoded-activate-timeout). Keep R1-03's existing assertions passing (kukulu_next names the runner probe, halt and docs/METRICS.json; no 'Writes only'; kukulu_status names counters, harness and activateSeconds; kukulu_pr_finalize names chore: flight metrics).
+**Acceptance tests:** test/protocol.mjs: new "kukulu_status's description says activateSeconds is a per-runner total, not the last wait" (from tools/list: the description matches /activateSeconds[^.;]*per runner/ and does not match /last runner activation/); new "kukulu_next's description gives the wave record a verb" (matches /partition is invalid, it also writes a record/ or an equivalent with a verb before 'a record'). test/plugin.mjs or test/protocol.mjs: new "docs/mcp-tools.md's overview no longer says kukulu_next writes only the stage timeline" (reads the tracked docs/mcp-tools.md and asserts it does not contain 'writes only the stage timeline'). Each fails on the current text.
+**Out of scope:** Any behavior change; other tools' descriptions; the docs/mcp-tools.md kukulu_status table (already correct); the round-1 advisory notes.
+**Verification:** kukulu_verify; node test/protocol.mjs; node test/plugin.mjs
+**Depends on:** none

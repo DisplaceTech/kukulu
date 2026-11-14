@@ -2,7 +2,8 @@
 // The server speaks newline-delimited JSON-RPC 2.0 by hand, so the framing is
 // worth testing as carefully as the tools it carries.
 
-import { finish, ok, eq, like, mkRepo, startServer } from "./harness.mjs";
+import { readFileSync } from "node:fs";
+import { finish, ok, eq, like, mkRepo, startServer, plannedRepo, setState, readFile } from "./harness.mjs";
 
 const EXPECTED_TOOLS = [
   "kukulu_status",
@@ -31,6 +32,7 @@ const EXPECTED_TOOLS = [
   "kukulu_release",
   "kukulu_agents_sync",
   "kukulu_config_show",
+  "kukulu_metrics",
 ];
 
 const repo = mkRepo();
@@ -81,6 +83,13 @@ ok(describedOk, "every tool carries a description the model can act on");
 ok(leakedOk, "tools/list does not leak the server-side handler");
 
 const byName = Object.fromEntries(list.map((t) => [t.name, t]));
+like(byName.kukulu_next.description, /runner probe[\s\S]*halt[\s\S]*docs\/METRICS\.json/, "kukulu_next's description names the activation probe, the runner halt and docs/METRICS.json");
+ok(!/Writes only/.test(byName.kukulu_next.description), "...and no longer says it writes only the timeline");
+ok(/activateSeconds[^.;]*per runner/.test(byName.kukulu_status.description) && !/last runner activation/.test(byName.kukulu_status.description), "kukulu_status's description says activateSeconds is a per-runner total, not the last wait");
+ok(/partition is invalid, it also writes a record/.test(byName.kukulu_next.description), "kukulu_next's description gives the wave record a verb");
+ok(!readFileSync(new URL("../docs/mcp-tools.md", import.meta.url), "utf8").includes("writes only the stage timeline"), "docs/mcp-tools.md's overview no longer says kukulu_next writes only the stage timeline");
+like(byName.kukulu_status.description, /counters[\s\S]*harness[\s\S]*activateSeconds/, "kukulu_status's description names counters, harness and activateSeconds");
+like(byName.kukulu_pr_finalize.description, /chore: flight metrics/, "kukulu_pr_finalize's description names the chore: flight metrics commit");
 eq(JSON.stringify(byName.kukulu_mutate.inputSchema.properties.filter.type), JSON.stringify(["string", "array"]), "kukulu_mutate's filter takes a string or a list");
 eq(byName.kukulu_status.inputSchema.required, undefined, "read-only tools take no required arguments");
 eq(byName.kukulu_task_done.inputSchema.required.join(","), "id,log", "task_done requires id and log");
@@ -160,5 +169,41 @@ ok((await splitReply).result, "a frame split across two writes is reassembled");
 
 await s.stop();
 eq(s.proc.exitCode, 0, "the server exits cleanly when stdin closes");
+
+// -------------------------------------------------------------- the harness's name (P2-03)
+
+{
+  const repo = plannedRepo();
+  const harnessOf = () => JSON.parse(readFile(repo, ".kukulu/state.json")).harness;
+  /** One server process that sends `info` as clientInfo (or none), makes one timeline write, and stops. */
+  const session = async (clientInfo, reopen = true) => {
+    const srv = startServer(repo);
+    try {
+      const params = { protocolVersion: "2025-06-18", capabilities: {} };
+      if (clientInfo !== undefined) params.clientInfo = clientInfo;
+      const reply = await srv.rpc("initialize", params);
+      if (reopen) setState(repo, { timeline: [{ event: "start", stage: "plan", round: 0, at: "2026-01-01T00:00:00.000Z" }] });
+      await srv.call("kukulu_next");
+      return { reply, status: await srv.call("kukulu_status") };
+    } finally {
+      await srv.stop();
+    }
+  };
+  const a = await session({ name: "claude-code", version: "9.9.9" });
+  eq(JSON.stringify(harnessOf()), '[{"name":"claude-code","version":"9.9.9"}]', "initialize's clientInfo reaches state.harness on the next timeline write");
+  eq(JSON.stringify(a.status.harness), JSON.stringify(harnessOf()), "...and kukulu_status.harness reports it");
+  await session({ name: "claude-code", version: "9.9.9" });
+  eq(harnessOf().length, 1, "the same client is recorded once");
+  await session({ name: "other-harness", version: "1.2.3" });
+  eq(harnessOf().map((h) => `${h.name}@${h.version}`).join(","), "claude-code@9.9.9,other-harness@1.2.3", "a second client is appended in first-seen order");
+  await session({ name: "no-version" });
+  eq(harnessOf().at(-1).version, null, "a clientInfo without a version records version null");
+  await session(undefined);
+  eq(JSON.stringify(harnessOf().at(-1)), '{"name":"unknown","version":null}', "a client that sends no clientInfo is recorded as unknown with version null");
+  const bare = startServer(mkRepo());
+  const reply = await bare.rpc("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "x", version: "1" } });
+  eq(JSON.stringify(Object.keys(reply.result).sort()) + "|" + reply.result.serverInfo.name, '["capabilities","protocolVersion","serverInfo"]|kukulu', "initialize's reply is unchanged");
+  await bare.stop();
+}
 
 finish();
