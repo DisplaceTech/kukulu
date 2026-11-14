@@ -8,7 +8,7 @@ Started: 2026-11-14T04:52:50.030Z
 - [x] P0-01 The usage record's contract, mcp/metrics.mjs and the metrics suite
 - [x] P0-02 usageFromClaudeCode replaces usageOf, and the chain's usage entry carries the record
 - [x] P0-03 General-mode usage in .kukulu/metrics/usage.jsonl, excluded per clone
-- [ ] P0-04 The logger on Stop, and the controller's usage record
+- [x] P0-04 The logger on Stop, and the controller's usage record
 - [ ] P0-05 Usage entries under the sandbox and in the verifier
 - [ ] P0-06 Phase 0 end: push and record the manual check
 - [ ] P1-01 scripts/runner-probe.mjs
@@ -53,3 +53,7 @@ usageFromClaudeCode in scripts/cleanroom-log.mjs (stageAndRound helper reads sta
 ### P0-03 — 8e29dfa
 
 General-mode branch in scripts/cleanroom-log.mjs (before the policy exit). Server: layoutFor gains metricsDir/usage/counters; ensureMetricsExcluded() called in startRun (after inRepo check, so also on already-started path) and next(); recordTimeline empties metrics files when timeline is empty. Tests: metrics (48), implement (396), state (326). Full verify green.
+
+### P0-04 — 6d4982c
+
+Logger registered on Stop (hooks.json second entry); usageFromClaudeCode handles Stop (role controller, transcript_path, sidechain rows dropped); clean-room Stop appends usage entry role session; gate check 3 requires Stop registration. Tests: metrics 57, plugin 604, cleanroom 1502 (incl. Stop 50 ms budget). Full verify green.
