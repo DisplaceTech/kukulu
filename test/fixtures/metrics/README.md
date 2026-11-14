@@ -22,3 +22,11 @@ escaped as `\uXXXX`.
 two rounds and an activation, routing, one usage record for each of the five
 roles, counters, feedback, task counts, git facts and a genesis), so that a test
 can walk every field of the metrics object. It describes no real flight.
+
+`a.METRICS.json` and `b.METRICS.json` are two synthetic flights, both outputs of
+`buildMetrics`: A is a general-mode flight on the `anthropic` runner with three
+rounds and every role recorded; B is a clean-room flight with a local runner for
+the implementer and reviewer, one activation, a different spec hash and no
+summarizer record. `compare.expected.txt` and `compare.expected.json` are what
+`scripts/compare-flights.mjs` prints for them without and with `--json`; they
+were read through once against the rules in `docs/metrics.md` before being kept.

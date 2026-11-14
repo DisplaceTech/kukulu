@@ -3,9 +3,10 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 import { finish, ok, eq, like, ROOT, mkDir, mkRepo, cleanroomRepo, plannedRepo, runHook, setState, withServer, writeFile, readFile, hasFile, markTasks, git, buildBundle } from "./harness.mjs";
 import { rolesUsage, appendEntry, readEntries } from "../mcp/cleanroom.mjs";
-import { METRICS_VERSION, USAGE_KEYS, validateUsageRecord, buildMetrics, usageFromChain } from "../mcp/metrics.mjs";
+import { METRICS_VERSION, USAGE_KEYS, validateUsageRecord, buildMetrics, usageFromChain, compareMetrics } from "../mcp/metrics.mjs";
 
 const json = (x) => JSON.stringify(x);
 const example = () => ({
@@ -464,6 +465,63 @@ const withTranscript = (text) => {
     eq(after.usage.source + "|" + after.usage.records + "|" + after.usage.chainHead, `chain|3|${archivedLog.at(-1).hash}`, "after an archive the chain is read from the archived log (its head includes the archive checkpoint)");
     eq(after.mode + "|" + after.flight, "clean-room|cr-flight", "...with the archived flight's mode");
   });
+}
+
+// ---------------------------------------------------------------- compareMetrics and scripts/compare-flights.mjs (P2-10)
+
+{
+  const FIX = path.join(ROOT, "test", "fixtures", "metrics");
+  const SCRIPT = path.join(ROOT, "scripts", "compare-flights.mjs");
+  const A = path.join(FIX, "a.METRICS.json");
+  const B = path.join(FIX, "b.METRICS.json");
+  const a = JSON.parse(fs.readFileSync(A, "utf8"));
+  const b = JSON.parse(fs.readFileSync(B, "utf8"));
+  const run = (...args) => spawnSync(process.execPath, [SCRIPT, ...args], { encoding: "utf8", cwd: ROOT });
+  const rowOf = (c, section, label) => c.sections[section].find((r) => r.label === label);
+  const before = JSON.stringify(a) + JSON.stringify(b);
+  const c = compareMetrics(a, b);
+  eq(json(Object.keys(c.sections)) + "|" + c.v, '["outcome","wall","rounds","roles","friction"]|1', "compareMetrics is pure and returns the five sections");
+  eq(JSON.stringify(a) + JSON.stringify(b), before, "...leaving its inputs as they were");
+  eq(json(c.header.sameSpec) + "|" + c.header.a.flight + "|" + c.header.b.mode, "false|flight-a|clean-room", "the header names each flight and says the specs differ");
+  eq(rowOf(c, "roles", "implementer requests").diff, 180, "a numeric row's diff is b minus a");
+  eq(rowOf(c, "outcome", "verdict").diff + "|" + rowOf(c, "roles", "implementer model").diff + "|" + rowOf(c, "outcome", "halted").diff, "=|differs|null", "an equal non-number is =, an unequal one differs, a null side has no diff");
+  const sum = rowOf(c, "roles", "summarizer requests");
+  eq(sum.a + "|" + sum.b + "|" + sum.diff, "6|not recorded|null", "a missing role is not recorded and its diff is null");
+  eq(rowOf(c, "roles", "summarizer model").b, "sonnet", "...while its model, runner and family keep their values");
+  const total = rowOf(c, "roles", "totals requests");
+  eq(json(total.b) + "|" + total.diff, '{"value":407,"partial":["summarizer"]}|null', "a total that leaves a role out is partial, and has no diff");
+  eq(json(c.sections.wall.map((r) => r.label)), '["seconds","stage plan","stage implement","stage review","stage summarize","activate spark","idle"]', "wall rows list the stages in order, then the runners");
+  eq(rowOf(c, "rounds", "round 3 findings").b, null, "a round only one flight has is null on the other side");
+  eq(json(compareMetrics(a, a).header.sameSpec) + "|" + json(compareMetrics({}, {}).header.sameSpec), "true|false", "the same spec hash is the same spec, and no hash is not");
+  ok(compareMetrics(null, undefined).sections.outcome.length === 7, "compareMetrics never throws on a missing object");
+
+  const text = run(A, B);
+  eq(text.status + "|" + text.stdout, "0|" + fs.readFileSync(path.join(FIX, "compare.expected.txt"), "utf8"), "compare-flights prints the exact text for the two fixtures");
+  eq(run(A, B, "--json").stdout, fs.readFileSync(path.join(FIX, "compare.expected.json"), "utf8"), "--json prints compareMetrics' exact object");
+  const tmp = mkDir("kukulu-cmp-");
+  fs.mkdirSync(path.join(tmp, "a"));
+  fs.copyFileSync(A, path.join(tmp, "a", "METRICS.json"));
+  eq(run(path.join(tmp, "a"), B).stdout, text.stdout, "a directory holding METRICS.json is read");
+  ok(/different specs; the comparison below is not like for like/.test(text.stdout), "different spec hashes print the not-like-for-like line");
+  ok(!/not like for like/.test(run(A, A).stdout), "the same spec prints no such line");
+  ok(/summarizer requests +6 +not recorded/.test(text.stdout) && /totals requests +206 +407 partial \(summarizer not recorded\)/.test(text.stdout), "the text says not recorded and partial");
+  for (const [name, args, re] of [
+    ["one argument", [A], /^compare-flights: give exactly two flights\nusage: /],
+    ["an unknown option", [A, B, "--wat"], /^compare-flights: unknown option --wat\nusage: /],
+    ["a missing path", [A, path.join(tmp, "nope")], /^compare-flights: .*nope does not exist\n$/],
+    ["a directory without METRICS.json", [A, tmp], /^compare-flights: .* has no METRICS\.json; pass the file, or a directory that holds one\n$/],
+    ["a file that is not JSON", [A, (() => { const f = path.join(tmp, "x.json"); fs.writeFileSync(f, "{nope"); return f; })()], /^compare-flights: .*x\.json is not JSON \(/],
+    ["a wrong version", [A, (() => { const f = path.join(tmp, "v2.json"); fs.writeFileSync(f, JSON.stringify({ ...a, v: 2 })); return f; })()], /^compare-flights: .*v2\.json is metrics version 2; this script reads version 1\n$/],
+    ["--trees", [A, B, "--trees", "x", "y"], /^compare-flights: --trees is not available yet\n$/],
+  ]) {
+    const r = run(...args);
+    ok(r.status === 2 && r.stdout === "" && re.test(r.stderr), `exit 2 for ${name}: ${r.stderr.split("\n")[0]}`);
+  }
+  const listing = (d) => fs.readdirSync(d, { recursive: true }).sort().join(",");
+  const listed = listing(FIX);
+  run(A, B);
+  run(A, B, "--json");
+  eq(listing(FIX), listed, "compare-flights writes no file");
 }
 
 finish();

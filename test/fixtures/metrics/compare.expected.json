@@ -1,0 +1,561 @@
+{
+  "v": 1,
+  "header": {
+    "a": {
+      "flight": "flight-a",
+      "harness": [
+        {
+          "name": "claude-code",
+          "version": "2.0.0"
+        }
+      ],
+      "plugin": "0.9.0",
+      "mode": "general",
+      "specSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "b": {
+      "flight": "flight-b",
+      "harness": [
+        {
+          "name": "claude-code",
+          "version": "2.0.1"
+        }
+      ],
+      "plugin": "0.9.0",
+      "mode": "clean-room",
+      "specSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    "sameSpec": false
+  },
+  "sections": {
+    "outcome": [
+      {
+        "label": "verdict",
+        "a": "APPROVED",
+        "b": "APPROVED",
+        "diff": "="
+      },
+      {
+        "label": "halted",
+        "a": null,
+        "b": null,
+        "diff": null
+      },
+      {
+        "label": "reviews",
+        "a": 3,
+        "b": 2,
+        "diff": -1
+      },
+      {
+        "label": "fixRounds",
+        "a": 2,
+        "b": 1,
+        "diff": -1
+      },
+      {
+        "label": "approvedAtRound",
+        "a": 3,
+        "b": 2,
+        "diff": -1
+      },
+      {
+        "label": "maxRounds",
+        "a": 3,
+        "b": 3,
+        "diff": 0
+      },
+      {
+        "label": "maxRoundsHard",
+        "a": 6,
+        "b": 6,
+        "diff": 0
+      }
+    ],
+    "wall": [
+      {
+        "label": "seconds",
+        "a": 1800,
+        "b": 2000,
+        "diff": 200
+      },
+      {
+        "label": "stage plan",
+        "a": 60,
+        "b": 80,
+        "diff": 20
+      },
+      {
+        "label": "stage implement",
+        "a": 1260,
+        "b": 1595,
+        "diff": 335
+      },
+      {
+        "label": "stage review",
+        "a": 380,
+        "b": 280,
+        "diff": -100
+      },
+      {
+        "label": "stage summarize",
+        "a": 30,
+        "b": null,
+        "diff": null
+      },
+      {
+        "label": "activate spark",
+        "a": null,
+        "b": 14,
+        "diff": null
+      },
+      {
+        "label": "idle",
+        "a": 70,
+        "b": 31,
+        "diff": -39
+      }
+    ],
+    "rounds": [
+      {
+        "label": "round 1 findings",
+        "a": 5,
+        "b": 2,
+        "diff": -3
+      },
+      {
+        "label": "round 1 implementSeconds",
+        "a": 930,
+        "b": 1305,
+        "diff": 375
+      },
+      {
+        "label": "round 1 reviewSeconds",
+        "a": 190,
+        "b": 190,
+        "diff": 0
+      },
+      {
+        "label": "round 2 findings",
+        "a": 1,
+        "b": 0,
+        "diff": -1
+      },
+      {
+        "label": "round 2 implementSeconds",
+        "a": 290,
+        "b": 290,
+        "diff": 0
+      },
+      {
+        "label": "round 2 reviewSeconds",
+        "a": 140,
+        "b": 90,
+        "diff": -50
+      },
+      {
+        "label": "round 3 findings",
+        "a": 0,
+        "b": null,
+        "diff": null
+      },
+      {
+        "label": "round 3 implementSeconds",
+        "a": 40,
+        "b": null,
+        "diff": null
+      },
+      {
+        "label": "round 3 reviewSeconds",
+        "a": 50,
+        "b": null,
+        "diff": null
+      }
+    ],
+    "roles": [
+      {
+        "label": "planner model",
+        "a": "opus",
+        "b": "opus",
+        "diff": "="
+      },
+      {
+        "label": "planner runner",
+        "a": "anthropic",
+        "b": "anthropic",
+        "diff": "="
+      },
+      {
+        "label": "planner family",
+        "a": "claude",
+        "b": "claude",
+        "diff": "="
+      },
+      {
+        "label": "planner requests",
+        "a": 10,
+        "b": 12,
+        "diff": 2
+      },
+      {
+        "label": "planner input",
+        "a": 1000,
+        "b": 1100,
+        "diff": 100
+      },
+      {
+        "label": "planner output",
+        "a": 200,
+        "b": 250,
+        "diff": 50
+      },
+      {
+        "label": "planner activeSeconds",
+        "a": 600,
+        "b": 600,
+        "diff": 0
+      },
+      {
+        "label": "planner outputPerActiveSecond",
+        "a": 0.3,
+        "b": 0.4,
+        "diff": 0.1
+      },
+      {
+        "label": "planner toolErrors",
+        "a": 2,
+        "b": 2,
+        "diff": 0
+      },
+      {
+        "label": "planner cost",
+        "a": 1.2,
+        "b": 1.4,
+        "diff": 0.2
+      },
+      {
+        "label": "implementer model",
+        "a": "sonnet",
+        "b": "spark/qwen38-27b",
+        "diff": "differs"
+      },
+      {
+        "label": "implementer runner",
+        "a": "anthropic",
+        "b": "spark",
+        "diff": "differs"
+      },
+      {
+        "label": "implementer family",
+        "a": "claude",
+        "b": "qwen",
+        "diff": "differs"
+      },
+      {
+        "label": "implementer requests",
+        "a": 120,
+        "b": 300,
+        "diff": 180
+      },
+      {
+        "label": "implementer input",
+        "a": 90000,
+        "b": 150000,
+        "diff": 60000
+      },
+      {
+        "label": "implementer output",
+        "a": 7000,
+        "b": 12000,
+        "diff": 5000
+      },
+      {
+        "label": "implementer activeSeconds",
+        "a": 600,
+        "b": 1200,
+        "diff": 600
+      },
+      {
+        "label": "implementer outputPerActiveSecond",
+        "a": 11.7,
+        "b": 10,
+        "diff": -1.7
+      },
+      {
+        "label": "implementer toolErrors",
+        "a": 9,
+        "b": 20,
+        "diff": 11
+      },
+      {
+        "label": "implementer cost",
+        "a": 3.4,
+        "b": null,
+        "diff": null
+      },
+      {
+        "label": "reviewer model",
+        "a": "opus",
+        "b": "spark/qwen38-27b",
+        "diff": "differs"
+      },
+      {
+        "label": "reviewer runner",
+        "a": "anthropic",
+        "b": "spark",
+        "diff": "differs"
+      },
+      {
+        "label": "reviewer family",
+        "a": "claude",
+        "b": "qwen",
+        "diff": "differs"
+      },
+      {
+        "label": "reviewer requests",
+        "a": 30,
+        "b": 40,
+        "diff": 10
+      },
+      {
+        "label": "reviewer input",
+        "a": 12000,
+        "b": 20000,
+        "diff": 8000
+      },
+      {
+        "label": "reviewer output",
+        "a": 1500,
+        "b": 2500,
+        "diff": 1000
+      },
+      {
+        "label": "reviewer activeSeconds",
+        "a": 600,
+        "b": 600,
+        "diff": 0
+      },
+      {
+        "label": "reviewer outputPerActiveSecond",
+        "a": 2.5,
+        "b": 4.2,
+        "diff": 1.7
+      },
+      {
+        "label": "reviewer toolErrors",
+        "a": 2,
+        "b": 2,
+        "diff": 0
+      },
+      {
+        "label": "reviewer cost",
+        "a": 2.1,
+        "b": null,
+        "diff": null
+      },
+      {
+        "label": "summarizer model",
+        "a": "sonnet",
+        "b": "sonnet",
+        "diff": "="
+      },
+      {
+        "label": "summarizer runner",
+        "a": "anthropic",
+        "b": "anthropic",
+        "diff": "="
+      },
+      {
+        "label": "summarizer family",
+        "a": "claude",
+        "b": "claude",
+        "diff": "="
+      },
+      {
+        "label": "summarizer requests",
+        "a": 6,
+        "b": "not recorded",
+        "diff": null
+      },
+      {
+        "label": "summarizer input",
+        "a": 900,
+        "b": "not recorded",
+        "diff": null
+      },
+      {
+        "label": "summarizer output",
+        "a": 400,
+        "b": "not recorded",
+        "diff": null
+      },
+      {
+        "label": "summarizer activeSeconds",
+        "a": 600,
+        "b": "not recorded",
+        "diff": null
+      },
+      {
+        "label": "summarizer outputPerActiveSecond",
+        "a": 0.7,
+        "b": "not recorded",
+        "diff": null
+      },
+      {
+        "label": "summarizer toolErrors",
+        "a": 2,
+        "b": "not recorded",
+        "diff": null
+      },
+      {
+        "label": "summarizer cost",
+        "a": 0.2,
+        "b": "not recorded",
+        "diff": null
+      },
+      {
+        "label": "controller model",
+        "a": null,
+        "b": null,
+        "diff": null
+      },
+      {
+        "label": "controller runner",
+        "a": null,
+        "b": null,
+        "diff": null
+      },
+      {
+        "label": "controller family",
+        "a": null,
+        "b": null,
+        "diff": null
+      },
+      {
+        "label": "controller requests",
+        "a": 40,
+        "b": 55,
+        "diff": 15
+      },
+      {
+        "label": "controller input",
+        "a": 9000,
+        "b": 11000,
+        "diff": 2000
+      },
+      {
+        "label": "controller output",
+        "a": 800,
+        "b": 900,
+        "diff": 100
+      },
+      {
+        "label": "controller activeSeconds",
+        "a": 600,
+        "b": 600,
+        "diff": 0
+      },
+      {
+        "label": "controller outputPerActiveSecond",
+        "a": 1.3,
+        "b": 1.5,
+        "diff": 0.2
+      },
+      {
+        "label": "controller toolErrors",
+        "a": 2,
+        "b": 2,
+        "diff": 0
+      },
+      {
+        "label": "controller cost",
+        "a": null,
+        "b": null,
+        "diff": null
+      },
+      {
+        "label": "totals requests",
+        "a": 206,
+        "b": {
+          "value": 407,
+          "partial": [
+            "summarizer"
+          ]
+        },
+        "diff": null
+      },
+      {
+        "label": "totals input",
+        "a": 112900,
+        "b": {
+          "value": 182100,
+          "partial": [
+            "summarizer"
+          ]
+        },
+        "diff": null
+      },
+      {
+        "label": "totals output",
+        "a": 9900,
+        "b": {
+          "value": 15650,
+          "partial": [
+            "summarizer"
+          ]
+        },
+        "diff": null
+      }
+    ],
+    "friction": [
+      {
+        "label": "feedback restart",
+        "a": 1,
+        "b": 0,
+        "diff": -1
+      },
+      {
+        "label": "feedback runner-drift",
+        "a": 0,
+        "b": 1,
+        "diff": 1
+      },
+      {
+        "label": "feedback stall",
+        "a": 2,
+        "b": 1,
+        "diff": -1
+      },
+      {
+        "label": "guardReblocks",
+        "a": 3,
+        "b": null,
+        "diff": null
+      },
+      {
+        "label": "verifyRuns",
+        "a": 20,
+        "b": 31,
+        "diff": 11
+      },
+      {
+        "label": "verifyFailures",
+        "a": 4,
+        "b": 9,
+        "diff": 5
+      },
+      {
+        "label": "tasksReopened",
+        "a": 1,
+        "b": 0,
+        "diff": -1
+      },
+      {
+        "label": "activateFailures",
+        "a": 0,
+        "b": 0,
+        "diff": 0
+      }
+    ]
+  }
+}

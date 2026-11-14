@@ -281,3 +281,90 @@ export function buildMetrics(inputs = {}) {
     tree: treeOf(i.git),
   };
 }
+
+// ---------------------------------------------------------------- comparing two flights
+
+const NOT_RECORDED = "not recorded";
+const STAGE_ORDER = ["plan", "implement", "review", "summarize"];
+const FACT_ROLES = ["model", "runner", "family"];
+const USAGE_ROWS = ["requests", "input", "output", "activeSeconds", "outputPerActiveSecond", "toolErrors", "cost"];
+
+const orderedStages = (names) => [...STAGE_ORDER.filter((s) => names.includes(s)), ...names.filter((s) => !STAGE_ORDER.includes(s)).sort()];
+
+/** `b - a` for numbers, `=` for equal non-numbers, `differs` for unequal ones, `null` when either side has no comparable value. */
+function diffOf(a, b) {
+  const plain = (x) => (isObj(x) && "partial" in x ? undefined : x);
+  const [x, y] = [plain(a), plain(b)];
+  if (x === undefined || y === undefined || x === null || y === null || x === NOT_RECORDED || y === NOT_RECORDED) return null;
+  if (typeof x === "number" && typeof y === "number") return Math.round((y - x) * 1e6) / 1e6;
+  return x === y ? "=" : "differs";
+}
+
+/**
+ * Two metrics objects side by side (SPEC D-01), as plain data: a header and five sections of `{ label, a, b, diff }` rows.
+ * A role with no usage record is `not recorded`, never 0, and a total that leaves a role out carries it in `partial`.
+ */
+export function compareMetrics(a, b) {
+  const side = (m) => (isObj(m) ? m : {});
+  const [A, B] = [side(a), side(b)];
+  const row = (label, va, vb) => ({ label, a: va ?? null, b: vb ?? null, diff: diffOf(va ?? null, vb ?? null) });
+  const num = (m, ...p) => p.reduce((o, k) => (isObj(o) ? o[k] : undefined), m) ?? null;
+  const keysOf = (...objs) => [...new Set(objs.flatMap((o) => (isObj(o) ? Object.keys(o) : [])))];
+
+  const outcome = [
+    ["verdict", ["outcome", "verdict"]], ["halted", ["outcome", "halted"]], ["reviews", ["outcome", "reviews"]], ["fixRounds", ["outcome", "fixRounds"]],
+    ["approvedAtRound", ["outcome", "approvedAtRound"]], ["maxRounds", ["outcome", "caps", "maxRounds"]], ["maxRoundsHard", ["outcome", "caps", "maxRoundsHard"]],
+  ].map(([label, p]) => row(label, num(A, ...p), num(B, ...p)));
+
+  const stages = orderedStages(keysOf(A.wall?.stageSeconds, B.wall?.stageSeconds));
+  const runners = keysOf(A.wall?.activateSeconds, B.wall?.activateSeconds).sort();
+  const wall = [
+    row("seconds", num(A, "wall", "seconds"), num(B, "wall", "seconds")),
+    ...stages.map((s) => row(`stage ${s}`, num(A, "wall", "stageSeconds", s), num(B, "wall", "stageSeconds", s))),
+    ...runners.map((r) => row(`activate ${r}`, num(A, "wall", "activateSeconds", r), num(B, "wall", "activateSeconds", r))),
+    row("idle", num(A, "wall", "idleSeconds"), num(B, "wall", "idleSeconds")),
+  ];
+
+  const roundList = (m) => (Array.isArray(m.rounds) ? m.rounds : []);
+  const roundNumbers = [...new Set([...roundList(A), ...roundList(B)].map((r) => r?.round).filter(Number.isInteger))].sort((x, y) => x - y);
+  const rounds = roundNumbers.flatMap((n) => {
+    const [ra, rb] = [roundList(A).find((r) => r?.round === n), roundList(B).find((r) => r?.round === n)];
+    return ["findings", "implementSeconds", "reviewSeconds"].map((k) => row(`round ${n} ${k}`, ra?.[k], rb?.[k]));
+  });
+
+  const roles = [];
+  for (const role of USAGE_ROLES) {
+    const [ea, eb] = [A.roles?.[role], B.roles?.[role]];
+    for (const k of FACT_ROLES) roles.push(row(`${role} ${k}`, ea?.[k], eb?.[k]));
+    for (const k of USAGE_ROWS) {
+      const val = (e) => (isObj(e) ? (e.usage === null ? NOT_RECORDED : (e[k] ?? null)) : null);
+      roles.push(row(`${role} ${k}`, val(ea), val(eb)));
+    }
+  }
+  for (const k of ["requests", "input", "output"]) {
+    const val = (m) => {
+      if (!isObj(m.totals)) return null;
+      const missing = Array.isArray(m.totals.missing) ? m.totals.missing : [];
+      return missing.length ? { value: m.totals[k] ?? null, partial: missing } : (m.totals[k] ?? null);
+    };
+    roles.push(row(`totals ${k}`, val(A), val(B)));
+  }
+
+  const categories = keysOf(A.friction?.feedback, B.friction?.feedback).sort();
+  const friction = [
+    ...categories.map((c) => row(`feedback ${c}`, num(A, "friction", "feedback", c), num(B, "friction", "feedback", c))),
+    row("guardReblocks", num(A, "friction", "guardReblocks"), num(B, "friction", "guardReblocks")),
+    row("verifyRuns", num(A, "friction", "verifyRuns"), num(B, "friction", "verifyRuns")),
+    row("verifyFailures", num(A, "friction", "verifyFailures"), num(B, "friction", "verifyFailures")),
+    row("tasksReopened", num(A, "tasks", "reopened"), num(B, "tasks", "reopened")),
+    row("activateFailures", num(A, "friction", "activateFailures"), num(B, "friction", "activateFailures")),
+  ];
+
+  const head = (m) => ({ flight: m.flight ?? null, harness: Array.isArray(m.harness) ? m.harness : null, plugin: m.plugin ?? null, mode: m.mode ?? null, specSha256: m.spec?.sha256 ?? null });
+  const [ha, hb] = [head(A), head(B)];
+  return {
+    v: METRICS_VERSION,
+    header: { a: ha, b: hb, sameSpec: typeof ha.specSha256 === "string" && ha.specSha256 === hb.specSha256 },
+    sections: { outcome, wall, rounds, roles, friction },
+  };
+}

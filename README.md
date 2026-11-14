@@ -261,6 +261,7 @@ Everything is on disk and committed, so `/kukulu:go-flight` can be re-run from a
 ├── hooks/hooks.json             Stop / SubagentStop wiring
 ├── scripts/
 │   ├── implement-guard.mjs      the guard hook
+│   ├── compare-flights.mjs      two flights' METRICS.json side by side
 │   ├── runner-probe.mjs         one request to a runner, one JSON line out
 │   ├── lint.sh                  dependency-free syntax + manifest lint
 │   └── check-diagrams.mjs       parses every Mermaid block (CI only)
@@ -280,7 +281,7 @@ Everything is on disk and committed, so `/kukulu:go-flight` can be re-run from a
 - [**docs/architecture.md**](./docs/architecture.md): why the pipeline is split this way, what each stage may and may not do, and where state lives
 - [**docs/sandbox.md**](./docs/sandbox.md): the sandbox: the sockets that cross the container boundary, and what an agent inside can and cannot do with them
 - [**docs/publishing.md**](./docs/publishing.md): publishing an attestation bundle with `scripts/publish-bundle.mjs`, and re-checking a published copy
-- [**docs/metrics.md**](./docs/metrics.md): the usage record every harness fills in
+- [**docs/metrics.md**](./docs/metrics.md): the usage record every harness fills in, the `METRICS.json` built from it, and comparing two flights with `scripts/compare-flights.mjs`
 - [**docs/mcp-tools.md**](./docs/mcp-tools.md): every tool, argument, return field and refusal
 - [**docs/routing.md**](./docs/routing.md): per-role model routing, covering the global config file, profiles, and running stages through a router like claude-code-router
 - [**docs/writing-specs.md**](./docs/writing-specs.md): how to write a `SPEC.md` the planner can turn into a usable plan

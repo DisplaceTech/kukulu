@@ -141,3 +141,14 @@ Counted usage records are the valid, non-error ones. The controller keeps only t
 `kukulu_next` writes `docs/METRICS.json` when it returns `done` or `halt`, that call wrote at least one record to the timeline (the open stage's `end`), and `policies.metrics` is true (the default). It is built after the state is saved, so it includes those records, and it joins the `chore: stage end` commit. A `done` that writes no record, such as the one after an archive, writes no file. A resumed flight overwrites the file at its next end or halt. A file that cannot be written is a `metricsNote` on the result and a `metrics` feedback entry; the decision and the timeline are unaffected. `kukulu_flight_archive` moves the file into the flight's directory.
 
 `kukulu_pr_finalize` also commits the file, alone, as `chore: flight metrics` before it pushes (into `docs/flights/<slug>/` for an archived flight), so it reaches the pull request. Known limit: the summarizer has not stopped when that runs, so the committed file has `roles.summarizer.usage: null` and `totals.missing` naming it. In general mode `kukulu_metrics` called after the flight includes the summarizer's record; in clean-room mode the log has stopped at the archive, so it stays missing.
+
+## Comparing two flights
+
+`node scripts/compare-flights.mjs <a> <b> [--json]` prints two flights' metrics side by side. `<a>` and `<b>` are each a `METRICS.json` file or a directory holding one. It reads and prints and never writes a file. The text starts with one line per flight (slug, harness names and versions, plugin version, mode and the first twelve characters of the spec hash), then five sections: Outcome, Wall time, Rounds, Roles and Friction, one row per line with the value of A, the value of B and the difference (B minus A, with its sign). `--json` prints the same data as one object, `compareMetrics` of `mcp/metrics.mjs`.
+
+- A value the flight does not have prints `n/a`.
+- A role with no usage record prints `not recorded` in its usage rows (its model, runner and family keep their values), and has no difference.
+- A total that leaves a role out prints `<value> partial (<roles> not recorded)`, so two flights are never compared on totals that silently differ in coverage.
+- When the two spec hashes differ, or either is missing, the line `the two flights were built from different specs; the comparison below is not like for like` follows the two header lines.
+
+Exit status is 0, or 2 for a usage error: not exactly two flights, an unknown option, a path that does not exist, a directory without `METRICS.json`, a file that is not JSON, or a file whose `v` is not 1. `--trees` is accepted by the parser but not available yet.

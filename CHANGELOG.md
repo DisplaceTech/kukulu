@@ -15,6 +15,7 @@ All notable changes to this plugin. Format follows
 - In clean-room mode the stage's start entry records the model asked for, the model the runner reports and the wait (A-03, patent pending); a `runner-drift` feedback entry when the two differ or a role's served id changes (A-03, A-04).
 - The usage record: one schema for every harness, validated by `validateUsageRecord` in `mcp/metrics.mjs` (B-01).
 - `buildMetrics` in `mcp/metrics.mjs` builds the flight's outcome, wall time, rounds, tasks, friction and tree from plain data (C-01).
+- `scripts/compare-flights.mjs` prints two flights' metrics side by side in five sections, or as JSON (D-01).
 - `kukulu_metrics` returns the flight's metrics object, computed now and read-only (C-01).
 - A clean-room flight's metrics read usage only from the signed chain and record `usage.source` and `chainHead` (B-05).
 - `docs/METRICS.json`, written when a flight ends or halts, and `policies.metrics` to turn it off (C-03, section 5.2).
