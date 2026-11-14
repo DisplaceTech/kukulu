@@ -11,7 +11,7 @@ Started: 2026-11-14T04:52:50.030Z
 - [x] P0-04 The logger on Stop, and the controller's usage record
 - [x] P0-05 Usage entries under the sandbox and in the verifier
 - [x] P0-06 Phase 0 end: push and record the manual check
-- [ ] P1-01 scripts/runner-probe.mjs
+- [x] P1-01 scripts/runner-probe.mjs
 - [ ] P1-02 Runner keys activate, activateTimeoutMs, servedAs and tokenEnv, and the served id
 - [ ] P1-03 kukulu_next warms the stage's runner and records the wait
 - [ ] P1-04 A runner that does not serve its model halts the flight
@@ -65,3 +65,7 @@ Tests only: sandbox (231) shows SubagentStop/Stop usage records cross the log so
 ### P0-06 — 61cc6b2
 
 Push: pushed build/2026-11-14 to origin. Verify was green on the identical tree (P0-05). Manual check: NOT VERIFIED (human): after one general-mode flight on the working tree's plugin, .kukulu/metrics/usage.jsonl holds one record per stage and one controller record, and git status is clean
+
+### P1-01 — 0e3fca2
+
+scripts/runner-probe.mjs: exports probe() and main(); one JSON line; token redacted twice; no shebang. Tests in routing (327 assertions) use spawn (async) against local http fakes; opt-in real step prints '# skipped' without KUKULU_RUNNER_IT. Interpretation: usage error prints 'runner-probe: <reason>' then the usage text on stderr. Docs: routing.md paragraph, README layout line, CHANGELOG.
