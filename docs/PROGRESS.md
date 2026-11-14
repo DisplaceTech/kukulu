@@ -30,7 +30,7 @@ Started: 2026-11-14T04:52:50.030Z
 - [x] P2-09 METRICS.json at kukulu_pr_finalize
 - [x] P2-10 compareMetrics and scripts/compare-flights.mjs
 - [x] P2-11 compare-flights --trees
-- [ ] P2-12 Phase 2 end: push and record the manual check
+- [x] P2-12 Phase 2 end: push and record the manual check
 - [ ] P3-01 MODEL_FAMILIES gains laguna
 - [ ] P3-02 Templates: a spark profile with activation, and a llama-swap example
 - [ ] P3-03 docs/local-runners.md
@@ -141,3 +141,7 @@ compareMetrics in metrics.mjs (pure), scripts/compare-flights.mjs (main(argv, io
 ### P2-11 — c6d22f0
 
 compare-flights --trees: scorePair import (only added import), TREE_LANGUAGES copy of DEFAULT_SIMILARITY_LANGUAGES (test keeps them equal), readTree skipping .git/node_modules/target, Trees section + --json trees, exit 2 cases. metrics suite 177.
+
+### P2-12 — 68540ae
+
+Push: pushed build/2026-11-14 to origin. Verify green on identical tree (P2-11). Manual check: NOT VERIFIED (human): node scripts/compare-flights.mjs on two real flights of one spec prints all five sections with no null in the Anthropic flight's cost column (see PLAN.md Spec issues: this Claude Code version's transcripts carry no per-row cost, so the column is expected to read n/a until the owner rules)
