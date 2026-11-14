@@ -24,7 +24,7 @@ Started: 2026-11-14T04:52:50.030Z
 - [x] P2-03 The harness's name from initialize
 - [x] P2-04 buildMetrics: outcome, wall time, rounds, tasks, friction and tree
 - [x] P2-05 buildMetrics: usage, roles and totals
-- [ ] P2-06 kukulu_metrics
+- [x] P2-06 kukulu_metrics
 - [ ] P2-07 A clean-room flight's metrics read usage from the chain only
 - [ ] P2-08 policies.metrics, and METRICS.json when kukulu_next ends or halts a flight
 - [ ] P2-09 METRICS.json at kukulu_pr_finalize
@@ -117,3 +117,7 @@ buildMetrics in mcp/metrics.mjs (pure); fixtures test/fixtures/metrics/v0-8-0.{i
 ### P2-05 — 5f42180
 
 buildMetrics gains usage/roles/totals (countedRecords, rolesAndTotals); fixtures: v0-8-0.expected updated, new full.inputs.json (synthetic); docs/metrics.md rewritten METRICS.json table with every dotted path + Known limits; test walks every path of the built object into the docs. metrics suite 104.
+
+### P2-06 — e8eb9e9
+
+kukulu_metrics added last in TOOLS (27 tools): metricsInputs() + metricsTool(); docs/mcp-tools.md section, README row + count, plugin/protocol tests. Archived flight read when state.archived && no docs/kukulu.json && empty live timeline. Genesis/chain usage left for P2-07 (usage null with a genesis). metrics suite 122. Interpretation: fresh repo tree zeros not null.
