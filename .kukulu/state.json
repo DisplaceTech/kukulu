@@ -19,5 +19,13 @@
     "dir": "docs/flights/v0-8-1",
     "at": "2026-11-13T20:08:33.316Z"
   },
-  "breaking": false
+  "breaking": false,
+  "timeline": [
+    {
+      "event": "start",
+      "stage": "plan",
+      "round": 0,
+      "at": "2026-11-14T04:16:38.438Z"
+    }
+  ]
 }
