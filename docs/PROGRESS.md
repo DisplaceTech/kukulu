@@ -10,7 +10,7 @@ Started: 2026-11-14T04:52:50.030Z
 - [x] P0-03 General-mode usage in .kukulu/metrics/usage.jsonl, excluded per clone
 - [x] P0-04 The logger on Stop, and the controller's usage record
 - [x] P0-05 Usage entries under the sandbox and in the verifier
-- [ ] P0-06 Phase 0 end: push and record the manual check
+- [x] P0-06 Phase 0 end: push and record the manual check
 - [ ] P1-01 scripts/runner-probe.mjs
 - [ ] P1-02 Runner keys activate, activateTimeoutMs, servedAs and tokenEnv, and the served id
 - [ ] P1-03 kukulu_next warms the stage's runner and records the wait
@@ -61,3 +61,7 @@ Logger registered on Stop (hooks.json second entry); usageFromClaudeCode handles
 ### P0-05 — 81302ea
 
 Tests only: sandbox (231) shows SubagentStop/Stop usage records cross the log socket with fifteen fields + source box, and no .kukulu/metrics written under KUKULU_LOG_SOCKET; attest (314) shows full-record usage entries verify, check 12 recount unchanged, controller entry (role session) changes nothing. No behavior change needed. docs/sandbox.md sentence added.
+
+### P0-06 — 61cc6b2
+
+Push: pushed build/2026-11-14 to origin. Verify was green on the identical tree (P0-05). Manual check: NOT VERIFIED (human): after one general-mode flight on the working tree's plugin, .kukulu/metrics/usage.jsonl holds one record per stage and one controller record, and git status is clean
