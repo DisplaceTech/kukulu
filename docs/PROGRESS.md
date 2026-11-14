@@ -39,7 +39,7 @@ Started: 2026-11-14T04:52:50.030Z
 - [x] P3-06 Phase 3 end: push and record the manual checks
 - [x] R1-01 The probe redacts the token before it cuts the error body
 - [x] R1-02 A failed activation on a flight's first timeline record keeps its activateFailures count
-- [ ] R1-03 The kukulu_next, kukulu_status and kukulu_pr_finalize tool descriptions name 0.9.0's behavior
+- [x] R1-03 The kukulu_next, kukulu_status and kukulu_pr_finalize tool descriptions name 0.9.0's behavior
 
 ## Log
 
@@ -180,3 +180,7 @@ Token replaced in raw body before oneLine and cut. Added straddle test in test/r
 ### R1-02 — 9accc63
 
 recordTimeline gained afterReset callback (runs after metrics emptying); next() bumps activateFailures there. Tests added in test/state.mjs. verify green.
+
+### R1-03 — bc16005
+
+Updated kukulu_next, kukulu_status, kukulu_pr_finalize descriptions in TOOLS; four assertions in test/protocol.mjs. No schema change. verify green.
