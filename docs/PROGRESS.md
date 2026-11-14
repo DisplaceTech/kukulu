@@ -15,7 +15,7 @@ Started: 2026-11-14T04:52:50.030Z
 - [x] P1-02 Runner keys activate, activateTimeoutMs, servedAs and tokenEnv, and the served id
 - [x] P1-03 kukulu_next warms the stage's runner and records the wait
 - [x] P1-04 A runner that does not serve its model halts the flight
-- [ ] P1-05 Activation in the chain, and the runner-drift notes
+- [x] P1-05 Activation in the chain, and the runner-drift notes
 - [ ] P1-06 go-flight prints the activation line
 - [ ] P1-07 Measure what the probe costs and how it fails
 - [ ] P1-08 Phase 1 end: push and record the manual checks
@@ -81,3 +81,7 @@ activateRunner(role) + activationRecord in server.mjs; next() probes via spawnSy
 ### P1-04 — b82d986
 
 Failed warm probe -> follow-up --models probe (RUNNER_LIST_TIMEOUT_MS=10000) -> next() calls nextDecision(forcedHalt) for a halt-shaped result; recordTimeline writes end + activate ok:false, sets state.halted (no haltCap), commit chore: stage end. readCounters/bumpCounter added (activateFailures; countersNote on failure). runProbe() shared helper. state suite 365. Interpretation: forcedHalt param on nextDecision.
+
+### P1-05 — 82edb36
+
+recordTimeline: start chain entry gains data.activate (ok activation only); drift 1 and 2 feedback entries (runner-drift, controller, auto) inside the timeline withRollback, feedback joins paths. Tests: state 373 (incl. real probe over node:http), cleanroom 1508, attest 315. Interpretation: drift 2 uses most recent ok activate of same stage.
