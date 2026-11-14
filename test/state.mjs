@@ -1255,7 +1255,7 @@ const OLD_LAYOUT = /pre-0\.6\.0 Foundry layout, which 0\.7\.0 no longer reads/;
   const repo = specRepo();
   await withServer(repo, async ({ call }) => {
     const p = (await call("kukulu_status")).policies;
-    eq(Object.keys(p).sort().join(",") + "|" + p.finalize, "archive,feedback,finalize,mergeMethod,pr,push,signing,syncBase|ready", "kukulu_status.policies before a run lists every policy default");
+    eq(Object.keys(p).sort().join(",") + "|" + p.finalize, "archive,feedback,finalize,mergeMethod,metrics,pr,push,signing,syncBase|ready", "kukulu_status.policies before a run lists every policy default");
   });
 }
 
@@ -1569,6 +1569,100 @@ const OLD_LAYOUT = /pre-0\.6\.0 Foundry layout, which 0\.7\.0 no longer reads/;
     await call("kukulu_run_halt", { reason: "legacy stop" });
     ok(!hasFile(legacy, ".kukulu/metrics/counters.json") || JSON.parse(readFile(legacy, ".kukulu/metrics/counters.json")).guardReblocks === null, "a legacy lock leaves guardReblocks null");
   });
+}
+
+// ---------------------------------------------------------------- METRICS.json when a flight ends or halts (P2-08)
+
+{
+  const done = (config) => {
+    const repo = plannedRepo(config ? { config } : {});
+    markTasks(repo, ALL_DONE);
+    setState(repo, { implemented: true, reviewed: true, verdict: "APPROVED", summarized: true, rounds: [{ round: 1, fixTasks: 0, verdict: "APPROVED" }], timeline: [{ event: "start", stage: "summarize", round: 0, at: "2026-01-01T00:00:00.000Z" }] });
+    git(repo, ["add", "-A"]);
+    git(repo, ["commit", "-qm", "chore: done"]);
+    return repo;
+  };
+  const metricsOf = (repo) => JSON.parse(readFile(repo, "docs/METRICS.json"));
+  const files = (repo) => git(repo, ["show", "--name-only", "--format=%s", "HEAD"]).split("\n");
+  {
+    const repo = done();
+    await withServer(repo, async ({ call }) => {
+      const n = await call("kukulu_next");
+      eq(n.stage, "done", "a finished flight is done");
+      const f = files(repo);
+      ok(f[0] === "chore: stage end" && f.includes("docs/METRICS.json"), "a done with an open span writes docs/METRICS.json in the chore: stage end commit");
+      const m = metricsOf(repo);
+      eq(m.v + "|" + m.outcome.verdict + "|" + m.outcome.approvedAtRound + "|" + m.tasks.done, "1|APPROVED|1|3", "...which parses, and holds the state's outcome and the task counts");
+      ok(m.wall.stageSeconds !== null && "summarize" in m.wall.stageSeconds, "...with the timeline records just written");
+      const head = git(repo, ["rev-parse", "HEAD"]);
+      await call("kukulu_next");
+      eq(git(repo, ["rev-parse", "HEAD"]), head, "a done that writes no timeline record writes no file and moves no HEAD");
+    });
+  }
+  {
+    const repo = done({ policies: { metrics: false } });
+    await withServer(repo, async ({ call }) => {
+      await call("kukulu_next");
+      ok(!hasFile(repo, "docs/METRICS.json") && subject(repo) === "chore: stage end", "policies.metrics false writes no file (the timeline is still recorded)");
+    });
+  }
+  {
+    const repo = done();
+    fs.mkdirSync(path.join(repo, "docs", "METRICS.json"));
+    await withServer(repo, async ({ call }) => {
+      const n = await call("kukulu_next");
+      ok(n.stage === "done" && /^METRICS\.json was not written: /.test(n.metricsNote), "a METRICS.json that cannot be written is a metricsNote and the decision stands");
+      eq(JSON.parse(readFile(repo, ".kukulu/state.json")).timeline.at(-1).event, "end", "...and the timeline is recorded");
+      like(readFile(repo, ".kukulu/feedback.jsonl"), /"category":"metrics"/, "...with one metrics feedback entry");
+    });
+  }
+  {
+    const repo = plannedRepo();
+    await withServer(repo, async ({ call }) => {
+      await call("kukulu_next");
+      await call("kukulu_run_halt", { reason: "first stop" });
+      const n = await call("kukulu_next");
+      eq(n.stage, "halt", "a halted flight halts");
+      eq(metricsOf(repo).outcome.halted, "first stop", "a halt writes docs/METRICS.json too, with outcome.halted");
+      await call("kukulu_run_resume", { reason: "fixed" });
+      await call("kukulu_next");
+      await call("kukulu_run_halt", { reason: "second stop" });
+      await call("kukulu_next");
+      eq(metricsOf(repo).outcome.halted, "second stop", "a resumed flight overwrites the file");
+    });
+  }
+  {
+    const probe = mkFakeProbe();
+    probe.answers([{ ok: false, status: 503, ms: 40, error: "HTTP 503: loading" }]);
+    const cfgPath = writeGlobalConfig(mkDir(), { runners: { spark: { endpoint: "http://h:1", locality: "local", match: ["spark/"], activate: "warm" } }, roles: { implementer: { model: "spark/qwen38-27b" } } });
+    const repo = plannedRepo();
+    const env = { KUKULU_CONFIG: cfgPath, KUKULU_RUNNER_PROBE: probe.script };
+    await withServer(repo, ({ call }) => call("kukulu_agents_sync"), { env });
+    setState(repo, { timeline: [{ event: "start", stage: "plan", round: 0, at: "2026-01-01T00:00:00.000Z" }] });
+    await withServer(repo, async ({ call }) => {
+      const n = await call("kukulu_next");
+      eq(n.stage, "halt", "a failed activation halts");
+      const m = metricsOf(repo);
+      eq(m.friction.activateFailures + "|" + (m.outcome.halted ?? "").slice(0, 20), "1|runner spark did not", "a halt from a failed activation writes it, with friction.activateFailures 1");
+    }, { env });
+  }
+  {
+    // kukulu_flight_archive moves docs/METRICS.json
+    const repo = plannedRepo({ config: { flight: "w1-share" } });
+    git(repo, ["checkout", "-q", "-b", "build/2026-11-14"]);
+    markTasks(repo, ALL_DONE);
+    writeFile(repo, "docs/HANDOFF.md", "# handoff\n");
+    writeFile(repo, "docs/REVIEW.md", "# Review\nRound: 1\n**Verdict**: APPROVED\n");
+    writeFile(repo, "docs/SUMMARY.md", "# summary\n");
+    writeFile(repo, "docs/METRICS.json", "{}\n");
+    setState(repo, { round: 0, implemented: true, reviewed: true, verdict: "APPROVED", summarized: true });
+    git(repo, ["add", "-A"]);
+    git(repo, ["commit", "-qm", "chore: build summary"]);
+    await withServer(repo, async ({ call }) => {
+      const r = await call("kukulu_flight_archive", {});
+      ok(!r.error && hasFile(repo, "docs/flights/w1-share/METRICS.json") && !hasFile(repo, "docs/METRICS.json"), "kukulu_flight_archive moves docs/METRICS.json");
+    });
+  }
 }
 
 finish();

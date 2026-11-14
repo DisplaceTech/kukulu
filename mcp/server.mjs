@@ -40,6 +40,7 @@ function layoutFor(stateName, configName) {
     handoff: path.join(ROOT, "docs", "HANDOFF.md"),
     review: path.join(ROOT, "docs", "REVIEW.md"),
     summary: path.join(ROOT, "docs", "SUMMARY.md"),
+    metrics: path.join(ROOT, "docs", "METRICS.json"),
     similarityDoc: path.join(ROOT, "docs", "SIMILARITY.md"),
     config: path.join(ROOT, "docs", configName),
     stateDir,
@@ -861,7 +862,7 @@ function loadConfig() {
 
 const SIGNING_POLICIES = ["auto", "off", "required"];
 const PR_POLICIES = ["draft", "none"];
-const POLICY_KEYS = ["signing", "push", "pr", "feedback", "archive", "finalize", "mergeMethod", "syncBase"];
+const POLICY_KEYS = ["signing", "push", "pr", "feedback", "archive", "finalize", "mergeMethod", "syncBase", "metrics"];
 const FINALIZE_POLICIES = ["auto", "ready", "draft"];
 const MERGE_METHODS = ["merge", "squash", "rebase"];
 const FLIGHT_SLUG = /^[a-z0-9][a-z0-9-]{0,39}$/;
@@ -897,6 +898,7 @@ function validatePolicies(policies, where = "docs/kukulu.json", joiner = " ") {
   oneOf("finalize", FINALIZE_POLICIES);
   oneOf("mergeMethod", MERGE_METHODS);
   bool("syncBase");
+  bool("metrics");
 }
 
 /**
@@ -1276,6 +1278,7 @@ function cfgFrom(c, planIds, limit = mcpTimeoutMs()) {
       finalize: c.policies?.finalize ?? "ready",
       mergeMethod: c.policies?.mergeMethod ?? "merge",
       syncBase: c.policies?.syncBase ?? true,
+      metrics: c.policies?.metrics ?? true,
     },
   };
   if (limit !== null) {
@@ -4852,7 +4855,12 @@ function recordTimeline(res, activation = null) {
     }
   }
   const crPaths = cleanroomPaths(st);
-  const paths = [P.state, P.feedback, ...crPaths];
+  // The metrics file is written when a flight ends or halts and this call wrote a record (SPEC C-03). A path that is
+  // a directory cannot be snapshotted, so it is left out and reported instead.
+  const wantMetrics = (res.stage === "done" || res.stage === "halt") && resolvePolicies().policies.metrics === true;
+  const metricsBlocked = wantMetrics && exists(P.metrics) && fs.statSync(P.metrics).isDirectory();
+  const paths = [P.state, P.feedback, ...(wantMetrics && !metricsBlocked ? [P.metrics] : []), ...crPaths];
+  let metricsNote = metricsBlocked ? "METRICS.json was not written: docs/METRICS.json is a directory" : null;
   // The timeline is bookkeeping: when it cannot be committed (a signer that is down, say) the files are put back and
   // the decision is returned as it was, with a note; the next call records the same transition again.
   try {
@@ -4895,12 +4903,22 @@ function recordTimeline(res, activation = null) {
         });
       }
     }
+    if (wantMetrics && !metricsBlocked) {
+      // Built after the state is saved, so the metrics include the records just written. A failure here never changes the decision or the timeline.
+      try {
+        fs.mkdirSync(path.dirname(P.metrics), { recursive: true });
+        fs.writeFileSync(P.metrics, `${JSON.stringify(buildMetrics(metricsInputs()), null, 2)}\n`);
+      } catch (e) {
+        metricsNote = `METRICS.json was not written: ${(e instanceof Error ? e.message : String(e)).split("\n")[0]}`;
+      }
+    }
+    if (metricsNote && cfg().policies.feedback && !(exists(P.feedback) && read(P.feedback).includes(JSON.stringify(metricsNote)))) appendFeedback("controller", metricsNote, "metrics", "auto");
     if (gitFacts().inRepo) gitCommitIfChanged(paths, records.at(-1).event === "end" || activation?.error ? "chore: stage end" : `chore: stage ${records.at(-1).stage}`, { stage: "controller", noSigningFallback: true });
     });
   } catch (e) {
     return { ...res, timelineNote: `the stage timeline was not recorded this call: ${e instanceof Error ? e.message : String(e)}` };
   }
-  return res;
+  return metricsNote ? { ...res, metricsNote } : res;
 }
 
 /** The timeline's activate record: the warm-up, between the span that ended and the one that starts. */
@@ -5279,7 +5297,7 @@ function cleanroomMovables(st) {
 }
 
 /** The files an archive moves, as [absolute path, repo-relative name]; a move keeps each file's name. */
-const archivedFiles = () => [P.plan, P.progress, P.handoff, P.review, P.summary, P.similarityDoc, P.config, P.state, P.feedback].map((abs) => [abs, rel(abs)]);
+const archivedFiles = () => [P.plan, P.progress, P.handoff, P.review, P.summary, P.metrics, P.similarityDoc, P.config, P.state, P.feedback].map((abs) => [abs, rel(abs)]);
 
 /**
  * Move a summarized flight's artifacts into docs/flights/<slug>/ so the

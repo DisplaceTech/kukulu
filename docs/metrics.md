@@ -135,3 +135,7 @@ Counted usage records are the valid, non-error ones. The controller keeps only t
 ## Reading the metrics
 
 `kukulu_metrics` returns the object described above, computed at the moment of the call from what is on disk; it writes nothing. After `kukulu_flight_archive` it reads the archived flight (its state, configuration, feedback, task counts and spec) until the next flight's first stage starts, and the live `.kukulu/metrics/` for the usage records.
+
+## When METRICS.json is written
+
+`kukulu_next` writes `docs/METRICS.json` when it returns `done` or `halt`, that call wrote at least one record to the timeline (the open stage's `end`), and `policies.metrics` is true (the default). It is built after the state is saved, so it includes those records, and it joins the `chore: stage end` commit. A `done` that writes no record, such as the one after an archive, writes no file. A resumed flight overwrites the file at its next end or halt. A file that cannot be written is a `metricsNote` on the result and a `metrics` feedback entry; the decision and the timeline are unaffected. `kukulu_flight_archive` moves the file into the flight's directory.

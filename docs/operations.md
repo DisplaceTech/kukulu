@@ -242,6 +242,7 @@ A policy with `"enforcement": "container+proxy"` is run with `node scripts/sandb
 | `policies.archive` | `true` | An owner decision (two release flights needed it), not an ⚠️ ASSUMPTION. `true` makes the summarizer call `kukulu_flight_archive` after the summary, moving the finished flight into `docs/flights/<flight>/` so the repository can run another; `false` keeps the finished flight in place |
 | `policies.finalize` | `"ready"` | What `kukulu_pr_finalize` does to a fully signed flight's draft pull request: `"ready"` only marks it ready; `"auto"` marks it ready and, unless the flight is breaking, enables auto-merge; `"draft"` leaves it alone |
 | `policies.syncBase` | `true` | `kukulu_run_start` on an existing build branch and a serial `kukulu_task_next` merge the local base branch into the build branch when it has commits the branch lacks (`git merge --no-ff`, committed as `chore: merge <base> into <branch>`; nothing is fetched). A conflict aborts the merge and refuses, naming the files, and never halts; a tracked tree with uncommitted changes skips the sync and says so in `baseSynced`. `false` keeps the 0.7.0 behavior of never merging the base. Streams never sync |
+| `policies.metrics` | `true` | A flight that reaches `done` or `halt` through `kukulu_next` leaves `docs/METRICS.json` (the metrics object of [metrics.md](./metrics.md)) in the `chore: stage end` commit. `false` writes none. A boolean; also settable in the global file and in a profile |
 | `policies.mergeMethod` | `"merge"` | The method `kukulu_pr_finalize` passes to `gh pr merge --auto`: `"merge"`, `"squash"` or `"rebase"`. Kūkulu never merges without `--auto` |
 | `prTitle` | derived | A string of 1 to 120 characters on one line: the title of the draft PR `kukulu_run_finish` opens (and the merge commit's subject). Absent, the title is `<flight>: <spec title>` (the first top-level heading of `docs/SPEC.md` without a trailing "Specification"), the spec title alone without a `flight`, or `Build: <branch>` without a heading; no round suffix |
 | `flight` | absent | A slug (`^[a-z0-9][a-z0-9-]{0,39}$`) naming this flight; the default `slug` for `kukulu_flight_archive` |
@@ -397,7 +398,8 @@ A `build/<date>` branch containing:
 - interleaved `progress:` commits recording each state change with its sha
 - for a plan with parallel streams, one `merge stream <s> (wave <n>)` commit per stream, and `chore: wave <n> runs serially` for any wave that could not run in parallel
 - `review: round N` commits, one per round, each carrying that round's `REVIEW.md` and the fix tasks it queued
-- `docs/HANDOFF.md`, `docs/REVIEW.md` and `docs/SUMMARY.md` at the tip
+- `docs/HANDOFF.md`, `docs/REVIEW.md` and `docs/SUMMARY.md` at the tip, and `docs/METRICS.json` when the flight ended or halted and `policies.metrics` is not `false`
+- on your machine only, never committed, `.kukulu/metrics/` (the usage records and counters; see [metrics.md](./metrics.md))
 - a draft PR, if `gh` was available and `policies.pr` is not `"none"`
 - `chore: finalize flight` or `chore: awaiting signing`, from `kukulu_pr_finalize`, and `chore: archive flight <slug>` when the flight was archived
 

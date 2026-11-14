@@ -36,7 +36,7 @@ for (const [config, want, label] of [[{}, true, "config_show reports archive tru
 
 await withServer(plannedRepo({ config: {} }), async ({ call }) => {
   const cs = await call("kukulu_config_show");
-  eq(cs.policies.finalize + "|" + Object.keys(cs.policies).length, "ready|8", "kukulu_config_show reports finalize ready with no policies block");
+  eq(cs.policies.finalize + "|" + Object.keys(cs.policies).length, "ready|9", "kukulu_config_show reports finalize ready with no policies block");
 });
 
 // ---------------------------------------------------------------- runners (A-01)
@@ -824,6 +824,24 @@ for (const [value, got, label] of [
       isError(await call("kukulu_config_show"), /profiles\.fast\.policies has an unknown key 'nope'$/, "a profile policies block with an unknown key names profiles.<name>.policies");
     }, { env: { KUKULU_CONFIG: file } });
   }
+  await withGlobal({ policies: { metrics: false }, profiles: { fast: { policies: { metrics: true } } } }, project(), async ({ call }) => {
+    const cs = await call("kukulu_config_show");
+    eq(cs.policies.metrics + "|" + cs.policySources.metrics, "false|global", "policies.metrics layers from the global file");
+  });
+  await withGlobal({ policies: { metrics: false }, profiles: { fast: { policies: { metrics: true } } } }, project(), async ({ call }) => {
+    const cs = await call("kukulu_config_show");
+    eq(cs.policies.metrics + "|" + cs.policySources.metrics, "true|profile:fast", "...and from a profile over the global file");
+  }, { KUKULU_PROFILE: "fast" });
+  await withGlobal({}, project(), async ({ call }) => {
+    const cs = await call("kukulu_config_show");
+    eq(cs.policies.metrics + "|" + cs.policySources.metrics, "true|default", "policies.metrics defaults to true");
+  });
+  await withGlobal({ policies: { metrics: "no" } }, project(), async ({ call }) => {
+    isError(await call("kukulu_config_show"), /global-config\.json policies\.metrics must be a boolean$/, "a non-boolean global policies.metrics is refused, naming the file");
+  });
+  await withGlobal({}, project({ metrics: 1 }), async ({ call }) => {
+    isError(await call("kukulu_config_show"), /^docs\/kukulu\.json policies\.metrics must be a boolean$/, "a non-boolean project policies.metrics is refused");
+  });
   await withGlobal({ policies: { finalize: "ready" } }, project({ signing: "off" }), async ({ call }) => {
     const n = await call("kukulu_next");
     like(n.prompt ?? "", /Run policies: signing=off, push=on, pr=draft, finalize=ready \(global\)\./, "the Run policies sentence names finalize and its source");
