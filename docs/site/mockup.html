@@ -148,7 +148,7 @@ pre.lines .ln::before{content:counter(line);display:inline-block;width:2.2em;col
 
 <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 16px 24px">
 <a href="#start" class="btn-outline" style="min-height: 48px; display: inline-flex; align-items: center; padding: 0 24px; border: 1.5px solid var(--ink); border-radius: 8px; color: var(--ink); text-decoration: none; font-weight: 700">Get started</a>
-<a href="#proof" style="min-height: 48px; display: inline-flex; align-items: center; gap: 8px; font-weight: 600">See the cleanflate results <span aria-hidden="true">→</span></a>
+<a href="#proof" style="min-height: 48px; display: inline-flex; align-items: center; gap: 8px; font-weight: 600">See both rebuilds <span aria-hidden="true">→</span></a>
 </div>
 <p style="margin: 0; font-style: italic; font-size: 15px; color: var(--muted)">Kūkulu is Hawaiian for “to build.”</p>
 </div>
@@ -423,7 +423,13 @@ git add docs/SPEC.md &amp;&amp; git commit -m "spec"</code></pre>
 <div class="wrap" style="display: flex; flex-direction: column; gap: 32px">
 <div style="display: flex; flex-direction: column; gap: 20px">
 <p class="eyebrow">06 — Proof</p>
-<h2 id="proof-h" class="h2"><span style="font-family: var(--mono); font-weight: 600; letter-spacing: -0.02em">cleanflate</span></h2>
+<h2 id="proof-h" class="h2">Two rebuilds.</h2>
+</div>
+
+<article aria-labelledby="cleanflate-h" style="display: flex; flex-direction: column; gap: 32px">
+<div style="display: flex; flex-direction: column; gap: 16px">
+<p style="margin: 0; font-family: var(--mono); font-size: 13px; font-weight: 500; letter-spacing: 0.1em; text-transform: uppercase; color: var(--accent-text)">Rebuild 01 · DEFLATE</p>
+<h3 id="cleanflate-h" style="margin: 0; font-family: var(--mono); font-weight: 600; letter-spacing: -0.02em; font-size: clamp(26px, 3vw, 36px); line-height: 1.15">cleanflate</h3>
 <p style="margin: 0; max-width: 760px; font-size: 20px; line-height: 1.55; color: var(--muted)">A clean-room DEFLATE decompressor in safe Rust, built by Kūkulu from RFCs 1950–1952 alone, without access to zlib’s source.</p>
 <p style="margin: 0; max-width: 760px; font-size: 16px; line-height: 1.55; color: var(--muted)">Built with Kūkulu 0.3.2, then named Foundry, under project-local clean-room controls; their general form is the plugin’s clean-room mode, as of 0.7.0.</p>
 </div>
@@ -488,6 +494,72 @@ git add docs/SPEC.md &amp;&amp; git commit -m "spec"</code></pre>
 <a href="https://github.com/ericmann/cleanflate" style="min-height: 44px; display: inline-flex; align-items: center; gap: 8px; font-weight: 600">cleanflate repository <span aria-hidden="true">↗</span></a>
 <a href="https://github.com/ericmann/cleanflate-bench" style="min-height: 44px; display: inline-flex; align-items: center; gap: 8px; font-weight: 600">cleanflate-bench <span aria-hidden="true">↗</span></a>
 </div>
+</article>
+
+<article aria-labelledby="cleanlz4-h" style="display: flex; flex-direction: column; gap: 32px; padding-top: 56px; border-top: 1px solid var(--line2)">
+<div style="display: flex; flex-direction: column; gap: 16px">
+<p style="margin: 0; font-family: var(--mono); font-size: 13px; font-weight: 500; letter-spacing: 0.1em; text-transform: uppercase; color: var(--accent-text)">Rebuild 02 · LZ4</p>
+<h3 id="cleanlz4-h" style="margin: 0; font-family: var(--mono); font-weight: 600; letter-spacing: -0.02em; font-size: clamp(26px, 3vw, 36px); line-height: 1.15">cleanlz4</h3>
+<p style="margin: 0; max-width: 760px; font-size: 20px; line-height: 1.55; color: var(--muted)">A clean-room LZ4 block and frame decoder in safe Rust, built by Kūkulu 0.8.0’s clean-room mode from the LZ4 format documents alone, without access to the LZ4 source.</p>
+<p style="margin: 0; max-width: 760px; font-size: 16px; line-height: 1.55; color: var(--muted)">Every claim below comes from the flight’s signed attestation bundle, published in the repository, and anyone can check that bundle offline with one command.</p>
+</div>
+
+<div style="overflow-x: auto; border: 1px solid var(--line2); border-radius: 10px; background: var(--bg2)">
+<table style="width: 100%; min-width: 320px; border-collapse: collapse; font-size: 16px">
+<caption style="caption-side: bottom; text-align: left; padding: 14px 20px; border-top: 1px solid var(--line); font-size: 13px; line-height: 1.55; color: var(--muted)">From the signed 0.2.0 attestation bundle in the <a href="https://github.com/ericmann/cleanlz4">cleanlz4</a> repository. Throughput measured on one x86 machine. <b style="color: var(--ink); font-weight: 600">Limits:</b> one target library; the guard was enforced by hooks, not a sandbox. 0.1.0’s similarity controls were cross-language and did not separate, and its score did not support independence, so 0.2.0 re-scored against same-language controls.</caption>
+<thead>
+<tr>
+<th scope="col" style="text-align: left; padding: 14px 20px; font-family: var(--mono); font-size: 12px; font-weight: 500; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); border-bottom: 1px solid var(--line2); width: 168px">Claim</th>
+<th scope="col" style="text-align: left; padding: 14px 20px; font-family: var(--mono); font-size: 12px; font-weight: 500; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); border-bottom: 1px solid var(--line2)">Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<th scope="row" style="text-align: left; vertical-align: top; padding: 16px 20px; font-weight: 700; border-bottom: 1px solid var(--line)">Clean room</th>
+<td style="padding: 16px 20px; border-bottom: 1px solid var(--line)">0 prior-art reads among 437 guarded tool calls. The 3 denials were guard false positives, since fixed in 0.8.1.</td>
+</tr>
+<tr>
+<th scope="row" style="text-align: left; vertical-align: top; padding: 16px 20px; font-weight: 700; border-bottom: 1px solid var(--line)">Equivalent</th>
+<td style="padding: 16px 20px; border-bottom: 1px solid var(--line)">2,349 of 2,349 conformance cases pass. 0 crashes in 226M fuzz executions across five one-hour targets; 0 divergences in the two differential targets.</td>
+</tr>
+<tr>
+<th scope="row" style="text-align: left; vertical-align: top; padding: 16px 20px; font-weight: 700; border-bottom: 1px solid var(--line)">Robust</th>
+<td style="padding: 16px 20px; border-bottom: 1px solid var(--line)">144 of 144 malformed inputs rejected, 0 panics.</td>
+</tr>
+<tr>
+<th scope="row" style="text-align: left; vertical-align: top; padding: 16px 20px; font-weight: 700; border-bottom: 1px solid var(--line)">Memory-safe</th>
+<td style="padding: 16px 20px; border-bottom: 1px solid var(--line)">0 lines of <code>unsafe</code> code, 0 runtime dependencies.</td>
+</tr>
+<tr>
+<th scope="row" style="text-align: left; vertical-align: top; padding: 16px 20px; font-weight: 700; border-bottom: 1px solid var(--line)">Independent</th>
+<td style="padding: 16px 20px; border-bottom: 1px solid var(--line)">Identifier overlap with C LZ4 of 0.013. Token 5-gram overlap of 0.22, against 0.23 for independently written code and 0.98 for derived code.</td>
+</tr>
+<tr>
+<th scope="row" style="text-align: left; vertical-align: top; padding: 16px 20px; font-weight: 700; border-bottom: 1px solid var(--line)">Viable</th>
+<td style="padding: 16px 20px; border-bottom: 1px solid var(--line)">0.61× C LZ4 throughput overall, 0.33–3.05× per file, with no <code>unsafe</code>.</td>
+</tr>
+<tr>
+<th scope="row" style="text-align: left; vertical-align: top; padding: 16px 20px; font-weight: 700">Cost</th>
+<td style="padding: 16px 20px">About 7.5 hours of pipeline time, including five one-hour fuzz runs; about $42 in model usage at API list prices; 1 operator intervention, before the build began.</td>
+</tr>
+</tbody>
+</table>
+</div>
+
+<div style="display: flex; flex-direction: column; gap: 12px">
+<p style="margin: 0; font-family: var(--mono); font-size: 13px; font-weight: 500; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted)">Verify it yourself</p>
+<p style="margin: 0; font-size: 15px; line-height: 1.55; color: var(--muted)">Signer fingerprint: <code style="font-size: 14px; color: var(--ink); overflow-wrap: anywhere">sha256:29eb2de703efe67ab50bf992d6c66c1e75d824010c727b1a76b0b336a5ed9f75</code></p>
+<div class="codebox" style="display: flex; align-items: flex-start; gap: 8px; background: var(--code-bg); border: 1px solid var(--line2); border-radius: 10px; padding: 10px 10px 10px 16px">
+<pre style="flex: 1 1 auto; min-width: 0; margin: 0; padding: 8px 0; overflow-x: auto; font-size: 15px; line-height: 1.8; color: var(--code-ink)"><code>git clone --depth 1 https://github.com/ericmann/cleanlz4 &amp;&amp; node cleanlz4/attestation/cleanlz4-0-2-0/verify.mjs cleanlz4/attestation/cleanlz4-0-2-0 --key sha256:29eb2de703efe67ab50bf992d6c66c1e75d824010c727b1a76b0b336a5ed9f75</code></pre>
+</div>
+<p style="margin: 0; font-size: 15px; line-height: 1.55; color: var(--muted)">Needs git and Node 22 or later. The fingerprint is also in the repository’s README; check that the two match. The last line the verifier prints is <code>verify-attestation: PASS</code>.</p>
+</div>
+
+<div style="display: flex; flex-wrap: wrap; gap: 12px 28px">
+<a href="https://github.com/ericmann/cleanlz4" style="min-height: 44px; display: inline-flex; align-items: center; gap: 8px; font-weight: 600">cleanlz4 repository <span aria-hidden="true">↗</span></a>
+<a href="https://github.com/ericmann/cleanlz4/tree/main/attestation/cleanlz4-0-2-0" style="min-height: 44px; display: inline-flex; align-items: center; gap: 8px; font-weight: 600">Published bundle <span aria-hidden="true">↗</span></a>
+</div>
+</article>
 </div>
 </section>
 
@@ -500,15 +572,15 @@ git add docs/SPEC.md &amp;&amp; git commit -m "spec"</code></pre>
 <ol style="list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; border-top: 1px solid var(--line2)">
 <li style="flex: 1 1 280px; min-width: 0; padding: 24px 28px 8px 0; display: flex; flex-direction: column; gap: 10px">
 <p style="margin: 0; font-family: var(--mono); font-size: 12px; letter-spacing: 0.1em; color: var(--accent-text)">NEXT 01</p>
-<p style="margin: 0; font-size: 20px; font-weight: 600; line-height: 1.35">A hotfix lane: a short, reviewed stage for an operator fix, flagged in the attestation.</p>
+<p style="margin: 0; font-size: 20px; font-weight: 600; line-height: 1.35">Runner comparison: usage and outcome metrics, so two flights of one spec can be compared across models, a local one included.</p>
 </li>
 <li style="flex: 1 1 280px; min-width: 0; padding: 24px 28px 8px 0; display: flex; flex-direction: column; gap: 10px">
 <p style="margin: 0; font-family: var(--mono); font-size: 12px; letter-spacing: 0.1em; color: var(--accent-text)">NEXT 02</p>
-<p style="margin: 0; font-size: 20px; font-weight: 600; line-height: 1.35">A vendor-agnostic package.</p>
+<p style="margin: 0; font-size: 20px; font-weight: 600; line-height: 1.35">A vendor-agnostic package, starting with OpenCode.</p>
 </li>
 <li style="flex: 1 1 280px; min-width: 0; padding: 24px 28px 8px 0; display: flex; flex-direction: column; gap: 10px">
 <p style="margin: 0; font-family: var(--mono); font-size: 12px; letter-spacing: 0.1em; color: var(--accent-text)">NEXT 03</p>
-<p style="margin: 0; font-size: 20px; font-weight: 600; line-height: 1.35">Continuous fuzzing and multi-pair similarity calibration.</p>
+<p style="margin: 0; font-size: 20px; font-weight: 600; line-height: 1.35">A hotfix lane: a short, reviewed stage for an operator fix, flagged in the attestation.</p>
 </li>
 </ol>
 </div>

@@ -205,6 +205,13 @@ pre.lines .ln::before{content:counter(line);display:inline-block;width:2.2em;col
 .proof-table thead th:first-child{width:168px}
 .proof-table tbody th{text-align:left;vertical-align:top;font-weight:700}
 .proof-table tbody tr:last-child th,.proof-table tbody tr:last-child td{border-bottom:0}
+.rebuild{display:flex;flex-direction:column;gap:32px}
+.rebuild+.rebuild{padding-top:56px;border-top:1px solid var(--line2)}
+.rebuild-head{display:flex;flex-direction:column;gap:16px}
+.rebuild-title{margin:0;font-size:clamp(26px,3vw,36px);line-height:1.15}
+.verify{display:flex;flex-direction:column;gap:12px}
+.verify-fp,.verify-note{margin:0;font-size:15px;line-height:1.55;color:var(--muted)}
+.verify-fp code{font-size:14px;color:var(--ink);overflow-wrap:anywhere}
 .links-row{display:flex;flex-wrap:wrap;gap:12px 28px}
 .link-ext{min-height:44px}
 

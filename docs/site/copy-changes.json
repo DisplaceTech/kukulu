@@ -1,6 +1,6 @@
 {
     "approved": "Eric Mann",
-    "approvedAt": "2026-10-19",
+    "approvedAt": "2026-11-13",
     "changes": [
       { "old": "Kūkulu is an open-source Claude Code plugin that turns a written spec into a planned, built, reviewed branch. Clean-room mode is coming in 0.7.0.\">", "new": "Kūkulu is an open-source Claude Code plugin that turns a written spec into a planned, built, reviewed branch, with a clean-room mode that guards, logs and attests the build.\">" },
       { "old": "An open-source Claude Code plugin that turns a written spec into a planned, built, reviewed branch. Clean-room mode is coming in 0.7.0.\">", "new": "An open-source Claude Code plugin that turns a written spec into a planned, built, reviewed branch, with a clean-room mode that guards, logs and attests the build.\">" },
@@ -14,6 +14,9 @@
       { "old": "Similarity scored on a scale where 0 is an independent pair of implementations and 1 is a known derivation.", "new": "Similarity scored on a scale where 0 is an independent pair of implementations and 1 is a known derivation, against control pairs you supply." },
       { "old": "under the clean-room controls that come to the plugin in 0.7.0.", "new": "under project-local clean-room controls; their general form is the plugin’s clean-room mode, as of 0.7.0." },
       { "old": "NEXT 01 · 0.7.0", "new": "NEXT 01" },
-      { "old": "Clean-room mode in the plugin, for modernizing legacy software into memory-safe code.", "new": "A hotfix lane: a short, reviewed stage for an operator fix, flagged in the attestation." }
+      { "old": "Clean-room mode in the plugin, for modernizing legacy software into memory-safe code.", "new": "A hotfix lane: a short, reviewed stage for an operator fix, flagged in the attestation." },
+      { "old": "See the cleanflate results", "new": "See both rebuilds" },
+      { "old": ">Continuous fuzzing and multi-pair similarity calibration.</p>", "new": ">Runner comparison: usage and outcome metrics, so two flights of one spec can be compared across models, a local one included.</p>" },
+      { "old": ">A vendor-agnostic package.</p>", "new": ">A vendor-agnostic package, starting with OpenCode.</p>" }
     ]
   }
