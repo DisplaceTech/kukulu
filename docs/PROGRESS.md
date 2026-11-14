@@ -40,7 +40,7 @@ Started: 2026-11-14T04:52:50.030Z
 - [x] R1-01 The probe redacts the token before it cuts the error body
 - [x] R1-02 A failed activation on a flight's first timeline record keeps its activateFailures count
 - [x] R1-03 The kukulu_next, kukulu_status and kukulu_pr_finalize tool descriptions name 0.9.0's behavior
-- [ ] R2-01 kukulu_status and kukulu_next descriptions and the mcp-tools overview state 0.9.0's behavior correctly
+- [x] R2-01 kukulu_status and kukulu_next descriptions and the mcp-tools overview state 0.9.0's behavior correctly
 
 ## Log
 
@@ -185,3 +185,7 @@ recordTimeline gained afterReset callback (runs after metrics emptying); next() 
 ### R1-03 — bc16005
 
 Updated kukulu_next, kukulu_status, kukulu_pr_finalize descriptions in TOOLS; four assertions in test/protocol.mjs. No schema change. verify green.
+
+### R2-01 — 051d602
+
+Text-only fixes: kukulu_status activateSeconds now per-runner total; kukulu_next wave sentence has a verb; docs/mcp-tools.md overview updated. Three assertions added to test/protocol.mjs. Verify green.
