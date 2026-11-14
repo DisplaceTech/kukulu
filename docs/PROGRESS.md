@@ -35,7 +35,7 @@ Started: 2026-11-14T04:52:50.030Z
 - [x] P3-02 Templates: a spark profile with activation, and a llama-swap example
 - [x] P3-03 docs/local-runners.md
 - [x] P3-04 Documentation sweep for 0.9.0
-- [ ] P3-05 CHANGELOG 0.9.0 and the version
+- [x] P3-05 CHANGELOG 0.9.0 and the version
 - [ ] P3-06 Phase 3 end: push and record the manual checks
 
 ## Log
@@ -161,3 +161,7 @@ docs/local-runners.md with the six sections; plugin test 615 (sections, citation
 ### P3-04 — e44d07c
 
 Docs sweep: architecture diagrams (pieces, activation in the stage loop, who may write what), README feature item, files table rows and Upgrading to 0.9.0, CONTRIBUTING probe row, metrics.md intro; plugin test 626. No code changes. Feedback-file headers not touched (not in tracked scope).
+
+### P3-05 — 874ea5e
+
+Version 0.9.0 in package.json, plugin.json, VERSION and README badge; CHANGELOG [Unreleased] became [0.9.0] - 2026-11-14 regrouped by requirement with Changed carrying the upgrade points; no Breaking changes heading. Full verify green.
