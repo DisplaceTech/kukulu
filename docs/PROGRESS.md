@@ -27,7 +27,7 @@ Started: 2026-11-14T04:52:50.030Z
 - [x] P2-06 kukulu_metrics
 - [x] P2-07 A clean-room flight's metrics read usage from the chain only
 - [x] P2-08 policies.metrics, and METRICS.json when kukulu_next ends or halts a flight
-- [ ] P2-09 METRICS.json at kukulu_pr_finalize
+- [x] P2-09 METRICS.json at kukulu_pr_finalize
 - [ ] P2-10 compareMetrics and scripts/compare-flights.mjs
 - [ ] P2-11 compare-flights --trees
 - [ ] P2-12 Phase 2 end: push and record the manual check
@@ -129,3 +129,7 @@ usageFromChain in metrics.mjs; metricsInputs reads the chain (live or archived c
 ### P2-08 — bdfc5dd
 
 policies.metrics (cfgFrom default true, POLICY_KEYS, validatePolicies bool); P.metrics = docs/METRICS.json, in archivedFiles; recordTimeline writes it inside the withRollback when done/halt + records + policy, metricsNote + metrics feedback on failure. state 396, routing 353, plugin 607. Interpretation: directory at the path detected up front (snapshot cannot read dirs).
+
+### P2-09 — 780d780
+
+prFinalize wrapper + prFinalizeCore + commitFlightMetrics(st, cc, ctx) (once per call): before rebase under resign; head of awaiting(); after chore: finalize flight otherwise. archivedFlightDir() shared with metricsInputs. review suite 513. Interpretation: existing aborted-rebase test now expects HEAD~1 == original and subject chore: flight metrics.
