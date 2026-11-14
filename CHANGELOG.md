@@ -9,6 +9,7 @@ All notable changes to this plugin. Format follows
 ### Added
 
 - The usage record: one schema for every harness, validated by `validateUsageRecord` in `mcp/metrics.mjs` (B-01).
+- Every flight records token use per role; in general mode to `.kukulu/metrics/usage.jsonl`, excluded per clone (B-02, §5.4).
 
 ### Changed
 

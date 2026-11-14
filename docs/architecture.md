@@ -254,6 +254,7 @@ What the reviewer submits as structured JSON is rendered into PLAN.md and parsed
 | `.kukulu/feedback.jsonl` | yes | one JSON line per pipeline-friction entry: `at`, `stage`, `round`, `category`, `message`, `source`; see [mcp-tools.md](./mcp-tools.md#kukulu_feedback_log) |
 | `.kukulu/implement.lock` | no (gitignored) | JSON `{ count, armedAt, round }`, the guard's re-block counter (a legacy bare number still reads back correctly) |
 | `.kukulu/worktrees/<stream>/` | no (`.gitignore`) | a parallel stream's git worktree, present from `kukulu_run_start({ stream })` until `kukulu_stream_finish` merges it back; `state.streams[<s>]` records its branch and the untracked paths `parallel.setup` left behind, and `state.serialWaves` the waves degraded to serial |
+| `.kukulu/metrics/` | no (`.git/info/exclude`) | general mode's `usage.jsonl`, one usage record per line, emptied at a flight's first timeline record; see [metrics.md](./metrics.md) |
 | `.kukulu/mutation.json` | no (`.git/info/exclude`) | present only while `kukulu_mutate` has a file mutated: `{ file, at, original }`, so a crash can be repaired by the next call |
 | `docs/PROGRESS.md` | yes | task checkboxes and the per-task log |
 | `docs/kukulu.json` | yes | `verify`, `extraVerify`, `build`, `baseBranch`, `branchPrefix`, `maxRounds`, `commandTimeoutMs`, `roles`, `permissionMode` |

@@ -50,3 +50,7 @@ An `assistant` row with `message.usage` is a request, and each `requestId` count
 `activeMs` is the time spent waiting on a model. The conversation rows are the `user` and `assistant` rows that have a timestamp, in file order. For each counted request, the time is the timestamp of the request's last conversation row minus the timestamp of the conversation row just before its first row. That includes prefill, decode and the network, and excludes tool execution. A request with no conversation row before it adds nothing, and `activeMs` is `null` when no request was timed.
 
 `toolCalls` counts `tool_use` items, `toolErrors` counts `tool_result` items with `is_error` true, and `cost` is the sum of the counted rows' reported cost when every counted row has one. `stage` and `round` come from `.kukulu/state.json` at the time of the hook.
+
+## Where usage is recorded
+
+In general mode, every role agent's usage record is appended as one line to `.kukulu/metrics/usage.jsonl` when the agent stops. The directory is excluded per clone (in `.git/info/exclude`) and never committed, and it is emptied when the next flight's first stage starts. The hook is silent without `docs/kukulu.json` and inside the sandbox. Clean-room mode writes the chain's `usage` entry only, and never `usage.jsonl`.

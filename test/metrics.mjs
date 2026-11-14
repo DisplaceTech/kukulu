@@ -3,7 +3,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { finish, ok, eq, like, ROOT, mkDir, cleanroomRepo, runHook, setState } from "./harness.mjs";
+import { finish, ok, eq, like, ROOT, mkDir, cleanroomRepo, plannedRepo, runHook, setState } from "./harness.mjs";
 import { METRICS_VERSION, USAGE_KEYS, validateUsageRecord } from "../mcp/metrics.mjs";
 
 const example = () => ({
@@ -124,6 +124,40 @@ const withTranscript = (text) => {
 {
   const d = stop(stopRepo([{ event: "start", stage: "implement", round: 0 }, { event: "end", stage: "implement", round: 0 }]));
   eq(d.stage, null, "a closed span gives stage null");
+}
+
+// ---------------------------------------------------------------- general mode (P0-03)
+
+{
+  const hook = (repo, payload, env = {}) => runHook(LOGGER, { hook_event_name: "SubagentStop", agent_type: "kukulu-implementer", agent_transcript_path: FULL, session_id: "s-1", cwd: repo, ...payload }, { CLAUDE_PROJECT_DIR: repo, CLAUDE_PLUGIN_ROOT: ROOT, HOME: mkDir("kukulu-home-"), ...env });
+  const lines = (repo) => (fs.existsSync(path.join(repo, ".kukulu", "metrics", "usage.jsonl")) ? fs.readFileSync(path.join(repo, ".kukulu", "metrics", "usage.jsonl"), "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)) : []);
+  const repo = plannedRepo();
+  setState(repo, { round: 0, timeline: [{ event: "start", stage: "implement", round: 0 }] });
+  const r = hook(repo, {});
+  eq(r.status, 0, "the hook exits 0 in general mode");
+  const got = lines(repo);
+  eq(got.length, 1, "general mode appends one usage record on SubagentStop");
+  eq(JSON.stringify(validateUsageRecord(got[0])), "[]", "...valid by validateUsageRecord");
+  eq(got[0].activeMs + "|" + got[0].role + "|" + got[0].stage + "|" + got[0].round, "17000|implementer|implement|0", "...equal to the adapter's record");
+  hook(repo, {});
+  eq(lines(repo).length, 2, "a second stop appends a second line");
+  hook(repo, { agent_type: "general-purpose" });
+  hook(repo, { agent_type: undefined });
+  eq(lines(repo).length, 2, "another agent type writes nothing");
+  const post = runHook(LOGGER, { hook_event_name: "PostToolUse", tool_name: "Read", tool_input: {}, cwd: repo }, { CLAUDE_PROJECT_DIR: repo, HOME: mkDir("kukulu-home-") });
+  eq(post.status + "|" + lines(repo).length, "0|2", "PostToolUse writes nothing");
+  const bad = hook(repo, { agent_transcript_path: path.join(repo, "nope.jsonl") });
+  eq(bad.status + "|" + bad.stdout + bad.stderr, "0|", "an unreadable transcript exits 0 silently");
+  eq(Object.keys(lines(repo).at(-1)).join(","), "v,harness,session,agent,role,error", "...and appends the error record");
+  const sock = hook(repo, {}, { KUKULU_LOG_SOCKET: path.join(mkDir("kukulu-sock-"), "x.sock") });
+  eq(sock.status + "|" + lines(repo).length, "0|3", "KUKULU_LOG_SOCKET set: exit 0 and no file written");
+  const plain = mkDir("kukulu-plain-");
+  const none = hook(plain, {});
+  eq(none.status + "|" + none.stdout + none.stderr + "|" + fs.existsSync(path.join(plain, ".kukulu")), "0||false", "no docs/kukulu.json: exit 0, no file, no output");
+  const cr = stopRepo();
+  stop(cr);
+  eq(fs.existsSync(path.join(cr, ".kukulu", "metrics", "usage.jsonl")), false, "clean-room mode writes no usage.jsonl line");
+  eq(logOf(cr).filter((e) => e.kind === "usage").length, 1, "...and the chain has the entry");
 }
 
 finish();

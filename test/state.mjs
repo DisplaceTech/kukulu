@@ -1272,4 +1272,20 @@ const OLD_LAYOUT = /pre-0\.6\.0 Foundry layout, which 0\.7\.0 no longer reads/;
   });
 }
 
+// ---------------------------------------------------------------- the metrics directory (P0-03)
+
+{
+  const repo = plannedRepo();
+  writeFile(repo, ".kukulu/metrics/usage.jsonl", "{\"old\":1}\n");
+  await withServer(repo, async ({ call }) => {
+    await call("kukulu_next");
+    ok(readFile(repo, ".git/info/exclude").split("\n").includes(".kukulu/metrics/"), "kukulu_next excludes .kukulu/metrics/");
+    ok(!hasFile(repo, ".kukulu/metrics/usage.jsonl"), "the first timeline record of a flight empties .kukulu/metrics/");
+    writeFile(repo, ".kukulu/metrics/usage.jsonl", "{\"new\":1}\n");
+    await call("kukulu_next");
+    ok(hasFile(repo, ".kukulu/metrics/usage.jsonl"), "a later kukulu_next leaves .kukulu/metrics/ alone");
+    eq(git(repo, ["status", "--porcelain"]).includes("metrics"), false, "...and git status never shows it");
+  });
+}
+
 finish();

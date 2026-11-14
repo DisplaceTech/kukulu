@@ -38,7 +38,23 @@ function policyFile(root) {
 
 const input = parseInput(readStdin());
 const root = process.env.CLAUDE_PROJECT_DIR || input?.cwd || process.cwd();
-if (!fs.existsSync(policyFile(root))) process.exit(0);
+if (!fs.existsSync(policyFile(root))) {
+  // General mode (SPEC B-02): a role agent's usage goes to .kukulu/metrics/usage.jsonl. Every other event, and every
+  // project that is not a Kūkulu project, leaves here at once; the log socket means a sandbox, where the controller owns the files.
+  try {
+    if (input?.hook_event_name === "SubagentStop" && fs.existsSync(path.join(root, "docs", "kukulu.json")) && !process.env.KUKULU_LOG_SOCKET) {
+      const record = usageFromClaudeCode(input);
+      if (record.role !== null) {
+        const dir = path.join(root, ".kukulu", "metrics");
+        fs.mkdirSync(dir, { recursive: true });
+        fs.appendFileSync(path.join(dir, "usage.jsonl"), `${JSON.stringify(record)}\n`);
+      }
+    }
+  } catch {
+    // the hook never blocks anything
+  }
+  process.exit(0);
+}
 
 let cr = null;
 const UNREACHABLE = "the log socket is unreachable, so this call cannot be logged; restart the session with node scripts/sandbox.mjs run";

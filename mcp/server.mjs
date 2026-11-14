@@ -46,6 +46,9 @@ function layoutFor(stateName, configName) {
     lock: path.join(stateDir, "implement.lock"),
     feedback: path.join(stateDir, "feedback.jsonl"),
     mutation: path.join(stateDir, "mutation.json"),
+    metricsDir: path.join(stateDir, "metrics"),
+    usage: path.join(stateDir, "metrics", "usage.jsonl"),
+    counters: path.join(stateDir, "metrics", "counters.json"),
     worktrees: path.join(stateDir, "worktrees"),
     gitignore: path.join(ROOT, ".gitignore"),
     agentsDir: path.join(ROOT, ".claude", "agents"),
@@ -611,6 +614,12 @@ function ensureLineInFile(file, line) {
   if (cur.split("\n").includes(line)) return false;
   write(file, cur.replace(/\s*$/, "") + (cur ? "\n" : "") + line + "\n");
   return true;
+}
+
+/** Keep `.kukulu/metrics/` out of `git status` per clone, as the agent files are: usage records are never committed. */
+function ensureMetricsExcluded() {
+  if (!gitFacts().inRepo) return;
+  ensureLineInFile(gitPath("info/exclude"), `${rel(P.metricsDir)}/`);
 }
 
 /**
@@ -2797,6 +2806,7 @@ function startRun({ sync = false } = {}) {
   if (envVar("SANDBOX") && c.policies.signing === "required") throw new ToolError(SANDBOX_SIGNING_REFUSAL);
   const g = gitFacts();
   if (!g.inRepo) throw new ToolError("not a git repository");
+  ensureMetricsExcluded();
   // A branch this call cuts from the base is already up to date; only an existing build branch can lag behind it.
   // A fallback the base sync itself just made is not re-probed in the same call; only an override that was already there is.
   const overrideBefore = loadState().signingOverride === true;
@@ -4647,6 +4657,14 @@ function recordTimeline(res) {
     records.push({ event: "start", stage: res.stage, round: res.round, at });
   }
   if (!records.length) return res;
+  // A flight's first record starts its metrics afresh: the directory holds one flight's usage, never two.
+  if (!timeline.length) {
+    try {
+      for (const f of fs.readdirSync(P.metricsDir, { withFileTypes: true })) if (f.isFile()) fs.rmSync(path.join(P.metricsDir, f.name), { force: true });
+    } catch {
+      // no directory, or a file that will not go: the next flight's records overwrite or append regardless
+    }
+  }
   const crPaths = cleanroomPaths(st);
   const paths = [P.state, ...crPaths];
   // The timeline is bookkeeping: when it cannot be committed (a signer that is down, say) the files are put back and
@@ -4675,6 +4693,11 @@ function recordTimeline(res) {
 }
 
 function next() {
+  try {
+    ensureMetricsExcluded();
+  } catch {
+    // the exclusion is a convenience; a decision is never refused for it
+  }
   return recordTimeline(nextDecision());
 }
 

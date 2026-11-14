@@ -617,6 +617,22 @@ const alive = (pid) => {
   });
 }
 
+// ---------------------------------------------------------------- the metrics directory is excluded per clone (P0-03)
+
+{
+  const repo = plannedRepo();
+  writeFile(repo, ".kukulu/metrics/usage.jsonl", "{}\n");
+  await withServer(repo, async ({ call }) => {
+    await call("kukulu_run_start");
+    const exclude = readFile(repo, ".git/info/exclude").split("\n");
+    eq(exclude.filter((l) => l === ".kukulu/metrics/").length, 1, "kukulu_run_start adds .kukulu/metrics/ to .git/info/exclude");
+    await call("kukulu_run_start");
+    eq(readFile(repo, ".git/info/exclude").split("\n").filter((l) => l === ".kukulu/metrics/").length, 1, "...once: a second call adds no second line");
+    const s = await call("kukulu_status");
+    ok(!s.preexistingUntracked.some((p) => p.includes("metrics")), "a usage.jsonl written before the run is not in preexistingUntracked");
+  });
+}
+
 // ---------------------------------------------------------------- pre-existing untracked files
 
 {
