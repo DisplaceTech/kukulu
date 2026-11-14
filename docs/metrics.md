@@ -67,4 +67,14 @@ The logger also runs on `Stop`. A `Stop` record has `role: "controller"` and `ag
 
 ## Counters
 
-`.kukulu/metrics/counters.json` is one JSON line of counters the server keeps beside the usage records: `verifyRuns`, `verifyFailures`, `guardReblocks`, `tasksReopened` and `activateFailures`. It is excluded per clone like the rest of the directory and emptied with it. `activateFailures` goes up by one each time a runner fails to serve its model and the flight halts.
+`.kukulu/metrics/counters.json` is one JSON line of counters the server keeps beside the usage records. It is excluded per clone like the rest of the directory and emptied with it, and `kukulu_status` reports it as `counters` (`null` before anything is counted).
+
+| Counter | Counts |
+|---|---|
+| `verifyRuns` | `kukulu_verify` calls that ran their commands |
+| `verifyFailures` | those whose command results included a failure (a skipped command or a failing constraint alone is not one) |
+| `guardReblocks` | `null` until the implement guard counts its re-blocks |
+| `tasksReopened` | `kukulu_task_reopen` calls |
+| `activateFailures` | times a runner failed to serve its model and the flight halted |
+
+A counters file that cannot be written is a `countersNote` on the tool's result and never changes the result's `ok`, a refusal or a commit.

@@ -2477,6 +2477,7 @@ function status() {
   out.cleanroom = cleanroomStatus(st);
   out.timeline = Array.isArray(st.timeline) ? st.timeline : [];
   out.stageSeconds = stageSecondsOf(out.timeline);
+  out.counters = readCounters();
   out.activateSeconds = {};
   for (const r of out.timeline) {
     if (r.event === "activate" && r.ok === true && typeof r.runner === "string" && Number.isFinite(r.ms)) out.activateSeconds[r.runner] = (out.activateSeconds[r.runner] ?? 0) + r.ms;
@@ -3296,7 +3297,8 @@ function taskReopen({ id, reason } = {}) {
     return gitCommitIfChanged([P.progress], `progress: reopen ${id}${dependents.length ? ` (+${dependents.length} dependent${dependents.length === 1 ? "" : "s"})` : ""}`, { stage: implementStage(st), task: id });
   });
   resetLockCounter();
-  return { id, reopenedDependents: dependents, commit, counts: counts(pr.tasks) };
+  const countersNote = bumpCounter("tasksReopened");
+  return { id, reopenedDependents: dependents, commit, counts: counts(pr.tasks), ...(countersNote ? { countersNote } : {}) };
 }
 
 // Every command Kūkulu runs for the model goes through mcp/run-command.mjs,
@@ -3510,7 +3512,10 @@ function verify({ files = [], stream } = {}) {
     const waiting = inactiveUntil(c2.from, progress);
     return waiting ? { cmd: c2.cmd, skipped: `inactive until ${waiting}` } : runShell(c2.cmd, c2.timeoutMs, cwd);
   });
-  return { ok: constraints.ok && results.every((r) => r.skipped || r.ok), constraints, results, ...(recovered ? { recoveredMutation: recovered } : {}) };
+  const failed = results.some((r) => !r.skipped && !r.ok);
+  // Counting is bookkeeping: a note on the result, never a change to ok, a refusal or a commit.
+  const countersNote = bumpCounter("verifyRuns") ?? (failed ? bumpCounter("verifyFailures") : null);
+  return { ok: constraints.ok && !failed, constraints, results, ...(recovered ? { recoveredMutation: recovered } : {}), ...(countersNote ? { countersNote } : {}) };
 }
 
 // ---------------------------------------------------------------- mutation testing

@@ -1517,4 +1517,28 @@ const OLD_LAYOUT = /pre-0\.6\.0 Foundry layout, which 0\.7\.0 no longer reads/;
   }
 }
 
+// ---------------------------------------------------------------- counters in kukulu_status and reopen (P2-01)
+
+{
+  const repo = plannedRepo({ config: { verify: ["true"] } });
+  await withServer(repo, async ({ call }) => {
+    eq((await call("kukulu_status")).counters, null, "kukulu_status.counters is null before anything is counted");
+    await call("kukulu_verify");
+    eq(JSON.stringify((await call("kukulu_status")).counters), JSON.stringify({ verifyRuns: 1, verifyFailures: 0, guardReblocks: null, tasksReopened: 0, activateFailures: 0 }), "kukulu_status reports the counters");
+    await call("kukulu_run_start");
+    eq(git(repo, ["status", "--porcelain"]).includes("metrics"), false, "the counters file is not in git status after kukulu_run_start");
+  });
+  const blocked = plannedRepo();
+  git(blocked, ["checkout", "-q", "-b", "build/2026-11-14"]);
+  markTasks(blocked, { "P0-01": "!", "P0-02": "x", "P0-03": "x" });
+  setState(blocked, { round: 0, implemented: true });
+  git(blocked, ["add", "-A"]);
+  git(blocked, ["commit", "-qm", "chore: blocked"]);
+  await withServer(blocked, async ({ call }) => {
+    const r = await call("kukulu_task_reopen", { id: "P0-01", reason: "fixed" });
+    ok(!r.countersNote, "kukulu_task_reopen succeeds");
+    eq((await call("kukulu_status")).counters.tasksReopened, 1, "kukulu_task_reopen counts tasksReopened");
+  });
+}
+
 finish();

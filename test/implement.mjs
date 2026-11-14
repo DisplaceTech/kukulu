@@ -1658,4 +1658,39 @@ async function baseAhead(repo, { onBuild = null, onBase = null } = {}) {
   });
 }
 
+// ---------------------------------------------------------------- counters: verify runs and failures (P2-01)
+
+{
+  const countersOf = (repo) => JSON.parse(readFile(repo, ".kukulu/metrics/counters.json"));
+  const repo = plannedRepo({ config: { verify: ["true"] } });
+  await withServer(repo, async ({ call }) => {
+    const v = await call("kukulu_verify");
+    eq(v.ok, true, "a passing verify is ok");
+    eq(countersOf(repo).verifyRuns + "|" + countersOf(repo).verifyFailures, "1|0", "kukulu_verify counts a run, and a passing run counts no failure");
+    eq(git(repo, ["status", "--porcelain"]).includes("metrics"), false, "the counters file is not in git status");
+  });
+  const failing = plannedRepo({ config: { verify: ["true", "false"] } });
+  await withServer(failing, async ({ call }) => {
+    const v = await call("kukulu_verify");
+    eq(v.ok, false, "a failing command makes verify not ok");
+    eq(countersOf(failing).verifyRuns + "|" + countersOf(failing).verifyFailures, "1|1", "...and counts a run and a failure");
+    await call("kukulu_verify");
+    eq(countersOf(failing).verifyRuns + "|" + countersOf(failing).verifyFailures, "2|2", "...again on the next call");
+  });
+  const rule = { id: "no-bad", description: "no BAD", paths: ["x.txt"], pattern: "BAD", shouldMatch: ["BAD"], shouldNotMatch: ["good"] };
+  const constrained = plannedRepo({ config: { verify: ["true"], constraints: [rule] } });
+  writeFile(constrained, "x.txt", "BAD\n");
+  await withServer(constrained, async ({ call }) => {
+    const v = await call("kukulu_verify");
+    eq(v.ok, false, "a failing constraint makes verify not ok");
+    eq(countersOf(constrained).verifyRuns + "|" + countersOf(constrained).verifyFailures, "1|0", "a failing constraint alone counts a run and no failure");
+  });
+  const stuck = plannedRepo({ config: { verify: ["false"] } });
+  fs.mkdirSync(path.join(stuck, ".kukulu", "metrics", "counters.json"), { recursive: true });
+  await withServer(stuck, async ({ call }) => {
+    const v = await call("kukulu_verify");
+    ok(v.ok === false && v.results.length === 1 && /counter was not recorded/.test(v.countersNote), "a counters file that cannot be written is a countersNote and the result is unchanged");
+  });
+}
+
 finish();
