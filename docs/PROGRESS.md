@@ -19,7 +19,7 @@ Started: 2026-11-14T04:52:50.030Z
 - [x] P1-06 go-flight prints the activation line
 - [x] P1-07 Measure what the probe costs and how it fails
 - [x] P1-08 Phase 1 end: push and record the manual checks
-- [ ] P2-01 Counters for verify runs, verify failures and reopened tasks
+- [x] P2-01 Counters for verify runs, verify failures and reopened tasks
 - [ ] P2-02 The implement guard keeps a cumulative total, read as guardReblocks
 - [ ] P2-03 The harness's name from initialize
 - [ ] P2-04 buildMetrics: outcome, wall time, rounds, tasks, friction and tree
@@ -97,3 +97,7 @@ docs/spikes/P1-07.md written. Measurement: before 1800000 ms default (SPEC cold 
 ### P1-08 — 18a0aad
 
 Push: pushed build/2026-11-14 to origin. Verify green on identical tree (P1-07). Manual check: NOT VERIFIED (human): node scripts/runner-probe.mjs --endpoint <a real runner> --models lists its models; with activate "warm" on a runner whose proxy swaps models, kukulu_next returns only after the model answers and the go-flight transcript shows the ready in line
+
+### P2-01 — df1df9a
+
+verify() bumps verifyRuns/verifyFailures, taskReopen bumps tasksReopened, status.counters = readCounters(); countersNote on failure never changes ok. docs/metrics.md Counters table. implement 405, state 378.
