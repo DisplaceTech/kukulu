@@ -2294,6 +2294,16 @@ function lockCounter() {
 }
 
 /**
+ * Add the lock's cumulative re-block `total` to the guardReblocks counter, just before the lock is removed (SPEC C-02).
+ * A lock without one (the legacy bare-number form) leaves the counter as it is. Returns bumpCounter's note, or null.
+ */
+function countGuardReblocks() {
+  if (!exists(P.lock)) return null;
+  const total = parseLock().json?.total;
+  return Number.isInteger(total) ? bumpCounter("guardReblocks", total) : null;
+}
+
+/**
  * Reset the guard's re-block counter to zero on every task state change
  * (kukulu_task_done, kukulu_task_block, kukulu_run_start on resume), so
  * the cap bounds re-blocks *since the last time work actually moved*
@@ -2908,7 +2918,7 @@ function startRun({ sync = false } = {}) {
   // plan gets the extra line (a plan without streams stays byte-identical).
   if (pr.tasks.some((t) => t.stream)) ensureLineInFile(P.gitignore, `${rel(P.worktrees)}/`);
   fs.mkdirSync(P.stateDir, { recursive: true });
-  write(P.lock, `${JSON.stringify({ count: 0, armedAt: new Date().toISOString(), round: st.round, cap: c.guardCap })}\n`);
+  write(P.lock, `${JSON.stringify({ count: 0, total: 0, armedAt: new Date().toISOString(), round: st.round, cap: c.guardCap })}\n`);
   if (!pr.branch || pr.branch.startsWith("(")) setHeader(pr, "Branch", branch);
   if (!pr.started || pr.started.startsWith("(")) setHeader(pr, "Started", new Date().toISOString());
   writeProgress(pr);
@@ -3840,6 +3850,7 @@ function runFinish() {
       }
     }
   }
+  const countersNote = countGuardReblocks();
   if (exists(P.lock)) fs.unlinkSync(P.lock);
   const head = git(["rev-parse", "--short", "HEAD"]).out;
   // A whole-tree constraint scan at handoff, reported rather than refused:
@@ -3850,6 +3861,7 @@ function runFinish() {
   return {
     branch: g.branch, base: g.base, head, handoffCommit, stateCommit, push, pr: pr_url, ...(title !== null && pr_url?.startsWith("pr create failed") !== true ? { prTitle: title } : {}), counts: cnt, round: st.round,
     constraints: { ok: scan.ok, failing },
+    ...(countersNote ? { countersNote } : {}),
     readyLine: `READY FOR REVIEW — branch ${g.branch}, head ${head}, ${cnt.done} done / ${cnt.blocked} blocked / ${cnt.skipped} skipped of ${cnt.total}${failing.length ? `; constraints failing: ${failing.join(", ")}` : ""}`,
   };
 }
@@ -4349,15 +4361,17 @@ function runHalt({ reason }) {
   st.halted = reason;
   delete st.haltCap; // only a round-cap halt is resumable through kukulu_flight_options
   delete st.haltStream;
+  const countersNote = countGuardReblocks();
   const commit = withRollback([P.state, P.progress, P.feedback], () => {
     saveState(st);
     if (exists(P.lock)) fs.unlinkSync(P.lock);
     if (cfg().policies.feedback) appendFeedback("controller", `Run halted: ${reason}`, "halt", "auto");
+    if (countersNote && cfg().policies.feedback) appendFeedback("controller", countersNote, "metrics", "auto");
     return gitCommitIfChanged([P.state, P.progress, P.feedback], "chore: run halted", { stage: "controller" });
   });
   const g = gitFacts();
   const dirty = git(["status", "--porcelain"], { allowFail: true }).out !== "";
-  return { halted: reason, branch: g.branch, head: g.head, commit, dirty, next: RESUME_HINT };
+  return { halted: reason, branch: g.branch, head: g.head, commit, dirty, next: RESUME_HINT, ...(countersNote ? { countersNote } : {}) };
 }
 
 const RESUME_HINT = 'once the cause is fixed, call kukulu_run_resume({ reason: "<what you fixed>" })';

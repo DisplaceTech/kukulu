@@ -73,7 +73,7 @@ The logger also runs on `Stop`. A `Stop` record has `role: "controller"` and `ag
 |---|---|
 | `verifyRuns` | `kukulu_verify` calls that ran their commands |
 | `verifyFailures` | those whose command results included a failure (a skipped command or a failing constraint alone is not one) |
-| `guardReblocks` | `null` until the implement guard counts its re-blocks |
+| `guardReblocks` | The implement guard's cumulative re-blocks: the lock's `total`, added when a run finishes or halts. `null` for a flight whose runs never reported one (a legacy bare-number lock has no `total`) |
 | `tasksReopened` | `kukulu_task_reopen` calls |
 | `activateFailures` | times a runner failed to serve its model and the flight halted |
 

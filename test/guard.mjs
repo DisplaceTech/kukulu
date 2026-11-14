@@ -446,4 +446,27 @@ const subagentStop = (repo, calls, extra = {}) => {
   eq(readFile(repo, ".kukulu/implement.lock").trim(), "0", "...and nothing is counted");
 }
 
+// ---------------------------------------------------------------- the cumulative total (P2-02)
+
+{
+  const repo = armed(TASKS, '{"count":0,"total":0}\n');
+  guard(repo, { input: implementerStop(repo) });
+  const lock = JSON.parse(readFile(repo, ".kukulu/implement.lock"));
+  eq(lock.count + "|" + lock.total, "1|1", "a re-block increments count and total");
+  writeFile(repo, ".kukulu/implement.lock", JSON.stringify({ ...lock, count: 0 }) + "\n");
+  guard(repo, { input: implementerStop(repo) });
+  const again = JSON.parse(readFile(repo, ".kukulu/implement.lock"));
+  eq(again.count + "|" + again.total, "1|2", "total survives a count reset");
+  const bare = armed();
+  guard(bare, { input: implementerStop(bare) });
+  eq(readFile(bare, ".kukulu/implement.lock").trim(), "1", "a legacy bare-number lock gets no total");
+  const over = armed(TASKS, '{"count":2,"total":2,"cap":2}\n');
+  guard(over, { input: implementerStop(over) });
+  const past = JSON.parse(readFile(over, ".kukulu/implement.lock"));
+  eq(past.count + "|" + past.total, "3|3", "a re-block past the cap still counts in total");
+  const none = armed(TASKS, '{"count":0}\n');
+  guard(none, { input: implementerStop(none) });
+  eq(JSON.parse(readFile(none, ".kukulu/implement.lock")).total, 1, "a JSON lock with no total starts one");
+}
+
 finish();

@@ -1541,4 +1541,34 @@ const OLD_LAYOUT = /pre-0\.6\.0 Foundry layout, which 0\.7\.0 no longer reads/;
   });
 }
 
+// ---------------------------------------------------------------- guardReblocks on halt (P2-02)
+
+{
+  const lockWith = (repo, total) => writeFile(repo, ".kukulu/implement.lock", total === undefined ? "4\n" : JSON.stringify({ count: 0, total, armedAt: "x", round: 0, cap: 60 }) + "\n");
+  const counter = (repo) => JSON.parse(readFile(repo, ".kukulu/metrics/counters.json")).guardReblocks;
+  const repo = plannedRepo();
+  git(repo, ["checkout", "-q", "-b", "build/2026-11-14"]);
+  writeFile(repo, ".gitignore", ".kukulu/implement.lock\n");
+  git(repo, ["add", "-A"]);
+  git(repo, ["commit", "-qm", "chore: ignore lock"]);
+  await withServer(repo, async ({ call }) => {
+    lockWith(repo, 4);
+    await call("kukulu_run_halt", { reason: "first stop" });
+    eq(counter(repo), 4, "kukulu_run_halt adds the lock's total to guardReblocks");
+    lockWith(repo, 3);
+    await call("kukulu_run_halt", { reason: "second stop" });
+    eq(counter(repo), 7, "two runs' totals add up");
+  });
+  const legacy = plannedRepo();
+  git(legacy, ["checkout", "-q", "-b", "build/2026-11-14"]);
+  writeFile(legacy, ".gitignore", ".kukulu/implement.lock\n");
+  git(legacy, ["add", "-A"]);
+  git(legacy, ["commit", "-qm", "chore: ignore lock"]);
+  await withServer(legacy, async ({ call }) => {
+    lockWith(legacy, undefined);
+    await call("kukulu_run_halt", { reason: "legacy stop" });
+    ok(!hasFile(legacy, ".kukulu/metrics/counters.json") || JSON.parse(readFile(legacy, ".kukulu/metrics/counters.json")).guardReblocks === null, "a legacy lock leaves guardReblocks null");
+  });
+}
+
 finish();

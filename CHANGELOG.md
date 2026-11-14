@@ -16,6 +16,7 @@ All notable changes to this plugin. Format follows
 - The usage record: one schema for every harness, validated by `validateUsageRecord` in `mcp/metrics.mjs` (B-01).
 - Every flight records token use per role; in general mode to `.kukulu/metrics/usage.jsonl`, excluded per clone (B-02, §5.4).
 - `.kukulu/metrics/counters.json` and `kukulu_status.counters`: verify runs, verify failures and reopened tasks (C-02).
+- The implement guard keeps a cumulative `total` beside `count` in its lock, reported as `guardReblocks` (C-02).
 - The controller session's usage is recorded on every `Stop` (B-03).
 
 ### Changed

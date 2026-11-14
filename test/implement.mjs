@@ -1693,4 +1693,29 @@ async function baseAhead(repo, { onBuild = null, onBase = null } = {}) {
   });
 }
 
+// ---------------------------------------------------------------- the guard's cumulative total (P2-02)
+
+{
+  const repo = plannedRepo();
+  await withServer(repo, async ({ call }) => {
+    await call("kukulu_run_start");
+    eq(JSON.parse(readFile(repo, ".kukulu/implement.lock")).total, 0, "kukulu_run_start arms the lock with total 0");
+  });
+  const started = startedRepo();
+  writeFile(started, ".kukulu/implement.lock", JSON.stringify({ count: 3, total: 5, armedAt: "x", round: 0, cap: 60 }) + "\n");
+  await withServer(started, async ({ call }) => {
+    await call("kukulu_task_next");
+    const lock = JSON.parse(readFile(started, ".kukulu/implement.lock"));
+    ok(lock.total === 5, "the lock keeps total through server rewrites");
+  });
+  const fin = startedRepo();
+  writeFile(fin, ".kukulu/implement.lock", JSON.stringify({ count: 0, total: 7, armedAt: "x", round: 0, cap: 60 }) + "\n");
+  writeFile(fin, "docs/HANDOFF.md", "# handoff\n");
+  await withServer(fin, async ({ call }) => {
+    const r = await call("kukulu_run_finish");
+    ok(!r.countersNote, "kukulu_run_finish succeeds");
+    eq(JSON.parse(readFile(fin, ".kukulu/metrics/counters.json")).guardReblocks, 7, "kukulu_run_finish adds the lock's total to guardReblocks");
+  });
+}
+
 finish();
