@@ -13,7 +13,7 @@ Started: 2026-11-14T04:52:50.030Z
 - [x] P0-06 Phase 0 end: push and record the manual check
 - [x] P1-01 scripts/runner-probe.mjs
 - [x] P1-02 Runner keys activate, activateTimeoutMs, servedAs and tokenEnv, and the served id
-- [ ] P1-03 kukulu_next warms the stage's runner and records the wait
+- [x] P1-03 kukulu_next warms the stage's runner and records the wait
 - [ ] P1-04 A runner that does not serve its model halts the flight
 - [ ] P1-05 Activation in the chain, and the runner-drift notes
 - [ ] P1-06 go-flight prints the activation line
@@ -73,3 +73,7 @@ scripts/runner-probe.mjs: exports probe() and main(); one JSON line; token redac
 ### P1-02 — c8470a3
 
 server.mjs: RUNNER_KEYS gains four keys, runnerActivation() holds the 30-minute default on the single allowed line, servedId(), runnerFor carries activate/activateTimeoutMs/served/tokenEnv, resolveRouting refuses empty served id, routingTable has served+activate columns, configShow roles gain activate/served/activateTimeoutMs. validateRunners(runners, where, limit=mcpTimeoutMs()). routing suite 348. Interpretation: default timeout vs MCP limit checked only when activate is warm.
+
+### P1-03 — 483527d
+
+activateRunner(role) + activationRecord in server.mjs; next() probes via spawnSync(KUKULU_RUNNER_PROBE or scripts/runner-probe.mjs); recordTimeline(res, activation) orders end, activate, start (activate alone when unchanged), ignores activate when finding the open span, skips activate in chain stage entries (P1-05 owns that). kukulu_status.activateSeconds. Failed probe: result.activation.error, no record (P1-04 replaces). mkFakeProbe in harness. state suite 350.
