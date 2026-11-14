@@ -1,45 +1,30 @@
 # Review: Kūkulu 0.9.0 (runner comparison metrics)
-Round: 1
+Round: 2
 
-Branch `build/2026-11-14`, base `3832f3e` (main), head `ea5aa10`. 32 of 32 tasks done, none blocked or skipped.
+Branch `build/2026-11-14`, base `3832f3e` (main), head `d5d9dfd`. 35 of 35 tasks done (32 planned, R1-01 to R1-03), none blocked or skipped. Last review commit `a379230`.
 
 ## Verdict
 
 CHANGES REQUESTED
 
-`kukulu_verify` on the head is green: all 39 constraints self-test and scan clean, `npm run lint`, `pre-commit run --all-files` and `npm test` (5,275 assertions in sixteen suites) pass. Twelve mutants across every changed module were killed (see Notes). Three findings remain, one of them a token leak.
+`kukulu_verify` on the head is green: all 39 constraints self-test and scan clean, `npm run lint`, `pre-commit run --all-files` and `npm test` (5,283 assertions in sixteen suites) pass. `prChecks` reads `{ state: "pending", failing: [] }`: not a finding. The three round-1 fixes do what they were asked, and each new test fails without its mechanic (see Notes). One finding remains, in the text R1-03 wrote.
 
 ## Findings
 
-### 1. Category 1 (reviewer-read constraint "no state, timeline, chain entry, feedback entry, tool result or halt reason holds a token value"; SPEC A-01): the probe leaks a prefix of the runner's token
+### 1. Category 5 (spec drift, model-facing contract): R1-03's `kukulu_status` description misstates `activateSeconds`, and `kukulu_next`'s description and `docs/mcp-tools.md`'s overview still say less than the tool does
 
-- Where: `scripts/runner-probe.mjs:74` and `:97`. The error text of a non-2xx answer is built as `HTTP <status>: <body collapsed and cut to 300 characters>`, and only then does `redact(result, token)` replace the token's value. When the runner echoes the token in its body and the 300-character cut falls inside it, the remaining prefix no longer equals the token, so neither `redact` nor `main`'s second check on the serialized line removes it.
-- Reproduced: a 401 whose body is 280 characters of padding, then ` auth was <x-api-key header>`, with the token `sk-SECRETTOKEN-0123456789abcdef`, prints `"error":"HTTP 401: xxxx… auth was sk-SECRETT"`.
-- What breaks: the probe's `error` becomes the runner halt's reason (A-03), which is written to `state.halted` in the committed `.kukulu/state.json`, to `outcome.halted` in the committed `docs/METRICS.json`, and is pushed with the branch. Part of a secret reaches git history and the pull request. SPEC A-01 says the probe replaces every occurrence of the token in anything it prints, so that the value cannot reach the state or a halt reason.
-- Minimal fix: redact the raw response body (and any error message) before it is collapsed and cut, so the cut can only shorten `<redacted>`, never the token; keep the final check on the serialized line.
-- Task: P1-01.
-- Why the existing test missed it: "a runner that echoes the Authorization header in a 401 body does not leak the token" (`test/routing.mjs:960`) uses a short body, so the cut never reaches the token.
-
-### 2. Category 3 (tests) and SPEC C-02: `activateFailures` is lost when the failed activation is a flight's first timeline record
-
-- Where: `mcp/server.mjs:5014` and `:4853`. `next()` calls `bumpCounter("activateFailures")` and then `recordTimeline(res, activation)`. When the state's timeline is empty (the flight's first record), `recordTimeline` deletes every file under `.kukulu/metrics/`, including the `counters.json` it was just given, and then builds `METRICS.json` from the emptied directory.
-- Reproduced with the suite's own helpers (`mkFakeProbe`, `writeGlobalConfig`, `plannedRepo`, a warm `spark` implementer and no timeline): `kukulu_next` returns the halt, `counters.json` does not exist, `kukulu_status.counters` is `null`, and `docs/METRICS.json` has `friction.activateFailures: null`.
-- What breaks: SPEC C-02 says A-03 increments `activateFailures`, and principle 7 says a number with a source is not `null`. A runner that fails on the first stage of a flight (the plan stage on a warm planner, which the plan's Decisions name as a case) halts the flight with no record of the failure in the metrics it writes. "activateFailures is 1, then 2" and "a halt from a failed activation writes it, with friction.activateFailures 1" pass only because their state already holds a `start plan` record.
-- Minimal fix: empty `.kukulu/metrics/` before any counter of the call is bumped (for example in `next()` before the activation step, when the timeline is empty), or bump `activateFailures` after `recordTimeline` and before the metrics are built; either way the first record's emptying must never remove what the same call counted.
-- Task: P1-04 (with P0-03's emptying and P2-08's write).
-
-### 3. Category 5 (spec drift, model-facing contract): the `kukulu_next`, `kukulu_status` and `kukulu_pr_finalize` tool descriptions were not updated
-
-- Where: `mcp/server.mjs:5825` (`kukulu_next`), `:5824` (`kukulu_status`), `:5934` (`kukulu_pr_finalize`), the `TOOLS` entries a client shows the model.
-- What is wrong: `kukulu_next`'s description still says it "Writes only the stage timeline (state.timeline, and in clean-room mode a stage entry in the chain …)" and lists the result keys without `activation`, `metricsNote` or `countersNote`. Since P1-03, P1-04, P1-05 and P2-08 it also runs a runner probe that can take as long as a model load, can return a `halt` for a runner that does not serve its model, appends `runner-drift` and `metrics` feedback entries, writes `docs/METRICS.json` into the `chore: stage end` commit, and adds `.kukulu/metrics/` to `.git/info/exclude`. `kukulu_status`'s description does not name `counters`, `harness` or `activateSeconds`; `kukulu_pr_finalize`'s does not name the `chore: flight metrics` commit or `metricsNote`. SPEC §1 lists "`kukulu_next` can now take as long as a model load, and it can return a `halt`" as an upgrade point, and CLAUDE.md's principle is that documentation moves with the code; `docs/mcp-tools.md` was updated, the description a model actually reads was not, and "Writes only" is now false.
-- What breaks: a controller or operator reading the tool list is told `kukulu_next` writes nothing but the timeline and returns quickly; nothing tells it that a long wait or a `runner …` halt is expected.
-- Minimal fix: update the three descriptions to name the new behavior and result fields, matching `docs/mcp-tools.md`.
-- Tasks: P1-03, P1-04, P2-01, P2-03, P2-08, P2-09.
+- Where: `mcp/server.mjs:5827` (`kukulu_status`'s `TOOLS` description), `mcp/server.mjs:5828` (`kukulu_next`'s), `docs/mcp-tools.md:5`.
+- What is wrong:
+  - `kukulu_status`'s description now says `activateSeconds` is "how long the last runner activation waited". The code (`mcp/server.mjs:2505`–`2509`), SPEC (line 213: "per runner, the sum of `ms` over `ok` records, in whole seconds"), PLAN P1-03 and `docs/mcp-tools.md:51` all say it is an object keyed by runner holding the sum of every successful activation's wait, in whole seconds. R1-03's design constraints asked the descriptions to match `docs/mcp-tools.md`; this sentence contradicts it.
+  - In `kukulu_next`'s description, R1-03 turned "Writes only the stage timeline … and, when a parallel wave's partition is invalid, a record …" into two sentences and left the second without a verb: "When a parallel wave's partition is invalid, a record (state, one feedback entry, one commit, only on a build branch) that the wave runs serially."
+  - `docs/mcp-tools.md:5`, the overview a reader meets first, still says "`kukulu_next` answers from disk and writes only the stage timeline (and the wave record)", the claim R1-03 removed from the tool description because it is no longer true (it runs the runner probe, may append `runner-drift` and `metrics` feedback entries, and writes `docs/METRICS.json` on `done` and `halt`).
+- What would break: a controller or operator reading `kukulu_status`'s description takes `activateSeconds` for one number about the last wait, when it is a per-runner object of totals, and misreads a flight's model-load cost; the overview tells a reader `kukulu_next` writes only the timeline.
+- Minimal fix: say "activateSeconds (per runner, the total wait of its successful activations, in whole seconds)"; give the wave sentence its verb ("When a parallel wave's partition is invalid, it also writes a record … that the wave runs serially."); change `docs/mcp-tools.md:5` to say `kukulu_next` writes the stage timeline, the wave record and, on `done` and `halt`, `docs/METRICS.json`, and may run the runner probe first. No behavior changes.
+- Task: R1-03 (descriptions), P1-03 (`activateSeconds`).
 
 ## Spec issues
 
-- I agree with every entry of PLAN.md's `## Spec issues`. The one that matters most to the owner: B-01's `cost` reads per-row `costUSD`, which current Claude Code transcripts do not carry, so every role's cost is `null` and Phase 2's manual check ("no `null` in the Anthropic flight's cost column") cannot pass as written. That is an owner decision (a rate table, or the session-wide `cost-state` row for the controller), not a fix task.
-- SPEC A-01 says the probe "replaces every occurrence of the token's value", but also tells it to cut the error body to one line; it does not say which comes first. Finding 1 is the consequence. The SPEC should state that redaction precedes any truncation.
+- Unchanged from round 1: B-01's `cost` reads a per-row `costUSD` that current Claude Code transcripts do not carry, so Phase 2's "no null in the Anthropic flight's cost column" cannot pass as written; the owner decides (a rate table, or the session-wide `cost-state` row). SPEC A-01 should also say that redaction precedes any truncation (R1-01 now does it in that order).
 
 ## Manual checks still owed
 
@@ -53,8 +38,7 @@ Copied from HANDOFF.md, all `NOT VERIFIED (human)`:
 
 ## Notes
 
-- Mutants, all killed: `mcp/metrics.mjs` (controller last-per-session dropped), `scripts/cleanroom-log.mjs` (`activeMs` timed to the first row, not the request's last), `scripts/implement-guard.mjs` (`total` not incremented), `scripts/runner-probe.mjs` (`max_tokens` 2), `scripts/compare-flights.mjs` (`.git`/`node_modules`/`target` not skipped), `mcp/cleanroom.mjs` (`laguna` without `poolside`), and in `mcp/server.mjs`: drift compared without `normalizeModel`, `verifyFailures` never bumped, the pre-rebase metrics commit removed under `resign`, and `kukulu_run_start`'s exclusion removed. No survivor, so no mutation task.
-- `usageFromClaudeCode`'s `activeMs` loop calls `conv.indexOf(row)` and rescans `conv` for each counted request, which is quadratic in the transcript's length. Measured on a synthetic general-mode `Stop`: 1,000 requests 96 ms, 4,000 requests 443 ms, 8,000 requests 1,457 ms per hook run, re-run on every stop. SPEC states no budget for that path; an index from row to position and from `requestId` to its last row would make it linear.
-- The logger creates `.kukulu/metrics/` without adding the exclusion itself; only `kukulu_run_start`, `kukulu_next` and `bumpCounter` do. A session in a clone that has `docs/kukulu.json` but has not yet called `kukulu_next` on 0.9.0 leaves `usage.jsonl` untracked in `git status` until it does.
-- In the awaiting-signing path of `kukulu_pr_finalize`, the metrics commit is made after `signedCheck`, so `state.awaitingSigning.unsigned` counts one commit fewer than the branch holds. The next `resign` re-signs everything, so nothing is lost.
-- `scripts/cleanroom-log.mjs`'s new general-mode comment spells the display name with the literal macron letter; the v0-9-0 notes ask for the escape in script source. It is a comment, and older comments in the same files do the same.
+- Mutants on the round-1 fix files, all killed with `confirmKill` (the unmutated tree passes): `scripts/runner-probe.mjs` with the pre-cut redaction removed (killed by "a token that straddles the 300-character cut is not leaked, not even in part"); `mcp/server.mjs` with `afterReset` run before the first-record emptying (killed by exactly the two new R1-02 assertions), and with `afterReset` never run (killed by "activateFailures is 1"); `mcp/server.mjs` with `chore: flight metrics` dropped from `kukulu_pr_finalize`'s description (killed by the new `test/protocol.mjs` assertion).
+- R1-02 runs `afterReset` outside `withRollback`, so a timeline commit that fails and is retried on the next call counts `activateFailures` twice. The pre-fix code had the same property (the bump preceded `recordTimeline`), and the counter lives in the untracked `.kukulu/metrics/`, so this is not a regression.
+- R1-01 redacts the body after it is capped at `MAX_BODY` (1 MiB). A token straddling that byte cap would survive as a prefix only if the first megabyte collapsed to fewer than 300 characters of output before it, which takes a runner that pads its answer with a megabyte of whitespace; not worth a task.
+- Round 1's notes stand: the quadratic `activeMs` scan in `usageFromClaudeCode`, the logger not adding the `.kukulu/metrics/` exclusion itself, the awaiting-signing `unsigned` count missing the metrics commit, and the literal macron letter in a `scripts/cleanroom-log.mjs` comment.
