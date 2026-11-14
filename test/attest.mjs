@@ -438,6 +438,9 @@ const logLines = (dir) => fs.readFileSync(path.join(dir, "log.jsonl"), "utf8").s
   eq(JSON.stringify(withController.manifest.roles), JSON.stringify(withFull.manifest.roles), "a controller usage entry does not change any role's recount");
   eq(run(withController.dir).status, 0, "...and the bundle verifies");
 
+  const withActivate = fresh({ roles: routed, extra: (log) => CR.appendEntry(log, { kind: "stage", stage: "implement", role: "controller", model: "spark/nemotron", tool: null, decision: null, data: { event: "start", stage: "implement", round: 0, agent: "kukulu-implementer", model: "spark/nemotron", activate: { runner: "spark", served: "nemotron", reported: "nemotron", ms: 1200 } } }) });
+  eq(run(withActivate.dir).status, 0, "a bundle whose stage entry carries data.activate verifies");
+
   const sum = fresh({ roles: routed, extra });
   rewriteManifest(sum.dir, sum.key, (mf) => { mf.roles.implementer.usage.input += 1; });
   const failed = run(sum.dir);

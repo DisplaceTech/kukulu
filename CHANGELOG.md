@@ -12,6 +12,7 @@ All notable changes to this plugin. Format follows
 - Runner keys `activate`, `activateTimeoutMs`, `servedAs` and `tokenEnv`, and the served id in `kukulu_config_show` and the routing table (A-02).
 - `kukulu_next` warms a stage's runner before the stage starts and records the wait in the timeline, the result and `kukulu_status`'s `activateSeconds` (A-03).
 - A runner that does not serve the stage's model halts the flight before the stage, naming what it does serve (A-03, A-04).
+- In clean-room mode the stage's start entry records the model asked for, the model the runner reports and the wait (A-03, patent pending); a `runner-drift` feedback entry when the two differ or a role's served id changes (A-03, A-04).
 - The usage record: one schema for every harness, validated by `validateUsageRecord` in `mcp/metrics.mjs` (B-01).
 - Every flight records token use per role; in general mode to `.kukulu/metrics/usage.jsonl`, excluded per clone (B-02, §5.4).
 - The controller session's usage is recorded on every `Stop` (B-03).

@@ -1291,10 +1291,10 @@ const OLD_LAYOUT = /pre-0\.6\.0 Foundry layout, which 0\.7\.0 no longer reads/;
 // ---------------------------------------------------------------- runner activation (P1-03)
 
 {
-  const warm = async (runner = {}, { tasks, sync = true } = {}) => {
+  const warm = async (runner = {}, { tasks, config, sync = true } = {}) => {
     const probe = mkFakeProbe();
     const cfgPath = writeGlobalConfig(mkDir(), { runners: { spark: { endpoint: "http://h:1", locality: "local", match: ["spark/"], activate: "warm", ...runner } }, roles: { implementer: { model: "spark/qwen38-27b" } } });
-    const repo = plannedRepo(tasks ? { tasks } : {});
+    const repo = plannedRepo({ ...(tasks ? { tasks } : {}), ...(config ? { config } : {}) });
     const env = { KUKULU_CONFIG: cfgPath, KUKULU_RUNNER_PROBE: probe.script };
     // the generated agent files must exist before the server under test starts, or the routed model needs a restart
     if (sync) await withServer(repo, ({ call }) => call("kukulu_agents_sync"), { env });
@@ -1426,6 +1426,77 @@ const OLD_LAYOUT = /pre-0\.6\.0 Foundry layout, which 0\.7\.0 no longer reads/;
       eq(counters().activateFailures, 2, "activateFailures is 2");
       like(third.reason, /It serves: nothing it would list\./, "the reason says so when the runner lists nothing it would list");
     }, { env });
+  }
+  // drift notes and the real probe (P1-05)
+  const drift = (repo) => (hasFile(repo, ".kukulu/feedback.jsonl") ? readFile(repo, ".kukulu/feedback.jsonl").split("\n").filter(Boolean).map((l) => JSON.parse(l)).filter((e) => e.category === "runner-drift") : []);
+  {
+    const { repo, probe, env } = await warm();
+    probe.answers([{ ok: true, status: 200, ms: 10, reported: "some-other-model" }]);
+    await withServer(repo, async ({ call }) => {
+      await call("kukulu_next");
+      const d = drift(repo);
+      eq(d.length + "|" + d[0].stage + "|" + d[0].source, "1|controller|auto", "a reported id that differs from the served id logs one runner-drift entry");
+      eq(d[0].message, "runner spark answered as some-other-model when asked for qwen38-27b (stage implement, round 0); the chain keeps both", "...with the message naming both");
+      const files = git(repo, ["show", "--name-only", "--format=%s", "HEAD"]).split("\n");
+      ok(files[0] === "chore: stage implement" && files.includes(".kukulu/feedback.jsonl") && files.includes(".kukulu/state.json"), "the drift entry is in the same commit as the timeline");
+    }, { env });
+  }
+  {
+    const { repo, probe, env } = await warm();
+    probe.answers([{ ok: true, status: 200, ms: 10, reported: "Spark/Qwen38-27b" }]);
+    await withServer(repo, async ({ call }) => {
+      await call("kukulu_next");
+      eq(drift(repo).length, 0, "no drift entry when the reported id equals the served id once normalized");
+    }, { env });
+  }
+  {
+    const { repo, probe, env } = await warm();
+    probe.answers([{ ok: true, status: 200, ms: 10, reported: null }]);
+    await withServer(repo, async ({ call }) => { await call("kukulu_next"); }, { env });
+    const cfgPath = env.KUKULU_CONFIG;
+    const cfg = JSON.parse(fs.readFileSync(cfgPath, "utf8"));
+    cfg.runners.spark.servedAs = { "spark/qwen38-27b": "renamed" };
+    fs.writeFileSync(cfgPath, JSON.stringify(cfg));
+    await withServer(repo, async ({ call }) => {
+      await call("kukulu_next");
+      const d = drift(repo);
+      eq(d.length + "|" + d[0]?.message, "1|the implementer was served as qwen38-27b at an earlier activation and is renamed now (runner spark); the routing changed mid-flight", "a role whose served id changed logs one runner-drift entry");
+    }, { env });
+  }
+  {
+    const { repo, probe, env } = await warm({}, { config: { verify: ["true"], policies: { feedback: false } } });
+    probe.answers([{ ok: true, status: 200, ms: 10, reported: "other" }]);
+    await withServer(repo, async ({ call }) => { await call("kukulu_next"); }, { env });
+    const cfgPath = env.KUKULU_CONFIG;
+    const cfg = JSON.parse(fs.readFileSync(cfgPath, "utf8"));
+    cfg.runners.spark.servedAs = { "spark/qwen38-27b": "renamed" };
+    fs.writeFileSync(cfgPath, JSON.stringify(cfg));
+    await withServer(repo, async ({ call }) => { await call("kukulu_next"); }, { env });
+    eq(drift(repo).length, 0, "policies.feedback false logs neither drift entry");
+  }
+  {
+    const { createServer } = await import("node:http");
+    const seen = [];
+    const runner = createServer((req, res) => {
+      let body = "";
+      req.on("data", (d) => { body += d; });
+      req.on("end", () => { seen.push({ method: req.method, url: req.url, body }); res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify({ model: "qwen38-27b" })); });
+    });
+    await new Promise((r) => runner.listen(0, "127.0.0.1", r));
+    try {
+      const cfgPath = writeGlobalConfig(mkDir(), { runners: { spark: { endpoint: `http://127.0.0.1:${runner.address().port}`, locality: "local", match: ["spark/"], activate: "warm" } }, roles: { implementer: { model: "spark/qwen38-27b" } } });
+      const repo = plannedRepo();
+      const env = { KUKULU_CONFIG: cfgPath };
+      await withServer(repo, ({ call }) => call("kukulu_agents_sync"), { env });
+      await withServer(repo, async ({ call }) => {
+        const n = await call("kukulu_next");
+        eq(n.activation.reported + "|" + n.activation.runner, "qwen38-27b|spark", "the real probe answers through kukulu_next");
+        eq(seen.length + "|" + seen[0].method + "|" + seen[0].url + "|" + JSON.parse(seen[0].body).model, "1|POST|/v1/messages|qwen38-27b", "...the runner saw one POST /v1/messages for the served id");
+      }, { env });
+    } finally {
+      runner.closeAllConnections?.();
+      await new Promise((r) => runner.close(r));
+    }
   }
   {
     const { repo, probe, env } = await warm();

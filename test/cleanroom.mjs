@@ -8,7 +8,7 @@ import os from "node:os";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import {
-  finish, ok, eq, like, isError, ROOT, plannedRepo, cleanroomRepo, withServer, runHook, mkDir, writeFile, readFile, hasFile, git, subject, testKeyFor, addPlan, commitTask, setState, tempPlugin, markTasks, startServer, logCall, buildBundle,
+  finish, ok, eq, like, isError, ROOT, plannedRepo, cleanroomRepo, withServer, runHook, mkDir, writeFile, readFile, hasFile, git, subject, testKeyFor, addPlan, commitTask, setState, tempPlugin, markTasks, startServer, logCall, buildBundle, mkFakeProbe,
 } from "./harness.mjs";
 import { spawn, spawnSync } from "node:child_process";
 import { createHash as sha, generateKeyPairSync } from "node:crypto";
@@ -2267,6 +2267,31 @@ eq(LANGUAGES.join(","), "rust,c,cpp,go,python,javascript,typescript,java,php", "
     ok(para.startsWith("The guard is a tripwire, not a sandbox."), "docs/cleanroom.md opens the guard section with the tripwire paragraph");
     ok(lines.includes("### When a guard gap is a defect") && /Known-gap candidates/.test(doc), "docs/cleanroom.md has a When a guard gap is a defect subsection");
   }
+}
+
+// ---------------------------------------------------------------- activation in the chain (P1-05)
+
+{
+  const probe = mkFakeProbe();
+  probe.answers([{ ok: true, status: 200, ms: 12, reported: "q" }]);
+  const marker = "TOKEN-MARKER-9f3a7c";
+  const cfgPath = writeFile(mkDir("kukulu-cfg-"), "global.json", JSON.stringify({ runners: { spark: { endpoint: "http://h:1", locality: "local", match: ["spark/"], activate: "warm", tokenEnv: "SPARK_TOKEN" } }, roles: { planner: { model: "spark/q" } } }));
+  const repo = cleanroomRepo();
+  const env = { KUKULU_CONFIG: cfgPath, KUKULU_RUNNER_PROBE: probe.script, SPARK_TOKEN: marker };
+  await withServer(repo, ({ call }) => call("kukulu_agents_sync"), { env });
+  await live(repo, async ({ call }) => {
+    const n = await call("kukulu_next");
+    eq(n.stage + "|" + n.activation.served, "plan|q", "a clean-room flight's first stage is activated");
+    const starts = () => logOf(repo).filter((e) => e.kind === "stage" && e.data.event === "start");
+    eq(JSON.stringify(starts().at(-1).data.activate), JSON.stringify({ runner: "spark", served: "q", reported: "q", ms: 12 }), "the start entry carries data.activate with runner, served, reported and ms");
+    const before = logOf(repo).filter((e) => e.kind === "stage").length;
+    await call("kukulu_next");
+    eq(logOf(repo).filter((e) => e.kind === "stage").length, before, "an activation with no new start writes no chain entry");
+    eq(probe.calls().length, 2, "...though the probe ran again");
+    ok(verifyChain(fs.readFileSync(LOG(repo), "utf8").split("\n").filter(Boolean)).ok, "the chain still verifies");
+    const everything = [".kukulu/state.json", ".kukulu/cleanroom/log.jsonl", ".kukulu/feedback.jsonl"].map((f) => (hasFile(repo, f) ? readFile(repo, f) : "")).join("\n");
+    ok(!everything.includes(marker) && !JSON.stringify(probe.calls()).includes(marker), "no token value is in the state, the chain or the feedback file");
+  }, { env });
 }
 
 finish();

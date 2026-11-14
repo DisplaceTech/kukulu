@@ -4718,7 +4718,7 @@ function recordTimeline(res, activation = null) {
     }
   }
   const crPaths = cleanroomPaths(st);
-  const paths = [P.state, ...crPaths];
+  const paths = [P.state, P.feedback, ...crPaths];
   // The timeline is bookkeeping: when it cannot be committed (a signer that is down, say) the files are put back and
   // the decision is returned as it was, with a note; the next call records the same transition again.
   try {
@@ -4730,6 +4730,18 @@ function recordTimeline(res, activation = null) {
       delete st.haltCap;
     }
     saveState(st);
+    // Drift is friction to note, never a halt (SPEC A-03, A-04): the runner answered as another model than it was asked
+    // for, or the role's served id differs from the one an earlier activation of the same stage used.
+    if (activation && !activation.error && cfg().policies.feedback) {
+      const normal = (m) => normalizeModel(m);
+      if (activation.reported !== null && normal(activation.reported) !== normal(activation.served)) {
+        appendFeedback("controller", `runner ${activation.runner} answered as ${activation.reported} when asked for ${activation.served} (stage ${activation.stage}, round ${activation.round}); the chain keeps both`, "runner-drift", "auto");
+      }
+      const earlier = timeline.filter((r) => r.event === "activate" && r.ok === true && r.stage === activation.stage).at(-1);
+      if (earlier && earlier.served !== activation.served) {
+        appendFeedback("controller", `the ${ROLE_OF_STAGE[activation.stage]} was served as ${earlier.served} at an earlier activation and is ${activation.served} now (runner ${activation.runner}); the routing changed mid-flight`, "runner-drift", "auto");
+      }
+    }
     if (crPaths.length) {
       for (const r of records.filter((x) => x.event !== "activate")) {
         appendEntry(cleanroomLogPath(), {
@@ -4737,7 +4749,14 @@ function recordTimeline(res, activation = null) {
           stage: r.stage,
           role: "controller",
           ...(r.event === "start" ? { model: res.model ?? null } : {}),
-          data: { event: r.event, stage: r.stage, round: r.round, ...(r.event === "start" ? { agent: res.agent ?? null, model: res.model ?? null } : {}) },
+          data: {
+            event: r.event,
+            stage: r.stage,
+            round: r.round,
+            ...(r.event === "start" ? { agent: res.agent ?? null, model: res.model ?? null } : {}),
+            // The model asked for, the model the runner reports and the wait: the token's name or value is never here.
+            ...(r.event === "start" && activation && !activation.error ? { activate: { runner: activation.runner, served: activation.served, reported: activation.reported, ms: activation.ms } } : {}),
+          },
         });
       }
     }
