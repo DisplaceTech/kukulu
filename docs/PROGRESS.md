@@ -18,7 +18,7 @@ Started: 2026-11-14T04:52:50.030Z
 - [x] P1-05 Activation in the chain, and the runner-drift notes
 - [x] P1-06 go-flight prints the activation line
 - [x] P1-07 Measure what the probe costs and how it fails
-- [ ] P1-08 Phase 1 end: push and record the manual checks
+- [x] P1-08 Phase 1 end: push and record the manual checks
 - [ ] P2-01 Counters for verify runs, verify failures and reopened tasks
 - [ ] P2-02 The implement guard keeps a cumulative total, read as guardReblocks
 - [ ] P2-03 The harness's name from initialize
@@ -93,3 +93,7 @@ go-flight step 1 prints the activation line; plugin test 606; operations.md ment
 ### P1-07 — 2fa7baf
 
 docs/spikes/P1-07.md written. Measurement: before 1800000 ms default (SPEC cold start 12 min 54 s); after unchanged. Medians of ten: bare node 24.9 ms, warm probe 80.0 ms (cost 55.0 ms), refused connection 80.0 ms, 1000 ms timeout returns at 1074.8 ms (overshoot 74.8 ms, ~25 of it node start). Full verify green.
+
+### P1-08 — 18a0aad
+
+Push: pushed build/2026-11-14 to origin. Verify green on identical tree (P1-07). Manual check: NOT VERIFIED (human): node scripts/runner-probe.mjs --endpoint <a real runner> --models lists its models; with activate "warm" on a runner whose proxy swaps models, kukulu_next returns only after the model answers and the go-flight transcript shows the ready in line
