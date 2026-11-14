@@ -2,6 +2,7 @@
 // The server speaks newline-delimited JSON-RPC 2.0 by hand, so the framing is
 // worth testing as carefully as the tools it carries.
 
+import { readFileSync } from "node:fs";
 import { finish, ok, eq, like, mkRepo, startServer, plannedRepo, setState, readFile } from "./harness.mjs";
 
 const EXPECTED_TOOLS = [
@@ -84,6 +85,9 @@ ok(leakedOk, "tools/list does not leak the server-side handler");
 const byName = Object.fromEntries(list.map((t) => [t.name, t]));
 like(byName.kukulu_next.description, /runner probe[\s\S]*halt[\s\S]*docs\/METRICS\.json/, "kukulu_next's description names the activation probe, the runner halt and docs/METRICS.json");
 ok(!/Writes only/.test(byName.kukulu_next.description), "...and no longer says it writes only the timeline");
+ok(/activateSeconds[^.;]*per runner/.test(byName.kukulu_status.description) && !/last runner activation/.test(byName.kukulu_status.description), "kukulu_status's description says activateSeconds is a per-runner total, not the last wait");
+ok(/partition is invalid, it also writes a record/.test(byName.kukulu_next.description), "kukulu_next's description gives the wave record a verb");
+ok(!readFileSync(new URL("../docs/mcp-tools.md", import.meta.url), "utf8").includes("writes only the stage timeline"), "docs/mcp-tools.md's overview no longer says kukulu_next writes only the stage timeline");
 like(byName.kukulu_status.description, /counters[\s\S]*harness[\s\S]*activateSeconds/, "kukulu_status's description names counters, harness and activateSeconds");
 like(byName.kukulu_pr_finalize.description, /chore: flight metrics/, "kukulu_pr_finalize's description names the chore: flight metrics commit");
 eq(JSON.stringify(byName.kukulu_mutate.inputSchema.properties.filter.type), JSON.stringify(["string", "array"]), "kukulu_mutate's filter takes a string or a list");
