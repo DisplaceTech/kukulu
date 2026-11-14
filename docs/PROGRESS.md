@@ -5,7 +5,7 @@ Started: 2026-11-14T04:52:50.030Z
 
 ## Tasks
 
-- [ ] P0-01 The usage record's contract, mcp/metrics.mjs and the metrics suite
+- [x] P0-01 The usage record's contract, mcp/metrics.mjs and the metrics suite
 - [ ] P0-02 usageFromClaudeCode replaces usageOf, and the chain's usage entry carries the record
 - [ ] P0-03 General-mode usage in .kukulu/metrics/usage.jsonl, excluded per clone
 - [ ] P0-04 The logger on Stop, and the controller's usage record
@@ -41,3 +41,7 @@ Started: 2026-11-14T04:52:50.030Z
 ## Log
 
 (one entry per task, appended by implement)
+
+### P0-01 — 87d7cab
+
+Added mcp/metrics.mjs (METRICS_VERSION, USAGE_ROLES, USAGE_KEYS, validateUsageRecord), test/metrics.mjs (21 assertions), registered metrics suite (sixteen suites in README/CONTRIBUTING/plugin test), docs/metrics.md, CHANGELOG Unreleased. Note: docs links test needs new docs files tracked (git add before running plugin suite). harness eq uses Object.is, so compare arrays via JSON.stringify.
