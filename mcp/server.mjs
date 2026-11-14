@@ -4829,7 +4829,7 @@ function summaryCommit({ content } = {}) {
  * the last record when it is a `start`. A new stage closes it and opens another; `done` and `halt` close it;
  * the same stage and round again writes nothing.
  */
-function recordTimeline(res, activation = null) {
+function recordTimeline(res, activation = null, afterReset = () => {}) {
   const st = loadState();
   const timeline = Array.isArray(st.timeline) ? st.timeline : [];
   // An activate record is not a span edge: the open span is the last start or end.
@@ -4857,6 +4857,8 @@ function recordTimeline(res, activation = null) {
       // no directory, or a file that will not go: the next flight's records overwrite or append regardless
     }
   }
+  // Counting waits until the directory is emptied, or a flight's first record would delete its own count.
+  afterReset();
   const crPaths = cleanroomPaths(st);
   // The metrics file is written when a flight ends or halts and this call wrote a record (SPEC C-03). A path that is
   // a directory cannot be snapshotted, so it is left out and reported instead.
@@ -5011,12 +5013,13 @@ function next() {
       if (a.error) {
         // The stage does not start: the answer is the halt, shaped as nextDecision's own halts are.
         res = nextDecision(reason);
-        countersNote = bumpCounter("activateFailures");
       }
       res.activation = shown;
     }
   }
-  const out = recordTimeline(res, activation);
+  const out = recordTimeline(res, activation, () => {
+    if (activation?.error) countersNote = bumpCounter("activateFailures");
+  });
   return countersNote ? { ...out, countersNote } : out;
 }
 

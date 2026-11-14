@@ -1647,6 +1647,21 @@ const OLD_LAYOUT = /pre-0\.6\.0 Foundry layout, which 0\.7\.0 no longer reads/;
     }, { env });
   }
   {
+    const probe = mkFakeProbe();
+    probe.answers([{ ok: false, status: 503, ms: 40, error: "HTTP 503: loading" }]);
+    const cfgPath = writeGlobalConfig(mkDir(), { runners: { spark: { endpoint: "http://h:1", locality: "local", match: ["spark/"], activate: "warm" } }, roles: { implementer: { model: "spark/qwen38-27b" } } });
+    const repo = plannedRepo();
+    const env = { KUKULU_CONFIG: cfgPath, KUKULU_RUNNER_PROBE: probe.script };
+    await withServer(repo, ({ call }) => call("kukulu_agents_sync"), { env });
+    await withServer(repo, async ({ call }) => {
+      const n = await call("kukulu_next");
+      eq(n.stage, "halt", "the first timeline record is a failed activation");
+      const c = hasFile(repo, ".kukulu/metrics/counters.json") ? JSON.parse(readFile(repo, ".kukulu/metrics/counters.json")) : null;
+      eq(c?.activateFailures + "|" + (await call("kukulu_status")).counters?.activateFailures, "1|1", "a failed activation on a flight's first timeline record counts activateFailures 1");
+      eq(metricsOf(repo).friction.activateFailures, 1, "...and its METRICS.json has friction.activateFailures 1");
+    }, { env });
+  }
+  {
     // kukulu_flight_archive moves docs/METRICS.json
     const repo = plannedRepo({ config: { flight: "w1-share" } });
     git(repo, ["checkout", "-q", "-b", "build/2026-11-14"]);
