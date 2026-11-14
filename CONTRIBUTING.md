@@ -121,7 +121,7 @@ Flight feedback is how a real flight's friction reaches the next release. During
 
 Three workflows, all of which must be green:
 
-- **ci**: the suite on Node 22, 24 and 26; again on macOS; again with the GitHub CLI removed, since `kukulu_run_finish` treats `gh` as optional. EOL Node lines are not tested and not supported; the floor in `package.json` moves up as they age out.
+- **ci**: the suite on Node 22, 24 and 26; again on macOS, but only as a preflight on a PR that is ready for review and touches plugin code (or on a manual dispatch), since macOS minutes are expensive; again with the GitHub CLI removed, since `kukulu_run_finish` treats `gh` as optional. EOL Node lines are not tested and not supported; the floor in `package.json` moves up as they age out.
 - **lint**: `pre-commit` (yamllint, shellcheck, markdownlint, gitleaks, JSON and whitespace hygiene, plus `scripts/lint.sh`), `actionlint` over the workflows themselves, and a Mermaid parse of every diagram in the docs.
 - **secret-scan**: gitleaks on every push and PR, and over the whole history weekly.
 

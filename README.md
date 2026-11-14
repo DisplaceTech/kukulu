@@ -322,7 +322,7 @@ npm test -- guard protocol     # one or more suites by name
 KEEP_REPO=1 npm test -- drive  # keep the temp repos to poke at afterwards
 ```
 
-Sixteen suites, about 4,000 assertions. They cover the plugin manifests and documentation links, the JSON-RPC transport, the `kukulu_next` decision table, the implement-stage tools, the review and summary tools, per-role routing (config merge, `kukulu_agents_sync`, `kukulu_config_show`), `docs/kukulu.json` constraints and their fixture self-tests, `kukulu_feedback_log` and the feedback policy, parallel streams (waves, partition validation, worktrees, merge-back), the guard hook, and serial and parallel end-to-end flights driven over real stdio against a real git repo. CI runs all of it on Node 22, 24 and 26, again on macOS, and again on a machine with no GitHub CLI installed.
+Sixteen suites, about 4,000 assertions. They cover the plugin manifests and documentation links, the JSON-RPC transport, the `kukulu_next` decision table, the implement-stage tools, the review and summary tools, per-role routing (config merge, `kukulu_agents_sync`, `kukulu_config_show`), `docs/kukulu.json` constraints and their fixture self-tests, `kukulu_feedback_log` and the feedback policy, parallel streams (waves, partition validation, worktrees, merge-back), the guard hook, and serial and parallel end-to-end flights driven over real stdio against a real git repo. CI runs all of it on Node 22, 24 and 26, again on macOS before a code PR merges, and again on a machine with no GitHub CLI installed.
 
 ## Contributing
 

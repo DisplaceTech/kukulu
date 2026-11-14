@@ -7,6 +7,8 @@ on:
   push:
     branches: [main]
   pull_request:
+    # ready_for_review starts the macOS preflight when a draft is marked ready.
+    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
 
 permissions:
@@ -64,8 +66,50 @@ jobs:
       - name: Test suite
         run: npm test
 
+  # macOS minutes cost ten times Linux ones, and the Linux jobs above already
+  # run the whole suite on every push. macOS is a preflight: it runs on a PR
+  # that is ready for review (a flight's PR becomes ready at kukulu_pr_finalize)
+  # and that touches plugin code, or on a manual dispatch. A skipped job still
+  # satisfies the required "test (macos)" check, so a site-only PR can merge.
+  changes:
+    name: macos preflight needed?
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      run: ${{ steps.decide.outputs.run }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - id: decide
+        env:
+          EVENT: ${{ github.event_name }}
+          DRAFT: ${{ github.event.pull_request.draft }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ "$EVENT" = workflow_dispatch ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          if [ "$EVENT" != pull_request ] || [ "$DRAFT" = true ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          # Plugin code is everything the BSD-userland run can tell apart from
+          # Linux; docs, the site and its inputs cannot.
+          if git diff --name-only "$BASE...$HEAD" |
+            grep -Eq '^(mcp|scripts|hooks|test|templates|agents|skills|\.claude-plugin)/|^(package\.json|\.mcp\.json|\.github/workflows/ci\.yml)$'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
   macos:
     name: test (macos)
+    needs: changes
+    # Fail closed: if the decision job breaks, run macOS rather than let a
+    # skip satisfy the required check.
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.run == 'true') }}
     runs-on: macos-latest
     # The macOS runner takes about twice as long as Linux; 0.9.0 pushed it past 15.
     timeout-minutes: 30
