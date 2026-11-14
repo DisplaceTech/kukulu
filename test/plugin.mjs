@@ -139,6 +139,12 @@ eq(hooks.hooks.SubagentStop[0].matcher, "^(kukulu:implementer|kukulu-implementer
   eq(sub[0].hooks.map((h) => h.command).join(), `"${"$"}{CLAUDE_PLUGIN_ROOT}"/scripts/implement-guard.mjs`, "...and the implement guard stays first");
 }
 ok(!hooks.hooks.Stop[0].matcher, "Stop carries no matcher — a Stop event has no agent to match against");
+{
+  const stopHooks = hooks.hooks.Stop;
+  eq(stopHooks.length, 2, "Stop has two entries");
+  eq(stopHooks[1].hooks.map((h) => h.command).join(), `"${"$"}{CLAUDE_PLUGIN_ROOT}"/scripts/cleanroom-log.mjs`, "hooks.json runs the clean-room logger on Stop after the implement guard");
+  ok(!stopHooks[1].matcher, "...with no matcher");
+}
 
 // ---------------------------------------------------------------- agents and skills
 

@@ -4,6 +4,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { finish, ok, eq, like, ROOT, mkDir, cleanroomRepo, plannedRepo, runHook, setState } from "./harness.mjs";
+import { rolesUsage } from "../mcp/cleanroom.mjs";
 import { METRICS_VERSION, USAGE_KEYS, validateUsageRecord } from "../mcp/metrics.mjs";
 
 const example = () => ({
@@ -158,6 +159,42 @@ const withTranscript = (text) => {
   stop(cr);
   eq(fs.existsSync(path.join(cr, ".kukulu", "metrics", "usage.jsonl")), false, "clean-room mode writes no usage.jsonl line");
   eq(logOf(cr).filter((e) => e.kind === "usage").length, 1, "...and the chain has the entry");
+}
+
+// ---------------------------------------------------------------- the controller on Stop (P0-04)
+
+{
+  const env = (repo) => ({ CLAUDE_PROJECT_DIR: repo, CLAUDE_PLUGIN_ROOT: ROOT, HOME: mkDir("kukulu-home-") });
+  const stopHook = (repo, extra = {}) => runHook(LOGGER, { hook_event_name: "Stop", transcript_path: FULL, session_id: "s-c", cwd: repo, ...extra }, env(repo));
+  const lines = (repo) => (fs.existsSync(path.join(repo, ".kukulu", "metrics", "usage.jsonl")) ? fs.readFileSync(path.join(repo, ".kukulu", "metrics", "usage.jsonl"), "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)) : []);
+  const repo = plannedRepo();
+  setState(repo, { round: 1, timeline: [{ event: "start", stage: "review", round: 1 }] });
+  const r = stopHook(repo);
+  eq(r.status + "|" + r.stdout + r.stderr, "0|", "Stop exits 0 silently in general mode");
+  const want = {
+    v: 1, harness: "claude-code", session: "s-c", agent: null, role: "controller", stage: "review", round: 1,
+    models: {
+      "m-one": { requests: 2, input: 300, output: 40, cacheRead: 1000, cacheWrite: 50 },
+      "<synthetic>": { requests: 1, input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      "m-two": { requests: 1, input: 10, output: 5, cacheRead: 5, cacheWrite: 0 },
+    },
+    first: "2026-11-14T10:00:04.000Z", last: "2026-11-14T10:00:20.000Z", activeMs: 18000, toolCalls: 3, toolErrors: 1, apiErrors: 1, cost: null,
+  };
+  eq(JSON.stringify(lines(repo)[0]), JSON.stringify(want), "Stop appends a controller record in general mode");
+  eq(JSON.stringify(validateUsageRecord(lines(repo)[0])), "[]", "...and it is valid");
+  ok(!("m-side" in lines(repo)[0].models), "a controller record skips sidechain rows");
+  stopHook(repo);
+  eq(lines(repo).length, 2, "two Stops of one session append two cumulative records");
+  const plain = mkDir("kukulu-plain-");
+  const quiet = stopHook(plain);
+  eq(quiet.status + "|" + quiet.stdout + quiet.stderr + "|" + fs.existsSync(path.join(plain, ".kukulu")), "0||false", "Stop without docs/kukulu.json is silent");
+  const cr = stopRepo();
+  runHook(LOGGER, { hook_event_name: "Stop", transcript_path: FULL, session_id: "s-c", cwd: cr }, env(cr));
+  const entry = logOf(cr).filter((e) => e.kind === "usage").at(-1);
+  eq(entry.role + "|" + entry.data.role, "session|controller", "Stop in clean-room mode appends a usage entry with role session and data.role controller");
+  eq(fs.existsSync(path.join(cr, ".kukulu", "metrics", "usage.jsonl")), false, "...and writes no usage.jsonl");
+  const roles = rolesUsage(logOf(cr));
+  eq(Object.values(roles).reduce((t, v) => t + v.usage.requests, 0), 0, "rolesUsage does not count the controller's entry");
 }
 
 finish();

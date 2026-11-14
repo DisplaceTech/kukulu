@@ -1271,6 +1271,12 @@ const gateCheck = (reason) => (reason.match(/^clean-room gate failed: ([\w-]+):/
     j.hooks.SubagentStop = j.hooks.SubagentStop.filter((e) => !e.hooks.some((h) => h.command.includes("cleanroom-log.mjs")));
     fs.writeFileSync(file, JSON.stringify(j, null, 2));
   }, { before: true, reason: /hooks\/hooks\.json no longer registers cleanroom-log\.mjs on SubagentStop/ });
+  await edited("the gate requires the logger on Stop", "guard", (p) => {
+    const file = path.join(p, "hooks", "hooks.json");
+    const j = JSON.parse(fs.readFileSync(file, "utf8"));
+    j.hooks.Stop = j.hooks.Stop.filter((e) => !e.hooks.some((h) => h.command.includes("cleanroom-log.mjs")));
+    fs.writeFileSync(file, JSON.stringify(j, null, 2));
+  }, { before: true, reason: /hooks\/hooks\.json no longer registers cleanroom-log\.mjs on Stop/ });
   await edited("a failing self-test halts naming self-test", "self-test", (p) => {
     const file = path.join(p, "test", "fixtures", "guard-cases.json");
     const cases = JSON.parse(fs.readFileSync(file, "utf8"));
@@ -1596,6 +1602,9 @@ const gateCheck = (reason) => (reason.match(/^clean-room gate failed: ([\w-]+):/
   const bare = time(() => spawnSync(process.execPath, ["-e", "0"]));
   const fast = time(() => stop(general));
   ok(fast - bare < 50, `the SubagentStop hook's fast path costs under 50 ms beyond Node's own startup (${(fast - bare).toFixed(1)} ms)`);
+  const stopEvent = () => runHook(LOGGER, { hook_event_name: "Stop", transcript_path: TRANSCRIPT, session_id: "s-7", cwd: general }, { CLAUDE_PROJECT_DIR: general, CLAUDE_PLUGIN_ROOT: ROOT, HOME: mkDir("kukulu-home-") });
+  const stopFast = time(stopEvent);
+  ok(stopFast - bare < 50, `the Stop hook's general-mode path costs under 50 ms beyond Node's own startup (${(stopFast - bare).toFixed(1)} ms)`);
   const full = time(() => stop(repo));
   ok(full - bare < 50, `...and so does the SubagentStop hook with a policy and the fixture transcript (${(full - bare).toFixed(1)} ms)`);
 }

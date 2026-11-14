@@ -42,7 +42,7 @@ if (!fs.existsSync(policyFile(root))) {
   // General mode (SPEC B-02): a role agent's usage goes to .kukulu/metrics/usage.jsonl. Every other event, and every
   // project that is not a Kūkulu project, leaves here at once; the log socket means a sandbox, where the controller owns the files.
   try {
-    if (input?.hook_event_name === "SubagentStop" && fs.existsSync(path.join(root, "docs", "kukulu.json")) && !process.env.KUKULU_LOG_SOCKET) {
+    if ((input?.hook_event_name === "SubagentStop" || input?.hook_event_name === "Stop") && fs.existsSync(path.join(root, "docs", "kukulu.json")) && !process.env.KUKULU_LOG_SOCKET) {
       const record = usageFromClaudeCode(input);
       if (record.role !== null) {
         const dir = path.join(root, ".kukulu", "metrics");
@@ -107,22 +107,25 @@ function stageAndRound() {
  * transcript is the six-key error record, never a failure.
  */
 function usageFromClaudeCode(hookInput) {
-  const type = typeof hookInput.agent_type === "string" ? hookInput.agent_type : null;
+  // A Stop is the controller session's own: its role is fixed, it has no agent type, and the subagents' sidechain rows
+  // in its transcript are dropped below so its record never holds their requests.
+  const controller = hookInput.hook_event_name === "Stop";
+  const type = !controller && typeof hookInput.agent_type === "string" ? hookInput.agent_type : null;
   const head = {
     v: 1,
     harness: "claude-code",
     session: typeof hookInput.session_id === "string" && hookInput.session_id ? hookInput.session_id : null,
     agent: type && type.length ? type : null,
-    role: type?.match(/^kukulu[-:](planner|implementer|reviewer|summarizer)$/)?.[1] ?? null,
+    role: controller ? "controller" : (type?.match(/^kukulu[-:](planner|implementer|reviewer|summarizer)$/)?.[1] ?? null),
   };
-  const file = hookInput.agent_transcript_path || hookInput.transcript_path;
+  const file = controller ? hookInput.transcript_path : hookInput.agent_transcript_path || hookInput.transcript_path;
   try {
     const rows = [];
     for (const line of fs.readFileSync(file, "utf8").split("\n")) {
       if (!line.trim()) continue;
       try {
         const row = JSON.parse(line);
-        if (row && typeof row === "object" && !Array.isArray(row)) rows.push(row);
+        if (row && typeof row === "object" && !Array.isArray(row) && !(controller && row.isSidechain === true)) rows.push(row);
       } catch {
         continue;
       }
@@ -205,6 +208,10 @@ try {
     });
   }
   if (cr.loggingActive(ctx, logPath) && input.hook_event_name === "SubagentStop") {
+    await record(logPath, { kind: "usage", ...cr.entryFields(input, ctx), tool: null, decision: null, target: null, data: usageFromClaudeCode(input) });
+  }
+  if (cr.loggingActive(ctx, logPath) && input.hook_event_name === "Stop") {
+    // The controller's cumulative record; its entry role is "session", so no per-role recount counts it.
     await record(logPath, { kind: "usage", ...cr.entryFields(input, ctx), tool: null, decision: null, target: null, data: usageFromClaudeCode(input) });
   }
   // Any other event is not ours.

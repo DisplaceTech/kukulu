@@ -10,9 +10,11 @@ All notable changes to this plugin. Format follows
 
 - The usage record: one schema for every harness, validated by `validateUsageRecord` in `mcp/metrics.mjs` (B-01).
 - Every flight records token use per role; in general mode to `.kukulu/metrics/usage.jsonl`, excluded per clone (B-02, §5.4).
+- The controller session's usage is recorded on every `Stop` (B-03).
 
 ### Changed
 
+- `hooks/hooks.json` registers the logger on `Stop`, so a clean-room flight started on 0.8.x cannot continue on 0.9.0 (gate check 3) (B-03).
 - The clean-room chain's `usage` entry carries the full usage record (B-01, B-04).
 
 ## [0.8.1] — 2026-11-13

@@ -54,3 +54,13 @@ An `assistant` row with `message.usage` is a request, and each `requestId` count
 ## Where usage is recorded
 
 In general mode, every role agent's usage record is appended as one line to `.kukulu/metrics/usage.jsonl` when the agent stops. The directory is excluded per clone (in `.git/info/exclude`) and never committed, and it is emptied when the next flight's first stage starts. The hook is silent without `docs/kukulu.json` and inside the sandbox. Clean-room mode writes the chain's `usage` entry only, and never `usage.jsonl`.
+
+## The controller's record
+
+The logger also runs on `Stop`. A `Stop` record has `role: "controller"` and `agent: null`, and counts the session's own transcript with every sidechain row dropped, so it never holds a subagent's requests. Each `Stop` appends the cumulative record, and a reader keeps the last one per session. In clean-room mode the record goes into the chain as a `usage` entry with entry role `session`, which the per-role recount does not count.
+
+## Known limits
+
+- Requests the controller makes after its last `Stop` are not counted.
+- A controller record covers its whole session, including anything the session did before the flight.
+- Tokens of other subagents a stage spawns are not counted.
