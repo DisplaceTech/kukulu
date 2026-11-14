@@ -1,9 +1,9 @@
 {
-  "round": 2,
-  "implemented": true,
-  "reviewed": true,
-  "verdict": "APPROVED",
-  "summarized": true,
+  "round": 0,
+  "implemented": false,
+  "reviewed": false,
+  "verdict": null,
+  "summarized": false,
   "halted": null,
   "preexistingUntracked": [],
   "policies": {
@@ -16,146 +16,11 @@
     "mergeMethod": "merge",
     "syncBase": true
   },
-  "signing": "on",
-  "rounds": [
-    {
-      "round": 1,
-      "fixTasks": 3,
-      "unblocked": 0,
-      "verdict": "CHANGES REQUESTED",
-      "nonConverging": false,
-      "sources": {
-        "review": 3,
-        "mutation": 0,
-        "blocked": 0
-      },
-      "at": "2026-11-14T11:31:20.709Z"
-    },
-    {
-      "round": 2,
-      "fixTasks": 1,
-      "unblocked": 0,
-      "verdict": "CHANGES REQUESTED",
-      "nonConverging": false,
-      "sources": {
-        "review": 1,
-        "mutation": 0,
-        "blocked": 0
-      },
-      "at": "2026-11-14T12:27:30.507Z"
-    },
-    {
-      "round": 3,
-      "fixTasks": 0,
-      "unblocked": 0,
-      "verdict": "APPROVED",
-      "sources": {
-        "review": 0,
-        "mutation": 0,
-        "blocked": 0
-      },
-      "at": "2026-11-14T12:50:33.457Z"
-    }
-  ],
+  "signing": null,
+  "rounds": [],
   "archived": {
-    "slug": "v0-8-1",
-    "dir": "docs/flights/v0-8-1",
-    "at": "2026-11-13T20:08:33.316Z"
-  },
-  "breaking": false,
-  "timeline": [
-    {
-      "event": "start",
-      "stage": "plan",
-      "round": 0,
-      "at": "2026-11-14T04:16:38.438Z"
-    },
-    {
-      "event": "end",
-      "stage": "plan",
-      "round": 0,
-      "at": "2026-11-14T04:52:39.990Z"
-    },
-    {
-      "event": "start",
-      "stage": "implement",
-      "round": 0,
-      "at": "2026-11-14T04:52:39.990Z"
-    },
-    {
-      "event": "end",
-      "stage": "implement",
-      "round": 0,
-      "at": "2026-11-14T11:05:46.079Z"
-    },
-    {
-      "event": "start",
-      "stage": "review",
-      "round": 0,
-      "at": "2026-11-14T11:05:46.079Z"
-    },
-    {
-      "event": "end",
-      "stage": "review",
-      "round": 0,
-      "at": "2026-11-14T11:31:42.713Z"
-    },
-    {
-      "event": "start",
-      "stage": "implement",
-      "round": 1,
-      "at": "2026-11-14T11:31:42.713Z"
-    },
-    {
-      "event": "end",
-      "stage": "implement",
-      "round": 1,
-      "at": "2026-11-14T12:06:30.499Z"
-    },
-    {
-      "event": "start",
-      "stage": "review",
-      "round": 1,
-      "at": "2026-11-14T12:06:30.499Z"
-    },
-    {
-      "event": "end",
-      "stage": "review",
-      "round": 1,
-      "at": "2026-11-14T12:27:48.943Z"
-    },
-    {
-      "event": "start",
-      "stage": "implement",
-      "round": 2,
-      "at": "2026-11-14T12:27:48.943Z"
-    },
-    {
-      "event": "end",
-      "stage": "implement",
-      "round": 2,
-      "at": "2026-11-14T12:38:49.793Z"
-    },
-    {
-      "event": "start",
-      "stage": "review",
-      "round": 2,
-      "at": "2026-11-14T12:38:49.793Z"
-    },
-    {
-      "event": "end",
-      "stage": "review",
-      "round": 2,
-      "at": "2026-11-14T12:50:51.501Z"
-    },
-    {
-      "event": "start",
-      "stage": "summarize",
-      "round": 2,
-      "at": "2026-11-14T12:50:51.501Z"
-    }
-  ],
-  "cleanroom": {
-    "mode": "general"
+    "slug": "v0-9-0",
+    "dir": "docs/flights/v0-9-0",
+    "at": "2026-11-14T12:53:03.493Z"
   }
 }
