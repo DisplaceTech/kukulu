@@ -19,7 +19,7 @@ import { createHash } from "node:crypto";
 import {
   CleanroomError, loadPolicy, policyHash, appendEntry, readEntries, logPathFor, generateKey, loadKey, signCheckpoint, verifyCheckpoint, verifyChain, evaluate, lockdownActive, normalizeModel, familyOf, controlPaths, rolesUsage, lockfileEcosystem, lockfilePackages, deniedPackage, normalizePackageName, ZERO_HASH, scorePair, position, verdictOf, LIMITS, coverageGaps, knownLimitsFor, summarizeEntries, signBytes,
 } from "./cleanroom.mjs";
-import { buildMetrics } from "./metrics.mjs";
+import { buildMetrics, usageFromChain } from "./metrics.mjs";
 
 /**
  * An environment variable by its Kūkulu name. An empty value counts as unset,
@@ -3956,6 +3956,21 @@ function metricsInputs() {
       git_ = { mergeBase: mergeBase.out, commits: n.ok ? Number(n.out) : null, shortstat: stat.ok ? stat.out : null };
     }
   }
+  // A clean-room flight's usage comes only from the signed chain, never from usage.jsonl (SPEC B-05).
+  let usage = { source: "usage.jsonl", chainHead: null, records: parsed(P.usage) };
+  let genesis = null;
+  if (state.cleanroom?.genesis) {
+    genesis = { mode: "clean-room", enforcement: null };
+    usage = null;
+    try {
+      const entries = readEntries(home ? path.join(home, "cleanroom", "log.jsonl") : cleanroomLogPath());
+      usage = { source: "chain", ...usageFromChain(entries) };
+      const g = entries.find((e) => e.kind === "genesis")?.data;
+      genesis = { ...("mode" in (g ?? {}) ? { mode: g.mode } : {}), ...("enforcement" in (g ?? {}) ? { enforcement: g.enforcement } : {}) };
+    } catch {
+      // an unreadable log is no usage, and a genesis that says nothing more
+    }
+  }
   return {
     plugin: VERSION,
     flight: config?.flight ?? (home ? live.archived.slug : null),
@@ -3963,12 +3978,12 @@ function metricsInputs() {
     state,
     caps: config ? { maxRounds: config.maxRounds, maxRoundsHard: config.maxRoundsHard } : null,
     routing,
-    usage: state.cleanroom?.genesis ? null : { source: "usage.jsonl", chainHead: null, records: parsed(P.usage) },
+    usage,
     counters: readCounters(),
     feedback: parsed(where(P.feedback, "feedback.jsonl")),
     tasks,
     git: git_,
-    genesis: null,
+    genesis,
     now: new Date().toISOString(),
   };
 }

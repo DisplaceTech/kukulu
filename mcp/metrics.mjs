@@ -135,6 +135,35 @@ function treeOf(git) {
   };
 }
 
+/**
+ * Usage records from verified chain entries (SPEC B-05): one per `usage` entry of a role agent, and the controller's
+ * (entry role `session`, `data.role` controller). An entry written by 0.8.x, whose data is `{ models, first, last, cost }`,
+ * still counts, with the fields it lacks `null`. `chainHead` is the last entry's hash.
+ */
+export function usageFromChain(entries) {
+  const list = Array.isArray(entries) ? entries : [];
+  const records = [];
+  for (const e of list) {
+    if (!isObj(e) || e.kind !== "usage") continue;
+    const named = typeof e.role === "string" ? /^kukulu[-:](planner|implementer|reviewer|summarizer)$/.exec(e.role) : null;
+    const data = isObj(e.data) ? e.data : {};
+    let role;
+    let agent = null;
+    if (named) {
+      role = named[1];
+      agent = e.role;
+    } else if (e.role === "session" && data.role === "controller") role = "controller";
+    else continue;
+    const base = { v: METRICS_VERSION, harness: data.harness ?? "unknown", session: e.session ?? null, agent, role };
+    if (typeof data.error === "string" && data.error) {
+      records.push({ ...base, error: data.error.split("\n")[0] });
+      continue;
+    }
+    records.push(Object.fromEntries(USAGE_KEYS.map((k) => [k, k in base ? base[k] : (data[k] ?? null)])));
+  }
+  return { records, chainHead: list.length && typeof list.at(-1)?.hash === "string" ? list.at(-1).hash : null };
+}
+
 const TOKEN_KEYS = ["requests", "input", "output", "cacheRead", "cacheWrite"];
 const PER_ROLE_NULLS = ["reported", ...TOKEN_KEYS, "activeSeconds", "outputPerActiveSecond", "toolCalls", "toolErrors", "apiErrors", "cost"];
 

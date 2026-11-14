@@ -16,6 +16,7 @@ All notable changes to this plugin. Format follows
 - The usage record: one schema for every harness, validated by `validateUsageRecord` in `mcp/metrics.mjs` (B-01).
 - `buildMetrics` in `mcp/metrics.mjs` builds the flight's outcome, wall time, rounds, tasks, friction and tree from plain data (C-01).
 - `kukulu_metrics` returns the flight's metrics object, computed now and read-only (C-01).
+- A clean-room flight's metrics read usage only from the signed chain and record `usage.source` and `chainHead` (B-05).
 - Per-role token use, model wait time and output per active second in the metrics object, with a role that has no record reported as missing, never zero (C-01).
 - Every flight records token use per role; in general mode to `.kukulu/metrics/usage.jsonl`, excluded per clone (B-02, §5.4).
 - `.kukulu/metrics/counters.json` and `kukulu_status.counters`: verify runs, verify failures and reopened tasks (C-02).

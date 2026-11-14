@@ -53,7 +53,9 @@ An `assistant` row with `message.usage` is a request, and each `requestId` count
 
 ## Where usage is recorded
 
-In general mode, every role agent's usage record is appended as one line to `.kukulu/metrics/usage.jsonl` when the agent stops. The directory is excluded per clone (in `.git/info/exclude`) and never committed, and it is emptied when the next flight's first stage starts. The hook is silent without `docs/kukulu.json` and inside the sandbox. Clean-room mode writes the chain's `usage` entry only, and never `usage.jsonl`.
+In general mode, every role agent's usage record is appended as one line to `.kukulu/metrics/usage.jsonl` when the agent stops. The directory is excluded per clone (in `.git/info/exclude`) and never committed, and it is emptied when the next flight's first stage starts. The hook is silent without `docs/kukulu.json` and inside the sandbox.
+
+Clean-room mode writes the chain's `usage` entry only, and never `usage.jsonl`. `kukulu_metrics` reads the two modes from different places: a general-mode flight from `usage.jsonl`, and a clean-room flight only from the signed chain (`usage.source` is `chain`), even when a `usage.jsonl` is present. `usage.chainHead` is the hash of the chain's last entry, so anyone holding the attestation bundle can recompute the per-role sums from its log and check them against the metrics. After an archive the chain is read from the archived flight's `cleanroom/log.jsonl`.
 
 ## The controller's record
 

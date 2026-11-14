@@ -3,9 +3,9 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { finish, ok, eq, like, ROOT, mkDir, mkRepo, cleanroomRepo, plannedRepo, runHook, setState, withServer, writeFile, readFile, hasFile, markTasks, git } from "./harness.mjs";
-import { rolesUsage } from "../mcp/cleanroom.mjs";
-import { METRICS_VERSION, USAGE_KEYS, validateUsageRecord, buildMetrics } from "../mcp/metrics.mjs";
+import { finish, ok, eq, like, ROOT, mkDir, mkRepo, cleanroomRepo, plannedRepo, runHook, setState, withServer, writeFile, readFile, hasFile, markTasks, git, buildBundle } from "./harness.mjs";
+import { rolesUsage, appendEntry, readEntries } from "../mcp/cleanroom.mjs";
+import { METRICS_VERSION, USAGE_KEYS, validateUsageRecord, buildMetrics, usageFromChain } from "../mcp/metrics.mjs";
 
 const json = (x) => JSON.stringify(x);
 const example = () => ({
@@ -391,6 +391,78 @@ const withTranscript = (text) => {
     eq(next.stage, "plan", "the next flight's first stage starts");
     const live = await call("kukulu_metrics");
     eq(json([live.flight, live.outcome.caps, live.tasks.total, live.spec.title]), '[null,null,null,"Next - Specification"]', "once the next flight's first stage has started, the live flight is read again");
+  });
+}
+
+// ---------------------------------------------------------------- usage from the chain (P2-07)
+
+{
+  const m = (requests, input, output, cacheRead = 0, cacheWrite = 0) => ({ requests, input, output, cacheRead, cacheWrite });
+  const entry = (role, data, extra = {}) => ({ kind: "usage", role, session: "s-1", stage: "implement", tool: null, decision: null, hash: "h".repeat(64), data, ...extra });
+  const full = (role, models) => ({ v: 1, harness: "claude-code", session: "s-1", agent: role === "controller" ? null : `kukulu-${role}`, role, stage: "implement", round: 0, models, first: "2026-11-14T10:00:00.000Z", last: "2026-11-14T10:10:00.000Z", activeMs: 1000, toolCalls: 1, toolErrors: 0, apiErrors: 0, cost: 0.5 });
+  const got = usageFromChain([
+    entry("kukulu-implementer", full("implementer", { a: m(1, 2, 3) })),
+    entry("kukulu:reviewer", full("reviewer", { a: m(1, 2, 3) })),
+    entry("session", full("controller", { a: m(1, 2, 3) })),
+    entry("session", { models: { a: m(1, 1, 1) } }),
+    entry("kukulu-planner", { error: "ENOENT: no such file\nmore" }),
+    entry("general-purpose", full("implementer", { a: m(9, 9, 9) })),
+    { kind: "allowed", role: "kukulu-implementer", hash: "x".repeat(64) },
+  ]);
+  eq(json(got.records.map((r) => [r.role, r.agent])), '[["implementer","kukulu-implementer"],["reviewer","kukulu:reviewer"],["controller",null],["planner","kukulu-planner"]]', "usageFromChain maps role agents and the controller and skips other entries");
+  eq(json(got.records[3]), '{"v":1,"harness":"unknown","session":"s-1","agent":"kukulu-planner","role":"planner","error":"ENOENT: no such file"}', "...an entry holding an error becomes the error form");
+  const old = usageFromChain([entry("kukulu-implementer", { models: { a: m(2, 10, 5) }, first: "2026-01-01T00:00:00.000Z", last: "2026-01-01T00:01:00.000Z", cost: 0.5 })]);
+  eq(json(Object.keys(old.records[0])) + "|" + validateUsageRecord(old.records[0]).length, json(USAGE_KEYS) + "|0", "a 0.8.x usage entry still counts, with the missing fields null");
+  eq(json([old.records[0].activeMs, old.records[0].stage, old.records[0].harness, old.records[0].session]), '[null,null,"unknown","s-1"]', "...");
+  eq(usageFromChain([entry("kukulu-implementer", {}, { hash: "1".repeat(64) }), entry("kukulu-reviewer", {}, { hash: "2".repeat(64) })]).chainHead, "2".repeat(64), "chainHead is the last entry's hash");
+  eq(usageFromChain([]).chainHead + "|" + usageFromChain(undefined).records.length, "null|0", "...and null for no entries");
+
+  // the per-role sums equal the verifier's recount of the same log
+  const ROLES4 = ["planner", "implementer", "reviewer", "summarizer"];
+  const routed = Object.fromEntries(ROLES4.map((role) => [role, { model: "opus", runner: "anthropic", endpoint: "https://api.anthropic.com", locality: "remote", identity: { source: "vendor-asserted" }, family: "claude" }]));
+  const old8 = (log, role, models, cost) => appendEntry(log, { kind: "usage", stage: "implement", role, tool: null, decision: null, data: { models, first: "2026-01-01T00:00:00.000Z", last: "2026-01-01T00:01:00.000Z", cost } });
+  const b = buildBundle(path.join(mkDir("kukulu-bundle-"), "bundle"), { roles: routed, extra: (log) => {
+    old8(log, "kukulu-implementer", { opus: m(3, 100, 40, 10, 5) }, 0.5);
+    old8(log, "kukulu:implementer", { opus: m(1, 20, 10) }, 0.25);
+    old8(log, "kukulu-reviewer", { opus: m(2, 7, 3) }, 0.1);
+    appendEntry(log, { kind: "usage", stage: "review", role: "session", tool: null, decision: null, data: { ...full("controller", { opus: m(50, 9999, 999) }) } });
+  } });
+  const chain = usageFromChain(b.entries);
+  const built = buildMetrics({ usage: { source: "chain", ...chain } });
+  const recount = rolesUsage(b.entries);
+  const sums = (u) => ["requests", "input", "output", "cacheRead", "cacheWrite"].map((k) => u[k]);
+  eq(json(ROLES4.map((r) => (built.roles[r].usage === null ? null : sums(built.roles[r])))), json(ROLES4.map((r) => (recount[r].usage.requests === 0 ? null : sums(recount[r].usage)))), "each role's token sums equal rolesUsage's recount of the same log");
+  eq(json(["implementer", "reviewer"].map((r) => sums(built.roles[r]))), json(["implementer", "reviewer"].map((r) => sums(b.manifest.roles[r].usage))), "...and the manifest's roles.<role>.usage");
+  eq(built.usage.chainHead, b.entries.at(-1).hash, "usage.chainHead is the log's head");
+  eq(built.roles.controller.requests, 50, "the controller's entry is counted for the controller only");
+
+  // kukulu_metrics in clean-room mode
+  const repo = cleanroomRepo();
+  const env = { CLAUDE_PROJECT_DIR: repo, CLAUDE_PLUGIN_ROOT: ROOT, HOME: mkDir("kukulu-home-") };
+  await withServer(repo, async ({ call }) => {
+    await call("kukulu_next");
+    const stopHook = (extra) => runHook(LOGGER, { hook_event_name: "SubagentStop", agent_type: "kukulu-implementer", agent_transcript_path: FULL, session_id: "s-9", cwd: repo, ...extra }, env);
+    stopHook({});
+    stopHook({ agent_type: "kukulu-reviewer" });
+    runHook(LOGGER, { hook_event_name: "Stop", transcript_path: FULL, session_id: "s-9", cwd: repo }, env);
+    writeFile(repo, ".kukulu/metrics/usage.jsonl", JSON.stringify(full("implementer", { stray: m(99, 99, 99) })) + "\n");
+    const log = readEntries(path.join(repo, ".kukulu", "cleanroom", "log.jsonl"));
+    const metrics = await call("kukulu_metrics");
+    eq(metrics.usage.source + "|" + metrics.usage.chainHead + "|" + metrics.usage.records, `chain|${log.at(-1).hash}|3`, "kukulu_metrics in clean-room mode reports usage.source chain and the log's head");
+    ok(!("stray" in Object.fromEntries(Object.values(metrics.roles).flatMap((r) => (r.reported ?? []).map((n) => [n, 1])))), "a stray usage.jsonl is not read in clean-room mode");
+    eq(metrics.mode + "|" + metrics.enforcement, "clean-room|hook", "mode and enforcement come from the genesis entry");
+    eq(metrics.roles.implementer.requests, 5, "...with the roles summed from the chain (the fixture transcript's five requests)");
+    // after an archive the chain is read from the archived log
+    setState(repo, { summarized: true, implemented: true, reviewed: true, verdict: "APPROVED", round: 0 });
+    git(repo, ["add", "-A"]);
+    git(repo, ["commit", "-qm", "chore: summarized"]);
+    const archived = await call("kukulu_flight_archive", { slug: "cr-flight" });
+    ok(!archived.error, `the clean-room flight archives${archived.error ? ` (${archived.error})` : ""}`);
+    ok(hasFile(repo, "docs/flights/cr-flight/cleanroom/log.jsonl") && !hasFile(repo, ".kukulu/cleanroom/log.jsonl"), "...moving its log");
+    const after = await call("kukulu_metrics");
+    const archivedLog = readEntries(path.join(repo, "docs", "flights", "cr-flight", "cleanroom", "log.jsonl"));
+    eq(after.usage.source + "|" + after.usage.records + "|" + after.usage.chainHead, `chain|3|${archivedLog.at(-1).hash}`, "after an archive the chain is read from the archived log (its head includes the archive checkpoint)");
+    eq(after.mode + "|" + after.flight, "clean-room|cr-flight", "...with the archived flight's mode");
   });
 }
 
