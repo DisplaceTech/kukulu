@@ -16,7 +16,7 @@ Started: 2026-11-14T04:52:50.030Z
 - [x] P1-03 kukulu_next warms the stage's runner and records the wait
 - [x] P1-04 A runner that does not serve its model halts the flight
 - [x] P1-05 Activation in the chain, and the runner-drift notes
-- [ ] P1-06 go-flight prints the activation line
+- [x] P1-06 go-flight prints the activation line
 - [ ] P1-07 Measure what the probe costs and how it fails
 - [ ] P1-08 Phase 1 end: push and record the manual checks
 - [ ] P2-01 Counters for verify runs, verify failures and reopened tasks
@@ -85,3 +85,7 @@ Failed warm probe -> follow-up --models probe (RUNNER_LIST_TIMEOUT_MS=10000) -> 
 ### P1-05 — 82edb36
 
 recordTimeline: start chain entry gains data.activate (ok activation only); drift 1 and 2 feedback entries (runner-drift, controller, auto) inside the timeline withRollback, feedback joins paths. Tests: state 373 (incl. real probe over node:http), cleanroom 1508, attest 315. Interpretation: drift 2 uses most recent ok activate of same stage.
+
+### P1-06 — 523d090
+
+go-flight step 1 prints the activation line; plugin test 606; operations.md mentions it. Interpretation: MD038 forbids a leading space in code span, so wording is 'a space and `(reports <reported>)`'. Final pre-commit and plugin suite green; full verify ran green except that markdownlint finding, fixed after.
