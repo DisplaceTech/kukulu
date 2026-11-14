@@ -9,7 +9,7 @@ Started: 2026-11-14T04:52:50.030Z
 - [x] P0-02 usageFromClaudeCode replaces usageOf, and the chain's usage entry carries the record
 - [x] P0-03 General-mode usage in .kukulu/metrics/usage.jsonl, excluded per clone
 - [x] P0-04 The logger on Stop, and the controller's usage record
-- [ ] P0-05 Usage entries under the sandbox and in the verifier
+- [x] P0-05 Usage entries under the sandbox and in the verifier
 - [ ] P0-06 Phase 0 end: push and record the manual check
 - [ ] P1-01 scripts/runner-probe.mjs
 - [ ] P1-02 Runner keys activate, activateTimeoutMs, servedAs and tokenEnv, and the served id
@@ -57,3 +57,7 @@ General-mode branch in scripts/cleanroom-log.mjs (before the policy exit). Serve
 ### P0-04 — 6d4982c
 
 Logger registered on Stop (hooks.json second entry); usageFromClaudeCode handles Stop (role controller, transcript_path, sidechain rows dropped); clean-room Stop appends usage entry role session; gate check 3 requires Stop registration. Tests: metrics 57, plugin 604, cleanroom 1502 (incl. Stop 50 ms budget). Full verify green.
+
+### P0-05 — 81302ea
+
+Tests only: sandbox (231) shows SubagentStop/Stop usage records cross the log socket with fifteen fields + source box, and no .kukulu/metrics written under KUKULU_LOG_SOCKET; attest (314) shows full-record usage entries verify, check 12 recount unchanged, controller entry (role session) changes nothing. No behavior change needed. docs/sandbox.md sentence added.
