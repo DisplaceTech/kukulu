@@ -6,7 +6,7 @@ Started: 2026-11-14T04:52:50.030Z
 ## Tasks
 
 - [x] P0-01 The usage record's contract, mcp/metrics.mjs and the metrics suite
-- [ ] P0-02 usageFromClaudeCode replaces usageOf, and the chain's usage entry carries the record
+- [x] P0-02 usageFromClaudeCode replaces usageOf, and the chain's usage entry carries the record
 - [ ] P0-03 General-mode usage in .kukulu/metrics/usage.jsonl, excluded per clone
 - [ ] P0-04 The logger on Stop, and the controller's usage record
 - [ ] P0-05 Usage entries under the sandbox and in the verifier
@@ -45,3 +45,7 @@ Started: 2026-11-14T04:52:50.030Z
 ### P0-01 — 87d7cab
 
 Added mcp/metrics.mjs (METRICS_VERSION, USAGE_ROLES, USAGE_KEYS, validateUsageRecord), test/metrics.mjs (21 assertions), registered metrics suite (sixteen suites in README/CONTRIBUTING/plugin test), docs/metrics.md, CHANGELOG Unreleased. Note: docs links test needs new docs files tracked (git add before running plugin suite). harness eq uses Object.is, so compare arrays via JSON.stringify.
+
+### P0-02 — 0ccc4de
+
+usageFromClaudeCode in scripts/cleanroom-log.mjs (stageAndRound helper reads state.json). Fixture agent-full.jsonl gives exact record (activeMs 17000). 35 metrics assertions; cleanroom suite unchanged green. Interpretation: 'no state file' test uses state with genesis but no round/timeline since log requires genesis. Note: running node test/cleanroom.mjs takes ~140s; run in background.
