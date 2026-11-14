@@ -33,7 +33,7 @@ Started: 2026-11-14T04:52:50.030Z
 - [x] P2-12 Phase 2 end: push and record the manual check
 - [x] P3-01 MODEL_FAMILIES gains laguna
 - [x] P3-02 Templates: a spark profile with activation, and a llama-swap example
-- [ ] P3-03 docs/local-runners.md
+- [x] P3-03 docs/local-runners.md
 - [ ] P3-04 Documentation sweep for 0.9.0
 - [ ] P3-05 CHANGELOG 0.9.0 and the version
 - [ ] P3-06 Phase 3 end: push and record the manual checks
@@ -153,3 +153,7 @@ MODEL_FAMILIES gains laguna last. Measurement: before 26 existing fixture rows a
 ### P3-02 — 0a75183
 
 template spark runner activate warm + spark profile; templates/runners/llama-swap.example.yaml (yamllint clean); routing 357, plugin 610; docs/routing.md and README layout updated.
+
+### P3-03 — 76e7ec0
+
+docs/local-runners.md with the six sections; plugin test 615 (sections, citations per variable, template/profile, routing link, no ms figure). Lesson: no-hardcoded-mcp-timeout scans test/ too, so a test must not spell the literal even to assert its absence. Interpretation: A-03's limit paragraph states only what the record shows.
