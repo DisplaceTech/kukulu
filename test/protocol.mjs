@@ -2,7 +2,7 @@
 // The server speaks newline-delimited JSON-RPC 2.0 by hand, so the framing is
 // worth testing as carefully as the tools it carries.
 
-import { finish, ok, eq, like, mkRepo, startServer } from "./harness.mjs";
+import { finish, ok, eq, like, mkRepo, startServer, plannedRepo, setState, readFile } from "./harness.mjs";
 
 const EXPECTED_TOOLS = [
   "kukulu_status",
@@ -160,5 +160,41 @@ ok((await splitReply).result, "a frame split across two writes is reassembled");
 
 await s.stop();
 eq(s.proc.exitCode, 0, "the server exits cleanly when stdin closes");
+
+// -------------------------------------------------------------- the harness's name (P2-03)
+
+{
+  const repo = plannedRepo();
+  const harnessOf = () => JSON.parse(readFile(repo, ".kukulu/state.json")).harness;
+  /** One server process that sends `info` as clientInfo (or none), makes one timeline write, and stops. */
+  const session = async (clientInfo, reopen = true) => {
+    const srv = startServer(repo);
+    try {
+      const params = { protocolVersion: "2025-06-18", capabilities: {} };
+      if (clientInfo !== undefined) params.clientInfo = clientInfo;
+      const reply = await srv.rpc("initialize", params);
+      if (reopen) setState(repo, { timeline: [{ event: "start", stage: "plan", round: 0, at: "2026-01-01T00:00:00.000Z" }] });
+      await srv.call("kukulu_next");
+      return { reply, status: await srv.call("kukulu_status") };
+    } finally {
+      await srv.stop();
+    }
+  };
+  const a = await session({ name: "claude-code", version: "9.9.9" });
+  eq(JSON.stringify(harnessOf()), '[{"name":"claude-code","version":"9.9.9"}]', "initialize's clientInfo reaches state.harness on the next timeline write");
+  eq(JSON.stringify(a.status.harness), JSON.stringify(harnessOf()), "...and kukulu_status.harness reports it");
+  await session({ name: "claude-code", version: "9.9.9" });
+  eq(harnessOf().length, 1, "the same client is recorded once");
+  await session({ name: "other-harness", version: "1.2.3" });
+  eq(harnessOf().map((h) => `${h.name}@${h.version}`).join(","), "claude-code@9.9.9,other-harness@1.2.3", "a second client is appended in first-seen order");
+  await session({ name: "no-version" });
+  eq(harnessOf().at(-1).version, null, "a clientInfo without a version records version null");
+  await session(undefined);
+  eq(JSON.stringify(harnessOf().at(-1)), '{"name":"unknown","version":null}', "a client that sends no clientInfo is recorded as unknown with version null");
+  const bare = startServer(mkRepo());
+  const reply = await bare.rpc("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "x", version: "1" } });
+  eq(JSON.stringify(Object.keys(reply.result).sort()) + "|" + reply.result.serverInfo.name, '["capabilities","protocolVersion","serverInfo"]|kukulu', "initialize's reply is unchanged");
+  await bare.stop();
+}
 
 finish();

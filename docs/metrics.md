@@ -78,3 +78,7 @@ The logger also runs on `Stop`. A `Stop` record has `role: "controller"` and `ag
 | `activateFailures` | times a runner failed to serve its model and the flight halted |
 
 A counters file that cannot be written is a `countersNote` on the tool's result and never changes the result's `ok`, a refusal or a commit.
+
+## Where the harness list comes from
+
+`state.harness` is filled from the `clientInfo` the harness sends in the MCP `initialize` request (its `name` and `version`), added by `kukulu_run_start` and by `kukulu_next`'s timeline write. A client that sends none is recorded as `unknown`. The list is never used in a condition.

@@ -1880,6 +1880,15 @@ function loadState() {
     return { ...DEFAULT_STATE };
   }
 }
+/** The harness that sent this process's `initialize` (SPEC C-04): `{ name, version }`, `unknown` until a client names itself. */
+let harnessClient = { name: "unknown", version: null };
+
+/** Add this process's harness to `st.harness` (first-seen order) unless that name and version are already listed. */
+function noteHarness(st) {
+  const list = Array.isArray(st.harness) ? st.harness : [];
+  st.harness = list.some((h) => h && h.name === harnessClient.name && h.version === harnessClient.version) ? list : [...list, { ...harnessClient }];
+}
+
 function saveState(s) {
   write(P.state, JSON.stringify(s, null, 2) + "\n");
 }
@@ -2487,6 +2496,7 @@ function status() {
   out.cleanroom = cleanroomStatus(st);
   out.timeline = Array.isArray(st.timeline) ? st.timeline : [];
   out.stageSeconds = stageSecondsOf(out.timeline);
+  out.harness = Array.isArray(st.harness) ? st.harness : [];
   out.counters = readCounters();
   out.activateSeconds = {};
   for (const r of out.timeline) {
@@ -2932,6 +2942,7 @@ function startRun({ sync = false } = {}) {
   if (st.signing.startsWith("off (probe failed")) st.signingOverride = true;
   else if (st.signing === "none") delete st.signingOverride;
   st.implemented = false; st.reviewed = false; st.verdict = null;
+  noteHarness(st);
   saveState(st);
   // Only the auto fallback is friction — an explicit "off" or an
   // unconfigured "none" is the operator's or the project's own choice
@@ -4743,6 +4754,7 @@ function recordTimeline(res, activation = null) {
   try {
     withRollback(paths, () => {
     st.timeline = [...timeline, ...records];
+    noteHarness(st);
     // A runner that did not serve its model halts the flight: not a round-cap halt, so kukulu_run_resume clears it.
     if (activation?.error) {
       st.halted = res.reason;
@@ -5787,6 +5799,9 @@ function handle(req) {
   const fail = (code, message) => id !== undefined && send({ jsonrpc: "2.0", id, error: { code, message } });
   switch (method) {
     case "initialize":
+      if (typeof params?.clientInfo?.name === "string" && params.clientInfo.name) {
+        harnessClient = { name: params.clientInfo.name, version: typeof params.clientInfo.version === "string" ? params.clientInfo.version : null };
+      }
       return reply({
         protocolVersion: params?.protocolVersion || "2025-06-18",
         capabilities: { tools: {} },
