@@ -512,7 +512,6 @@ const withTranscript = (text) => {
     ["a directory without METRICS.json", [A, tmp], /^compare-flights: .* has no METRICS\.json; pass the file, or a directory that holds one\n$/],
     ["a file that is not JSON", [A, (() => { const f = path.join(tmp, "x.json"); fs.writeFileSync(f, "{nope"); return f; })()], /^compare-flights: .*x\.json is not JSON \(/],
     ["a wrong version", [A, (() => { const f = path.join(tmp, "v2.json"); fs.writeFileSync(f, JSON.stringify({ ...a, v: 2 })); return f; })()], /^compare-flights: .*v2\.json is metrics version 2; this script reads version 1\n$/],
-    ["--trees", [A, B, "--trees", "x", "y"], /^compare-flights: --trees is not available yet\n$/],
   ]) {
     const r = run(...args);
     ok(r.status === 2 && r.stdout === "" && re.test(r.stderr), `exit 2 for ${name}: ${r.stderr.split("\n")[0]}`);
@@ -522,6 +521,59 @@ const withTranscript = (text) => {
   run(A, B);
   run(A, B, "--json");
   eq(listing(FIX), listed, "compare-flights writes no file");
+}
+
+// ---------------------------------------------------------------- compare-flights --trees (P2-11)
+
+{
+  const FIX = path.join(ROOT, "test", "fixtures", "metrics");
+  const SIM = path.join(ROOT, "test", "fixtures", "similarity");
+  const SCRIPT = path.join(ROOT, "scripts", "compare-flights.mjs");
+  const A = path.join(FIX, "a.METRICS.json");
+  const B = path.join(FIX, "b.METRICS.json");
+  const run = (...args) => spawnSync(process.execPath, [SCRIPT, ...args], { encoding: "utf8", cwd: ROOT });
+  const r = run(A, B, "--trees", path.join(SIM, "a"), path.join(SIM, "b"));
+  eq(r.status + "|" + r.stdout, "0|" + fs.readFileSync(path.join(FIX, "compare-trees.expected.txt"), "utf8"), "--trees on test/fixtures/similarity/a and b prints the exact sixth section");
+  like(r.stdout, /\nTrees\n  files +2 +2 +0\n  lines +129 +125 +-4\n/, "...with the file and line counts and their difference");
+  const self = run(A, B, "--trees", path.join(SIM, "b"), path.join(SIM, "b"));
+  ok(/ngram_jaccard@5 +1\.0000/.test(self.stdout) && /ident_jaccard +1\.0000/.test(self.stdout), "--trees scores a tree against itself at 1.0000");
+
+  // directories named .git, node_modules and target are skipped
+  const tmp = mkDir("kukulu-trees-");
+  for (const side of ["a", "b"]) fs.cpSync(path.join(SIM, side), path.join(tmp, side), { recursive: true });
+  const countsOf = (out) => /files +(\d+) +(\d+)/.exec(out).slice(1).join(",");
+  const base = countsOf(run(A, B, "--trees", path.join(tmp, "a"), path.join(tmp, "b")).stdout);
+  for (const d of [".git", "node_modules", "target"]) {
+    fs.mkdirSync(path.join(tmp, "a", d), { recursive: true });
+    fs.writeFileSync(path.join(tmp, "a", d, "skipped.rs"), "fn skipped() {}\n");
+  }
+  eq(countsOf(run(A, B, "--trees", path.join(tmp, "a"), path.join(tmp, "b")).stdout), base, "--trees skips .git, node_modules and target");
+
+  const js = JSON.parse(run(A, B, "--json", "--trees", path.join(SIM, "a"), path.join(SIM, "b")).stdout);
+  eq(json([js.trees.a, js.trees.b]) + "|" + Object.keys(js.trees.similarity).length + "|" + json(Object.keys(js.sections)), '[{"files":2,"lines":129},{"files":2,"lines":125}]|7|["outcome","wall","rounds","roles","friction"]', "--json carries trees");
+  eq(json(Object.keys(JSON.parse(run(A, B, "--json").stdout))), '["v","header","sections"]', "...and no trees without --trees");
+
+  const bad = (name, args, re) => {
+    const o = run(...args);
+    ok(o.status === 2 && o.stdout === "" && re.test(o.stderr), `exit 2 for ${name}: ${o.stderr.split("\n")[0]}`);
+  };
+  bad("a --trees path that is not a directory", [A, B, "--trees", path.join(SIM, "a", "rle.rs"), path.join(SIM, "b")], /^compare-flights: .*rle\.rs is not a directory\n$/);
+  bad("a missing --trees path", [A, B, "--trees", path.join(tmp, "nope"), path.join(SIM, "b")], /^compare-flights: .*nope is not a directory\n$/);
+  const empty = path.join(tmp, "empty");
+  fs.mkdirSync(empty);
+  fs.writeFileSync(path.join(empty, "notes.txt"), "no source\n");
+  bad("a tree with no source file", [A, B, "--trees", empty, path.join(SIM, "b")], /^compare-flights: .*empty has no file with a known source extension\n$/);
+  bad("--trees with one directory", [A, B, "--trees", path.join(SIM, "a")], /^compare-flights: --trees takes two directories\nusage: /);
+
+  // the script's language map equals the server's DEFAULT_SIMILARITY_LANGUAGES
+  const pairsIn = (file, name) => {
+    const text = fs.readFileSync(path.join(ROOT, file), "utf8");
+    const body = new RegExp(`const ${name} = \\{([^}]*)\\};`).exec(text)?.[1] ?? "";
+    return [...body.matchAll(/"(\.\w+)": "(\w+)"/g)].map((m) => `${m[1]}=${m[2]}`).sort().join(",");
+  };
+  const fromServer = pairsIn("mcp/server.mjs", "DEFAULT_SIMILARITY_LANGUAGES");
+  ok(fromServer.length > 20, "the server's language map was found");
+  eq(pairsIn("scripts/compare-flights.mjs", "TREE_LANGUAGES"), fromServer, "the script's language map equals the server's DEFAULT_SIMILARITY_LANGUAGES");
 }
 
 finish();
