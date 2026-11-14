@@ -200,7 +200,7 @@ Checkbox states in `PROGRESS.md`: `[ ]` todo · `[~]` in progress · `[x]` done 
 
 ## MCP tools
 
-The server exposes twenty-six tools.
+The server exposes twenty-seven tools.
 
 | Tool | Does |
 |---|---|
@@ -230,6 +230,7 @@ The server exposes twenty-six tools.
 | `kukulu_release` | After a human merges the flight's pull request: tag the merge commit from CHANGELOG.md's newest numbered entry, push the tag and create a GitHub release (a draft unless `publish: true`). For the flight controller, on request only |
 | `kukulu_agents_sync` | Write `.claude/agents/kukulu-<role>.md` from the merged routing config; only changed files are written |
 | `kukulu_config_show` | The merged routing config with the source of every value. Read-only |
+| `kukulu_metrics` | The flight's metrics: outcome, wall time, rounds, per-role token use, tasks, friction and the tree, computed now. Read-only |
 
 Full arguments, return shapes and failure modes: [docs/mcp-tools.md](./docs/mcp-tools.md).
 

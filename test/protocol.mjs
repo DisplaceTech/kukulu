@@ -31,6 +31,7 @@ const EXPECTED_TOOLS = [
   "kukulu_release",
   "kukulu_agents_sync",
   "kukulu_config_show",
+  "kukulu_metrics",
 ];
 
 const repo = mkRepo();

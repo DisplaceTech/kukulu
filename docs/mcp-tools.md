@@ -1,8 +1,8 @@
 # MCP tool reference
 
-Twenty-six tools, served over stdio by `mcp/server.mjs` with no dependencies. The server is launched by Claude Code from [`.mcp.json`](../.mcp.json) with `KUKULU_PROJECT_DIR` set to the project root; every path below is relative to that root.
+Twenty-seven tools, served over stdio by `mcp/server.mjs` with no dependencies. The server is launched by Claude Code from [`.mcp.json`](../.mcp.json) with `KUKULU_PROJECT_DIR` set to the project root; every path below is relative to that root.
 
-Two of them are read-only: `kukulu_status` and `kukulu_config_show`; `kukulu_next` answers from disk and writes only the stage timeline (and the wave record). The flight controller may call those three and four more. `kukulu_agents_sync` writes only the generated agent files, the MCP allow rule and a `.git/info/exclude` line, never a task or a verdict. It may call `kukulu_run_halt` itself when it cannot even spawn a stage, so the next flight sees a clean halt instead of retrying blindly. `kukulu_flight_options` applies the operator's own go-flight options to the review-loop bounds (and, with `resume`, lifts a round-cap halt). `kukulu_pr_finalize` is allowed for the human-initiated re-sign only (`resign: true`, when the operator says signing is unlocked), and `kukulu_release` only when the operator asks to release a merged flight. Everything else changes project state and belongs to a stage agent. (`kukulu_mutate` changes a source file only for the length of one call and always restores it, and a stream's tools work in that stream's own worktree.)
+Three of them are read-only: `kukulu_status`, `kukulu_config_show` and `kukulu_metrics` (which no stage agent and no skill calls); `kukulu_next` answers from disk and writes only the stage timeline (and the wave record). The flight controller may call those three and four more. `kukulu_agents_sync` writes only the generated agent files, the MCP allow rule and a `.git/info/exclude` line, never a task or a verdict. It may call `kukulu_run_halt` itself when it cannot even spawn a stage, so the next flight sees a clean halt instead of retrying blindly. `kukulu_flight_options` applies the operator's own go-flight options to the review-loop bounds (and, with `resume`, lifts a round-cap halt). `kukulu_pr_finalize` is allowed for the human-initiated re-sign only (`resign: true`, when the operator says signing is unlocked), and `kukulu_release` only when the operator asks to release a merged flight. Everything else changes project state and belongs to a stage agent. (`kukulu_mutate` changes a source file only for the length of one call and always restores it, and a stream's tools work in that stream's own worktree.)
 
 `kukulu_next`, `kukulu_status`, `kukulu_config_show` and `kukulu_agents_sync` all resolve the merged routing config (see [routing.md](./routing.md)) as part of answering, so a malformed global config, profile or project override is a refusal from any of the four. This is deliberate: a flight must not run with a half-understood routing config.
 
@@ -607,6 +607,18 @@ The merged routing config, read-only, with the source of every value.
 `agentsGenerated` is the same field `kukulu_status` returns. `agentsStale` lists roles whose generated file exists but no longer matches what `kukulu_agents_sync` would write for the current config. `permissionRule` is `"present"` when either settings file already covers the MCP allow rule, else `"missing"`. This tool writes nothing, so both are reported, not fixed; only `kukulu_agents_sync` writes.
 
 **Refuses when:** the same conditions as `kukulu_agents_sync`, with the same messages.
+
+---
+
+## `kukulu_metrics`
+
+The flight's metrics object, computed now from what is on disk. It writes nothing and makes no commit.
+
+**Arguments:** none.
+
+**Returns:** the object of [metrics.md](./metrics.md#metricsjson): `v`, `plugin`, `flight`, `spec`, `harness`, `usage`, `mode`, `enforcement`, `outcome`, `wall`, `rounds`, `roles`, `totals`, `tasks`, `friction` and `tree`. Each field is documented there with its source. A field the flight has no input for is `null`, never 0, and a role with no usage record is listed in `totals.missing`. In general mode the usage records are read from `.kukulu/metrics/usage.jsonl` (a line that does not parse is skipped). After `kukulu_flight_archive`, with no new flight started (no `docs/kukulu.json` and an empty live timeline), the state, config, feedback, task counts and spec are read from the archived flight's directory and the usage records from the live `.kukulu/metrics/`; once the next flight's first stage has started, the live flight is read again.
+
+**Refuses when:** `kukulu_status` refuses (a `PROGRESS.md` with no `## Tasks` section, a `kukulu.json` that is not valid JSON, or a malformed routing config), with the same messages.
 
 ---
 

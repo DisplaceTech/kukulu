@@ -3,10 +3,11 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { finish, ok, eq, like, ROOT, mkDir, cleanroomRepo, plannedRepo, runHook, setState } from "./harness.mjs";
+import { finish, ok, eq, like, ROOT, mkDir, mkRepo, cleanroomRepo, plannedRepo, runHook, setState, withServer, writeFile, readFile, hasFile, markTasks, git } from "./harness.mjs";
 import { rolesUsage } from "../mcp/cleanroom.mjs";
 import { METRICS_VERSION, USAGE_KEYS, validateUsageRecord, buildMetrics } from "../mcp/metrics.mjs";
 
+const json = (x) => JSON.stringify(x);
 const example = () => ({
   v: 1,
   harness: "claude-code",
@@ -315,6 +316,82 @@ const withTranscript = (text) => {
   const absent = [...paths].filter((p) => !doc.includes(`\`${p}\``));
   eq(absent.join(", "), "", "docs/metrics.md names every field of METRICS.json");
   ok(paths.size > 60, `...walked ${paths.size} paths`);
+}
+
+// ---------------------------------------------------------------- kukulu_metrics (P2-06)
+
+{
+  const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8"));
+  const usageLine = (role, extra = {}) => JSON.stringify({ v: 1, harness: "claude-code", session: `s-${role}`, agent: role === "controller" ? null : `kukulu-${role}`, role, stage: "implement", round: 0, models: { "m-x": { requests: 2, input: 10, output: 5, cacheRead: 0, cacheWrite: 0 } }, first: "2026-11-14T10:00:00.000Z", last: "2026-11-14T10:10:00.000Z", activeMs: 1000, toolCalls: 3, toolErrors: 0, apiErrors: 0, cost: 0.25, ...extra });
+  const repo = plannedRepo({ config: { verify: ["true"] } });
+  writeFile(repo, ".kukulu/metrics/usage.jsonl", [usageLine("implementer"), "{not json", usageLine("reviewer"), usageLine("controller")].join("\n") + "\n");
+  await withServer(repo, async ({ call }) => {
+    const before = { status: git(repo, ["status", "--porcelain"]), head: git(repo, ["rev-parse", "HEAD"]), files: fs.readdirSync(path.join(repo, ".kukulu")).sort().join(",") };
+    const m = await call("kukulu_metrics");
+    eq(m.v + "|" + m.plugin, `1|${pkg.version}`, "kukulu_metrics returns the metrics object with v 1 and the plugin version");
+    eq(m.usage.source + "|" + m.usage.records, "usage.jsonl|3", "it reads usage.jsonl in general mode, and a corrupt usage line is skipped");
+    eq(m.roles.implementer.requests + "|" + m.roles.reviewer.requests + "|" + m.roles.controller.requests, "2|2|2", "...with the roles summed");
+    eq(json(m.totals.missing), '["planner","summarizer"]', "...and the roles without a record missing");
+    eq(m.roles.implementer.model !== null && m.roles.implementer.runner === "anthropic", true, "the routing facts come from the resolved routing");
+    eq(m.mode + "|" + m.enforcement, "general|null", "a project without a genesis is general");
+    const after = { status: git(repo, ["status", "--porcelain"]), head: git(repo, ["rev-parse", "HEAD"]), files: fs.readdirSync(path.join(repo, ".kukulu")).sort().join(",") };
+    eq(json(after), json(before), "it writes nothing and moves no HEAD");
+  });
+  const fresh = mkRepo();
+  await withServer(fresh, async ({ call }) => {
+    const m = await call("kukulu_metrics");
+    eq(json([m.spec, m.flight, m.caps ?? m.outcome.caps, m.tasks.total, m.wall.seconds, m.tree.filesChanged === 0 ? null : 1, m.counters ?? null, m.friction.verifyRuns]), "[null,null,null,null,null,null,null,null]", "in a fresh repository every sourceless field is null (a repository with no commits since the base has a tree of zeros)");
+    eq(m.usage.records, 0, "...and no usage file is no records");
+  });
+  const bad = plannedRepo();
+  writeFile(bad, "docs/kukulu.json", "{ not json");
+  await withServer(bad, async ({ call }) => {
+    const a = await call("kukulu_status");
+    const b = await call("kukulu_metrics");
+    eq(b.error, a.error, "it refuses what kukulu_status refuses");
+    ok(typeof b.error === "string" && b.error.length > 0, "...with a message");
+  });
+  const build = plannedRepo({ config: { verify: ["true"] } });
+  git(build, ["checkout", "-q", "-b", "build/2026-11-14"]);
+  writeFile(build, "a.txt", "one\n");
+  git(build, ["add", "-A"]);
+  git(build, ["commit", "-qm", "P0-01: a"]);
+  writeFile(build, "b.txt", "two\nthree\n");
+  git(build, ["add", "-A"]);
+  git(build, ["commit", "-qm", "P0-02: b"]);
+  await withServer(build, async ({ call }) => {
+    const m = await call("kukulu_metrics");
+    eq(json(m.tree), '{"commits":2,"filesChanged":2,"insertions":3,"deletions":0}', "tree counts the commits since the merge base");
+    ok(!/\b[0-9a-f]{40}\b/.test(json(m)), "...and no commit hash is in the output");
+  });
+
+  // after an archive the archived flight is read; once the next flight starts, the live one
+  const flight = plannedRepo({ config: { verify: ["true"], flight: "w1-share", maxRounds: 4, maxRoundsHard: 5 } });
+  git(flight, ["checkout", "-q", "-b", "build/2026-11-14"]);
+  markTasks(flight, { "P0-01": "x", "P0-02": "x", "P0-03": "x" });
+  writeFile(flight, "docs/HANDOFF.md", "# handoff\n");
+  writeFile(flight, "docs/REVIEW.md", "# Review\nRound: 1\n**Verdict**: APPROVED\n");
+  writeFile(flight, "docs/SUMMARY.md", "# summary\n");
+  writeFile(flight, ".kukulu/feedback.jsonl", '{"at":"x","stage":"implement","round":0,"category":"stall","message":"m","source":"agent"}\n');
+  setState(flight, { round: 0, implemented: true, reviewed: true, verdict: "APPROVED", summarized: true, rounds: [{ round: 1, fixTasks: 0, verdict: "APPROVED" }] });
+  git(flight, ["add", "-A"]);
+  git(flight, ["commit", "-qm", "chore: build summary"]);
+  // a real flight's kukulu_run_start has excluded the directory by now
+  fs.appendFileSync(path.join(flight, ".git", "info", "exclude"), ".kukulu/metrics/\n");
+  writeFile(flight, ".kukulu/metrics/usage.jsonl", usageLine("implementer") + "\n");
+  await withServer(flight, async ({ call }) => {
+    ok(!(await call("kukulu_flight_archive", {})).error, "the flight archives");
+    const m = await call("kukulu_metrics");
+    eq(m.flight + "|" + json(m.outcome.caps) + "|" + m.outcome.verdict + "|" + m.tasks.total + "|" + m.friction.feedback.stall, 'w1-share|{"maxRounds":4,"maxRoundsHard":5}|APPROVED|3|1', "after an archive it reads the archived state, config and feedback");
+    eq(m.usage.records + "|" + m.roles.implementer.requests, "1|2", "...and the live .kukulu/metrics/");
+    writeFile(flight, "docs/SPEC.md", "# Next - Specification\n");
+    git(flight, ["add", "-A"]);
+    git(flight, ["commit", "-qm", "spec: the next flight"]);
+    const next = await call("kukulu_next");
+    eq(next.stage, "plan", "the next flight's first stage starts");
+    const live = await call("kukulu_metrics");
+    eq(json([live.flight, live.outcome.caps, live.tasks.total, live.spec.title]), '[null,null,null,"Next - Specification"]', "once the next flight's first stage has started, the live flight is read again");
+  });
 }
 
 finish();

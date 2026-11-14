@@ -19,6 +19,7 @@ import { createHash } from "node:crypto";
 import {
   CleanroomError, loadPolicy, policyHash, appendEntry, readEntries, logPathFor, generateKey, loadKey, signCheckpoint, verifyCheckpoint, verifyChain, evaluate, lockdownActive, normalizeModel, familyOf, controlPaths, rolesUsage, lockfileEcosystem, lockfilePackages, deniedPackage, normalizePackageName, ZERO_HASH, scorePair, position, verdictOf, LIMITS, coverageGaps, knownLimitsFor, summarizeEntries, signBytes,
 } from "./cleanroom.mjs";
+import { buildMetrics } from "./metrics.mjs";
 
 /**
  * An environment variable by its Kūkulu name. An empty value counts as unset,
@@ -3890,6 +3891,94 @@ function prTitleFor(c, branch) {
   return [...title].slice(0, 120).join("");
 }
 
+/**
+ * Plain data for buildMetrics (SPEC C-01), gathered from what is on disk. A missing input is `null`, never a throw.
+ * After an archive, with no new flight started, the flight is the archived one and its own copies are read.
+ */
+function metricsInputs() {
+  const live = loadState();
+  const archivedFlight = Boolean(live.archived) && !exists(P.config) && !(Array.isArray(live.timeline) && live.timeline.length);
+  const home = archivedFlight ? path.join(ROOT, live.archived.dir) : null;
+  const where = (liveFile, name) => (home ? path.join(home, name) : liveFile);
+  const readJson = (file) => {
+    try {
+      return exists(file) ? JSON.parse(read(file)) : null;
+    } catch {
+      return null;
+    }
+  };
+  const state = home ? (readJson(path.join(home, "state.json")) ?? {}) : live;
+  const rawConfig = readJson(home ? ["kukulu.json", "foun" + "dry.json"].map((n) => path.join(home, n)).find(exists) ?? "" : P.config);
+  let config = null;
+  try {
+    config = rawConfig ? cfgFrom(rawConfig, null) : null;
+  } catch {
+    config = null;
+  }
+  const specFile = where(P.spec, "SPEC.md");
+  let spec = null;
+  if (exists(specFile)) {
+    const bytes = fs.readFileSync(specFile);
+    const title = /^# (.+)$/m.exec(bytes.toString("utf8"))?.[1];
+    spec = title ? { title, sha256: sha256Hex(bytes) } : null;
+  }
+  let routing = null;
+  try {
+    routing = Object.fromEntries(ROLES.map((role) => {
+      const e = resolveRouting().roles[role];
+      return [role, { model: e.model, runner: e.runner, locality: e.locality, family: familyOf(e.model) }];
+    }));
+  } catch {
+    routing = null;
+  }
+  const lines = (file) => (exists(file) ? read(file).split("\n").filter((l) => l.trim()) : []);
+  const parsed = (file) => lines(file).flatMap((l) => {
+    try {
+      return [JSON.parse(l)];
+    } catch {
+      return [];
+    }
+  });
+  const progressFile = where(P.progress, "PROGRESS.md");
+  let tasks = null;
+  try {
+    tasks = exists(progressFile) ? counts(parseProgressText(read(progressFile)).tasks) : null;
+  } catch {
+    tasks = null;
+  }
+  let git_ = null;
+  if (gitFacts().inRepo) {
+    const base = (config ?? cfg()).baseBranch;
+    const mergeBase = git(["merge-base", base, "HEAD"], { allowFail: true });
+    if (mergeBase.ok && mergeBase.out) {
+      const n = git(["rev-list", "--count", `${mergeBase.out}..HEAD`], { allowFail: true });
+      const stat = git(["diff", "--shortstat", `${mergeBase.out}..HEAD`], { allowFail: true });
+      git_ = { mergeBase: mergeBase.out, commits: n.ok ? Number(n.out) : null, shortstat: stat.ok ? stat.out : null };
+    }
+  }
+  return {
+    plugin: VERSION,
+    flight: config?.flight ?? (home ? live.archived.slug : null),
+    spec,
+    state,
+    caps: config ? { maxRounds: config.maxRounds, maxRoundsHard: config.maxRoundsHard } : null,
+    routing,
+    usage: state.cleanroom?.genesis ? null : { source: "usage.jsonl", chainHead: null, records: parsed(P.usage) },
+    counters: readCounters(),
+    feedback: parsed(where(P.feedback, "feedback.jsonl")),
+    tasks,
+    git: git_,
+    genesis: null,
+    now: new Date().toISOString(),
+  };
+}
+
+/** `kukulu_metrics`: the metrics object, computed now from what is on disk. Refuses what kukulu_status refuses; writes nothing. */
+function metricsTool() {
+  status();
+  return buildMetrics(metricsInputs());
+}
+
 const FLIGHT_OPTION_KEYS = ["maxRounds", "maxRoundsHard"];
 
 /**
@@ -5787,6 +5876,7 @@ const TOOLS = [
     fn: agentsSync,
   },
   { name: "kukulu_config_show", description: "The merged routing config with the source of every role/key (default | global | profile:<name> | project) and the global file path. Read-only.", inputSchema: S({}), fn: configShow },
+  { name: "kukulu_metrics", description: "The flight's metrics object (docs/metrics.md): outcome, wall time, rounds, per-role token use and model wait time, tasks, friction and the tree, computed now from what is on disk. Read-only: writes nothing and makes no commit.", inputSchema: S({}), fn: metricsTool },
 ];
 
 function send(msg) {

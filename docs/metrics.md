@@ -129,3 +129,7 @@ Counted usage records are the valid, non-error ones. The controller keeps only t
 | `friction.guardReblocks`, `friction.verifyRuns`, `friction.verifyFailures`, `friction.activateFailures` | the counters of `.kukulu/metrics/counters.json`; `null` without the file |
 | `tree.commits` | the number of commits since the merge base |
 | `tree.filesChanged`, `tree.insertions`, `tree.deletions` | the `git diff --shortstat` line against the merge base (an omitted part is 0); all four `tree` fields are `null` without a merge base |
+
+## Reading the metrics
+
+`kukulu_metrics` returns the object described above, computed at the moment of the call from what is on disk; it writes nothing. After `kukulu_flight_archive` it reads the archived flight (its state, configuration, feedback, task counts and spec) until the next flight's first stage starts, and the live `.kukulu/metrics/` for the usage records.
