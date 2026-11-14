@@ -2554,7 +2554,7 @@ function baseHealth(st) {
   }
 }
 
-function nextDecision() {
+function nextDecision(forcedHalt = null) {
   const routing = resolveRouting();
   const s = status();
   const c = cfg();
@@ -2663,6 +2663,7 @@ function nextDecision() {
   const policyPresent = cleanroomOn(c);
   const broken = cleanroomModeBreak(st, policyPresent, s.planPresent);
   if (broken) return stage("halt", modeBreakText(broken));
+  if (forcedHalt) return stage("halt", forcedHalt);
   if (st.halted) return stage("halt", st.haltCap || st.halted.includes("kukulu_run_resume") ? st.halted : `${st.halted} — ${RESUME_HINT}`);
   if (st.awaitingSigning) {
     const mb = git(["merge-base", c.baseBranch, "HEAD"], { allowFail: true }).out || "<merge-base>";
@@ -4699,12 +4700,13 @@ function recordTimeline(res, activation = null) {
   const changed = !open || open.stage !== res.stage || open.round !== res.round;
   if (res.stage === "done" || res.stage === "halt") {
     if (open) records.push({ event: "end", stage: open.stage, round: open.round, at });
+    if (activation?.error) records.push(activationRecord(activation));
   } else if (changed) {
     if (open) records.push({ event: "end", stage: open.stage, round: open.round, at });
-    if (activation) records.push(activationRecord(res, activation));
+    if (activation) records.push(activationRecord(activation));
     records.push({ event: "start", stage: res.stage, round: res.round, at: activation?.afterAt ?? at });
   } else if (activation) {
-    records.push(activationRecord(res, activation));
+    records.push(activationRecord(activation));
   }
   if (!records.length) return res;
   // A flight's first record starts its metrics afresh: the directory holds one flight's usage, never two.
@@ -4722,6 +4724,11 @@ function recordTimeline(res, activation = null) {
   try {
     withRollback(paths, () => {
     st.timeline = [...timeline, ...records];
+    // A runner that did not serve its model halts the flight: not a round-cap halt, so kukulu_run_resume clears it.
+    if (activation?.error) {
+      st.halted = res.reason;
+      delete st.haltCap;
+    }
     saveState(st);
     if (crPaths.length) {
       for (const r of records.filter((x) => x.event !== "activate")) {
@@ -4734,7 +4741,7 @@ function recordTimeline(res, activation = null) {
         });
       }
     }
-    if (gitFacts().inRepo) gitCommitIfChanged(paths, records.at(-1).event === "end" ? "chore: stage end" : `chore: stage ${records.at(-1).stage}`, { stage: "controller", noSigningFallback: true });
+    if (gitFacts().inRepo) gitCommitIfChanged(paths, records.at(-1).event === "end" || activation?.error ? "chore: stage end" : `chore: stage ${records.at(-1).stage}`, { stage: "controller", noSigningFallback: true });
     });
   } catch (e) {
     return { ...res, timelineNote: `the stage timeline was not recorded this call: ${e instanceof Error ? e.message : String(e)}` };
@@ -4743,23 +4750,19 @@ function recordTimeline(res, activation = null) {
 }
 
 /** The timeline's activate record: the warm-up, between the span that ended and the one that starts. */
-function activationRecord(res, a) {
-  return { event: "activate", stage: res.stage, round: res.round, runner: a.runner, served: a.served, reported: a.reported, ms: a.ms, ok: true, at: a.afterAt };
+function activationRecord(a) {
+  return { event: "activate", stage: a.stage, round: a.round, runner: a.runner, served: a.served, reported: a.reported, ms: a.ms, ok: !a.error, at: a.afterAt };
 }
 
-/**
- * Warm a role's runner (SPEC A-03): when its runner is configured with `activate: "warm"`, run the probe, wait for
- * the answer and return `{ runner, served, reported, ms }`, or the same with `error` when the runner did not answer.
- * Null when no probe applies. The request is the probe script's, run through spawnSync; the server opens no socket
- * and never reads the token variable, only passes its own environment on.
- */
-function activateRunner(role) {
-  const e = resolveRouting().roles[role];
-  if (!e || !e.runner || e.runner === "anthropic" || e.activate !== "warm") return null;
+// The follow-up listing only decorates a halt's reason, so its wait is fixed, not a tunable.
+const RUNNER_LIST_TIMEOUT_MS = 10000;
+
+/** One run of the probe script for a role's runner, through spawnSync; the last JSON line it printed, or a failure of our own making. */
+function runProbe(e, mode, timeoutMs) {
   const probePath = envVar("RUNNER_PROBE") || path.join(PLUGIN_ROOT, "scripts", "runner-probe.mjs");
-  const args = [probePath, "--endpoint", e.endpoint, "--warm", e.served, "--timeout-ms", String(e.activateTimeoutMs), ...(e.tokenEnv ? ["--token-env", e.tokenEnv] : [])];
+  const args = [probePath, "--endpoint", e.endpoint, ...(mode === "warm" ? ["--warm", e.served] : ["--models"]), "--timeout-ms", String(timeoutMs), ...(e.tokenEnv ? ["--token-env", e.tokenEnv] : [])];
   const started = Date.now();
-  const r = spawnSync(process.execPath, args, { encoding: "utf8", timeout: e.activateTimeoutMs + RUNNER_BACKSTOP_MS, env: process.env });
+  const r = spawnSync(process.execPath, args, { encoding: "utf8", timeout: timeoutMs + RUNNER_BACKSTOP_MS, env: process.env });
   let line = null;
   try {
     line = JSON.parse((r.stdout || "").trim().split("\n").filter(Boolean).pop());
@@ -4767,8 +4770,52 @@ function activateRunner(role) {
     line = null;
   }
   if (!line || typeof line !== "object") line = { ok: false, status: null, ms: Date.now() - started, error: `the probe printed no result (exit ${r.status})` };
-  const base = { runner: e.runner, served: e.served, reported: line.ok ? (line.reported ?? null) : null, ms: Number.isFinite(line.ms) ? line.ms : Date.now() - started };
-  return line.ok ? base : { ...base, error: String(line.error ?? "the runner did not answer") };
+  return line;
+}
+
+/**
+ * Warm a role's runner (SPEC A-03): when its runner is configured with `activate: "warm"`, run the probe, wait for
+ * the answer and return `{ runner, served, reported, ms }`, or the same with `error` and the reason for a halt when
+ * the runner did not serve its model. Null when no probe applies. The request is the probe script's, run through
+ * spawnSync; the server opens no socket and never reads the token variable, only passes its own environment on.
+ */
+function activateRunner(role) {
+  const e = resolveRouting().roles[role];
+  if (!e || !e.runner || e.runner === "anthropic" || e.activate !== "warm") return null;
+  const line = runProbe(e, "warm", e.activateTimeoutMs);
+  const base = { runner: e.runner, served: e.served, reported: line.ok ? (line.reported ?? null) : null, ms: Number.isFinite(line.ms) ? line.ms : 0 };
+  if (line.ok) return base;
+  const error = String(line.error ?? "the runner did not answer");
+  const list = runProbe(e, "models", Math.min(e.activateTimeoutMs, RUNNER_LIST_TIMEOUT_MS));
+  const ids = list.ok && Array.isArray(list.served) && list.served.length ? list.served.join(", ") : "nothing it would list";
+  const reason = `runner ${e.runner} did not serve ${e.served} within ${e.activateTimeoutMs} ms (${error}). It serves: ${ids}. Fix the runner or the routing, then resume: kukulu_run_resume({ reason: "<what you fixed>" })`;
+  return { ...base, error, reason };
+}
+
+const COUNTER_START = { verifyRuns: 0, verifyFailures: 0, guardReblocks: null, tasksReopened: 0, activateFailures: 0 };
+
+/** The metrics counters (.kukulu/metrics/counters.json), or null when the file is absent or unreadable. */
+function readCounters() {
+  try {
+    const c = JSON.parse(fs.readFileSync(P.counters, "utf8"));
+    return c && typeof c === "object" && !Array.isArray(c) ? c : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Add to one counter. Never throws: a file that cannot be written is a one-line note for the caller to pass on, else null. */
+function bumpCounter(name, by = 1) {
+  try {
+    const c = { ...COUNTER_START, ...(readCounters() ?? {}) };
+    c[name] = (typeof c[name] === "number" ? c[name] : 0) + by;
+    fs.mkdirSync(P.metricsDir, { recursive: true });
+    fs.writeFileSync(P.counters, `${JSON.stringify(c)}\n`);
+    ensureMetricsExcluded();
+    return null;
+  } catch (e) {
+    return `the ${name} counter was not recorded: ${e instanceof Error ? e.message : String(e)}`;
+  }
 }
 
 function next() {
@@ -4777,17 +4824,25 @@ function next() {
   } catch {
     // the exclusion is a convenience; a decision is never refused for it
   }
-  const res = nextDecision();
+  let res = nextDecision();
   let activation = null;
+  let countersNote = null;
   if (ROLE_OF_STAGE[res.stage] && res.restartRequired === false) {
     const beforeAt = new Date().toISOString();
     const a = activateRunner(ROLE_OF_STAGE[res.stage]);
     if (a) {
-      res.activation = a;
-      if (!a.error) activation = { ...a, beforeAt, afterAt: new Date().toISOString() };
+      const { reason, ...shown } = a;
+      activation = { ...shown, stage: res.stage, round: res.round, beforeAt, afterAt: new Date().toISOString() };
+      if (a.error) {
+        // The stage does not start: the answer is the halt, shaped as nextDecision's own halts are.
+        res = nextDecision(reason);
+        countersNote = bumpCounter("activateFailures");
+      }
+      res.activation = shown;
     }
   }
-  return recordTimeline(res, activation);
+  const out = recordTimeline(res, activation);
+  return countersNote ? { ...out, countersNote } : out;
 }
 
 /** Whole seconds each stage has run, from the timeline's spans; an open span counts up to now. */

@@ -1399,11 +1399,49 @@ const OLD_LAYOUT = /pre-0\.6\.0 Foundry layout, which 0\.7\.0 no longer reads/;
   }
   {
     const { repo, probe, env } = await warm();
-    probe.answers([{ ok: false, status: 503, ms: 40, error: "HTTP 503: loading" }]);
+    setState(repo, { timeline: [{ event: "start", stage: "plan", round: 0, at: "2026-01-01T00:00:00.000Z" }] });
+    const bad = { ok: false, status: 503, ms: 40, error: "HTTP 503: loading" };
+    probe.answers([bad, { ok: true, status: 200, ms: 3, served: ["alpha", "beta"] }, bad, bad, bad, bad]);
+    const counters = () => JSON.parse(readFile(repo, ".kukulu/metrics/counters.json"));
     await withServer(repo, async ({ call }) => {
       const n = await call("kukulu_next");
-      eq(n.stage + "|" + n.activation.error + "|" + n.activation.reported, "implement|HTTP 503: loading|null", "a failed probe does not stop the stage in this task (the result carries activation.error)");
-      eq(events(timelineOf(repo)), "start implement", "...and no activate record is written");
+      const reason = 'runner spark did not serve qwen38-27b within 1800000 ms (HTTP 503: loading). It serves: alpha, beta. Fix the runner or the routing, then resume: kukulu_run_resume({ reason: "<what you fixed>" })';
+      eq(n.stage + "|" + n.reason, `halt|${reason}`, "a failed activation halts with the reason naming the runner, the served id, the wait and the error");
+      ok(n.agent === null && n.prompt === null && !("description" in n) && !("streams" in n), "...shaped as nextDecision's own halts are");
+      eq(JSON.stringify(n.activation), JSON.stringify({ runner: "spark", served: "qwen38-27b", reported: null, ms: 40, error: "HTTP 503: loading" }), "...with activation carrying the error");
+      like(n.reason, /It serves: alpha, beta\./, "the reason lists what the runner serves");
+      eq(JSON.stringify(probe.calls()[1]), JSON.stringify(["--endpoint", "http://h:1", "--models", "--timeout-ms", "10000"]), "the follow-up probe is --models with the capped timeout");
+      const tl = timelineOf(repo);
+      eq(events(tl), "start plan, end plan, activate", "the timeline ends the open span and holds the activate record");
+      eq(tl.at(-1).ok + "|" + tl.at(-1).reported + "|" + tl.at(-1).stage, "false|null|implement", "...with ok false");
+      eq(JSON.parse(readFile(repo, ".kukulu/state.json")).halted, reason, "state.halted is the reason");
+      eq(subject(repo), "chore: stage end", "...and the commit is chore: stage end");
+      eq(counters().activateFailures, 1, "activateFailures is 1");
+      const again = await call("kukulu_next");
+      eq(again.stage + "|" + probe.calls().length, "halt|2", "the next kukulu_next returns the halt without probing");
+      const resumed = await call("kukulu_run_resume", { reason: "restarted the runner" });
+      eq(resumed.resumed, true, "kukulu_run_resume clears the halt");
+      const third = await call("kukulu_next");
+      eq(third.stage + "|" + probe.calls().length, "halt|4", "...and the next call probes again");
+      eq(counters().activateFailures, 2, "activateFailures is 2");
+      like(third.reason, /It serves: nothing it would list\./, "the reason says so when the runner lists nothing it would list");
+    }, { env });
+  }
+  {
+    const { repo, probe, env } = await warm();
+    fs.writeFileSync(path.join(probe.dir, "silent.mjs"), "process.exit(1);\n");
+    await withServer(repo, async ({ call }) => {
+      const n = await call("kukulu_next");
+      like(n.reason, /\(the probe printed no result \(exit 1\)\)\. It serves: nothing it would list\./, "a probe that prints nothing is a failure, not a crash");
+    }, { env: { ...env, KUKULU_RUNNER_PROBE: path.join(probe.dir, "silent.mjs") } });
+  }
+  {
+    const { repo, probe, env } = await warm();
+    probe.answers([{ ok: false, status: null, ms: 5, error: "ECONNREFUSED: nope" }]);
+    fs.mkdirSync(path.join(repo, ".kukulu", "metrics", "counters.json"), { recursive: true });
+    await withServer(repo, async ({ call }) => {
+      const n = await call("kukulu_next");
+      ok(n.stage === "halt" && /^the activateFailures counter was not recorded: /.test(n.countersNote), "a counters file that cannot be written is a countersNote, and the halt stands");
     }, { env });
   }
 }

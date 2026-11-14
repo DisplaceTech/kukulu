@@ -64,3 +64,7 @@ The logger also runs on `Stop`. A `Stop` record has `role: "controller"` and `ag
 - Requests the controller makes after its last `Stop` are not counted.
 - A controller record covers its whole session, including anything the session did before the flight.
 - Tokens of other subagents a stage spawns are not counted.
+
+## Counters
+
+`.kukulu/metrics/counters.json` is one JSON line of counters the server keeps beside the usage records: `verifyRuns`, `verifyFailures`, `guardReblocks`, `tasksReopened` and `activateFailures`. It is excluded per clone like the rest of the directory and emptied with it. `activateFailures` goes up by one each time a runner fails to serve its model and the flight halts.

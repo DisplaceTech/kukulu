@@ -79,7 +79,7 @@ Every task that was skipped because of it comes back too, transitively. A depend
 
 ## Halts
 
-Five things halt a flight on purpose.
+Six things halt a flight on purpose.
 
 **Owner action needed.** When the review finds nothing wrong and the only open item is a task blocked on something only you can do, the reviewer calls `kukulu_run_halt` with `owner action needed: <task id>: <what you must do>` instead of a verdict. Do what it says, then call `kukulu_run_resume({ reason })`; the next `kukulu_next` is the review stage again, and the reviewer unblocks the task with your answer.
 
@@ -99,6 +99,8 @@ To continue anyway, make the call the halt message names: `kukulu_flight_options
 **An operator-level problem.** `kukulu_run_halt` records a reason when the implementer hits something no task-level retry fixes: a signing agent that died, a full disk, a `verify` command that cannot even run, a vanished base branch. Nothing is reset or cleaned up, so you can read the branch exactly as the run left it.
 
 To continue once the problem is fixed, call `kukulu_run_resume({ reason: "<what you fixed>" })` (or tell `/kukulu:go-flight` `resume: <what you fixed>`). It clears the halt and commits `chore: run resumed`; it refuses while the tree is dirty or a stream worktree exists. A stream-merge halt is cleared the same way, after you merge or delete the stream's branch.
+
+**A runner that does not serve its model.** When a role's runner has `activate: "warm"` and the one-token request `kukulu_next` sends before the stage does not succeed within `activateTimeoutMs`, the stage does not start. `kukulu_next` returns `halt` with `runner <name> did not serve <served id> within <N> ms (<error>). It serves: <ids>. Fix the runner or the routing, then resume: kukulu_run_resume({ reason: "<what you fixed>" })`, records the failed `activate` in the timeline and commits `chore: stage end`. Fix the runner (load the model, correct `servedAs`), then call `kukulu_run_resume`; the next `kukulu_next` probes again.
 
 **A stream merge conflict.** When a parallel stream's branch conflicts on merge, `kukulu_stream_finish` aborts the merge, keeps the stream's branch and worktree, and halts with the conflicting paths in the reason. Kūkulu cannot guess a merge. See [Parallel streams](#parallel-streams) for the recovery.
 
