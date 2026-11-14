@@ -32,7 +32,7 @@ Started: 2026-11-14T04:52:50.030Z
 - [x] P2-11 compare-flights --trees
 - [x] P2-12 Phase 2 end: push and record the manual check
 - [x] P3-01 MODEL_FAMILIES gains laguna
-- [ ] P3-02 Templates: a spark profile with activation, and a llama-swap example
+- [x] P3-02 Templates: a spark profile with activation, and a llama-swap example
 - [ ] P3-03 docs/local-runners.md
 - [ ] P3-04 Documentation sweep for 0.9.0
 - [ ] P3-05 CHANGELOG 0.9.0 and the version
@@ -149,3 +149,7 @@ Push: pushed build/2026-11-14 to origin. Verify green on identical tree (P2-11).
 ### P3-01 — 2b7c9ea
 
 MODEL_FAMILIES gains laguna last. Measurement: before 26 existing fixture rows all resolve, three new strings unknown:<normalized>; after 29 rows all resolve (three new to laguna), no existing family changed. docs/spikes/P3-01.md; guard self-tests ran in verify (693 and 689 cases ok); cleanroom suite 1513.
+
+### P3-02 — 0a75183
+
+template spark runner activate warm + spark profile; templates/runners/llama-swap.example.yaml (yamllint clean); routing 357, plugin 610; docs/routing.md and README layout updated.
