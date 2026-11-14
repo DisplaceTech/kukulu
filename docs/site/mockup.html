@@ -74,6 +74,26 @@ pre.lines .ln::before{content:counter(line);display:inline-block;width:2.2em;col
 .conn{display:block}
 .conn-m{display:none}
 .room{padding:44px 24px 20px}
+.tabs{display:flex;flex-direction:column;gap:32px}
+.rebuild{display:flex;flex-direction:column;gap:32px}
+.rebuild+.rebuild{padding-top:56px;border-top:1px solid var(--line2)}
+.tab-bar{display:none;position:relative;flex-wrap:wrap;gap:0 36px;border-bottom:1px solid var(--line2)}
+.tab-input{position:absolute;left:0;top:0;width:1px;height:1px;margin:0;opacity:0;pointer-events:none}
+.tab{min-height:48px;display:flex;flex-direction:column;justify-content:center;gap:2px;padding:10px 0 12px;margin-bottom:-1px;border-bottom:2px solid transparent;cursor:pointer}
+.tab-no{font-family:var(--mono);font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+.tab-name{font-family:var(--mono);font-size:20px;font-weight:600;letter-spacing:.02em;color:var(--muted)}
+.tab:hover .tab-name{color:var(--ink)}
+.tab-input:checked+.tab{border-bottom-color:var(--accent)}
+.tab-input:checked+.tab .tab-no{color:var(--accent-text)}
+.tab-input:checked+.tab .tab-name{color:var(--ink)}
+.tab-input:focus-visible+.tab{outline:2px solid var(--accent);outline-offset:3px;border-radius:6px}
+/* Tabs only where :has() works and only on screen; elsewhere, and in print, both rebuilds stack. */
+@supports selector(:has(*)){@media screen{
+.tab-bar{display:flex}
+.rebuild,.rebuild-kicker{display:none}
+.rebuild+.rebuild{padding-top:0;border-top:0}
+.tabs:has(#tab-deflate:checked) #rebuild-deflate,.tabs:has(#tab-lz4:checked) #rebuild-lz4{display:flex}
+}}
 .tag{display:inline-block;font-family:var(--mono);font-size:11px;letter-spacing:.08em;padding:2px 7px;border:1px dashed var(--accent-text);border-radius:4px;color:var(--accent-text);white-space:nowrap}
 @media (max-width:860px){
 .pipe,.ev{grid-template-columns:minmax(0,1fr);row-gap:64px}
@@ -91,6 +111,7 @@ pre.lines .ln::before{content:counter(line);display:inline-block;width:2.2em;col
 .step{grid-template-columns:minmax(0,1fr) !important}
 .codebox{flex-direction:column;align-items:stretch !important}
 .codebox .copy{align-self:flex-end}
+.tab-bar{column-gap:24px}
 .chart{height:140px !important}
 .chart .label-far{top:88px !important}
 .chart .scale{top:120px !important}
@@ -429,9 +450,17 @@ git add docs/SPEC.md &amp;&amp; git commit -m "spec"</code></pre>
 <h2 id="proof-h" class="h2">Two rebuilds.</h2>
 </div>
 
-<article aria-labelledby="cleanflate-h" style="display: flex; flex-direction: column; gap: 32px">
+<div class="tabs">
+<div class="tab-bar" role="radiogroup" aria-label="Rebuilds">
+<input type="radio" name="rebuild" id="tab-deflate" class="tab-input" checked>
+<label for="tab-deflate" class="tab"><span class="tab-no">Rebuild 01</span> <span class="tab-name">DEFLATE</span></label>
+<input type="radio" name="rebuild" id="tab-lz4" class="tab-input">
+<label for="tab-lz4" class="tab"><span class="tab-no">Rebuild 02</span> <span class="tab-name">LZ4</span></label>
+</div>
+
+<article id="rebuild-deflate" class="rebuild" aria-labelledby="cleanflate-h">
 <div style="display: flex; flex-direction: column; gap: 16px">
-<p style="margin: 0; font-family: var(--mono); font-size: 13px; font-weight: 500; letter-spacing: 0.1em; text-transform: uppercase; color: var(--accent-text)">Rebuild 01 · DEFLATE</p>
+<p class="rebuild-kicker" style="margin: 0; font-family: var(--mono); font-size: 13px; font-weight: 500; letter-spacing: 0.1em; text-transform: uppercase; color: var(--accent-text)">Rebuild 01 · DEFLATE</p>
 <h3 id="cleanflate-h" style="margin: 0; font-family: var(--mono); font-weight: 600; letter-spacing: -0.02em; font-size: clamp(26px, 3vw, 36px); line-height: 1.15">cleanflate</h3>
 <p style="margin: 0; max-width: 760px; font-size: 20px; line-height: 1.55; color: var(--muted)">A clean-room DEFLATE decompressor in safe Rust, built by Kūkulu from RFCs 1950–1952 alone, without access to zlib’s source.</p>
 <p style="margin: 0; max-width: 760px; font-size: 16px; line-height: 1.55; color: var(--muted)">Built with Kūkulu 0.3.2, then named Foundry, under project-local clean-room controls; their general form is the plugin’s clean-room mode, as of 0.7.0.</p>
@@ -499,9 +528,9 @@ git add docs/SPEC.md &amp;&amp; git commit -m "spec"</code></pre>
 </div>
 </article>
 
-<article aria-labelledby="cleanlz4-h" style="display: flex; flex-direction: column; gap: 32px; padding-top: 56px; border-top: 1px solid var(--line2)">
+<article id="rebuild-lz4" class="rebuild" aria-labelledby="cleanlz4-h">
 <div style="display: flex; flex-direction: column; gap: 16px">
-<p style="margin: 0; font-family: var(--mono); font-size: 13px; font-weight: 500; letter-spacing: 0.1em; text-transform: uppercase; color: var(--accent-text)">Rebuild 02 · LZ4</p>
+<p class="rebuild-kicker" style="margin: 0; font-family: var(--mono); font-size: 13px; font-weight: 500; letter-spacing: 0.1em; text-transform: uppercase; color: var(--accent-text)">Rebuild 02 · LZ4</p>
 <h3 id="cleanlz4-h" style="margin: 0; font-family: var(--mono); font-weight: 600; letter-spacing: -0.02em; font-size: clamp(26px, 3vw, 36px); line-height: 1.15">cleanlz4</h3>
 <p style="margin: 0; max-width: 760px; font-size: 20px; line-height: 1.55; color: var(--muted)">A clean-room LZ4 block and frame decoder in safe Rust, built by Kūkulu 0.8.0’s clean-room mode from the LZ4 format documents alone, without access to the LZ4 source.</p>
 <p style="margin: 0; max-width: 760px; font-size: 16px; line-height: 1.55; color: var(--muted)">Every claim below comes from the flight’s signed attestation bundle, published in the repository, and anyone can check that bundle offline with one command.</p>
@@ -586,6 +615,7 @@ git add docs/SPEC.md &amp;&amp; git commit -m "spec"</code></pre>
 <a href="https://github.com/ericmann/cleanlz4/tree/main/attestation/cleanlz4-0-2-0" style="min-height: 44px; display: inline-flex; align-items: center; gap: 8px; font-weight: 600">Published bundle <span aria-hidden="true">↗</span></a>
 </div>
 </article>
+</div>
 </div>
 </section>
 

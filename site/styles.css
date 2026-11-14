@@ -216,8 +216,26 @@ pre.lines .ln::before{content:counter(line);display:inline-block;width:2.2em;col
 .proof-table thead th:first-child{width:168px}
 .proof-table tbody th{text-align:left;vertical-align:top;font-weight:700}
 .proof-table tbody tr:last-child th,.proof-table tbody tr:last-child td{border-bottom:0}
+.tabs{display:flex;flex-direction:column;gap:32px}
 .rebuild{display:flex;flex-direction:column;gap:32px}
 .rebuild+.rebuild{padding-top:56px;border-top:1px solid var(--line2)}
+.tab-bar{display:none;position:relative;flex-wrap:wrap;gap:0 36px;border-bottom:1px solid var(--line2)}
+.tab-input{position:absolute;left:0;top:0;width:1px;height:1px;margin:0;opacity:0;pointer-events:none}
+.tab{min-height:48px;display:flex;flex-direction:column;justify-content:center;gap:2px;padding:10px 0 12px;margin-bottom:-1px;border-bottom:2px solid transparent;cursor:pointer}
+.tab-no{font-family:var(--mono);font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+.tab-name{font-family:var(--mono);font-size:20px;font-weight:600;letter-spacing:.02em;color:var(--muted)}
+.tab:hover .tab-name{color:var(--ink)}
+.tab-input:checked+.tab{border-bottom-color:var(--accent)}
+.tab-input:checked+.tab .tab-no{color:var(--accent-text)}
+.tab-input:checked+.tab .tab-name{color:var(--ink)}
+.tab-input:focus-visible+.tab{outline:2px solid var(--accent);outline-offset:3px;border-radius:6px}
+/* Tabs only where :has() works and only on screen; elsewhere, and in print, both rebuilds stack. */
+@supports selector(:has(*)){@media screen{
+.tab-bar{display:flex}
+.rebuild,.rebuild-kicker{display:none}
+.rebuild+.rebuild{padding-top:0;border-top:0}
+.tabs:has(#tab-deflate:checked) #rebuild-deflate,.tabs:has(#tab-lz4:checked) #rebuild-lz4{display:flex}
+}}
 .rebuild-head{display:flex;flex-direction:column;gap:16px}
 .rebuild-title{margin:0;font-size:clamp(26px,3vw,36px);line-height:1.15}
 .verify{display:flex;flex-direction:column;gap:12px}
@@ -260,6 +278,7 @@ pre.lines .ln::before{content:counter(line);display:inline-block;width:2.2em;col
 .step{grid-template-columns:minmax(0,1fr)}
 .codebox{flex-direction:column;align-items:stretch}
 .codebox .copy{align-self:flex-end}
+.tab-bar{column-gap:24px}
 .chart{height:140px}
 .label-port,.label-disguised{top:88px}
 .scale{top:120px}

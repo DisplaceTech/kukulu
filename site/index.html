@@ -359,9 +359,17 @@ git add docs/SPEC.md &amp;&amp; git commit -m "spec"</code></pre>
 <h2 id="proof-h" class="h2">Two rebuilds.</h2>
 </div>
 
-<article class="rebuild" aria-labelledby="cleanflate-h">
+<div class="tabs">
+<div class="tab-bar" role="radiogroup" aria-label="Rebuilds">
+<input type="radio" name="rebuild" id="tab-deflate" class="tab-input" checked>
+<label for="tab-deflate" class="tab"><span class="tab-no">Rebuild 01</span> <span class="tab-name">DEFLATE</span></label>
+<input type="radio" name="rebuild" id="tab-lz4" class="tab-input">
+<label for="tab-lz4" class="tab"><span class="tab-no">Rebuild 02</span> <span class="tab-name">LZ4</span></label>
+</div>
+
+<article id="rebuild-deflate" class="rebuild" aria-labelledby="cleanflate-h">
 <div class="rebuild-head">
-<p class="kicker kicker-accent">Rebuild 01 · DEFLATE</p>
+<p class="kicker kicker-accent rebuild-kicker">Rebuild 01 · DEFLATE</p>
 <h3 id="cleanflate-h" class="rebuild-title mono-title">cleanflate</h3>
 <p class="proof-lede">A clean-room DEFLATE decompressor in safe Rust, built by Kūkulu from RFCs 1950–1952 alone, without access to zlib’s source.</p>
 <p class="proof-sub">Built with Kūkulu 0.3.2, then named Foundry, under project-local clean-room controls; their general form is the plugin’s clean-room mode, as of 0.7.0.</p>
@@ -429,9 +437,9 @@ git add docs/SPEC.md &amp;&amp; git commit -m "spec"</code></pre>
 </div>
 </article>
 
-<article class="rebuild" aria-labelledby="cleanlz4-h">
+<article id="rebuild-lz4" class="rebuild" aria-labelledby="cleanlz4-h">
 <div class="rebuild-head">
-<p class="kicker kicker-accent">Rebuild 02 · LZ4</p>
+<p class="kicker kicker-accent rebuild-kicker">Rebuild 02 · LZ4</p>
 <h3 id="cleanlz4-h" class="rebuild-title mono-title">cleanlz4</h3>
 <p class="proof-lede">A clean-room LZ4 block and frame decoder in safe Rust, built by Kūkulu 0.8.0’s clean-room mode from the LZ4 format documents alone, without access to the LZ4 source.</p>
 <p class="proof-sub">Every claim below comes from the flight’s signed attestation bundle, published in the repository, and anyone can check that bundle offline with one command.</p>
@@ -516,6 +524,7 @@ git add docs/SPEC.md &amp;&amp; git commit -m "spec"</code></pre>
 <a href="https://github.com/ericmann/cleanlz4/tree/main/attestation/cleanlz4-0-2-0" class="link-arrow link-ext">Published bundle <span aria-hidden="true">↗</span></a>
 </div>
 </article>
+</div>
 </div>
 </section>
 
