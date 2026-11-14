@@ -255,6 +255,7 @@ Everything is on disk and committed, so `/kukulu:go-flight` can be re-run from a
 ├── .claude-plugin/              plugin.json + marketplace.json
 ├── .mcp.json                    how Claude Code launches the MCP server
 ├── mcp/server.mjs               the deterministic half of the pipeline
+├── mcp/metrics.mjs              the usage record's contract
 ├── mcp/run-command.mjs          runs one command bounded in time and output
 ├── hooks/hooks.json             Stop / SubagentStop wiring
 ├── scripts/
@@ -269,7 +270,7 @@ Everything is on disk and committed, so `/kukulu:go-flight` can be re-run from a
 │   ├── kukulu.config.example.json   the global routing config, explained in docs/routing.md
 │   └── ccr/                     claude-code-router provider manifests
 ├── docs/                        architecture · MCP reference · routing · spec guide · runbook
-└── test/                        harness + fifteen suites, run by test/run.mjs
+└── test/                        harness + sixteen suites, run by test/run.mjs
 ```
 
 ## Documentation map
@@ -277,6 +278,7 @@ Everything is on disk and committed, so `/kukulu:go-flight` can be re-run from a
 - [**docs/architecture.md**](./docs/architecture.md): why the pipeline is split this way, what each stage may and may not do, and where state lives
 - [**docs/sandbox.md**](./docs/sandbox.md): the sandbox: the sockets that cross the container boundary, and what an agent inside can and cannot do with them
 - [**docs/publishing.md**](./docs/publishing.md): publishing an attestation bundle with `scripts/publish-bundle.mjs`, and re-checking a published copy
+- [**docs/metrics.md**](./docs/metrics.md): the usage record every harness fills in
 - [**docs/mcp-tools.md**](./docs/mcp-tools.md): every tool, argument, return field and refusal
 - [**docs/routing.md**](./docs/routing.md): per-role model routing, covering the global config file, profiles, and running stages through a router like claude-code-router
 - [**docs/writing-specs.md**](./docs/writing-specs.md): how to write a `SPEC.md` the planner can turn into a usable plan
@@ -302,7 +304,7 @@ npm test -- guard protocol     # one or more suites by name
 KEEP_REPO=1 npm test -- drive  # keep the temp repos to poke at afterwards
 ```
 
-Fifteen suites, about 4,000 assertions. They cover the plugin manifests and documentation links, the JSON-RPC transport, the `kukulu_next` decision table, the implement-stage tools, the review and summary tools, per-role routing (config merge, `kukulu_agents_sync`, `kukulu_config_show`), `docs/kukulu.json` constraints and their fixture self-tests, `kukulu_feedback_log` and the feedback policy, parallel streams (waves, partition validation, worktrees, merge-back), the guard hook, and serial and parallel end-to-end flights driven over real stdio against a real git repo. CI runs all of it on Node 22, 24 and 26, again on macOS, and again on a machine with no GitHub CLI installed.
+Sixteen suites, about 4,000 assertions. They cover the plugin manifests and documentation links, the JSON-RPC transport, the `kukulu_next` decision table, the implement-stage tools, the review and summary tools, per-role routing (config merge, `kukulu_agents_sync`, `kukulu_config_show`), `docs/kukulu.json` constraints and their fixture self-tests, `kukulu_feedback_log` and the feedback policy, parallel streams (waves, partition validation, worktrees, merge-back), the guard hook, and serial and parallel end-to-end flights driven over real stdio against a real git repo. CI runs all of it on Node 22, 24 and 26, again on macOS, and again on a machine with no GitHub CLI installed.
 
 ## Contributing
 

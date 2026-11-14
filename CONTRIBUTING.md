@@ -20,6 +20,7 @@ Every behaviour change to the server therefore needs a test, because the thing u
 | `scripts/sandbox-entry.mjs` | The container's entrypoint: bridges `127.0.0.1:3128` to the proxy socket, then starts the harness; `node:` only |
 | `templates/sandbox/Containerfile`, `templates/cleanroom.local-only.example.json` | The sandbox image template, and the worked local-only, sandboxed policy |
 | `scripts/sandbox.mjs` | The sandbox launcher: the controller, log and proxy sockets, `planFor` and `containerArgs`, and the `doctor`, `run` and `stop` subcommands |
+| `mcp/metrics.mjs` | The usage record's contract: `USAGE_KEYS` and `validateUsageRecord`; pure, harness-neutral |
 | `scripts/implement-guard.mjs` | The Stop / SubagentStop hook |
 | `scripts/lint.sh` | Dependency-free syntax and manifest lint |
 | `scripts/check-names.mjs` | Fails on a misplaced kahakō or an ASCII spelling of the display name in prose; run by `scripts/lint.sh` |
@@ -36,7 +37,7 @@ Every behaviour change to the server therefore needs a test, because the thing u
 | `templates/SPEC.md` | The spec skeleton users copy |
 | `templates/kukulu.config.example.json`, `templates/ccr/` | The global routing config and claude-code-router provider manifests |
 | `templates/constraints.example.json` | Three worked `docs/kukulu.json` `constraints` rules, with fixtures |
-| `test/` | Harness plus fifteen suites |
+| `test/` | Harness plus sixteen suites |
 | `docs/` | Architecture, tool reference, routing guide, spec guide, runbook |
 | `docs/plans/` | The task-by-task plan behind each release |
 | `docs/feedback/` | Stumbling blocks a real flight hit, feeding the next release plan; gitignored, local to the maintainer |
@@ -63,7 +64,7 @@ When `docs/feedback/.private-names` exists on your machine (gitignored; see [Fli
 
 ```bash
 npm run lint                    # node --check, bash -n, JSON parse, exec bits
-npm test                        # all fifteen suites
+npm test                        # all sixteen suites
 npm test -- guard protocol      # named suites only
 node test/state.mjs             # one suite, directly
 KUKULU_SANDBOX_IT=1 node test/sandbox.mjs   # the real-container step (Linux, docker on PATH; never in verify)
@@ -89,6 +90,7 @@ npm install --no-save mermaid jsdom && node scripts/check-diagrams.mjs
 | `attest` | The offline verifier (`scripts/verify-attestation.mjs`), attestation bundles, tamper detection, and pre-0.6.0 logs |
 | `sandbox` | The sandbox: the relay and controller socket, the log socket, the proxy, the container launcher and gate checks 9 and 10; no container engine needed |
 | `bundles` | The bundle scripts: `scripts/model-identity.mjs`, and `publish-bundle.mjs` and `compare-bundles.mjs` once they exist |
+| `metrics` | The usage record and its validator, the logger's usage adapter and general-mode writer, the counters, `mcp/metrics.mjs`, and `scripts/compare-flights.mjs` once they exist |
 | `drive` | Complete flights end to end over real stdio: one serial, and parallel ones (a wave, `maxStreams: 1`, an overlapping partition) |
 
 Suites are plain Node programs that print TAP-ish lines and exit non-zero on failure. `test/harness.mjs` provides temp git repos, an MCP client, fixtures and the assertion helpers. Add assertions to the suite that owns the behaviour; add a new suite only for a new surface.
