@@ -4,38 +4,35 @@ All notable changes to this plugin. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.9.0] — 2026-11-14
 
 ### Added
 
-- `docs/local-runners.md`: running a fully local flight on one inference host (E-01).
+- `scripts/runner-probe.mjs` sends one request to a runner (`--models` or `--warm <id>`) and prints one JSON line, without ever printing the runner's token (A-01).
+- Runner keys `activate`, `activateTimeoutMs`, `servedAs` and `tokenEnv` in the global file, and the served id in `kukulu_config_show` and the routing table (A-02).
+- `kukulu_next` warms a stage's runner before the stage starts, records the wait in the timeline, the result and `kukulu_status`'s `activateSeconds`, and `go-flight` prints how long the runner took to be ready (A-03).
+- A runner that does not serve the stage's model halts the flight before the stage, naming what it does serve; `kukulu_run_resume` clears it (A-03, A-04).
+- In clean-room mode the stage's start entry records the model asked for, the model the runner reports and the wait (A-03, patent pending); a `runner-drift` feedback entry when the two differ or a role's served id changes mid-flight (A-03, A-04).
+- The usage record: one schema for every harness, validated by `validateUsageRecord` in `mcp/metrics.mjs`, filled by one adapter per harness (Claude Code's is the one shipped) (B-01).
+- Every flight records token use per role, in general mode to `.kukulu/metrics/usage.jsonl` (excluded per clone, never committed) and in clean-room mode to the signed chain, whose `usage` entry carries the full record (B-02, B-04).
+- The controller session's usage is recorded on every `Stop` (B-03).
+- A clean-room flight's metrics read usage only from the signed chain and record `usage.source` and `chainHead` (B-05).
+- `kukulu_metrics` returns the flight's metrics object (outcome, wall time, rounds, per-role token use and model wait time, tasks, friction, tree), computed now and read-only; a role with no record is reported as missing, never zero (C-01).
+- `.kukulu/metrics/counters.json` and `kukulu_status.counters`: verify runs, verify failures, reopened tasks, guard re-blocks (the implement guard's lock keeps a cumulative `total`) and activation failures (C-02).
+- `docs/METRICS.json`, written when a flight ends or halts, committed by `kukulu_pr_finalize` as `chore: flight metrics` before it pushes, and `policies.metrics` to turn it off (C-03).
+- The flight records the harness's name and version from the MCP `initialize` request, in `state.harness` and `kukulu_status.harness` (C-04).
+- `scripts/compare-flights.mjs` prints two flights' metrics side by side in five sections, or as JSON, and with `--trees` the size and the similarity of the two result trees (D-01).
+- `docs/local-runners.md`: running a fully local flight on one inference host, resident or swapping (E-01).
 - The `spark` profile with `activate: "warm"` in `templates/kukulu.config.example.json`, and `templates/runners/llama-swap.example.yaml` (E-02).
 - The model family `laguna` (Laguna and Poolside model strings) (E-03).
-- `scripts/runner-probe.mjs` sends one request to a runner and prints one JSON line, without ever printing the runner's token (A-01).
-- Runner keys `activate`, `activateTimeoutMs`, `servedAs` and `tokenEnv`, and the served id in `kukulu_config_show` and the routing table (A-02).
-- `kukulu_next` warms a stage's runner before the stage starts and records the wait in the timeline, the result and `kukulu_status`'s `activateSeconds` (A-03).
-- A runner that does not serve the stage's model halts the flight before the stage, naming what it does serve (A-03, A-04).
-- In clean-room mode the stage's start entry records the model asked for, the model the runner reports and the wait (A-03, patent pending); a `runner-drift` feedback entry when the two differ or a role's served id changes (A-03, A-04).
-- The usage record: one schema for every harness, validated by `validateUsageRecord` in `mcp/metrics.mjs` (B-01).
-- `buildMetrics` in `mcp/metrics.mjs` builds the flight's outcome, wall time, rounds, tasks, friction and tree from plain data (C-01).
-- `scripts/compare-flights.mjs` prints two flights' metrics side by side in five sections, or as JSON (D-01).
-- `scripts/compare-flights.mjs --trees` adds the size and the similarity of the two result trees (D-01).
-- `kukulu_metrics` returns the flight's metrics object, computed now and read-only (C-01).
-- A clean-room flight's metrics read usage only from the signed chain and record `usage.source` and `chainHead` (B-05).
-- `docs/METRICS.json`, written when a flight ends or halts, and `policies.metrics` to turn it off (C-03, section 5.2).
-- `kukulu_pr_finalize` commits `METRICS.json` as `chore: flight metrics` before it pushes (C-03).
-- Per-role token use, model wait time and output per active second in the metrics object, with a role that has no record reported as missing, never zero (C-01).
-- Every flight records token use per role; in general mode to `.kukulu/metrics/usage.jsonl`, excluded per clone (B-02, §5.4).
-- `.kukulu/metrics/counters.json` and `kukulu_status.counters`: verify runs, verify failures and reopened tasks (C-02).
-- The flight records the harness's name and version from the MCP `initialize` request, in `state.harness` and `kukulu_status.harness` (C-04).
-- The implement guard keeps a cumulative `total` beside `count` in its lock, reported as `guardReblocks` (C-02).
-- The controller session's usage is recorded on every `Stop` (B-03).
 
 ### Changed
 
-- `kukulu_next` can take as long as a model load when a runner has `activate: "warm"` (A-03).
-- `hooks/hooks.json` registers the logger on `Stop`, so a clean-room flight started on 0.8.x cannot continue on 0.9.0 (gate check 3) (B-03).
-- The clean-room chain's `usage` entry carries the full usage record (B-01, B-04).
+- `hooks/hooks.json` registers the logger on `Stop` as well, and in general mode it now writes usage. No hook script is added. The gate pins both files, so a clean-room flight started on 0.8.x cannot continue on 0.9.0 (gate check 3) (B-03).
+- The four runner keys are new and optional (A-02).
+- `kukulu_next` can take as long as a model load when a runner has `activate: "warm"`, and it can return a `halt` for a runner that does not answer (A-03).
+- New files: `docs/METRICS.json` (committed) and `.kukulu/metrics/` (excluded per clone, never committed) (C-03, B-02).
+- A runner's `activateTimeoutMs` at or above the plugin's MCP tool-call limit is refused when the config loads (A-02).
 
 ## [0.8.1] — 2026-11-13
 

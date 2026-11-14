@@ -104,7 +104,7 @@ if (envVar("CONTROLLER_SOCKET")) {
 }
 
 // Keep in sync with .claude-plugin/plugin.json and package.json; test/plugin.mjs checks it.
-const VERSION = "0.8.1";
+const VERSION = "0.9.0";
 
 // ---------------------------------------------------------------- clean-room mode (SPEC D-06)
 
