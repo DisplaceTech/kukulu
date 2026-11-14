@@ -320,6 +320,8 @@ eq((AGENT_MAP.match(/kukulu:/g) || []).length, agentNames.length, "the stage tab
 // ---------------------------------------------------------------- the flight controller
 
 const goFlight = read("skills/go-flight/SKILL.md");
+like(goFlight, /print `runner <name>: <served> ready in <seconds> s`/, "go-flight prints the activation line");
+like(goFlight, /`\(reports <reported>\)` when `reported` is not null and differs from `served`/, "...and the reported id when it differs");
 like(goFlight, /policies\.signing is 'required' and the signing probe failed/, "go-flight stops on a required-signing probe failure");
 like(goFlight, /`subagent_type`, `description`, `prompt`, and optionally `model`/, "go-flight names description beside subagent_type and prompt");
 like(goFlight, /`description`: the `description` value, verbatim/, "...and passes it in step 4");

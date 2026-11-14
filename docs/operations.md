@@ -10,6 +10,8 @@ claude
 > /kukulu:go-flight
 ```
 
+When a role runs on a runner with `activate: "warm"`, `kukulu_next` returns only after the runner answers its one-token request, which can take as long as the model's load, and the controller prints `runner <name>: <served> ready in <seconds> s` (with `(reports <id>)` when the runner answered as another model).
+
 The controller is model-invocable, so asking for it by name also works; the slash command is the documented shortcut. It prints the stage it is entering, delegates, and repeats. Each stage is one `Agent` call that either blocks until the stage finishes or returns at once and delivers its result later as a completion notification. The controller treats both the same way and never polls in between. When it stops, it prints the final stage, the number of reviews and fix rounds, the branch, and the path to `docs/SUMMARY.md` if one exists.
 
 ### Flight options
