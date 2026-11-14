@@ -422,6 +422,22 @@ const logLines = (dir) => fs.readFileSync(path.join(dir, "log.jsonl"), "utf8").s
   ok(!/the endpoint reported/.test(ok1.stdout), "...with no note when every reported model is the routed one");
   eq(JSON.stringify(V.rolesUsage(b.entries)), JSON.stringify(CR.rolesUsage(b.entries)), "the verifier's recount and the module's agree");
 
+  // the full usage record of docs/metrics.md (P0-05): check 12 recounts only the token sums
+  const full = (agent, role, models, extra2 = {}) => ({ v: 1, harness: "claude-code", session: "s-1", agent, role, stage: "implement", round: 0, models, first: "2026-01-01T00:00:00.000Z", last: "2026-01-01T00:01:00.000Z", activeMs: 1234, toolCalls: 5, toolErrors: 1, apiErrors: 0, cost: 0.5, ...extra2 });
+  const fullExtra = (log) => {
+    CR.appendEntry(log, { kind: "usage", stage: "implement", role: "kukulu-implementer", tool: null, decision: null, data: full("kukulu-implementer", "implementer", { "spark/nemotron": m(3, 100, 40, 10, 5) }) });
+    CR.appendEntry(log, { kind: "usage", stage: "implement", role: "kukulu-implementer", tool: null, decision: null, data: full("kukulu-implementer", "implementer", { "spark/nemotron": m(1, 20, 10) }, { cost: 0.25, source: "box" }) });
+  };
+  const withFull = fresh({ roles: routed, extra: fullExtra });
+  eq(run(withFull.dir).status, 0, "a bundle whose usage entries carry the full record verifies");
+  eq(JSON.stringify(withFull.manifest.roles.implementer.usage), '{"requests":4,"input":120,"output":50,"cacheRead":10,"cacheWrite":5,"cost":0.75}', "check 12's recount ignores the added fields (the manifest's usage equals the token sums)");
+  const withController = fresh({ roles: routed, extra: (log) => {
+    fullExtra(log);
+    CR.appendEntry(log, { kind: "usage", stage: "implement", role: "session", tool: null, decision: null, data: full(null, "controller", { "spark/nemotron": m(50, 9999, 999) }) });
+  } });
+  eq(JSON.stringify(withController.manifest.roles), JSON.stringify(withFull.manifest.roles), "a controller usage entry does not change any role's recount");
+  eq(run(withController.dir).status, 0, "...and the bundle verifies");
+
   const sum = fresh({ roles: routed, extra });
   rewriteManifest(sum.dir, sum.key, (mf) => { mf.roles.implementer.usage.input += 1; });
   const failed = run(sum.dir);

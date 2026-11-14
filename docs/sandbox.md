@@ -12,6 +12,8 @@ The container reaches the outside through three Unix sockets, all in a runtime d
 | `log.sock` | Log entries. The two clean-room hooks inside send each entry here instead of appending it; the entry is appended to the chain outside, with `data.source` set to `box` | `startLogSocket` |
 | `proxy.sock` | HTTP `CONNECT` requests, through a loopback bridge, for the egress proxy | the proxy (added later) |
 
+`usage` entries, the controller's included, cross the log socket with the full usage record (see [metrics.md](./metrics.md)) and `source: "box"`; nothing is written to `.kukulu/metrics/` inside the boundary.
+
 What an agent inside can do with them: call the same tools it would call without a sandbox, and have every tool call logged. What it cannot do: read the signing key, edit or truncate the log, change a clean-room hook (the policy, the hooks and `.kukulu/` are mounted read-only), or reach any host the proxy does not allow. A hook that cannot reach the log socket fails closed: the guard denies the call and the logger exits 1, both saying `the log socket is unreachable, so this call cannot be logged; restart the session with node scripts/sandbox.mjs run`.
 
 ## Egress
