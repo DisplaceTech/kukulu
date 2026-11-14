@@ -8,6 +8,7 @@ All notable changes to this plugin. Format follows
 
 ### Added
 
+- The model family `laguna` (Laguna and Poolside model strings) (E-03).
 - `scripts/runner-probe.mjs` sends one request to a runner and prints one JSON line, without ever printing the runner's token (A-01).
 - Runner keys `activate`, `activateTimeoutMs`, `servedAs` and `tokenEnv`, and the served id in `kukulu_config_show` and the routing table (A-02).
 - `kukulu_next` warms a stage's runner before the stage starts and records the wait in the timeline, the result and `kukulu_status`'s `activateSeconds` (A-03).

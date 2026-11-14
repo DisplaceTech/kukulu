@@ -19,7 +19,7 @@ import {
   splitSegments, stripHeredocs, shellWords, commandWord, isPathLike, tokenPath, canonicalPaths,
   evaluate, sedInPlace, lockdownActive, NETWORK_COMMANDS, READ_FAMILY, WRITE_FAMILY, protectedPaths,
   coverageGaps, KNOWN_LIMITS, knownLimitsFor,
-  normalizeModel, familyOf, controlPaths, LOG_SOCKET_TIMEOUT_MS,
+  normalizeModel, familyOf, MODEL_FAMILIES, controlPaths, LOG_SOCKET_TIMEOUT_MS,
   LOCKFILES, lockfileEcosystem, lockfilePackages, normalizePackageName, deniedPackage,
   generateKey, loadKey, keyFingerprint, CHECKPOINT_KEYS, signCheckpoint, verifyCheckpoint,
 } from "../mcp/cleanroom.mjs";
@@ -70,6 +70,8 @@ const pattern = (extra = {}) => ({ id: "p", pattern: "/build/", shouldMatch: ["/
   const families = JSON.parse(readFile(ROOT, "test/fixtures/families.json"));
   ok(families.length >= 16, "the family fixture has at least sixteen entries");
   for (const { model, family } of families) eq(familyOf(model), family, `familyOf classifies ${model}`);
+  eq(MODEL_FAMILIES.at(-1).family, "laguna", "laguna is the last family, so no earlier pattern changes");
+  eq(familyOf("spark/qwen-laguna-merge"), "qwen", "a string naming both qwen and laguna stays qwen (the first match wins)");
   eq(normalizeModel("OpenRouter/deepseek/deepseek-v4-pro"), "deepseek-v4-pro", "normalizeModel strips every provider prefix");
   eq(normalizeModel("Prov,Mixed/Model-X"), "model-x", "...whether the separator is a slash or a comma");
   ok(familyOf("alpha-1") !== familyOf("beta-1"), "two unknown strings are their own families");

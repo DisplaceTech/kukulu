@@ -32,7 +32,7 @@ A project without the policy file pays nothing: both hooks exit at once, before 
 | `lockdown.after` | no | A task id. Once that task is `[x]` in `PROGRESS.md`, or when no open task remains, `allow.urls` is treated as empty. Absent means no lockdown |
 | `runners.allow` | no, any runner | Non-empty array of runner names. A role resolving to a runner not in the list fails gate check 8 |
 | `runners.locality` | no, `"any"` | `"local"` or `"any"`. `"local"` fails gate check 8 for any role whose runner is not `local` |
-| `roles.distinct` | no, `"none"` | `"none"`, `"model"` or `"family"`: how far apart the implementer's and reviewer's models must be. `family` compares `familyOf` of the normalized model strings |
+| `roles.distinct` | no, `"none"` | `"none"`, `"model"` or `"family"`: how far apart the implementer's and reviewer's models must be. `family` compares `familyOf` of the normalized model strings; the families the table knows are `claude`, `qwen`, `nemotron`, `mistral`, `deepseek`, `glm`, `llama`, `gemma`, `gpt` and `laguna`, and any other string is its own `unknown:` family |
 | `mode` | no, `"clean-room"` | `"clean-room"` or `"control-positive"`. A control flight is given the prior art on purpose; its bundle can never pass as a clean-room one (see [Control mode](#control-mode)) |
 | `control.priorArt` | with `mode` `"control-positive"` only | Non-empty array of prefixes, resolved like `deny.paths`. Refused in clean-room mode, required in control mode |
 | `enforcement` | no, `"hook"` | `"hook"` or `"container+proxy"`: the level the flight must run under. `"container+proxy+audit"` is refused as the next release's level |

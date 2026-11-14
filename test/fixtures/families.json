@@ -102,5 +102,17 @@
  {
   "model": "sonnet-5-5",
   "family": "unknown:sonnet-5-5"
+ },
+ {
+  "model": "poolside/laguna-1",
+  "family": "laguna"
+ },
+ {
+  "model": "spark/laguna-xl-nvfp4",
+  "family": "laguna"
+ },
+ {
+  "model": "spark/poolside-malibu-2",
+  "family": "laguna"
  }
 ]
