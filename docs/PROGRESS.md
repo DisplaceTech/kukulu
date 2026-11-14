@@ -7,7 +7,7 @@ Started: 2026-11-14T04:52:50.030Z
 
 - [x] P0-01 The usage record's contract, mcp/metrics.mjs and the metrics suite
 - [x] P0-02 usageFromClaudeCode replaces usageOf, and the chain's usage entry carries the record
-- [ ] P0-03 General-mode usage in .kukulu/metrics/usage.jsonl, excluded per clone
+- [x] P0-03 General-mode usage in .kukulu/metrics/usage.jsonl, excluded per clone
 - [ ] P0-04 The logger on Stop, and the controller's usage record
 - [ ] P0-05 Usage entries under the sandbox and in the verifier
 - [ ] P0-06 Phase 0 end: push and record the manual check
@@ -49,3 +49,7 @@ Added mcp/metrics.mjs (METRICS_VERSION, USAGE_ROLES, USAGE_KEYS, validateUsageRe
 ### P0-02 — 0ccc4de
 
 usageFromClaudeCode in scripts/cleanroom-log.mjs (stageAndRound helper reads state.json). Fixture agent-full.jsonl gives exact record (activeMs 17000). 35 metrics assertions; cleanroom suite unchanged green. Interpretation: 'no state file' test uses state with genesis but no round/timeline since log requires genesis. Note: running node test/cleanroom.mjs takes ~140s; run in background.
+
+### P0-03 — 8e29dfa
+
+General-mode branch in scripts/cleanroom-log.mjs (before the policy exit). Server: layoutFor gains metricsDir/usage/counters; ensureMetricsExcluded() called in startRun (after inRepo check, so also on already-started path) and next(); recordTimeline empties metrics files when timeline is empty. Tests: metrics (48), implement (396), state (326). Full verify green.
