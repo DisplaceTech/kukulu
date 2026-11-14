@@ -141,6 +141,18 @@
       "stage": "review",
       "round": 2,
       "at": "2026-11-14T12:38:49.793Z"
+    },
+    {
+      "event": "end",
+      "stage": "review",
+      "round": 2,
+      "at": "2026-11-14T12:50:51.501Z"
+    },
+    {
+      "event": "start",
+      "stage": "summarize",
+      "round": 2,
+      "at": "2026-11-14T12:50:51.501Z"
     }
   ],
   "cleanroom": {
