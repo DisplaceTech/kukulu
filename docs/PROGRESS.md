@@ -36,7 +36,7 @@ Started: 2026-11-14T04:52:50.030Z
 - [x] P3-03 docs/local-runners.md
 - [x] P3-04 Documentation sweep for 0.9.0
 - [x] P3-05 CHANGELOG 0.9.0 and the version
-- [ ] P3-06 Phase 3 end: push and record the manual checks
+- [x] P3-06 Phase 3 end: push and record the manual checks
 
 ## Log
 
@@ -165,3 +165,7 @@ Docs sweep: architecture diagrams (pieces, activation in the stage loop, who may
 ### P3-05 — 874ea5e
 
 Version 0.9.0 in package.json, plugin.json, VERSION and README badge; CHANGELOG [Unreleased] became [0.9.0] - 2026-11-14 regrouped by requirement with Changed carrying the upgrade points; no Breaking changes heading. Full verify green.
+
+### P3-06 — 474ccee
+
+Push: pushed build/2026-11-14 to origin. Verify green on identical tree (P3-05). Manual check: NOT VERIFIED (human): the commands in docs/local-runners.md start a fully local session against the owner's inference host
