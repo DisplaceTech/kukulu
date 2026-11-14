@@ -2477,6 +2477,11 @@ function status() {
   out.cleanroom = cleanroomStatus(st);
   out.timeline = Array.isArray(st.timeline) ? st.timeline : [];
   out.stageSeconds = stageSecondsOf(out.timeline);
+  out.activateSeconds = {};
+  for (const r of out.timeline) {
+    if (r.event === "activate" && r.ok === true && typeof r.runner === "string" && Number.isFinite(r.ms)) out.activateSeconds[r.runner] = (out.activateSeconds[r.runner] ?? 0) + r.ms;
+  }
+  for (const k of Object.keys(out.activateSeconds)) out.activateSeconds[k] = Math.round(out.activateSeconds[k] / 1000);
   return out;
 }
 
@@ -4683,18 +4688,23 @@ function summaryCommit({ content } = {}) {
  * the last record when it is a `start`. A new stage closes it and opens another; `done` and `halt` close it;
  * the same stage and round again writes nothing.
  */
-function recordTimeline(res) {
+function recordTimeline(res, activation = null) {
   const st = loadState();
   const timeline = Array.isArray(st.timeline) ? st.timeline : [];
-  const last = timeline.at(-1);
+  // An activate record is not a span edge: the open span is the last start or end.
+  const last = timeline.filter((r) => r.event === "start" || r.event === "end").at(-1);
   const open = last?.event === "start" ? last : null;
-  const at = new Date().toISOString();
+  const at = activation?.beforeAt ?? new Date().toISOString();
   const records = [];
+  const changed = !open || open.stage !== res.stage || open.round !== res.round;
   if (res.stage === "done" || res.stage === "halt") {
     if (open) records.push({ event: "end", stage: open.stage, round: open.round, at });
-  } else if (!open || open.stage !== res.stage || open.round !== res.round) {
+  } else if (changed) {
     if (open) records.push({ event: "end", stage: open.stage, round: open.round, at });
-    records.push({ event: "start", stage: res.stage, round: res.round, at });
+    if (activation) records.push(activationRecord(res, activation));
+    records.push({ event: "start", stage: res.stage, round: res.round, at: activation?.afterAt ?? at });
+  } else if (activation) {
+    records.push(activationRecord(res, activation));
   }
   if (!records.length) return res;
   // A flight's first record starts its metrics afresh: the directory holds one flight's usage, never two.
@@ -4714,7 +4724,7 @@ function recordTimeline(res) {
     st.timeline = [...timeline, ...records];
     saveState(st);
     if (crPaths.length) {
-      for (const r of records) {
+      for (const r of records.filter((x) => x.event !== "activate")) {
         appendEntry(cleanroomLogPath(), {
           kind: "stage",
           stage: r.stage,
@@ -4724,12 +4734,41 @@ function recordTimeline(res) {
         });
       }
     }
-    if (gitFacts().inRepo) gitCommitIfChanged(paths, records.at(-1).event === "start" ? `chore: stage ${records.at(-1).stage}` : "chore: stage end", { stage: "controller", noSigningFallback: true });
+    if (gitFacts().inRepo) gitCommitIfChanged(paths, records.at(-1).event === "end" ? "chore: stage end" : `chore: stage ${records.at(-1).stage}`, { stage: "controller", noSigningFallback: true });
     });
   } catch (e) {
     return { ...res, timelineNote: `the stage timeline was not recorded this call: ${e instanceof Error ? e.message : String(e)}` };
   }
   return res;
+}
+
+/** The timeline's activate record: the warm-up, between the span that ended and the one that starts. */
+function activationRecord(res, a) {
+  return { event: "activate", stage: res.stage, round: res.round, runner: a.runner, served: a.served, reported: a.reported, ms: a.ms, ok: true, at: a.afterAt };
+}
+
+/**
+ * Warm a role's runner (SPEC A-03): when its runner is configured with `activate: "warm"`, run the probe, wait for
+ * the answer and return `{ runner, served, reported, ms }`, or the same with `error` when the runner did not answer.
+ * Null when no probe applies. The request is the probe script's, run through spawnSync; the server opens no socket
+ * and never reads the token variable, only passes its own environment on.
+ */
+function activateRunner(role) {
+  const e = resolveRouting().roles[role];
+  if (!e || !e.runner || e.runner === "anthropic" || e.activate !== "warm") return null;
+  const probePath = envVar("RUNNER_PROBE") || path.join(PLUGIN_ROOT, "scripts", "runner-probe.mjs");
+  const args = [probePath, "--endpoint", e.endpoint, "--warm", e.served, "--timeout-ms", String(e.activateTimeoutMs), ...(e.tokenEnv ? ["--token-env", e.tokenEnv] : [])];
+  const started = Date.now();
+  const r = spawnSync(process.execPath, args, { encoding: "utf8", timeout: e.activateTimeoutMs + RUNNER_BACKSTOP_MS, env: process.env });
+  let line = null;
+  try {
+    line = JSON.parse((r.stdout || "").trim().split("\n").filter(Boolean).pop());
+  } catch {
+    line = null;
+  }
+  if (!line || typeof line !== "object") line = { ok: false, status: null, ms: Date.now() - started, error: `the probe printed no result (exit ${r.status})` };
+  const base = { runner: e.runner, served: e.served, reported: line.ok ? (line.reported ?? null) : null, ms: Number.isFinite(line.ms) ? line.ms : Date.now() - started };
+  return line.ok ? base : { ...base, error: String(line.error ?? "the runner did not answer") };
 }
 
 function next() {
@@ -4738,7 +4777,17 @@ function next() {
   } catch {
     // the exclusion is a convenience; a decision is never refused for it
   }
-  return recordTimeline(nextDecision());
+  const res = nextDecision();
+  let activation = null;
+  if (ROLE_OF_STAGE[res.stage] && res.restartRequired === false) {
+    const beforeAt = new Date().toISOString();
+    const a = activateRunner(ROLE_OF_STAGE[res.stage]);
+    if (a) {
+      res.activation = a;
+      if (!a.error) activation = { ...a, beforeAt, afterAt: new Date().toISOString() };
+    }
+  }
+  return recordTimeline(res, activation);
 }
 
 /** Whole seconds each stage has run, from the timeline's spans; an open span counts up to now. */

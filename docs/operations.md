@@ -266,6 +266,7 @@ Environment variables:
 | `KUKULU_SANDBOX` | unset | The sandbox's container name (`kukulu-<project id>`); set by `scripts/sandbox.mjs` on the server it runs outside the container, never by hand. `kukulu_status` reports it as `sandbox` |
 | `KUKULU_SANDBOX_ENGINE` | unset | `docker` or `podman`: the engine the sandbox uses; set by `scripts/sandbox.mjs`, never by hand |
 | `KUKULU_SANDBOX_HOOKS_PATH` | unset | The empty directory git's hooks are redirected to for the server's own git calls while the sandbox runs; set by `scripts/sandbox.mjs`, never by hand |
+| `KUKULU_RUNNER_PROBE` | `scripts/runner-probe.mjs` under the plugin root | The script `kukulu_next` runs to warm a runner; for tests only, so a suite can answer without a runner |
 | `KUKULU_CONTROLLER_SOCKET` | unset | Inside the sandbox, the Unix socket the MCP relay connects to; set by `scripts/sandbox.mjs`, never by hand |
 | `KUKULU_LOG_SOCKET` | unset | Inside the sandbox, the Unix socket the two clean-room hooks send log entries to; set by `scripts/sandbox.mjs`, never by hand |
 

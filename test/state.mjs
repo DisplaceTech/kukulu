@@ -10,7 +10,7 @@ import {
   ROOT, finish, ok, eq, like, isError,
   mkDir, mkFakeGpg, specRepo, plannedRepo, withServer, useLegacyLayout, mkBareRemote, mkFakeGhBin,
   writeFile, readFile, hasFile, setState, markTasks, git, subject, planDoc, progressDoc,
-  cleanroomRepo, addPlan, logCall,
+  cleanroomRepo, addPlan, logCall, mkFakeProbe, writeGlobalConfig,
 } from "./harness.mjs";
 import { readEntries } from "../mcp/cleanroom.mjs";
 
@@ -1286,6 +1286,126 @@ const OLD_LAYOUT = /pre-0\.6\.0 Foundry layout, which 0\.7\.0 no longer reads/;
     ok(hasFile(repo, ".kukulu/metrics/usage.jsonl"), "a later kukulu_next leaves .kukulu/metrics/ alone");
     eq(git(repo, ["status", "--porcelain"]).includes("metrics"), false, "...and git status never shows it");
   });
+}
+
+// ---------------------------------------------------------------- runner activation (P1-03)
+
+{
+  const warm = async (runner = {}, { tasks, sync = true } = {}) => {
+    const probe = mkFakeProbe();
+    const cfgPath = writeGlobalConfig(mkDir(), { runners: { spark: { endpoint: "http://h:1", locality: "local", match: ["spark/"], activate: "warm", ...runner } }, roles: { implementer: { model: "spark/qwen38-27b" } } });
+    const repo = plannedRepo(tasks ? { tasks } : {});
+    const env = { KUKULU_CONFIG: cfgPath, KUKULU_RUNNER_PROBE: probe.script };
+    // the generated agent files must exist before the server under test starts, or the routed model needs a restart
+    if (sync) await withServer(repo, ({ call }) => call("kukulu_agents_sync"), { env });
+    return { repo, probe, env };
+  };
+  const T = (id, files, extra = {}) => ({ id, title: `Task ${id}`, goal: `do ${id}`, files: files.map((f) => `\`${f}\``).join(", "), ...extra });
+  const timelineOf = (repo) => JSON.parse(readFile(repo, ".kukulu/state.json")).timeline;
+  const events = (tl) => tl.map((r) => (r.event === "activate" ? "activate" : `${r.event} ${r.stage}`)).join(", ");
+
+  {
+    const { repo, probe, env } = await warm();
+    setState(repo, { timeline: [{ event: "start", stage: "plan", round: 0, at: "2026-01-01T00:00:00.000Z" }] });
+    await withServer(repo, async ({ call }) => {
+      const n = await call("kukulu_next");
+      eq(n.stage, "implement", "the warm role's stage is implement");
+      eq(JSON.stringify(n.activation), JSON.stringify({ runner: "spark", served: "qwen38-27b", reported: "qwen38-27b", ms: 1500 }), "an ok activation returns activation with runner, served, reported and ms");
+      const tl = timelineOf(repo);
+      eq(events(tl), "start plan, end plan, activate, start implement", "the timeline holds end, activate, start in that order");
+      const [end, act] = tl.slice(1, 3);
+      ok(Date.parse(end.at) <= Date.parse(act.at), "...and the end's at is not later than the activate's");
+      eq(JSON.stringify(act, ["event", "stage", "round", "runner", "served", "reported", "ms", "ok"]), JSON.stringify({ event: "activate", stage: "implement", round: 0, runner: "spark", served: "qwen38-27b", reported: "qwen38-27b", ms: 1500, ok: true }), "...the activate record names the runner, served id and wait");
+      eq(JSON.stringify(probe.calls()[0]), JSON.stringify(["--endpoint", "http://h:1", "--warm", "qwen38-27b", "--timeout-ms", "1800000"]), "the probe is called with --endpoint, --warm <served>, --timeout-ms and no token flag");
+      eq(subject(repo), "chore: stage implement", "the commit subject is chore: stage implement");
+      await call("kukulu_next");
+      eq(events(timelineOf(repo)), "start plan, end plan, activate, start implement, activate", "the probe runs again for the same stage and round and writes the activate record alone");
+      eq(probe.calls().length, 2, "...so the probe was called twice");
+      const st = await call("kukulu_status");
+      eq(st.activateSeconds.spark, 3, "activateSeconds sums ok records per runner (1500 ms twice is 3 s)");
+    }, { env });
+  }
+  {
+    const { repo, probe, env } = await warm({ tokenEnv: "SPARK_TOKEN" });
+    await withServer(repo, async ({ call }) => {
+      await call("kukulu_next");
+      eq(probe.calls()[0].slice(-2).join(" "), "--token-env SPARK_TOKEN", "tokenEnv adds --token-env <NAME>, never a value");
+    }, { env: { ...env, SPARK_TOKEN: "do-not-pass-me" } });
+    ok(!JSON.stringify(probe.calls()).includes("do-not-pass-me"), "...and the token's value is in no argument");
+  }
+  {
+    const repo = plannedRepo();
+    const base = "2026-01-01T00:00:";
+    setState(repo, { timeline: [
+      { event: "start", stage: "implement", round: 0, at: `${base}00.000Z` },
+      { event: "activate", stage: "implement", round: 0, runner: "spark", served: "s", reported: "s", ms: 5000, ok: true, at: `${base}02.000Z` },
+      { event: "end", stage: "implement", round: 0, at: `${base}10.000Z` },
+      { event: "activate", stage: "review", round: 0, runner: "spark", served: "s", reported: "s", ms: 2000, ok: true, at: `${base}12.000Z` },
+      { event: "activate", stage: "review", round: 0, runner: "spark", served: "s", reported: null, ms: 9000, ok: false, at: `${base}13.000Z` },
+    ] });
+    await withServer(repo, async ({ call }) => {
+      const st = await call("kukulu_status");
+      eq(st.stageSeconds.implement, 10, "stageSeconds is unchanged by an activate record");
+      eq(JSON.stringify(st.activateSeconds), '{"spark":7}', "activateSeconds counts ok records only");
+    });
+    await withServer(plannedRepo(), async ({ call }) => {
+      eq(JSON.stringify((await call("kukulu_status")).activateSeconds), "{}", "activateSeconds is {} with no activate record");
+    });
+  }
+  {
+    const { repo, probe, env } = await warm({ activate: "none" });
+    await withServer(repo, async ({ call }) => {
+      const n = await call("kukulu_next");
+      ok(n.activation === undefined && probe.calls().length === 0, "activate none runs no probe");
+    }, { env });
+  }
+  {
+    const probe = mkFakeProbe();
+    const cfgPath = writeGlobalConfig(mkDir(), { runners: { spark: { endpoint: "http://h:1", locality: "local", match: ["spark/"], activate: "warm" } } });
+    await withServer(plannedRepo(), async ({ call }) => {
+      const n = await call("kukulu_next");
+      ok(n.activation === undefined && probe.calls().length === 0, "a role on the anthropic runner runs no probe");
+    }, { env: { KUKULU_CONFIG: cfgPath, KUKULU_RUNNER_PROBE: probe.script } });
+  }
+  {
+    const { repo, probe, env } = await warm({}, { sync: false });
+    await withServer(repo, async ({ call }) => {
+      const n = await call("kukulu_next");
+      ok(n.restartRequired === true && n.activation === undefined && probe.calls().length === 0, "restartRequired runs no probe");
+    }, { env });
+  }
+  {
+    const tasks = [T("P0-01", ["package.json"]), T("P0-02", ["docs/"]), T("P1-01", ["src/api/a.txt"], { stream: "api" }), T("P1-02", ["src/ui/a.txt"], { stream: "ui" })];
+    const { repo, probe, env } = await warm({}, { tasks });
+    markTasks(repo, { "P0-01": "x", "P0-02": "x" });
+    git(repo, ["add", "-A"]);
+    git(repo, ["commit", "-qm", "chore: serial tasks done"]);
+    await withServer(repo, async ({ call }) => {
+      const n = await call("kukulu_next");
+      ok((n.streams ?? []).length === 2 && probe.calls().length === 1, "a wave runs one probe");
+    }, { env });
+  }
+  {
+    const { repo, probe, env } = await warm();
+    markTasks(repo, ALL_DONE);
+    setState(repo, { implemented: true, reviewed: true, verdict: "APPROVED", summarized: true });
+    await withServer(repo, async ({ call }) => {
+      eq((await call("kukulu_next")).stage, "done", "a finished flight is done");
+    }, { env });
+    await withServer(mkDir(), async ({ call }) => {
+      eq((await call("kukulu_next")).stage, "halt", "...and a project with no spec halts");
+    }, { env });
+    eq(probe.calls().length, 0, "done and halt run no probe");
+  }
+  {
+    const { repo, probe, env } = await warm();
+    probe.answers([{ ok: false, status: 503, ms: 40, error: "HTTP 503: loading" }]);
+    await withServer(repo, async ({ call }) => {
+      const n = await call("kukulu_next");
+      eq(n.stage + "|" + n.activation.error + "|" + n.activation.reported, "implement|HTTP 503: loading|null", "a failed probe does not stop the stage in this task (the result carries activation.error)");
+      eq(events(timelineOf(repo)), "start implement", "...and no activate record is written");
+    }, { env });
+  }
 }
 
 finish();

@@ -251,6 +251,39 @@ printf -- '-----BEGIN PGP SIGNATURE-----\\n\\nZmFrZQ==\\n-----END PGP SIGNATURE-
 }
 
 /**
+ * A fake runner probe for the activation tests: a directory holding `probe.mjs`, to be named by
+ * `KUKULU_RUNNER_PROBE`. Each run appends its argv as one JSON line to `<dir>/calls.jsonl` and prints the next
+ * entry of `<dir>/answers.json` as one line (the last entry repeats), exiting 0 when that entry's `ok` is true and
+ * 1 otherwise. Returns `{ script, dir, answers(list), calls() }`; `answers` replaces the list, `calls()` reads the argv lines.
+ */
+export function mkFakeProbe() {
+  const dir = mkDir("kukulu-fake-probe-");
+  const script = path.join(dir, "probe.mjs");
+  fs.writeFileSync(script, [
+    'import fs from "node:fs";',
+    'import path from "node:path";',
+    'import { fileURLToPath } from "node:url";',
+    'const here = path.dirname(fileURLToPath(import.meta.url));',
+    'const calls = path.join(here, "calls.jsonl");',
+    'const n = fs.existsSync(calls) ? fs.readFileSync(calls, "utf8").split("\\n").filter(Boolean).length : 0;',
+    'fs.appendFileSync(calls, JSON.stringify(process.argv.slice(2)) + "\\n");',
+    'const answers = JSON.parse(fs.readFileSync(path.join(here, "answers.json"), "utf8"));',
+    'const a = answers[Math.min(n, answers.length - 1)];',
+    'console.log(JSON.stringify(a));',
+    'process.exit(a.ok ? 0 : 1);',
+    "",
+  ].join("\n"));
+  const probe = {
+    script,
+    dir,
+    answers: (list) => fs.writeFileSync(path.join(dir, "answers.json"), JSON.stringify(list)),
+    calls: () => (fs.existsSync(path.join(dir, "calls.jsonl")) ? fs.readFileSync(path.join(dir, "calls.jsonl"), "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)) : []),
+  };
+  probe.answers([{ ok: true, status: 200, ms: 1500, reported: "qwen38-27b" }]);
+  return probe;
+}
+
+/**
  * A fake container engine for the sandbox tests: a directory holding an executable `docker` script to
  * put first on PATH. It appends every invocation to `<dir>/calls.log` and answers from files in the
  * directory: `version.txt`, `image-inspect.txt`, `image-missing`, `inspect.json`, `run-exit` and
