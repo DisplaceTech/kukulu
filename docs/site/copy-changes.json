@@ -18,6 +18,7 @@
       { "old": "See the cleanflate results", "new": "See both rebuilds" },
       { "old": ">Continuous fuzzing and multi-pair similarity calibration.</p>", "new": ">Runner comparison: usage and outcome metrics, so two flights of one spec can be compared across models, a local one included.</p>" },
       { "old": ">A vendor-agnostic package.</p>", "new": ">A vendor-agnostic package, starting with OpenCode.</p>" },
-      { "old": "Token 5-gram overlap of 0.22, against 0.23 for independently written code and 0.98 for derived code.", "new": "Token 5-gram overlap of 0.22 with lz4_flex, a Rust LZ4 library the build could not read; an unrelated Rust decoder scores 0.23 and a disguised copy 0.98." }
+      { "old": "Token 5-gram overlap of 0.22, against 0.23 for independently written code and 0.98 for derived code.", "new": "Token 5-gram overlap of 0.22 with lz4_flex, a Rust LZ4 library the build could not read; an unrelated Rust decoder scores 0.23 and a disguised copy 0.98." },
+      { "old": "The 3 denials were guard false positives, since fixed in 0.8.1.", "new": "3 calls were denied and left unclassified in the signed log; the reviewer judged them guard false positives, and the 0.8.1 guard allows all three." }
     ]
   }
