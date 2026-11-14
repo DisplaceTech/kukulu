@@ -82,6 +82,10 @@ ok(describedOk, "every tool carries a description the model can act on");
 ok(leakedOk, "tools/list does not leak the server-side handler");
 
 const byName = Object.fromEntries(list.map((t) => [t.name, t]));
+like(byName.kukulu_next.description, /runner probe[\s\S]*halt[\s\S]*docs\/METRICS\.json/, "kukulu_next's description names the activation probe, the runner halt and docs/METRICS.json");
+ok(!/Writes only/.test(byName.kukulu_next.description), "...and no longer says it writes only the timeline");
+like(byName.kukulu_status.description, /counters[\s\S]*harness[\s\S]*activateSeconds/, "kukulu_status's description names counters, harness and activateSeconds");
+like(byName.kukulu_pr_finalize.description, /chore: flight metrics/, "kukulu_pr_finalize's description names the chore: flight metrics commit");
 eq(JSON.stringify(byName.kukulu_mutate.inputSchema.properties.filter.type), JSON.stringify(["string", "array"]), "kukulu_mutate's filter takes a string or a list");
 eq(byName.kukulu_status.inputSchema.required, undefined, "read-only tools take no required arguments");
 eq(byName.kukulu_task_done.inputSchema.required.join(","), "id,log", "task_done requires id and log");
