@@ -258,4 +258,63 @@ const withTranscript = (text) => {
   eq(json(buildMetrics({ state: { harness: [{ name: "claude-code", version: "1" }] } }).harness), '[{"name":"claude-code","version":"1"}]', "the harness list is state.harness");
 }
 
+// ---------------------------------------------------------------- usage, roles and totals (P2-05)
+
+{
+  const fixture = (name) => JSON.parse(fs.readFileSync(path.join(ROOT, "test", "fixtures", "metrics", name), "utf8"));
+  const json = (x) => JSON.stringify(x);
+  const full = fixture("full.inputs.json");
+  const rec = (role, models, extra = {}) => ({ v: 1, harness: "claude-code", session: `s-${role}`, agent: role === "controller" ? null : `kukulu-${role}`, role, stage: "implement", round: 0, models, first: "2026-11-14T10:00:00.000Z", last: "2026-11-14T10:30:00.000Z", activeMs: 10000, toolCalls: 1, toolErrors: 0, apiErrors: 0, cost: 0.5, ...extra });
+  const m = (requests, input, output, cacheRead = 0, cacheWrite = 0) => ({ requests, input, output, cacheRead, cacheWrite });
+  const route = { implementer: { model: "spark/q", runner: "spark", locality: "local", family: "qwen" }, reviewer: { model: "opus", runner: "anthropic", locality: "remote", family: "claude" } };
+  const build = (records, extra = {}) => buildMetrics({ routing: route, usage: { source: "chain", chainHead: null, records }, ...extra });
+
+  const b = build([rec("implementer", { "q-a": m(3, 100, 40, 10, 5), "q-b": m(1, 20, 10) }), rec("implementer", { "q-a": m(2, 5, 5) }, { activeMs: 5000 })]);
+  eq(json([b.roles.implementer.requests, b.roles.implementer.input, b.roles.implementer.output, b.roles.implementer.cacheRead, b.roles.implementer.cacheWrite]), "[6,125,55,10,5]", "a role's entry sums its records' models");
+  eq(json(b.roles.implementer.reported), '["q-a","q-b"]', "...and lists the reported models sorted");
+  eq(b.roles.implementer.activeSeconds + "|" + b.roles.implementer.outputPerActiveSecond, "15|3.7", "outputPerActiveSecond is output over active seconds, to one decimal (55 / 15 s)");
+  eq(json(b.roles.implementer.toolCalls), "2", "tool counts sum");
+  eq(json(b.roles.summarizer), json({ model: null, runner: null, locality: null, family: null, usage: null, reported: null, requests: null, input: null, output: null, cacheRead: null, cacheWrite: null, activeSeconds: null, outputPerActiveSecond: null, toolCalls: null, toolErrors: null, apiErrors: null, cost: null }), "a missing summarizer record gives usage null and every token field null");
+  eq(json(b.totals.missing), '["planner","reviewer","summarizer","controller"]', "...and totals.missing lists the roles without records, in order");
+  eq(json([b.totals.requests, b.totals.input, b.totals.output]), "[6,125,55]", "totals sum only the roles that have records");
+  const none = buildMetrics({});
+  eq(json([none.totals.requests, none.totals.input, none.totals.output, none.totals.missing.length, none.usage]), "[null,null,null,5,null]", "a flight with no usage records has every role missing and null totals, and usage is null without the input");
+  eq(json(Object.keys(none.roles)), '["planner","implementer","reviewer","summarizer","controller"]', "roles has the five keys in USAGE_ROLES order");
+  eq(build([rec("reviewer", { x: m(1, 1, 1) })]).roles.reviewer.cost, 0.5, "cost is the sum for a role on the anthropic runner");
+  eq(build([rec("reviewer", { x: m(1, 1, 1) }, { cost: 0.1 }), rec("reviewer", { x: m(1, 1, 1) }, { cost: 0.2, session: "s2", first: "2026-11-14T11:00:00.000Z" })]).roles.reviewer.cost, 0.3, "...rounded to six decimals");
+  eq(build([rec("implementer", { x: m(1, 1, 1) })]).roles.implementer.cost, null, "cost is null for a local runner even when the records carry one");
+  eq(build([rec("reviewer", { x: m(1, 1, 1) }), rec("reviewer", { x: m(1, 1, 1) }, { cost: null, session: "s2" })]).roles.reviewer.cost, null, "cost is null when one record has none");
+  eq(build([rec("controller", { x: m(1, 1, 1) })]).roles.controller.cost, null, "the controller's cost is null");
+  const ctl = build([rec("controller", { x: m(1, 10, 1) }, { session: "A" }), rec("controller", { x: m(2, 30, 2) }, { session: "A" }), rec("controller", { x: m(4, 5, 4) }, { session: "B" })]);
+  eq(json([ctl.roles.controller.requests, ctl.roles.controller.input, ctl.usage]), json([6, 35, { source: "chain", records: 2, chainHead: null }]), "the controller keeps the last record per session and sums across sessions (usage.records counts what was summed)");
+  const rep = (source) => buildMetrics({ routing: route, usage: { source, chainHead: null, records: [rec("implementer", { x: m(1, 10, 1) }), rec("implementer", { x: m(3, 30, 3) })] } });
+  eq(rep("usage.jsonl").roles.implementer.requests + "|" + rep("usage.jsonl").usage.records, "3|1", "in general mode a later record with the same session, agent and first supersedes the earlier one");
+  eq(rep("chain").roles.implementer.requests + "|" + rep("chain").usage.records, "4|2", "from the chain every role record is summed");
+  const bad = build([rec("implementer", { x: m(1, 1, 1) }), { v: 1, harness: "claude-code", session: null, agent: null, role: "implementer", error: "ENOENT" }, { ...rec("implementer", { x: m(9, 9, 9) }), v: 2 }, "junk", null]);
+  eq(bad.roles.implementer.requests + "|" + bad.usage.records, "1|1", "an error record and an invalid record are not counted");
+  eq(build([rec("implementer", { x: m(1, 1, 1) }, { activeMs: null })]).roles.implementer.outputPerActiveSecond, null, "outputPerActiveSecond is null without active time");
+  eq(json(buildMetrics(fixture("v0-8-0.inputs.json"))), json(fixture("v0-8-0.expected.json")), "the v0-8-0 fixture still builds to its exact metrics");
+
+  // every field of the object is named in docs/metrics.md
+  const paths = new Set();
+  const MAPS = { "wall.stageSeconds": "<stage>", "wall.activateSeconds": "<runner>", roles: "<role>", "friction.feedback": "<category>" };
+  const walk = (value, at) => {
+    if (value === null && MAPS[at]) return; // a null map is covered by the build that fills it
+    if (Array.isArray(value)) {
+      if (value.length && value[0] !== null && typeof value[0] === "object") walk(value[0], `${at}[]`);
+      else paths.add(at);
+    } else if (value !== null && typeof value === "object" && at !== "rounds[].sources") {
+      const entries = Object.entries(value);
+      if (MAPS[at]) for (const [, v] of entries.slice(0, 1)) walk(v, `${at}.${MAPS[at]}`);
+      else for (const [k, v] of entries) walk(v, at ? `${at}.${k}` : k);
+    } else paths.add(at);
+  };
+  walk(buildMetrics(full), "");
+  walk(buildMetrics(fixture("v0-8-0.inputs.json")), "");
+  const doc = fs.readFileSync(path.join(ROOT, "docs", "metrics.md"), "utf8");
+  const absent = [...paths].filter((p) => !doc.includes(`\`${p}\``));
+  eq(absent.join(", "), "", "docs/metrics.md names every field of METRICS.json");
+  ok(paths.size > 60, `...walked ${paths.size} paths`);
+}
+
 finish();

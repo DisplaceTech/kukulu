@@ -17,3 +17,8 @@ server kept none. `v0-8-0.expected.json` is the metrics object those inputs
 must build to, worked out from the rules in `docs/metrics.md` and not copied
 from the code's output. Both files are ASCII, with every other character
 escaped as `\uXXXX`.
+
+`full.inputs.json` is synthetic: every key of the inputs filled (a timeline with
+two rounds and an activation, routing, one usage record for each of the five
+roles, counters, feedback, task counts, git facts and a genesis), so that a test
+can walk every field of the metrics object. It describes no real flight.

@@ -135,6 +135,65 @@ function treeOf(git) {
   };
 }
 
+const TOKEN_KEYS = ["requests", "input", "output", "cacheRead", "cacheWrite"];
+const PER_ROLE_NULLS = ["reported", ...TOKEN_KEYS, "activeSeconds", "outputPerActiveSecond", "toolCalls", "toolErrors", "apiErrors", "cost"];
+
+/** The records that count: valid full records, the controller's last per session, and in general mode the last of a repeated stop. */
+function countedRecords(usage) {
+  const valid = (Array.isArray(usage?.records) ? usage.records : []).filter((r) => isObj(r) && !("error" in r) && validateUsageRecord(r).length === 0);
+  const lastOf = (list, keyOf) => {
+    const kept = new Map();
+    for (const r of list) kept.set(keyOf(r), r);
+    return [...kept.values()];
+  };
+  const controller = lastOf(valid.filter((r) => r.role === "controller"), (r) => String(r.session));
+  const others = valid.filter((r) => r.role !== "controller");
+  return [...(usage.source === "usage.jsonl" ? lastOf(others, (r) => JSON.stringify([r.session, r.agent, r.first])) : others), ...controller];
+}
+
+function rolesAndTotals(usage, routing) {
+  const records = usage ? countedRecords(usage) : [];
+  const roles = {};
+  const missing = [];
+  const sums = { requests: 0, input: 0, output: 0 };
+  for (const role of USAGE_ROLES) {
+    const route = role !== "controller" && isObj(routing) && isObj(routing[role]) ? routing[role] : {};
+    const head = { model: route.model ?? null, runner: route.runner ?? null, locality: route.locality ?? null, family: route.family ?? null };
+    const mine = records.filter((r) => r.role === role);
+    if (!mine.length) {
+      roles[role] = { ...head, usage: null, ...Object.fromEntries(PER_ROLE_NULLS.map((k) => [k, null])) };
+      missing.push(role);
+      continue;
+    }
+    const tokens = Object.fromEntries(TOKEN_KEYS.map((k) => [k, 0]));
+    const reported = new Set();
+    for (const r of mine) for (const [name, m] of Object.entries(r.models)) {
+      reported.add(name);
+      for (const k of TOKEN_KEYS) tokens[k] += m[k];
+    }
+    const sumOf = (key) => {
+      const values = mine.map((r) => r[key]).filter((v) => v !== null);
+      return values.length ? values.reduce((t, v) => t + v, 0) : null;
+    };
+    const activeMs = sumOf("activeMs");
+    const costs = mine.map((r) => r.cost);
+    roles[role] = {
+      ...head,
+      reported: [...reported].sort(),
+      ...tokens,
+      activeSeconds: activeMs === null ? null : secs(activeMs),
+      outputPerActiveSecond: activeMs ? Math.round((tokens.output / (activeMs / 1000)) * 10) / 10 : null,
+      toolCalls: sumOf("toolCalls"),
+      toolErrors: sumOf("toolErrors"),
+      apiErrors: sumOf("apiErrors"),
+      cost: head.runner === "anthropic" && costs.every((c) => typeof c === "number") ? Math.round(costs.reduce((t, c) => t + c, 0) * 1e6) / 1e6 : null,
+    };
+    for (const k of ["requests", "input", "output"]) sums[k] += tokens[k];
+  }
+  const any = missing.length < USAGE_ROLES.length;
+  return { count: records.length, roles, totals: { requests: any ? sums.requests : null, input: any ? sums.input : null, output: any ? sums.output : null, missing } };
+}
+
 /**
  * The metrics object of docs/metrics.md from plain data. Reads no file and no clock; a missing input is a `null`
  * field, never a throw and never a zero. Holds counts, timestamps and content hashes, never a commit hash.
@@ -153,13 +212,15 @@ export function buildMetrics(inputs = {}) {
     : null;
   const spec = isObj(i.spec) && typeof i.spec.title === "string" && typeof i.spec.sha256 === "string" ? { title: i.spec.title, sha256: i.spec.sha256 } : null;
   const timeline = state && Array.isArray(state.timeline) ? state.timeline : null;
+  const usageIn = isObj(i.usage) ? i.usage : null;
+  const per = rolesAndTotals(usageIn, i.routing);
   return {
     v: METRICS_VERSION,
     plugin: i.plugin ?? null,
     flight: i.flight ?? null,
     spec,
     harness: state && Array.isArray(state.harness) && state.harness.length ? state.harness : [{ name: "unknown", version: null }],
-    usage: null,
+    usage: usageIn ? { source: usageIn.source ?? null, records: per.count, chainHead: usageIn.chainHead ?? null } : null,
     mode: genesis ? (genesis.mode ?? "clean-room") : "general",
     enforcement: genesis ? ("enforcement" in genesis ? genesis.enforcement : "hook") : null,
     outcome: {
@@ -172,8 +233,8 @@ export function buildMetrics(inputs = {}) {
     },
     wall: wallOf(timeline, i.now),
     rounds: roundsOf(state, timeline, i.now),
-    roles: null,
-    totals: null,
+    roles: per.roles,
+    totals: per.totals,
     tasks: {
       total: tasks && Number.isInteger(tasks.total) ? tasks.total : null,
       done: tasks && Number.isInteger(tasks.done) ? tasks.done : null,

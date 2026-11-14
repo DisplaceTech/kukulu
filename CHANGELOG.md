@@ -15,6 +15,7 @@ All notable changes to this plugin. Format follows
 - In clean-room mode the stage's start entry records the model asked for, the model the runner reports and the wait (A-03, patent pending); a `runner-drift` feedback entry when the two differ or a role's served id changes (A-03, A-04).
 - The usage record: one schema for every harness, validated by `validateUsageRecord` in `mcp/metrics.mjs` (B-01).
 - `buildMetrics` in `mcp/metrics.mjs` builds the flight's outcome, wall time, rounds, tasks, friction and tree from plain data (C-01).
+- Per-role token use, model wait time and output per active second in the metrics object, with a role that has no record reported as missing, never zero (C-01).
 - Every flight records token use per role; in general mode to `.kukulu/metrics/usage.jsonl`, excluded per clone (B-02, §5.4).
 - `.kukulu/metrics/counters.json` and `kukulu_status.counters`: verify runs, verify failures and reopened tasks (C-02).
 - The flight records the harness's name and version from the MCP `initialize` request, in `state.harness` and `kukulu_status.harness` (C-04).
