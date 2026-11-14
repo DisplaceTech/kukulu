@@ -37,6 +37,9 @@ Started: 2026-11-14T04:52:50.030Z
 - [x] P3-04 Documentation sweep for 0.9.0
 - [x] P3-05 CHANGELOG 0.9.0 and the version
 - [x] P3-06 Phase 3 end: push and record the manual checks
+- [ ] R1-01 The probe redacts the token before it cuts the error body
+- [ ] R1-02 A failed activation on a flight's first timeline record keeps its activateFailures count
+- [ ] R1-03 The kukulu_next, kukulu_status and kukulu_pr_finalize tool descriptions name 0.9.0's behavior
 
 ## Log
 
