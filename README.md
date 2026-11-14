@@ -260,6 +260,7 @@ Everything is on disk and committed, so `/kukulu:go-flight` can be re-run from a
 ├── hooks/hooks.json             Stop / SubagentStop wiring
 ├── scripts/
 │   ├── implement-guard.mjs      the guard hook
+│   ├── runner-probe.mjs         one request to a runner, one JSON line out
 │   ├── lint.sh                  dependency-free syntax + manifest lint
 │   └── check-diagrams.mjs       parses every Mermaid block (CI only)
 ├── site/                        the kukulu.tech landing page, deployed to Cloudflare Pages

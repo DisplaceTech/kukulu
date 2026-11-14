@@ -822,4 +822,98 @@ for (const [value, got, label] of [
   ok(!(await statusWith("vendor/bin/phpunit --filter {filter}")).error, "a non-cargo command with {filter} and no -- still loads");
 }
 
+// ---------------------------------------------------------------- scripts/runner-probe.mjs (P1-01)
+
+{
+  const PROBE = path.join(ROOT, "scripts", "runner-probe.mjs");
+  const { spawn } = await import("node:child_process");
+  const http = await import("node:http");
+  /** Run the script without blocking this process's event loop, so the fake server can answer. */
+  const run = (args, env = {}) => new Promise((resolve) => {
+    const p = spawn(process.execPath, [PROBE, ...args], { env: { PATH: process.env.PATH, ...env } });
+    let stdout = "";
+    let stderr = "";
+    p.stdout.on("data", (d) => { stdout += d; });
+    p.stderr.on("data", (d) => { stderr += d; });
+    p.on("close", (status) => resolve({ status, stdout, stderr, json: (() => { try { return JSON.parse(stdout); } catch { return null; } })() }));
+  });
+  const serve = async (handler) => {
+    const seen = [];
+    const server = http.createServer((req, res) => {
+      let body = "";
+      req.on("data", (d) => { body += d; });
+      req.on("end", () => { seen.push({ method: req.method, url: req.url, headers: req.headers, body }); handler(req, res, body); });
+    });
+    await new Promise((r) => server.listen(0, "127.0.0.1", r));
+    return { url: `http://127.0.0.1:${server.address().port}`, seen, close: () => new Promise((r) => { server.closeAllConnections?.(); server.close(r); }) };
+  };
+  const json = (res, status, obj) => { res.writeHead(status, { "content-type": "application/json" }); res.end(JSON.stringify(obj)); };
+
+  const a = await serve((req, res) => {
+    if (req.url === "/v1/models") json(res, 200, { data: [{ id: "m-1" }, { id: "m-2" }] });
+    else if (req.url === "/v1/messages" && JSON.parse(req.headers["x-test-nomodel"] ?? "false")) json(res, 200, {});
+    else json(res, 200, { model: "served-x" });
+  });
+  const b = await serve((req, res) => json(res, 200, { ok: true }));
+  const c = await serve((req, res) => { res.writeHead(404); res.end("no such\n   model  here"); });
+  const hang = await serve(() => {});
+  const echo = await serve((req, res) => json(res, 401, { error: `bad header ${req.headers.authorization}` }));
+  const redirect = await serve((req, res) => { res.writeHead(302, { location: `${a.url}/v1/models` }); res.end(); });
+  try {
+    const m = await run(["--endpoint", a.url, "--models"]);
+    eq(JSON.stringify(m.json.served) + "|" + m.json.ok + "|" + m.json.status + "|" + m.status, '["m-1","m-2"]|true|200|0', "--models lists the ids of data[].id");
+    const w = await run(["--endpoint", a.url, "--warm", "served-x"]);
+    eq(w.json.reported + "|" + w.status, "served-x|0", "--warm reports the body's model");
+    const w2 = await run(["--endpoint", b.url, "--warm", "served-x"]);
+    eq(w2.json.ok + "|" + w2.json.reported, "true|null", "--warm reports null when the body has no model");
+    const sent = b.seen[0];
+    eq(sent.method + "|" + sent.url + "|" + sent.headers["content-type"] + "|" + sent.headers["anthropic-version"], "POST|/v1/messages|application/json|2023-06-01", "--warm sends POST /v1/messages with the json and anthropic-version headers");
+    eq(JSON.stringify(JSON.parse(sent.body)), JSON.stringify({ model: "served-x", max_tokens: 1, messages: [{ role: "user", content: "ping" }] }), "...a body of model, max_tokens 1 and one ping message");
+    const nf = await run(["--endpoint", c.url, "--models"]);
+    eq(nf.json.ok + "|" + nf.json.status + "|" + nf.json.error + "|" + nf.status, "false|404|HTTP 404: no such model here|1", "a 404 with a body is ok false, status 404, error HTTP 404: <body>, exit 1");
+    const slow = await run(["--endpoint", hang.url, "--models", "--timeout-ms", "300"]);
+    eq(slow.json.error + "|" + slow.json.ok + "|" + slow.status, "no answer within 300 ms|false|1", "a server that never answers is no answer within <N> ms");
+    const dead = await serve(() => {});
+    const deadUrl = dead.url;
+    await dead.close();
+    const refused = await run(["--endpoint", deadUrl, "--models", "--timeout-ms", "60000"]);
+    ok(refused.json.status === null && /^ECONNREFUSED/.test(refused.json.error) && refused.json.ms < 5000, "a refused connection fails at once with status null");
+    const before = a.seen.length;
+    const unset = await run(["--endpoint", a.url, "--models", "--token-env", "PROBE_TOKEN"]);
+    eq(unset.json.error + "|" + unset.status + "|" + (a.seen.length === before), "the environment variable PROBE_TOKEN is not set|1|true", "an unset token variable is an error before any request");
+    await run(["--endpoint", a.url, "--models", "--token-env", "PROBE_TOKEN"], { PROBE_TOKEN: "sekret-123" });
+    const withToken = a.seen.at(-1);
+    eq(withToken.headers["x-api-key"] + "|" + withToken.headers.authorization, "sekret-123|Bearer sekret-123", "the token reaches the runner as x-api-key and as a Bearer authorization");
+    const leak = await run(["--endpoint", echo.url, "--models", "--token-env", "PROBE_TOKEN"], { PROBE_TOKEN: "sekret-123" });
+    ok(leak.stdout.includes("<redacted>") && !leak.stdout.includes("sekret-123") && !leak.stderr.includes("sekret-123"), "a runner that echoes the Authorization header in a 401 body does not leak the token");
+    const seenA = a.seen.length;
+    const red = await run(["--endpoint", redirect.url, "--models"]);
+    ok(red.json.ok === false && red.json.status === 302 && a.seen.length === seenA, "a redirect is not followed");
+    eq(m.stdout.split("\n").filter(Boolean).length + "|" + m.stdout.endsWith("\n"), "1|true", "the probe prints exactly one line");
+    for (const [name, args] of [
+      ["no --endpoint", ["--models"]],
+      ["an endpoint with a path", ["--endpoint", "http://x.test/v1", "--models"]],
+      ["an endpoint with credentials", ["--endpoint", "http://u:p@x.test", "--models"]],
+      ["an endpoint that is not http", ["--endpoint", "ftp://x.test", "--models"]],
+      ["both modes", ["--endpoint", a.url, "--models", "--warm", "x"]],
+      ["neither mode", ["--endpoint", a.url]],
+      ["--warm without an id", ["--endpoint", a.url, "--warm"]],
+      ["a bad --timeout-ms", ["--endpoint", a.url, "--models", "--timeout-ms", "0"]],
+      ["a bad --token-env", ["--endpoint", a.url, "--models", "--token-env", "lower"]],
+      ["an unknown option", ["--endpoint", a.url, "--models", "--frob"]],
+    ]) {
+      const r = await run(args);
+      ok(r.status === 2 && r.stdout === "" && /^usage: node scripts\/runner-probe\.mjs/m.test(r.stderr), `usage error: ${name} returns 2 with usage on stderr and nothing on stdout`);
+    }
+  } finally {
+    for (const s of [a, b, c, hang, echo, redirect]) await s.close();
+  }
+  if (process.env.KUKULU_RUNNER_IT === "1" && process.env.KUKULU_RUNNER_IT_ENDPOINT) {
+    const real = await run(["--endpoint", process.env.KUKULU_RUNNER_IT_ENDPOINT, "--models"]);
+    ok(real.status === 0 && real.json.served.length > 0, "a real runner answers --models with a non-empty served list");
+  } else {
+    console.log("# skipped: set KUKULU_RUNNER_IT=1 and KUKULU_RUNNER_IT_ENDPOINT=<url> to probe a real runner");
+  }
+}
+
 finish();
