@@ -10,9 +10,13 @@
     "signing": "auto",
     "push": true,
     "pr": "draft",
-    "feedback": true
+    "feedback": true,
+    "archive": true,
+    "finalize": "ready",
+    "mergeMethod": "merge",
+    "syncBase": true
   },
-  "signing": null,
+  "signing": "on",
   "rounds": [],
   "archived": {
     "slug": "v0-8-1",
@@ -39,5 +43,8 @@
       "round": 0,
       "at": "2026-11-14T04:52:39.990Z"
     }
-  ]
+  ],
+  "cleanroom": {
+    "mode": "general"
+  }
 }
