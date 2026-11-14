@@ -91,7 +91,8 @@
       "toolCalls": 40,
       "toolErrors": 2,
       "apiErrors": 0,
-      "cost": 1.4
+      "cost": 1.4,
+      "costSource": "reported"
     },
     "implementer": {
       "model": "spark/qwen38-27b",
@@ -111,7 +112,8 @@
       "toolCalls": 40,
       "toolErrors": 20,
       "apiErrors": 0,
-      "cost": null
+      "cost": null,
+      "costSource": null
     },
     "reviewer": {
       "model": "spark/qwen38-27b",
@@ -131,7 +133,8 @@
       "toolCalls": 40,
       "toolErrors": 2,
       "apiErrors": 0,
-      "cost": null
+      "cost": null,
+      "costSource": null
     },
     "summarizer": {
       "model": "sonnet",
@@ -150,7 +153,8 @@
       "toolCalls": null,
       "toolErrors": null,
       "apiErrors": null,
-      "cost": null
+      "cost": null,
+      "costSource": null
     },
     "controller": {
       "model": null,
@@ -170,13 +174,15 @@
       "toolCalls": 40,
       "toolErrors": 2,
       "apiErrors": 0,
-      "cost": null
+      "cost": 0.031,
+      "costSource": "rates"
     }
   },
   "totals": {
     "requests": 407,
     "input": 182100,
     "output": 15650,
+    "cost": null,
     "missing": [
       "summarizer"
     ]

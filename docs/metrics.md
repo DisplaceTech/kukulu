@@ -39,7 +39,7 @@ This page covers the usage record (what one agent's use of models looks like onc
 | `toolCalls` | integer | Tool uses | the format cannot say |
 | `toolErrors` | integer | Tool results flagged as errors | the format cannot say |
 | `apiErrors` | integer | Rows the transcript flags as API errors | the format has no such flag |
-| `cost` | number | Sum of the reported cost, in dollars | any counted row lacks one |
+| `cost` | number | Sum of the cost the harness reported, in dollars | any counted row lacks one (current Claude Code transcripts never carry one; `buildMetrics` then prices the record, see [Cost](#cost)) |
 
 A transcript that cannot be read yields an error record with only `v`, `harness`, `session`, `agent`, `role` and `error`. `validateUsageRecord` in `mcp/metrics.mjs` checks both shapes.
 
@@ -61,6 +61,12 @@ Clean-room mode writes the chain's `usage` entry only, and never `usage.jsonl`. 
 
 The logger also runs on `Stop`. A `Stop` record has `role: "controller"` and `agent: null`, and counts the session's own transcript with every sidechain row dropped, so it never holds a subagent's requests. Each `Stop` appends the cumulative record, and a reader keeps the last one per session. In clean-room mode the record goes into the chain as a `usage` entry with entry role `session`, which the per-role recount does not count.
 
+## Cost
+
+Claude Code transcripts no longer carry a per-row cost, so a record usually arrives with `cost: null`. `buildMetrics` then prices the record from its `models` with `RATES` in `mcp/metrics.mjs`: Anthropic's first-party list prices in dollars per million tokens, as of `RATES_AS_OF` (an ⚠️ ASSUMPTION to refresh when prices change). Per model, `input`, `output` and `cacheRead` are priced at their own rates and `cacheWrite` at twice the input rate, the 1-hour TTL every recorded Claude Code session wrote with. A model is matched by its exact id, ignoring case, a `[…]` suffix and a `-YYYYMMDD` date. A model with tokens and no rate (a local model, or an id the table does not list) makes that record unpriced, while a model with no tokens at all (an API-error row) costs nothing.
+
+A role is priced only on the `anthropic` runner, so a local runner that serves a model under a `claude-*` name is never priced. The controller has no routed runner and is priced from its model names alone.
+
 ## Known limits
 
 - Requests the controller makes after its last `Stop` are not counted.
@@ -68,7 +74,7 @@ The logger also runs on `Stop`. A `Stop` record has `role: "controller"` and `ag
 - Tokens of other subagents a stage spawns are not counted.
 - `outputPerActiveSecond` is output over the time spent waiting on a model, which includes prefill and the network; it is not decode speed.
 - Clean-room sums count a re-blocked agent's earlier stops again, as check 12 does, while general mode keeps the last record per transcript.
-- `cost` is `null` for local runners and for the controller.
+- `cost` is `null` for local runners and for any model the rate table does not list. A priced cost is an estimate at list prices: it ignores batch, fast-mode and partner pricing, Haiku 5.5's above-100K tier and subscription billing, and prices every cache write at the 1-hour TTL.
 - With `activate: "none"` a model load hides inside a stage's first request and inflates `activeMs`.
 
 ## Counters
@@ -122,8 +128,10 @@ Counted usage records are the valid, non-error ones. The controller keeps only t
 | `roles.<role>.activeSeconds` | the sum of the records' non-null `activeMs`, in whole seconds |
 | `roles.<role>.outputPerActiveSecond` | `output` over the active seconds, rounded to one decimal; `null` without active time |
 | `roles.<role>.toolCalls`, `roles.<role>.toolErrors`, `roles.<role>.apiErrors` | sums of the records' non-null values; `null` when every record's is `null` |
-| `roles.<role>.cost` | the sum of the records' `cost`, rounded to six decimals, for a role on the `anthropic` runner when every record has one; `null` otherwise |
+| `roles.<role>.cost` | the sum, rounded to six decimals, of each record's reported `cost`, or of its [list-price cost](#cost) when it reported none; only for a role on the `anthropic` runner, or the controller; `null` when any record has neither |
+| `roles.<role>.costSource` | `reported` when every record carried its own cost, `rates` when every one was priced from the rate table, `mixed` otherwise; `null` with `cost` |
 | `totals.requests`, `totals.input`, `totals.output` | sums over the roles that have records; `null` when none has |
+| `totals.cost` | the sum of `cost` over the roles that have records, rounded to six decimals; `null` when none has, or when one of them has no `cost` |
 | `totals.missing` | the roles with no usage record, in the order planner, implementer, reviewer, summarizer, controller |
 | `tasks.total`, `tasks.done`, `tasks.blocked`, `tasks.skipped` | the task counts of `docs/PROGRESS.md` |
 | `tasks.reopened` | the `tasksReopened` counter |

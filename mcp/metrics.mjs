@@ -165,7 +165,54 @@ export function usageFromChain(entries) {
 }
 
 const TOKEN_KEYS = ["requests", "input", "output", "cacheRead", "cacheWrite"];
-const PER_ROLE_NULLS = ["reported", ...TOKEN_KEYS, "activeSeconds", "outputPerActiveSecond", "toolCalls", "toolErrors", "apiErrors", "cost"];
+const PER_ROLE_NULLS = ["reported", ...TOKEN_KEYS, "activeSeconds", "outputPerActiveSecond", "toolCalls", "toolErrors", "apiErrors", "cost", "costSource"];
+
+// ⚠️ ASSUMPTION: Anthropic first-party list prices, dollars per million tokens, as published on RATES_AS_OF.
+// An adapter whose harness reports no cost leaves the record's cost null, so such a record is priced from its token
+// counts here. Only claude-* ids are listed, so a local model is never priced. Cache writes are priced at the
+// 1-hour TTL (twice input), the TTL every write in the recorded sessions used; Haiku 5.5's above-100K-token tier
+// is not modelled.
+export const RATES_AS_OF = "2026-11-03";
+export const CACHE_WRITE_MULTIPLIER = 2;
+export const RATES = {
+  "claude-fable-5-2": { input: 8, output: 40, cacheRead: 0.2 },
+  "claude-mythos-5-2": { input: 8, output: 40, cacheRead: 0.2 },
+  "claude-fable-5-1": { input: 10, output: 50, cacheRead: 0.25 },
+  "claude-mythos-5-1": { input: 10, output: 50, cacheRead: 0.25 },
+  "claude-fable-5": { input: 10, output: 50, cacheRead: 1 },
+  "claude-mythos-5": { input: 10, output: 50, cacheRead: 1 },
+  "claude-opus-5-5": { input: 4, output: 20, cacheRead: 0.2 },
+  "claude-opus-5": { input: 5, output: 25, cacheRead: 0.5 },
+  "claude-opus-4-8": { input: 5, output: 25, cacheRead: 0.5 },
+  "claude-opus-4-7": { input: 5, output: 25, cacheRead: 0.5 },
+  "claude-opus-4-6": { input: 5, output: 25, cacheRead: 0.5 },
+  "claude-sonnet-5-5": { input: 2, output: 10, cacheRead: 0.1 },
+  "claude-sonnet-5": { input: 2, output: 10, cacheRead: 0.2 },
+  "claude-sonnet-4-6": { input: 3, output: 15, cacheRead: 0.3 },
+  "claude-haiku-5-5": { input: 0.1, output: 0.5, cacheRead: 0.01 },
+  "claude-haiku-4-5": { input: 1, output: 5, cacheRead: 0.1 },
+};
+
+/** The rate of a reported model name: exact id after dropping a `[…]` suffix and a `-YYYYMMDD` date; `null` when unlisted. */
+export function rateFor(name) {
+  if (typeof name !== "string") return null;
+  const id = name.toLowerCase().replace(/\[[^\]]*\]$/, "").replace(/-\d{8}$/, "");
+  return Object.hasOwn(RATES, id) ? RATES[id] : null;
+}
+
+/** The list-price cost of a record's `models`, in dollars; `null` when a model with tokens has no rate. */
+export function priceModels(models) {
+  if (!isObj(models)) return null;
+  let total = 0;
+  for (const [name, m] of Object.entries(models)) {
+    const tokens = m.input + m.output + m.cacheRead + m.cacheWrite;
+    if (tokens === 0) continue; // an API-error row (`<synthetic>`) bills nothing
+    const r = rateFor(name);
+    if (!r) return null;
+    total += (m.input * r.input + m.output * r.output + m.cacheRead * r.cacheRead + m.cacheWrite * r.input * CACHE_WRITE_MULTIPLIER) / 1e6;
+  }
+  return Math.round(total * 1e6) / 1e6;
+}
 
 /** The records that count: valid full records, the controller's last per session, and in general mode the last of a repeated stop. */
 function countedRecords(usage) {
@@ -184,7 +231,8 @@ function rolesAndTotals(usage, routing) {
   const records = usage ? countedRecords(usage) : [];
   const roles = {};
   const missing = [];
-  const sums = { requests: 0, input: 0, output: 0 };
+  const sums = { requests: 0, input: 0, output: 0, cost: 0 };
+  let costKnown = true;
   for (const role of USAGE_ROLES) {
     const route = role !== "controller" && isObj(routing) && isObj(routing[role]) ? routing[role] : {};
     const head = { model: route.model ?? null, runner: route.runner ?? null, locality: route.locality ?? null, family: route.family ?? null };
@@ -205,7 +253,12 @@ function rolesAndTotals(usage, routing) {
       return values.length ? values.reduce((t, v) => t + v, 0) : null;
     };
     const activeMs = sumOf("activeMs");
-    const costs = mine.map((r) => r.cost);
+    // A role on a non-Anthropic runner is never priced, even when its model name looks like one; the controller has
+    // no routed runner, so it is priced from the model names alone (a local model has no rate).
+    const priceable = role === "controller" || head.runner === "anthropic";
+    const costs = mine.map((r) => (typeof r.cost === "number" ? { value: r.cost, source: "reported" } : { value: priceModels(r.models), source: "rates" }));
+    const costed = priceable && costs.every((c) => c.value !== null);
+    const sources = [...new Set(costs.map((c) => c.source))];
     roles[role] = {
       ...head,
       reported: [...reported].sort(),
@@ -215,12 +268,19 @@ function rolesAndTotals(usage, routing) {
       toolCalls: sumOf("toolCalls"),
       toolErrors: sumOf("toolErrors"),
       apiErrors: sumOf("apiErrors"),
-      cost: head.runner === "anthropic" && costs.every((c) => typeof c === "number") ? Math.round(costs.reduce((t, c) => t + c, 0) * 1e6) / 1e6 : null,
+      cost: costed ? Math.round(costs.reduce((t, c) => t + c.value, 0) * 1e6) / 1e6 : null,
+      costSource: costed ? (sources.length === 1 ? sources[0] : "mixed") : null,
     };
     for (const k of ["requests", "input", "output"]) sums[k] += tokens[k];
+    if (roles[role].cost === null) costKnown = false;
+    else sums.cost += roles[role].cost;
   }
   const any = missing.length < USAGE_ROLES.length;
-  return { count: records.length, roles, totals: { requests: any ? sums.requests : null, input: any ? sums.input : null, output: any ? sums.output : null, missing } };
+  return {
+    count: records.length,
+    roles,
+    totals: { requests: any ? sums.requests : null, input: any ? sums.input : null, output: any ? sums.output : null, cost: any && costKnown ? Math.round(sums.cost * 1e6) / 1e6 : null, missing },
+  };
 }
 
 /**
@@ -341,7 +401,7 @@ export function compareMetrics(a, b) {
       roles.push(row(`${role} ${k}`, val(ea), val(eb)));
     }
   }
-  for (const k of ["requests", "input", "output"]) {
+  for (const k of ["requests", "input", "output", "cost"]) {
     const val = (m) => {
       if (!isObj(m.totals)) return null;
       const missing = Array.isArray(m.totals.missing) ? m.totals.missing : [];

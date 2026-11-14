@@ -25,14 +25,19 @@ All notable changes to this plugin. Format follows
 - `docs/local-runners.md`: running a fully local flight on one inference host, resident or swapping (E-01).
 - The `spark` profile with `activate: "warm"` in `templates/kukulu.config.example.json`, and `templates/runners/llama-swap.example.yaml` (E-02).
 - The model family `laguna` (Laguna and Poolside model strings) (E-03).
+- A role's `cost` is estimated at Anthropic list prices from its token counts when the harness reports none, as current Claude Code transcripts never do; `roles.<role>.costSource` says which (`reported`, `rates`, `mixed`), the controller is priced too, and `totals.cost` sums the flight. The rates are `RATES` in `mcp/metrics.mjs`, dated by `RATES_AS_OF` (B-01, owner decision 2026-11-14).
 
 ### Changed
 
-- `hooks/hooks.json` registers the logger on `Stop` as well, and in general mode it now writes usage. No hook script is added. The gate pins both files, so a clean-room flight started on 0.8.x cannot continue on 0.9.0 (gate check 3) (B-03).
+- `hooks/hooks.json` registers the logger on `Stop` as well, and in general mode it now writes usage. No hook script is added (B-03).
 - The four runner keys are new and optional (A-02).
 - `kukulu_next` can take as long as a model load when a runner has `activate: "warm"`, and it can return a `halt` for a runner that does not answer (A-03).
 - New files: `docs/METRICS.json` (committed) and `.kukulu/metrics/` (excluded per clone, never committed) (C-03, B-02).
 - A runner's `activateTimeoutMs` at or above the plugin's MCP tool-call limit is refused when the config loads (A-02).
+
+### Breaking changes
+
+- A clean-room flight started on 0.8.x cannot continue on 0.9.0. The gate pins `hooks/hooks.json` and the logger, and both changed when the logger was registered on `Stop`, so gate check 3 halts the flight. Finish an in-progress clean-room flight on 0.8.1 before upgrading, or start it again on 0.9.0. General-mode flights are not affected (B-03, gate check 3).
 
 ## [0.8.1] — 2026-11-13
 

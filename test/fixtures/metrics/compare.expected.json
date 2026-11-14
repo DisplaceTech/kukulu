@@ -469,9 +469,9 @@
       },
       {
         "label": "controller cost",
-        "a": null,
-        "b": null,
-        "diff": null
+        "a": 0.026,
+        "b": 0.031,
+        "diff": 0.005
       },
       {
         "label": "totals requests",
@@ -500,6 +500,17 @@
         "a": 9900,
         "b": {
           "value": 15650,
+          "partial": [
+            "summarizer"
+          ]
+        },
+        "diff": null
+      },
+      {
+        "label": "totals cost",
+        "a": 6.926,
+        "b": {
+          "value": null,
           "partial": [
             "summarizer"
           ]

@@ -103,7 +103,8 @@
       "toolCalls": 40,
       "toolErrors": 2,
       "apiErrors": 0,
-      "cost": 1.2
+      "cost": 1.2,
+      "costSource": "reported"
     },
     "implementer": {
       "model": "sonnet",
@@ -123,7 +124,8 @@
       "toolCalls": 40,
       "toolErrors": 9,
       "apiErrors": 0,
-      "cost": 3.4
+      "cost": 3.4,
+      "costSource": "reported"
     },
     "reviewer": {
       "model": "opus",
@@ -143,7 +145,8 @@
       "toolCalls": 40,
       "toolErrors": 2,
       "apiErrors": 0,
-      "cost": 2.1
+      "cost": 2.1,
+      "costSource": "reported"
     },
     "summarizer": {
       "model": "sonnet",
@@ -163,7 +166,8 @@
       "toolCalls": 40,
       "toolErrors": 2,
       "apiErrors": 0,
-      "cost": 0.2
+      "cost": 0.2,
+      "costSource": "reported"
     },
     "controller": {
       "model": null,
@@ -183,13 +187,15 @@
       "toolCalls": 40,
       "toolErrors": 2,
       "apiErrors": 0,
-      "cost": null
+      "cost": 0.026,
+      "costSource": "rates"
     }
   },
   "totals": {
     "requests": 206,
     "input": 112900,
     "output": 9900,
+    "cost": 6.926,
     "missing": []
   },
   "tasks": {

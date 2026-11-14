@@ -93,7 +93,8 @@
    "toolCalls": null,
    "toolErrors": null,
    "apiErrors": null,
-   "cost": null
+   "cost": null,
+   "costSource": null
   },
   "implementer": {
    "model": null,
@@ -112,7 +113,8 @@
    "toolCalls": null,
    "toolErrors": null,
    "apiErrors": null,
-   "cost": null
+   "cost": null,
+   "costSource": null
   },
   "reviewer": {
    "model": null,
@@ -131,7 +133,8 @@
    "toolCalls": null,
    "toolErrors": null,
    "apiErrors": null,
-   "cost": null
+   "cost": null,
+   "costSource": null
   },
   "summarizer": {
    "model": null,
@@ -150,7 +153,8 @@
    "toolCalls": null,
    "toolErrors": null,
    "apiErrors": null,
-   "cost": null
+   "cost": null,
+   "costSource": null
   },
   "controller": {
    "model": null,
@@ -169,13 +173,15 @@
    "toolCalls": null,
    "toolErrors": null,
    "apiErrors": null,
-   "cost": null
+   "cost": null,
+   "costSource": null
   }
  },
  "totals": {
   "requests": null,
   "input": null,
   "output": null,
+  "cost": null,
   "missing": [
    "planner",
    "implementer",

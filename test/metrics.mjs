@@ -6,7 +6,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { finish, ok, eq, like, ROOT, mkDir, mkRepo, cleanroomRepo, plannedRepo, runHook, setState, withServer, writeFile, readFile, hasFile, markTasks, git, buildBundle } from "./harness.mjs";
 import { rolesUsage, appendEntry, readEntries } from "../mcp/cleanroom.mjs";
-import { METRICS_VERSION, USAGE_KEYS, validateUsageRecord, buildMetrics, usageFromChain, compareMetrics } from "../mcp/metrics.mjs";
+import { METRICS_VERSION, USAGE_KEYS, validateUsageRecord, buildMetrics, usageFromChain, compareMetrics, RATES, rateFor, priceModels } from "../mcp/metrics.mjs";
 
 const json = (x) => JSON.stringify(x);
 const example = () => ({
@@ -276,7 +276,7 @@ const withTranscript = (text) => {
   eq(json(b.roles.implementer.reported), '["q-a","q-b"]', "...and lists the reported models sorted");
   eq(b.roles.implementer.activeSeconds + "|" + b.roles.implementer.outputPerActiveSecond, "15|3.7", "outputPerActiveSecond is output over active seconds, to one decimal (55 / 15 s)");
   eq(json(b.roles.implementer.toolCalls), "2", "tool counts sum");
-  eq(json(b.roles.summarizer), json({ model: null, runner: null, locality: null, family: null, usage: null, reported: null, requests: null, input: null, output: null, cacheRead: null, cacheWrite: null, activeSeconds: null, outputPerActiveSecond: null, toolCalls: null, toolErrors: null, apiErrors: null, cost: null }), "a missing summarizer record gives usage null and every token field null");
+  eq(json(b.roles.summarizer), json({ model: null, runner: null, locality: null, family: null, usage: null, reported: null, requests: null, input: null, output: null, cacheRead: null, cacheWrite: null, activeSeconds: null, outputPerActiveSecond: null, toolCalls: null, toolErrors: null, apiErrors: null, cost: null, costSource: null }), "a missing summarizer record gives usage null and every token field null");
   eq(json(b.totals.missing), '["planner","reviewer","summarizer","controller"]', "...and totals.missing lists the roles without records, in order");
   eq(json([b.totals.requests, b.totals.input, b.totals.output]), "[6,125,55]", "totals sum only the roles that have records");
   const none = buildMetrics({});
@@ -285,8 +285,28 @@ const withTranscript = (text) => {
   eq(build([rec("reviewer", { x: m(1, 1, 1) })]).roles.reviewer.cost, 0.5, "cost is the sum for a role on the anthropic runner");
   eq(build([rec("reviewer", { x: m(1, 1, 1) }, { cost: 0.1 }), rec("reviewer", { x: m(1, 1, 1) }, { cost: 0.2, session: "s2", first: "2026-11-14T11:00:00.000Z" })]).roles.reviewer.cost, 0.3, "...rounded to six decimals");
   eq(build([rec("implementer", { x: m(1, 1, 1) })]).roles.implementer.cost, null, "cost is null for a local runner even when the records carry one");
-  eq(build([rec("reviewer", { x: m(1, 1, 1) }), rec("reviewer", { x: m(1, 1, 1) }, { cost: null, session: "s2" })]).roles.reviewer.cost, null, "cost is null when one record has none");
-  eq(build([rec("controller", { x: m(1, 1, 1) })]).roles.controller.cost, null, "the controller's cost is null");
+  eq(build([rec("reviewer", { x: m(1, 1, 1) }), rec("reviewer", { x: m(1, 1, 1) }, { cost: null, session: "s2" })]).roles.reviewer.cost, null, "cost is null when one record has none and its model has no rate");
+  eq(build([rec("reviewer", { x: m(1, 1, 1) })]).roles.reviewer.costSource, "reported", "a role whose records all carry a cost has costSource reported");
+
+  // The rate table (RATES): a record without a reported cost is priced from its tokens.
+  eq(json(rateFor("claude-opus-5-5")) + "|" + json(rateFor("claude-opus-5-5-20261001")) + "|" + json(rateFor("Claude-Sonnet-5-5[1m]")), json(RATES["claude-opus-5-5"]) + "|" + json(RATES["claude-opus-5-5"]) + "|" + json(RATES["claude-sonnet-5-5"]), "rateFor matches the exact id, ignoring a date suffix, a [..] suffix and case");
+  eq(json([rateFor("claude-opus-5-5-5"), rateFor("qwen38-27b"), rateFor(null)]), "[null,null,null]", "...and an unlisted, local or missing name has no rate");
+  eq(priceModels({ "claude-opus-5-5": m(3, 1000000, 100000, 2000000, 500000) }), 4 + 2 + 0.4 + 4, "priceModels prices input, output, cache reads and cache writes (at twice input) per million tokens");
+  eq(priceModels({ "claude-sonnet-5-5": m(1, 0, 1000000), "<synthetic>": m(1, 0, 0) }), 10, "...a model with no tokens (an API-error row) costs nothing even without a rate");
+  eq(priceModels({ "claude-sonnet-5-5": m(1, 0, 1000000), "qwen38-27b": m(1, 5, 5) }), null, "...and a model with tokens but no rate makes the price null");
+  const opusRec = (extra = {}) => rec("reviewer", { "claude-opus-5-5": m(1, 1000000, 0) }, { cost: null, ...extra });
+  const priced = build([opusRec()]);
+  eq(priced.roles.reviewer.cost + "|" + priced.roles.reviewer.costSource, "4|rates", "a role on the anthropic runner whose records carry no cost is priced from RATES, with costSource rates");
+  const mixed = build([opusRec(), opusRec({ cost: 1, session: "s2" })]);
+  eq(mixed.roles.reviewer.cost + "|" + mixed.roles.reviewer.costSource, "5|mixed", "...a role with reported and priced records sums both, with costSource mixed");
+  const local = build([rec("implementer", { "claude-opus-5-5": m(1, 1000000, 0) }, { cost: null })]);
+  eq(json([local.roles.implementer.cost, local.roles.implementer.costSource]), "[null,null]", "a role on a local runner is never priced, even under a claude-* model name");
+  const ctlPriced = build([rec("controller", { "claude-sonnet-5-5": m(1, 1000000, 0) }, { cost: null })]);
+  eq(ctlPriced.roles.controller.cost + "|" + ctlPriced.roles.controller.costSource, "2|rates", "the controller, which has no routed runner, is priced from its model names");
+  eq(build([rec("controller", { x: m(1, 1, 1) }, { cost: null })]).roles.controller.cost, null, "...and its cost is null when its model has no rate");
+  eq(build([opusRec(), rec("controller", { "claude-sonnet-5-5": m(1, 1000000, 0) }, { cost: null })]).totals.cost, 6, "totals.cost sums the costs of the roles that have records");
+  eq(build([opusRec(), rec("implementer", { "q-a": m(1, 1, 1) })]).totals.cost, null, "...and is null when one of them has no cost");
+  eq(buildMetrics({}).totals.cost, null, "...or when no role has records");
   const ctl = build([rec("controller", { x: m(1, 10, 1) }, { session: "A" }), rec("controller", { x: m(2, 30, 2) }, { session: "A" }), rec("controller", { x: m(4, 5, 4) }, { session: "B" })]);
   eq(json([ctl.roles.controller.requests, ctl.roles.controller.input, ctl.usage]), json([6, 35, { source: "chain", records: 2, chainHead: null }]), "the controller keeps the last record per session and sums across sessions (usage.records counts what was summed)");
   const rep = (source) => buildMetrics({ routing: route, usage: { source, chainHead: null, records: [rec("implementer", { x: m(1, 10, 1) }), rec("implementer", { x: m(3, 30, 3) })] } });
