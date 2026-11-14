@@ -70,7 +70,7 @@ export async function probe({ endpoint, mode, served, timeoutMs, token }) {
     const r = await send({ url, ...request, timeoutMs });
     if (r.error) result = fail(r.status, r.ms, r.error);
     else if (r.status < 200 || r.status >= 300) {
-      const text = oneLine(r.body);
+      const text = oneLine(token ? String(r.body).split(token).join("<redacted>") : r.body);
       result = fail(r.status, r.ms, text ? `HTTP ${r.status}: ${text.slice(0, ERROR_CUT)}` : `HTTP ${r.status}`);
     } else if (mode === "models") {
       let list = null;

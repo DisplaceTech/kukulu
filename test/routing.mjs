@@ -930,6 +930,7 @@ for (const [value, got, label] of [
   const c = await serve((req, res) => { res.writeHead(404); res.end("no such\n   model  here"); });
   const hang = await serve(() => {});
   const echo = await serve((req, res) => json(res, 401, { error: `bad header ${req.headers.authorization}` }));
+  const straddle = await serve((req, res) => { res.writeHead(401); res.end("x".repeat(280) + " auth was " + req.headers["x-api-key"]); });
   const redirect = await serve((req, res) => { res.writeHead(302, { location: `${a.url}/v1/models` }); res.end(); });
   try {
     const m = await run(["--endpoint", a.url, "--models"]);
@@ -958,6 +959,9 @@ for (const [value, got, label] of [
     eq(withToken.headers["x-api-key"] + "|" + withToken.headers.authorization, "sekret-123|Bearer sekret-123", "the token reaches the runner as x-api-key and as a Bearer authorization");
     const leak = await run(["--endpoint", echo.url, "--models", "--token-env", "PROBE_TOKEN"], { PROBE_TOKEN: "sekret-123" });
     ok(leak.stdout.includes("<redacted>") && !leak.stdout.includes("sekret-123") && !leak.stderr.includes("sekret-123"), "a runner that echoes the Authorization header in a 401 body does not leak the token");
+    const tok = "sk-SECRETTOKEN-0123456789abcdef";
+    const cut = await run(["--endpoint", straddle.url, "--models", "--token-env", "PROBE_TOKEN"], { PROBE_TOKEN: tok });
+    ok(!cut.stdout.includes(tok.slice(0, 8)) && !cut.stderr.includes(tok.slice(0, 8)) && /^HTTP 401: /.test(cut.json.error), "a token that straddles the 300-character cut is not leaked, not even in part");
     const seenA = a.seen.length;
     const red = await run(["--endpoint", redirect.url, "--models"]);
     ok(red.json.ok === false && red.json.status === 302 && a.seen.length === seenA, "a redirect is not followed");
@@ -978,7 +982,7 @@ for (const [value, got, label] of [
       ok(r.status === 2 && r.stdout === "" && /^usage: node scripts\/runner-probe\.mjs/m.test(r.stderr), `usage error: ${name} returns 2 with usage on stderr and nothing on stdout`);
     }
   } finally {
-    for (const s of [a, b, c, hang, echo, redirect]) await s.close();
+    for (const s of [a, b, c, hang, echo, straddle, redirect]) await s.close();
   }
   if (process.env.KUKULU_RUNNER_IT === "1" && process.env.KUKULU_RUNNER_IT_ENDPOINT) {
     const real = await run(["--endpoint", process.env.KUKULU_RUNNER_IT_ENDPOINT, "--models"]);
