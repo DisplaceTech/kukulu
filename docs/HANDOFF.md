@@ -74,3 +74,9 @@ None.
 - R1-02: `recordTimeline` takes an `afterReset` callback run right after a flight's first-record emptying of `.kukulu/metrics/`; `next()` bumps `activateFailures` there, so the count survives (interpretation: callback rather than reordering `next()`, to keep "only when a record is written").
 - R1-03: the `kukulu_next`, `kukulu_status` and `kukulu_pr_finalize` descriptions name the activation wait and halt, METRICS.json, counters, harness, activateSeconds and the `chore: flight metrics` commit; four assertions in `test/protocol.mjs`.
 - Nothing for a human to check by hand.
+
+## Round 2
+
+- Tasks: 1 done (R2-01), 0 blocked. Final `kukulu_verify` green (5,286 assertions).
+- R2-01: text only. `kukulu_status` now says activateSeconds is a per-runner total of successful activations in whole seconds; `kukulu_next`'s wave-record sentence has a verb; `docs/mcp-tools.md`'s overview no longer says `kukulu_next` writes only the stage timeline. Three assertions in `test/protocol.mjs`.
+- Nothing for a human to check by hand.
