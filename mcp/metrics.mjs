@@ -59,3 +59,135 @@ export function validateUsageRecord(record) {
     return [`record: could not be validated (${e?.message ?? e})`];
   }
 }
+
+// ---------------------------------------------------------------- METRICS.json
+
+const isObj = (x) => x !== null && typeof x === "object" && !Array.isArray(x);
+const secs = (ms) => Math.round(ms / 1000);
+const stamp = (at) => (typeof at === "string" ? Date.parse(at) : NaN);
+
+/** The timeline's spans (a `start` closed by the next `end`; `activate` records are neither), with an open one closed at `now` when it is given. */
+function spansOf(timeline, now) {
+  const spans = [];
+  let open = null;
+  for (const r of timeline) {
+    if (!isObj(r)) continue;
+    if (r.event === "start") open = r;
+    else if (r.event === "end" && open) {
+      spans.push({ stage: open.stage, round: open.round, ms: Math.max(0, stamp(r.at) - stamp(open.at)) });
+      open = null;
+    }
+  }
+  if (open && Number.isFinite(now)) spans.push({ stage: open.stage, round: open.round, ms: Math.max(0, now - stamp(open.at)) });
+  return { spans, open };
+}
+
+function wallOf(timeline, nowText) {
+  const none = { startedAt: null, endedAt: null, seconds: null, stageSeconds: null, activateSeconds: null, idleSeconds: null };
+  if (!Array.isArray(timeline) || !timeline.length) return none;
+  const records = timeline.filter((r) => isObj(r) && Number.isFinite(stamp(r.at)));
+  if (!records.length) return none;
+  const now = stamp(nowText);
+  const { spans, open } = spansOf(records, now);
+  const startedAt = records[0].at;
+  const endedAt = open && Number.isFinite(now) ? nowText : records.at(-1).at;
+  const seconds = secs(stamp(endedAt) - stamp(startedAt));
+  const stageMs = {};
+  for (const s of spans) stageMs[s.stage] = (stageMs[s.stage] ?? 0) + s.ms;
+  const stageSeconds = Object.fromEntries(Object.entries(stageMs).map(([k, v]) => [k, secs(v)]));
+  const activateMs = {};
+  for (const r of records) if (r.event === "activate" && r.ok === true && typeof r.runner === "string" && Number.isFinite(r.ms)) activateMs[r.runner] = (activateMs[r.runner] ?? 0) + r.ms;
+  const activateSeconds = Object.fromEntries(Object.entries(activateMs).map(([k, v]) => [k, secs(v)]));
+  const sum = (o) => Object.values(o).reduce((t, v) => t + v, 0);
+  return { startedAt, endedAt, seconds, stageSeconds, activateSeconds, idleSeconds: seconds - sum(stageSeconds) - sum(activateSeconds) };
+}
+
+function roundsOf(state, timeline, nowText) {
+  if (!isObj(state) || !Array.isArray(state.rounds)) return null;
+  const { spans } = spansOf(Array.isArray(timeline) ? timeline : [], stamp(nowText));
+  const seconds = (stage, round) => {
+    const mine = spans.filter((s) => s.stage === stage && s.round === round);
+    return mine.length ? secs(mine.reduce((t, s) => t + s.ms, 0)) : null;
+  };
+  return state.rounds.map((r) => ({
+    round: r.round ?? null,
+    // Review round N reviews the build of timeline round N - 1: the build itself is round 0.
+    implementSeconds: Number.isInteger(r.round) ? seconds("implement", r.round - 1) : null,
+    reviewSeconds: Number.isInteger(r.round) ? seconds("review", r.round - 1) : null,
+    findings: r.fixTasks ?? null,
+    sources: r.sources ?? null,
+    verdict: r.verdict ?? null,
+    nonConverging: r.nonConverging ?? false,
+  }));
+}
+
+function treeOf(git) {
+  const none = { commits: null, filesChanged: null, insertions: null, deletions: null };
+  if (!isObj(git) || git.mergeBase === null || git.mergeBase === undefined) return none;
+  const commits = Number.isInteger(git.commits) ? git.commits : null;
+  if (typeof git.shortstat !== "string") return { ...none, commits };
+  const part = (re) => Number(re.exec(git.shortstat)?.[1] ?? 0);
+  return {
+    commits,
+    filesChanged: part(/(\d+) files? changed/),
+    insertions: part(/(\d+) insertions?\(\+\)/),
+    deletions: part(/(\d+) deletions?\(-\)/),
+  };
+}
+
+/**
+ * The metrics object of docs/metrics.md from plain data. Reads no file and no clock; a missing input is a `null`
+ * field, never a throw and never a zero. Holds counts, timestamps and content hashes, never a commit hash.
+ */
+export function buildMetrics(inputs = {}) {
+  const i = isObj(inputs) ? inputs : {};
+  const state = isObj(i.state) ? i.state : null;
+  const counters = isObj(i.counters) ? i.counters : null;
+  const genesis = isObj(i.genesis) ? i.genesis : null;
+  const counter = (k) => (counters && Number.isInteger(counters[k]) ? counters[k] : null);
+  const rounds = state && Array.isArray(state.rounds) ? state.rounds : null;
+  const approved = rounds?.find((r) => r?.verdict === "APPROVED");
+  const tasks = isObj(i.tasks) ? i.tasks : null;
+  const feedback = Array.isArray(i.feedback)
+    ? Object.fromEntries(Object.entries(i.feedback.reduce((o, e) => ({ ...o, [e?.category ?? "other"]: (o[e?.category ?? "other"] ?? 0) + 1 }), { restart: 0, "runner-drift": 0 })).sort(([a], [b]) => (a < b ? -1 : 1)))
+    : null;
+  const spec = isObj(i.spec) && typeof i.spec.title === "string" && typeof i.spec.sha256 === "string" ? { title: i.spec.title, sha256: i.spec.sha256 } : null;
+  const timeline = state && Array.isArray(state.timeline) ? state.timeline : null;
+  return {
+    v: METRICS_VERSION,
+    plugin: i.plugin ?? null,
+    flight: i.flight ?? null,
+    spec,
+    harness: state && Array.isArray(state.harness) && state.harness.length ? state.harness : [{ name: "unknown", version: null }],
+    usage: null,
+    mode: genesis ? (genesis.mode ?? "clean-room") : "general",
+    enforcement: genesis ? ("enforcement" in genesis ? genesis.enforcement : "hook") : null,
+    outcome: {
+      verdict: state ? (state.verdict ?? null) : null,
+      halted: state ? (state.halted ?? null) : null,
+      reviews: rounds ? rounds.length : null,
+      fixRounds: state && Number.isInteger(state.round) ? state.round : null,
+      approvedAtRound: approved && Number.isInteger(approved.round) ? approved.round : null,
+      caps: isObj(i.caps) ? { maxRounds: i.caps.maxRounds ?? null, maxRoundsHard: i.caps.maxRoundsHard ?? null } : null,
+    },
+    wall: wallOf(timeline, i.now),
+    rounds: roundsOf(state, timeline, i.now),
+    roles: null,
+    totals: null,
+    tasks: {
+      total: tasks && Number.isInteger(tasks.total) ? tasks.total : null,
+      done: tasks && Number.isInteger(tasks.done) ? tasks.done : null,
+      blocked: tasks && Number.isInteger(tasks.blocked) ? tasks.blocked : null,
+      skipped: tasks && Number.isInteger(tasks.skipped) ? tasks.skipped : null,
+      reopened: counter("tasksReopened"),
+    },
+    friction: {
+      feedback,
+      guardReblocks: counter("guardReblocks"),
+      verifyRuns: counter("verifyRuns"),
+      verifyFailures: counter("verifyFailures"),
+      activateFailures: counter("activateFailures"),
+    },
+    tree: treeOf(i.git),
+  };
+}

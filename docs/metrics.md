@@ -82,3 +82,33 @@ A counters file that cannot be written is a `countersNote` on the tool's result 
 ## Where the harness list comes from
 
 `state.harness` is filled from the `clientInfo` the harness sends in the MCP `initialize` request (its `name` and `version`), added by `kukulu_run_start` and by `kukulu_next`'s timeline write. A client that sends none is recorded as `unknown`. The list is never used in a condition.
+
+## METRICS.json
+
+`buildMetrics` in `mcp/metrics.mjs` turns plain data into one object. It reads no file and no clock, and a missing input is a `null` field, never a zero. It holds counts, timestamps and content hashes, never a commit hash. The table gives every field it fills by its dotted path and the file and field it comes from.
+
+| Field | Derived from |
+|---|---|
+| `v` | `METRICS_VERSION` |
+| `plugin`, `flight` | the plugin's `package.json` version; `flight` in `docs/kukulu.json` |
+| `spec.title`, `spec.sha256` | the first heading of `docs/SPEC.md` and the SHA-256 of that file |
+| `harness` | `state.harness`, else `[{ name: "unknown", version: null }]` |
+| `mode`, `enforcement` | the genesis entry's `mode` (default `clean-room`) and `enforcement` (default `hook` for a genesis written before 0.8.0); `general` and `null` without a genesis |
+| `outcome.verdict`, `outcome.halted` | `state.verdict`, `state.halted` |
+| `outcome.reviews` | the length of `state.rounds` |
+| `outcome.fixRounds` | `state.round` |
+| `outcome.approvedAtRound` | the `round` of the first entry of `state.rounds` whose verdict is `APPROVED`, else `null` |
+| `outcome.caps` | `maxRounds` and `maxRoundsHard` of `docs/kukulu.json` |
+| `wall.startedAt`, `wall.endedAt` | the first and the last record of `state.timeline` (`endedAt` is the time of the call while a span is open) |
+| `wall.seconds` | `wall.endedAt` minus `wall.startedAt`, in whole seconds |
+| `wall.stageSeconds` | the timeline's spans (a `start` closed by the next `end`) summed per stage; an `activate` record is not a span |
+| `wall.activateSeconds` | the `ms` of the timeline's successful `activate` records, summed per runner, in whole seconds |
+| `wall.idleSeconds` | `wall.seconds` minus the stage seconds and the activate seconds |
+| `rounds[].round`, `.findings`, `.sources`, `.verdict`, `.nonConverging` | the matching entry of `state.rounds` (`findings` is its `fixTasks`) |
+| `rounds[].implementSeconds`, `.reviewSeconds` | the `implement` and `review` spans of the timeline round before it (review round N reviews the build of round N - 1); `null` when there is none |
+| `tasks.total`, `.done`, `.blocked`, `.skipped` | the task counts of `docs/PROGRESS.md` |
+| `tasks.reopened` | the `tasksReopened` counter |
+| `friction.feedback` | the entries of `.kukulu/feedback.jsonl` counted by `category`, always with `restart` and `runner-drift` |
+| `friction.guardReblocks`, `.verifyRuns`, `.verifyFailures`, `.activateFailures` | the counters of `.kukulu/metrics/counters.json` |
+| `tree.commits` | the number of commits since the merge base |
+| `tree.filesChanged`, `.insertions`, `.deletions` | the `git diff --shortstat` line against the merge base (an omitted part is 0); all four are `null` without a merge base |

@@ -1,0 +1,105 @@
+{
+ "v": 1,
+ "plugin": "0.8.0",
+ "flight": "v0-8-0",
+ "spec": {
+  "title": "K\u016bkulu 0.8.0 \u2014 Specification",
+  "sha256": "0b314e61c1330c1611aeeba938cbee25f51872bed74e4281fdee2f4ac2a3750d"
+ },
+ "harness": [
+  {
+   "name": "unknown",
+   "version": null
+  }
+ ],
+ "usage": null,
+ "mode": "general",
+ "enforcement": null,
+ "outcome": {
+  "verdict": "APPROVED",
+  "halted": null,
+  "reviews": 3,
+  "fixRounds": 2,
+  "approvedAtRound": 3,
+  "caps": {
+   "maxRounds": 3,
+   "maxRoundsHard": 6
+  }
+ },
+ "wall": {
+  "startedAt": null,
+  "endedAt": null,
+  "seconds": null,
+  "stageSeconds": null,
+  "activateSeconds": null,
+  "idleSeconds": null
+ },
+ "rounds": [
+  {
+   "round": 1,
+   "implementSeconds": null,
+   "reviewSeconds": null,
+   "findings": 8,
+   "sources": {
+    "review": 7,
+    "mutation": 1,
+    "blocked": 0
+   },
+   "verdict": "CHANGES REQUESTED",
+   "nonConverging": false
+  },
+  {
+   "round": 2,
+   "implementSeconds": null,
+   "reviewSeconds": null,
+   "findings": 1,
+   "sources": {
+    "review": 1,
+    "mutation": 0,
+    "blocked": 0
+   },
+   "verdict": "CHANGES REQUESTED",
+   "nonConverging": false
+  },
+  {
+   "round": 3,
+   "implementSeconds": null,
+   "reviewSeconds": null,
+   "findings": 0,
+   "sources": {
+    "review": 0,
+    "mutation": 0,
+    "blocked": 0
+   },
+   "verdict": "APPROVED",
+   "nonConverging": false
+  }
+ ],
+ "roles": null,
+ "totals": null,
+ "tasks": {
+  "total": 47,
+  "done": 47,
+  "blocked": 0,
+  "skipped": 0,
+  "reopened": null
+ },
+ "friction": {
+  "feedback": {
+   "pr-lookup": 1,
+   "restart": 0,
+   "runner-drift": 0,
+   "verbose-output": 1
+  },
+  "guardReblocks": null,
+  "verifyRuns": null,
+  "verifyFailures": null,
+  "activateFailures": null
+ },
+ "tree": {
+  "commits": null,
+  "filesChanged": null,
+  "insertions": null,
+  "deletions": null
+ }
+}

@@ -5,7 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { finish, ok, eq, like, ROOT, mkDir, cleanroomRepo, plannedRepo, runHook, setState } from "./harness.mjs";
 import { rolesUsage } from "../mcp/cleanroom.mjs";
-import { METRICS_VERSION, USAGE_KEYS, validateUsageRecord } from "../mcp/metrics.mjs";
+import { METRICS_VERSION, USAGE_KEYS, validateUsageRecord, buildMetrics } from "../mcp/metrics.mjs";
 
 const example = () => ({
   v: 1,
@@ -195,6 +195,67 @@ const withTranscript = (text) => {
   eq(fs.existsSync(path.join(cr, ".kukulu", "metrics", "usage.jsonl")), false, "...and writes no usage.jsonl");
   const roles = rolesUsage(logOf(cr));
   eq(Object.values(roles).reduce((t, v) => t + v.usage.requests, 0), 0, "rolesUsage does not count the controller's entry");
+}
+
+// ---------------------------------------------------------------- buildMetrics (P2-04)
+
+{
+  const fixture = (name) => JSON.parse(fs.readFileSync(path.join(ROOT, "test", "fixtures", "metrics", name), "utf8"));
+  const json = (x) => JSON.stringify(x);
+  eq(json(buildMetrics(fixture("v0-8-0.inputs.json"))), json(fixture("v0-8-0.expected.json")), "the recorded v0-8-0 flight builds to its exact metrics");
+  const empty = buildMetrics({});
+  eq(Object.keys(empty).join(","), "v,plugin,flight,spec,harness,usage,mode,enforcement,outcome,wall,rounds,roles,totals,tasks,friction,tree", "an empty input builds an object with every top-level key and no throw");
+  eq(Object.keys(buildMetrics()).length, 16, "...also with no argument");
+  eq(json(empty.wall), '{"startedAt":null,"endedAt":null,"seconds":null,"stageSeconds":null,"activateSeconds":null,"idleSeconds":null}', "no timeline gives null wall fields");
+
+  const at = (sec) => `2026-01-01T00:${String(Math.floor(sec / 60)).padStart(2, "0")}:${String(sec % 60).padStart(2, "0")}.000Z`;
+  const tl = [
+    { event: "start", stage: "plan", round: 0, at: at(0) },
+    { event: "end", stage: "plan", round: 0, at: at(10) },
+    { event: "activate", stage: "implement", round: 0, runner: "spark", served: "s", reported: "s", ms: 2400, ok: true, at: at(12) },
+    { event: "activate", stage: "implement", round: 0, runner: "spark", served: "s", reported: null, ms: 9000, ok: false, at: at(13) },
+    { event: "start", stage: "implement", round: 0, at: at(14) },
+    { event: "end", stage: "implement", round: 0, at: at(114) },
+    { event: "start", stage: "review", round: 0, at: at(120) },
+    { event: "end", stage: "review", round: 0, at: at(150) },
+    { event: "start", stage: "implement", round: 1, at: at(160) },
+    { event: "end", stage: "implement", round: 1, at: at(190) },
+    { event: "start", stage: "review", round: 1, at: at(200) },
+  ];
+  const rounds = [
+    { round: 1, fixTasks: 2, sources: { review: 2, mutation: 0, blocked: 0 }, verdict: "CHANGES REQUESTED" },
+    { round: 2, fixTasks: 0, verdict: "APPROVED", nonConverging: false },
+  ];
+  const withNow = buildMetrics({ state: { timeline: tl, rounds, round: 1, verdict: "APPROVED" }, now: at(260) });
+  eq(withNow.wall.endedAt + "|" + withNow.wall.seconds, `${at(260)}|260`, "an open span counts to now and endedAt is now");
+  eq(json(withNow.wall.stageSeconds), '{"plan":10,"implement":130,"review":90}', "...in the stage seconds");
+  eq(json(withNow.wall.activateSeconds), '{"spark":2}', "activate records are no span and sum per runner, ok ones only (2.4 s rounds to 2)");
+  eq(withNow.wall.idleSeconds, 260 - 230 - 2, "idleSeconds is seconds minus stage and activate seconds");
+  const noNow = buildMetrics({ state: { timeline: tl } });
+  eq(noNow.wall.endedAt + "|" + json(noNow.wall.stageSeconds), `${at(200)}|{"plan":10,"implement":130,"review":30}`, "an open span without now ends at the last record and is left out of the stage seconds");
+  eq(json(withNow.rounds.map((r) => [r.round, r.implementSeconds, r.reviewSeconds])), "[[1,100,30],[2,30,60]]", "a round's implement and review seconds come from the spans of the round before it");
+  eq(withNow.rounds[0].nonConverging + "|" + json(withNow.rounds[1].sources), "false|null", "...with nonConverging false and sources null when absent");
+  eq(withNow.outcome.approvedAtRound, 2, "approvedAtRound is the first APPROVED round");
+  eq(buildMetrics({ state: { rounds: [{ round: 1, verdict: "CHANGES REQUESTED" }] } }).outcome.approvedAtRound, null, "...else null");
+  const halted = buildMetrics({ state: { halted: "round 4 exceeds the hard cap", verdict: "CHANGES REQUESTED", round: 3, rounds: [{ round: 1, verdict: "CHANGES REQUESTED" }] }, caps: { maxRounds: 3, maxRoundsHard: 6 } });
+  eq(halted.outcome.halted + "|" + halted.outcome.approvedAtRound + "|" + json(halted.outcome.caps), 'round 4 exceeds the hard cap|null|{"maxRounds":3,"maxRoundsHard":6}', "a halted flight keeps its halt reason and a null approvedAtRound");
+  const fb = buildMetrics({ feedback: [{ category: "tool-refusal" }, { category: "restart" }, { category: "tool-refusal" }] });
+  eq(json(fb.friction.feedback), '{"restart":1,"runner-drift":0,"tool-refusal":2}', "feedback is counted by category with restart and runner-drift always present");
+  eq(json(buildMetrics({ feedback: [] }).friction.feedback), '{"restart":0,"runner-drift":0}', "...also with no entries");
+  const nullCounters = buildMetrics({ counters: null });
+  eq(json([nullCounters.friction.guardReblocks, nullCounters.friction.verifyRuns, nullCounters.tasks.reopened]), "[null,null,null]", "counters null gives null friction counters, never 0");
+  const counted = buildMetrics({ counters: { verifyRuns: 5, verifyFailures: 2, guardReblocks: null, tasksReopened: 1, activateFailures: 0 } });
+  eq(json([counted.friction.verifyRuns, counted.friction.verifyFailures, counted.friction.guardReblocks, counted.friction.activateFailures, counted.tasks.reopened]), "[5,2,null,0,1]", "...and each counter passes through, a null one staying null");
+  const MB = "a".repeat(40);
+  const tree = buildMetrics({ git: { commits: 58, shortstat: " 31 files changed, 2904 insertions(+), 112 deletions(-)", mergeBase: MB } }).tree;
+  eq(json(tree), '{"commits":58,"filesChanged":31,"insertions":2904,"deletions":112}', "the shortstat line parses");
+  eq(json(buildMetrics({ git: { commits: 1, shortstat: " 1 file changed, 3 insertions(+)", mergeBase: MB } }).tree), '{"commits":1,"filesChanged":1,"insertions":3,"deletions":0}', "...with an omitted part as 0");
+  eq(json(buildMetrics({ git: { commits: 0, shortstat: "", mergeBase: MB } }).tree), '{"commits":0,"filesChanged":0,"insertions":0,"deletions":0}', "...an empty line as zeros");
+  eq(json(buildMetrics({ git: { commits: 4, shortstat: " 1 file changed", mergeBase: null } }).tree), '{"commits":null,"filesChanged":null,"insertions":null,"deletions":null}', "a null merge base gives a null tree");
+  ok(!/\b[0-9a-f]{40}\b/.test(json(buildMetrics({ plugin: "0.9.0", flight: "v0-9-0", git: { commits: 3, shortstat: " 1 file changed, 1 insertion(+)", mergeBase: MB }, state: { rounds }, spec: { title: "t", sha256: "b".repeat(64) } }))), "no 40-hex string is in the output");
+  const gen = (g) => buildMetrics({ genesis: g });
+  eq(json([buildMetrics({}).mode, buildMetrics({}).enforcement, gen({}).mode, gen({}).enforcement, gen({ mode: "control-positive", enforcement: "container+proxy" }).mode, gen({ enforcement: null }).enforcement]), '["general",null,"clean-room","hook","control-positive",null]', "mode and enforcement come from genesis, with the 0.7.x defaults");
+  eq(json(buildMetrics({ state: { harness: [{ name: "claude-code", version: "1" }] } }).harness), '[{"name":"claude-code","version":"1"}]', "the harness list is state.harness");
 }
 
 finish();
