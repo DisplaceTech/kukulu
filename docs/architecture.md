@@ -18,7 +18,9 @@ flowchart LR
         MCP["kukulu MCP server<br/>mcp/server.mjs"]
         HOOK["implement-guard.mjs<br/>Stop · SubagentStop (implementer only)"]
         CRG["cleanroom-guard.mjs<br/>PreToolUse (clean-room only)"]
-        CRL["cleanroom-log.mjs<br/>PostToolUse · UserPromptSubmit<br/>(clean-room only)"]
+        CRL["cleanroom-log.mjs<br/>PostToolUse · UserPromptSubmit · SubagentStop · Stop<br/>(clean-room: the chain; otherwise usage.jsonl)"]
+        MET["mcp/metrics.mjs<br/>usage record · METRICS.json"]
+        PROBE["runner-probe.mjs<br/>one request, one JSON line"]
         CRM["mcp/cleanroom.mjs<br/>policy · chain · keys · scorer"]
     end
 
@@ -26,6 +28,7 @@ flowchart LR
         DOCS["docs/*.md<br/>docs/kukulu.json"]
         STATE[".kukulu/state.json<br/>.kukulu/implement.lock"]
         LOG[".kukulu/cleanroom/log.jsonl<br/>docs/cleanroom.json"]
+        MD[".kukulu/metrics/<br/>docs/METRICS.json"]
         GIT["git history"]
     end
 
@@ -40,6 +43,10 @@ flowchart LR
     CRG -->|"reads policy"| LOG
     CRL -->|"appends"| LOG
     MCP -->|"gate · checkpoints"| LOG
+    CRL -->|"general mode appends"| MD
+    MCP -->|"counters · METRICS.json"| MD
+    MCP -->|"spawnSync: warms a runner"| PROBE
+    MCP --> MET
     CRG & CRL & MCP --> CRM
 ```
 
@@ -92,6 +99,8 @@ The server evaluates these decisions in this order:
 
 Only `kukulu_review_submit` makes the round-cap decision. It is the one place that decides a round is non-converging past `maxRounds` or is a review that requests changes numbered above `maxRoundsHard` (an approving review above it ends the flight and halts nothing), and it records that as decision 2's `state.halted`. `next()` never re-derives it from `round` and `maxRounds`: open tasks after a round that was not itself halted are the next implement stage, like any other round (V3-10). `kukulu_run_halt` also sets `state.halted` directly. An implementer calls it for an operator-level problem it cannot resolve itself, such as a dead signing agent, a full disk or a vanished base branch.
 
+Between the decision and the stage sits activation: a role on a runner with `activate: "warm"` makes `kukulu_next` run the probe and wait for the answer before it returns, and a runner that does not serve the stage's model turns the answer into a `halt`. `docs/METRICS.json` is written in the same step when the answer is `done` or `halt` and the call wrote a timeline record.
+
 Each stage comes back with a `prompt` that the flight controller passes to the subagent verbatim. The implement, review and summarize prompts each end with one sentence stating this run's policies (`signing`, `push`, `pr`), so every stage knows them without re-deriving them. The server generates the prompt and the controller only relays it, so the instruction a stage receives does not drift with the controller's context.
 
 ## Clean-room mode
@@ -107,7 +116,9 @@ The gate sits between stage selection and the stage:
 ```mermaid
 flowchart LR
     N["kukulu_next picks a stage"] --> G{"gate: up to ten checks"}
-    G -->|"all pass"| S["the stage runs"]
+    G -->|"all pass"| ACT["activation: a warm runner answers one request, the wait is recorded"]
+    ACT -->|"answered, or no runner to warm"| S["the stage runs"]
+    ACT -->|"the runner does not serve its model"| HR["halt, naming what it does serve"]
     G -->|"one fails"| H["gate entry in the log, then halt"]
     S --> T["each tool call: guard decides, logger records"]
     T --> C["bookkeeping tools append a signed checkpoint"]
@@ -136,6 +147,8 @@ flowchart TD
     MCP -->|"kukulu_plan_commit validates, then commits"| PLAN
     MCP -->|"kukulu_flight_archive moves the flight into"| FLIGHTS["docs/flights/slug/"]
     MCP -->|"kukulu_pr_finalize readies the PR, notes awaiting signing in"| SUMMARY
+    MCP -->|"counters, and METRICS.json when a flight ends or halts"| MD["docs/METRICS.json · .kukulu/metrics/"]
+    HOOKLOG["usage hook (cleanroom-log.mjs)"] -->|"appends usage.jsonl, general mode only"| MD
 ```
 
 Three tools have the MCP commit a stage's own output. `kukulu_plan_commit` validates the planner's four files together and commits them, so the planner never runs `git commit`. `kukulu_flight_archive` moves a summarized flight's artifacts into `docs/flights/<slug>/` and writes a fresh state. `kukulu_pr_finalize` is the last call of a flight: it checks the commits' signatures, marks the draft PR ready, and enables GitHub auto-merge (never a synchronous merge); when a commit is unsigned and the policy expects signatures (`required`, or `auto` with signing configured) it leaves the PR a draft and appends an `## Awaiting signing` section to `docs/SUMMARY.md`.

@@ -34,7 +34,7 @@ Started: 2026-11-14T04:52:50.030Z
 - [x] P3-01 MODEL_FAMILIES gains laguna
 - [x] P3-02 Templates: a spark profile with activation, and a llama-swap example
 - [x] P3-03 docs/local-runners.md
-- [ ] P3-04 Documentation sweep for 0.9.0
+- [~] P3-04 Documentation sweep for 0.9.0
 - [ ] P3-05 CHANGELOG 0.9.0 and the version
 - [ ] P3-06 Phase 3 end: push and record the manual checks
 

@@ -1,6 +1,6 @@
 # Usage metrics
 
-This page covers the usage record: what one agent's use of models looks like once a harness adapter has read its transcript. The record has one schema and one adapter per harness; Claude Code's adapter is the only one shipped.
+This page covers the usage record (what one agent's use of models looks like once a harness adapter has read its transcript), where it is recorded, the counters, the `METRICS.json` built from it, and comparing two flights. The record has one schema and one adapter per harness; Claude Code's adapter is the only one shipped.
 
 ## The usage record
 

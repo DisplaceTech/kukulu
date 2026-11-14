@@ -69,6 +69,7 @@ You need Node ≥ 22, git, and Claude Code. Nothing to `npm install`.
 - **A flight controller**, `/kukulu:go-flight`, that makes no engineering decisions. It asks the MCP what runs next, spawns that agent, and repeats until the pipeline reports `done` or `halt`.
 - **A deterministic MCP server** (`mcp/server.mjs`, no dependencies, Node ≥ 22) that owns stage selection, task selection, dependency skipping, checkbox edits, log entries, verification runs and every bookkeeping commit. The skills direct judgment and never describe mechanics.
 - **Clean-room mode**, opt-in with a policy file: a guard that checks every tool call (a tripwire, not a sandbox: the chain and the gate make a bypass visible afterwards), a hash-chained log with signed checkpoints, a gate before every stage, a lexical contamination score, and a signed attestation bundle that anyone with Node can verify offline. See [docs/cleanroom.md](./docs/cleanroom.md).
+- **Runner comparison metrics.** Every flight records token use and model wait time per role and for the controller session (to `.kukulu/metrics/usage.jsonl` in general mode, to the signed chain in clean-room mode), a runner can be warmed before its stage with the wait recorded, a flight that ends or halts leaves `docs/METRICS.json`, and `scripts/compare-flights.mjs` puts two flights side by side. See [docs/metrics.md](./docs/metrics.md).
 - **A Stop-hook guard** that refuses to let the implementer stop while tasks are open, and gives up after a configurable cap so a stuck run ends instead of looping.
 - **Blocked-task handling** that keeps an unattended run moving: a task that cannot be done is reset, logged and left for the reviewer; its dependents are skipped rather than attempted.
 - **Everything on disk.** The plan, progress, handoff, review and summary are all committed, so a flight can be resumed from any point by re-running one command.
@@ -150,6 +151,16 @@ Plugin skills are namespaced, so the entry point is `/kukulu:go-flight`; the bar
 
 0.7.0 no longer reads the pre-0.6.0 layout. A project that still has `.foundry/` or `docs/foundry.json` is refused by every tool with a message that names the move, which is by hand: `.foundry/state.json` and `.foundry/feedback.jsonl` go to `.kukulu/`, `docs/foundry.json` goes to `docs/kukulu.json`, the `.foundry/` lines of `.gitignore` become `.kukulu/`, and the result is committed (0.6.x's `kukulu_migrate` did this, and 0.7.0 does not). The `FOUNDRY_*` environment variables are no longer read either; use the `KUKULU_*` names. A project on the 0.6 layout needs nothing else, and clean-room mode stays off until it has a `docs/cleanroom.json`. Flights archived under `docs/flights/` keep their old file names and are never rewritten.
 
+## Upgrading to 0.9.0
+
+0.9.0 adds one tool, `kukulu_metrics`, and removes or renames nothing. What changes for someone upgrading:
+
+- **The logger runs on `Stop` too.** `hooks/hooks.json` registers `scripts/cleanroom-log.mjs` on `Stop` as well, and in general mode it now writes each role agent's and the controller session's usage to `.kukulu/metrics/usage.jsonl`. No hook script is added. The clean-room gate pins both files, so a clean-room flight started on 0.8.x cannot continue on 0.9.0: archive it and start another.
+- **Four optional runner keys** in the global file: `activate`, `activateTimeoutMs`, `servedAs` and `tokenEnv` (see [docs/routing.md](./docs/routing.md#runners)).
+- **`kukulu_next` can take as long as a model load**, and can return a `halt` for a runner that does not answer; resume it with `kukulu_run_resume`.
+- **New files.** `docs/METRICS.json` is committed when a flight ends or halts (`policies.metrics` turns it off), and `.kukulu/metrics/` is excluded per clone and never committed.
+- **A new refusal.** A runner's `activateTimeoutMs` at or above the plugin's tool-call limit is refused when the config loads.
+
 ## Per-project use
 
 ```bash
@@ -191,6 +202,8 @@ Each of the four roles can be pointed at a different model (an Anthropic alias o
 | `docs/REVIEW.md` | reviewer | summarizer |
 | `docs/SUMMARY.md` | summarizer | you |
 | `.kukulu/state.json` | MCP (committed) | `kukulu_next` |
+| `docs/METRICS.json` | MCP (written when a flight ends or halts, committed) | you, `scripts/compare-flights.mjs` |
+| `.kukulu/metrics/` | the usage hook and MCP (excluded per clone, never committed) | `kukulu_metrics` |
 | `.kukulu/implement.lock` | MCP (gitignored) | guard hook |
 | `.kukulu/worktrees/<stream>/` | MCP (gitignored) — a parallel stream's worktree, until it is merged back | that stream's implementer |
 | `.claude/agents/kukulu-*.md` | MCP (`kukulu_agents_sync`, git-excluded) | Claude Code |

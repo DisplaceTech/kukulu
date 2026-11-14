@@ -599,6 +599,29 @@ like(template, /⚠️ ASSUMPTION/, "the template explains the assumption marker
 
 const kukuluConfigTemplate = json("templates/kukulu.config.example.json");
 {
+  const tools = read("docs/mcp-tools.md");
+  const section = (name) => tools.slice(tools.indexOf(`## \`${name}\``), tools.indexOf("\n## ", tools.indexOf(`## \`${name}\``) + 5));
+  const status = section("kukulu_status");
+  ok(/\| `counters` \|/.test(status) && /\| `harness` \|/.test(status) && /\| `activateSeconds` \|/.test(status), "mcp-tools documents counters, harness and activateSeconds in kukulu_status");
+  const next = section("kukulu_next");
+  ok(/\*\*Runner activation\.\*\*/.test(next) && next.includes("`activation:") && next.includes("metricsNote") && next.includes("`activate` record"), "mcp-tools documents activation and metricsNote in kukulu_next");
+  ok(/`activate`, `served`/.test(section("kukulu_config_show")) || /activate, served/.test(section("kukulu_config_show")), "...and activate and served in kukulu_config_show");
+  const start = section("kukulu_run_start");
+  ok(start.includes(".kukulu/metrics/") && start.includes("total: 0"), "...and the metrics exclusion and the lock's total in kukulu_run_start");
+  const readme9 = read("README.md");
+  const upgrade = readme9.slice(readme9.indexOf("## Upgrading to 0.9.0"), readme9.indexOf("## Per-project use"));
+  ok(upgrade.includes("`Stop`") && ["activate", "activateTimeoutMs", "servedAs", "tokenEnv"].every((k) => upgrade.includes(`\`${k}\``)) && upgrade.includes("METRICS.json") && upgrade.includes(".kukulu/metrics/"), "README has a 0.9.0 upgrade paragraph naming the Stop hook, the four runner keys, METRICS.json and .kukulu/metrics/");
+  ok(readme9.indexOf("## Upgrading to 0.7.0") < readme9.indexOf("## Upgrading to 0.9.0") && /## Upgrading to 0\.7\.0/.test(readme9), "...after the 0.7.0 one, which stays");
+  ok(/\| `docs\/METRICS\.json` \|/.test(readme9) && /\| `\.kukulu\/metrics\/` \|/.test(readme9), "README's file list names docs/METRICS.json and .kukulu/metrics/");
+  const arch = read("docs/architecture.md");
+  const loop = arch.slice(arch.indexOf("flowchart LR\n    N["), arch.indexOf("```", arch.indexOf("flowchart LR\n    N[")));
+  ok(/ACT\["activation:/.test(loop) && /"the runner does not serve its model"/.test(loop), "architecture.md shows activation in the stage loop");
+  ok(arch.includes(".kukulu/metrics/") && arch.includes("docs/METRICS.json") && /usage hook/.test(arch), "...and the metrics files and their writers in State on disk and Who may write what");
+  ok(/`## Leaves`|## What the flight leaves behind/.test(read("docs/operations.md")) && read("docs/operations.md").slice(read("docs/operations.md").indexOf("## What the flight leaves behind")).includes("docs/METRICS.json"), "operations.md lists METRICS.json among what a flight leaves behind");
+  const contributing = read("CONTRIBUTING.md");
+  ok(["mcp/metrics.mjs", "scripts/runner-probe.mjs", "scripts/compare-flights.mjs"].every((f) => contributing.includes(`\`${f}\``)) && /\| `metrics` \|/.test(contributing), "CONTRIBUTING lists the metrics module, the probe and the comparison script, and the metrics suite");
+}
+{
   const page = read("docs/local-runners.md");
   const headings = page.split("\n").filter((l) => l.startsWith("## "));
   eq(headings.join("|"), "## Direct mode|## Resident and swapping layouts|## The controller rule|## Timeouts|## What activation measures|## A smoke test before a flight", "docs/local-runners.md has its six sections, in order");

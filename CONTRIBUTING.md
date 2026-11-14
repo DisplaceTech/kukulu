@@ -25,6 +25,7 @@ Every behaviour change to the server therefore needs a test, because the thing u
 | `scripts/lint.sh` | Dependency-free syntax and manifest lint |
 | `scripts/check-names.mjs` | Fails on a misplaced kahakō or an ASCII spelling of the display name in prose; run by `scripts/lint.sh` |
 | `scripts/model-identity.mjs` | Hashes a model's weight files into one digest, for the global config's `runners.<name>.identities`; run on the inference host |
+| `scripts/runner-probe.mjs` | Sends one request to a runner (`--models` or `--warm <id>`) and prints one JSON line, redacting the token; the only network I/O the server causes, always run through `spawnSync`; `node:` imports only |
 | `scripts/compare-bundles.mjs` | Compares two attestation bundles side by side (mode, gates, denials, similarity, roles, wall time, tokens), and with `--trees` scores their result trees against each other |
 | `scripts/compare-flights.mjs` | Compares two flights' `METRICS.json` side by side (outcome, wall time, rounds, roles, friction), as text or JSON; imports only `node:` modules and `mcp/metrics.mjs` |
 | `scripts/publish-bundle.mjs` | Writes a publishable copy of a verified attestation bundle with `SHA256SUMS` and `VERIFY.txt`, and re-checks one with `--check` |
