@@ -22,7 +22,7 @@ Started: 2026-11-14T04:52:50.030Z
 - [x] P2-01 Counters for verify runs, verify failures and reopened tasks
 - [x] P2-02 The implement guard keeps a cumulative total, read as guardReblocks
 - [x] P2-03 The harness's name from initialize
-- [ ] P2-04 buildMetrics: outcome, wall time, rounds, tasks, friction and tree
+- [x] P2-04 buildMetrics: outcome, wall time, rounds, tasks, friction and tree
 - [ ] P2-05 buildMetrics: usage, roles and totals
 - [ ] P2-06 kukulu_metrics
 - [ ] P2-07 A clean-room flight's metrics read usage from the chain only
@@ -109,3 +109,7 @@ Guard writeLock also writes total (JSON locks only); startRun arms total 0; coun
 ### P2-03 — bee6a07
 
 harnessClient from initialize clientInfo; noteHarness(st) in startRun and recordTimeline state writes; status.harness. protocol suite 44. Full verify green.
+
+### P2-04 — 1997a21
+
+buildMetrics in mcp/metrics.mjs (pure); fixtures test/fixtures/metrics/v0-8-0.{inputs,expected}.json (expected hand-derived) and README; docs/metrics.md METRICS.json table. metrics suite 82. Interpretation: caps from inputs.caps even without state; absent rounds -> null, empty -> []; idleSeconds unclamped; usage/roles/totals null until P2-05.
