@@ -114,6 +114,8 @@ The `spark` profile in the template runs a whole flight on the `spark` runner, w
 
 **The served id.** A role's model string names the runner and the model together, as in `spark/qwen38-27b`; the runner itself is asked for a shorter id. The served id is the runner's `servedAs` entry for the model string when there is one, else the model string with its longest matching `match` prefix removed (`qwen38-27b` for `spark/qwen38-27b` under the prefix `spark/`). A `match` entry equal to a whole model string leaves nothing to ask for and is refused until a `servedAs` entry names the id. `kukulu_config_show` and the routing table show `served` and `activate` for every role on a configured runner, and `–` for the built-in runner and for no runner.
 
+**A whole flight on local models.** [local-runners.md](./local-runners.md) walks through running every role on one inference host, resident or swapping, with the variables Claude Code needs and the timeouts that matter.
+
 **Checking a runner by hand.** `node scripts/runner-probe.mjs --endpoint <url> --models` sends `GET /v1/models` and prints the served ids; `--warm <served id>` sends a one-token message (`POST /v1/messages`) and prints the model the runner reports. Add `--timeout-ms N` to bound the whole request and `--token-env NAME` to send the token held in the environment variable `NAME` as `x-api-key` and as a Bearer authorization (the value is never an argument, and it is redacted from the output). It prints exactly one JSON line, `{ ok, status, ms, served }` or `{ ok, status, ms, reported }` on success and `{ ok: false, status, ms, error }` on failure, and exits 0 when `ok`, 1 when not, and 2 for a usage error, with the usage text on stderr.
 
 ## Routing through claude-code-router (v3)
@@ -179,7 +181,7 @@ As of this writing, for a 48 GB Apple Silicon machine running Ollama locally:
 
 Set the context cap in Ollama itself (`num_ctx` on the model, or a Modelfile); the client side of the connection does not control it.
 
-For a clean-room flight that must stay on your own hardware, name the machines as [runners](#runners) and route the roles to them. A common split is to plan and review on a laptop-class model and implement on a larger one served from a dedicated host (profile B in `docs/sandbox.md`'s worked flight); `roles.distinct` in the policy then keeps the implementer and the reviewer from being the same model or family.
+For a flight that runs entirely on one inference host, see [local-runners.md](./local-runners.md). For a clean-room flight that must stay on your own hardware, name the machines as [runners](#runners) and route the roles to them. A common split is to plan and review on a laptop-class model and implement on a larger one served from a dedicated host (profile B in `docs/sandbox.md`'s worked flight); `roles.distinct` in the policy then keeps the implementer and the reviewer from being the same model or family.
 
 ## Running a stage by hand
 

@@ -284,6 +284,7 @@ Everything is on disk and committed, so `/kukulu:go-flight` can be re-run from a
 - [**docs/publishing.md**](./docs/publishing.md): publishing an attestation bundle with `scripts/publish-bundle.mjs`, and re-checking a published copy
 - [**docs/metrics.md**](./docs/metrics.md): the usage record every harness fills in, the `METRICS.json` built from it, and comparing two flights with `scripts/compare-flights.mjs`
 - [**docs/mcp-tools.md**](./docs/mcp-tools.md): every tool, argument, return field and refusal
+- [**docs/local-runners.md**](./docs/local-runners.md): running a whole flight on local models from one inference host: direct mode, resident and swapping layouts, timeouts and a smoke test
 - [**docs/routing.md**](./docs/routing.md): per-role model routing, covering the global config file, profiles, and running stages through a router like claude-code-router
 - [**docs/writing-specs.md**](./docs/writing-specs.md): how to write a `SPEC.md` the planner can turn into a usable plan
 - [**docs/cleanroom.md**](./docs/cleanroom.md): clean-room mode, covering the policy, the guard, the log and checkpoints, the gate, and recording what you did

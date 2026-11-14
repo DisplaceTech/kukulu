@@ -599,6 +599,18 @@ like(template, /⚠️ ASSUMPTION/, "the template explains the assumption marker
 
 const kukuluConfigTemplate = json("templates/kukulu.config.example.json");
 {
+  const page = read("docs/local-runners.md");
+  const headings = page.split("\n").filter((l) => l.startsWith("## "));
+  eq(headings.join("|"), "## Direct mode|## Resident and swapping layouts|## The controller rule|## Timeouts|## What activation measures|## A smoke test before a flight", "docs/local-runners.md has its six sections, in order");
+  // each paragraph or list item that names a Claude Code variable holds a link to Claude Code's own docs
+  const blocks = page.split(/\n\s*\n/).flatMap((b) => (b.trimStart().startsWith("- ") ? b.split(/\n(?=- )/) : [b]));
+  const named = blocks.filter((b) => /`(?:ANTHROPIC_\w+|API_TIMEOUT_MS|MCP_TOOL_TIMEOUT|CLAUDE_CODE_\w+)`/.test(b));
+  ok(named.length >= 8 && named.every((b) => b.includes("https://code.claude.com/docs/")), `docs/local-runners.md cites a page for every Claude Code variable it names (${named.length} blocks)`);
+  ok(page.includes("templates/runners/llama-swap.example.yaml") && page.includes("KUKULU_PROFILE=spark") && page.includes("`spark` profile"), "...points at the llama-swap template and the spark profile");
+  like(read("docs/routing.md"), /\(\.\/local-runners\.md\)/, "...is linked from docs/routing.md");
+  ok(/24 hours/.test(page) && !/\b\d{7,}\b/.test(page) && !/\bpatented\b/i.test(page), "...and says 24 hours, with no millisecond figure for the MCP limit, and never 'patented'");
+}
+{
   const swap = read("templates/runners/llama-swap.example.yaml");
   like(swap.split("\n")[1], /Checked against llama-swap v\d+/, "the llama-swap template names the release it was checked against");
   ok(/persistent: true/.test(swap) && /swap: true/.test(swap) && /swap: false/.test(swap), "...has a persistent group and a swapping group");

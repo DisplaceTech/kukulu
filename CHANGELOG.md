@@ -8,6 +8,7 @@ All notable changes to this plugin. Format follows
 
 ### Added
 
+- `docs/local-runners.md`: running a fully local flight on one inference host (E-01).
 - The `spark` profile with `activate: "warm"` in `templates/kukulu.config.example.json`, and `templates/runners/llama-swap.example.yaml` (E-02).
 - The model family `laguna` (Laguna and Poolside model strings) (E-03).
 - `scripts/runner-probe.mjs` sends one request to a runner and prints one JSON line, without ever printing the runner's token (A-01).
